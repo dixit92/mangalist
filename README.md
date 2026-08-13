@@ -5,9 +5,7 @@ manga subfolder as **Volume-based**, **Chapter-based**, or **Both** using
 filename heuristics on `.cbz` / `.zip` / `.cbr` / `.rar` / `.7z` / `.cb7`
 archives.
 
-<!-- Screenshot: save a PNG to docs/screenshot.png and uncomment the line below.
 ![Main window](docs/screenshot.png)
--->
 
 ## Download
 
