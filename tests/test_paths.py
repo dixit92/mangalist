@@ -24,7 +24,8 @@ def _legacy_folder(root: Path) -> Path:
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("CREATE TABLE mu_cache (folder TEXT PRIMARY KEY, mu_id INTEGER, mu_title TEXT, "
                 "mu_confirmed INTEGER NOT NULL DEFAULT 0, mu_score REAL NOT NULL DEFAULT 0.0)")
-    con.execute("INSERT INTO mu_cache VALUES ('/library/Manga/A', 1, 'Some Title', 1, 0.5)")
+    # Keyed like mu_cache does: str(Path) (backslashes on Windows).
+    con.execute("INSERT INTO mu_cache VALUES (?, 1, 'Some Title', 1, 0.5)", (str(Path("/library/Manga/A")),))
     con.commit()
     con.close()
     return legacy

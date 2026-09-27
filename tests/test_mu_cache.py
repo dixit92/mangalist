@@ -33,7 +33,7 @@ def test_legacy_rows_are_marked_version_1(cache_db):
     con = sqlite3.connect(cache_db)
     con.executescript(_LEGACY_DDL)
     con.execute("INSERT INTO mu_cache (folder, mu_id, mu_title, mu_score, mu_confirmed) VALUES (?,?,?,?,?)",
-                ("/library/Manga/A", 1, "Legacy Title", 1.0, 0))
+                (str(Path("/library/Manga/A")), 1, "Legacy Title", 1.0, 0))  # keyed like mu_cache does
     con.commit()
     con.close()
 
