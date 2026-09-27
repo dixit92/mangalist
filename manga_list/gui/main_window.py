@@ -864,6 +864,11 @@ class MainWindow(QMainWindow):
         entry.mu_url = mu_url
         entry.licensed = licensed
         entry.mu_confirmed = True
+        # A manual pick is not scored by the matcher: no score, band or reasons.
+        entry.mu_score = 0.0
+        entry.mu_score_version = mu_cache.MU_SCORE_VERSION
+        entry.mu_band = None
+        entry.mu_reasons = []
         _apply_progress(entry, progress)
 
         mu_cache.save_entry(

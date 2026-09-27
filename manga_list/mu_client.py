@@ -23,13 +23,18 @@ _SESSION.headers.update({"Content-Type": "application/json", "Accept": "applicat
 REQUEST_DELAY = 0.3
 
 
-def search_series(query: str, page_size: int = 10) -> List[Dict[str, Any]]:
+def search_series(query: str, page_size: int = 10,
+                  filter_types: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Return up to *page_size* candidates from /series/search.
 
     Each item is ``{"record": SeriesModelSearchV1, "hit_title": str}``.
     ``hit_title`` is the associated/alt title that MU matched against.
+    *filter_types* excludes series types (the automatic match passes
+    ``matcher.mangaupdates.AUTO_SEARCH_FILTER``; the manual picker passes none).
     """
-    payload = {"search": query, "stype": "title", "perpage": page_size}
+    payload: Dict[str, Any] = {"search": query, "stype": "title", "page": 1, "perpage": page_size}
+    if filter_types:
+        payload["filter_types"] = list(filter_types)
     _log.debug("search_series: %r", query)
     resp = _SESSION.post(f"{_BASE}/series/search", json=payload, timeout=15)
     resp.raise_for_status()

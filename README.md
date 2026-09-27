@@ -67,6 +67,38 @@ For every archive file inside a manga folder (scanned to a depth of 3):
 The exact weights live as constants in `manga_list/classifier.py` and are easy
 to tune.
 
+## MangaUpdates matching
+
+**Check MU** matches each folder to a MangaUpdates series with the stage-2
+matcher in `manga_list/matcher/`, a Python port of the matcher in
+[MangaPixer](https://github.com/dixit92/mangapixer) 1.26.0 (same rules and thresholds):
+
+1. **What is the folder?** From names and counts alone, a folder is one work
+   (a series, a series with `Volumes/` / `Chapters/` / `Season N/` subfolders,
+   a one-shot) or not (a shelf of separate works, an artist folder, a unit
+   subfolder). Only folders that are one work are matched automatically.
+2. **Search.** Up to four title variants are searched in order: the folder
+   name, its `[English Title]`, the part before a ` - Subtitle`, the title
+   without a sequel number, and the title most archive names share. Searching
+   stops at the first confident hit. Novels, doujinshi, artbooks and drama CDs
+   are filtered out.
+3. **Score.** Title similarity counts word order, partial words and sequel
+   numbers (`Part 3` is not `Part 4`), and a subset is not a perfect match.
+   Local evidence can lower a candidate or veto an automatic link: file counts
+   vs published volumes / chapters, file years vs the start year, the category
+   folder vs the record's origin (`Manhwa` vs a Japanese manga).
+4. **Tier.** The **MU Title** column shows the result:
+   - *auto*: title score ≥ 0.92, a clear lead over the runner-up and no conflict.
+     Shown as a normal, unconfirmed match.
+   - *needs review*: score ≥ 0.60 otherwise. Highlighted in orange; the tooltip
+     gives the reasons.
+   - *unmatched* or *not one work*: nothing is linked; the tooltip says why.
+     Use **Fix MangaUpdates match…** to pick one yourself.
+
+A confirmed match (✔) is yours and is never re-scored. Matches cached by
+versions before this matcher keep their old score, marked as a legacy score;
+**Check MU** re-matches them.
+
 ## Phase 2 (planned, not implemented)
 
 - CSV / JSON export of the table
@@ -136,6 +168,10 @@ with, endorsed by, or sponsored by either service.
   `manga_list/mu_client.py`) and all responses are cached locally under `data/`.
 - **[AniList](https://anilist.co)** — supplementary volume/chapter counts via the
   [AniList GraphQL API](https://docs.anilist.co/).
+
+The matcher's golden-set tests replay recorded public MangaUpdates responses
+(`tests/golden/fixtures`, series data © MangaUpdates); the tests never contact
+the network.
 
 ### Fetching the MangaUpdates API spec
 
