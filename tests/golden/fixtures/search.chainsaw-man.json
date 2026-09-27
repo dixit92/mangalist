@@ -1,0 +1,104 @@
+{
+ "query": "Chainsaw Man",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 9918,
+  "results": [
+   {
+    "record": {
+     "series_id": 75336092483,
+     "title": "Chainsaw Man",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Chainsaw Man"
+   },
+   {
+    "record": {
+     "series_id": 1921046691,
+     "title": "Lollipop Chainsaw",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Lollipop Chainsaw"
+   },
+   {
+    "record": {
+     "series_id": 36912218295,
+     "title": "Chimamire Sukeban Chainsaw",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Chimamire Sukeban Chainsaw"
+   },
+   {
+    "record": {
+     "series_id": 64352965535,
+     "title": "Saitama Chainsaw Shoujo",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "Saitama Chainsaw Shoujo"
+   },
+   {
+    "record": {
+     "series_id": 5300065649,
+     "title": "Fujimoto Tatsuki Tanpenshuu",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Tatsuki Fujimoto Before Chainsaw Man: 22-26"
+   },
+   {
+    "record": {
+     "series_id": 56741959269,
+     "title": "Negative Happy Chain Saw Edge",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "Negative Happy Chainsaw Edge"
+   },
+   {
+    "record": {
+     "series_id": 24148999669,
+     "title": "Hajimari no Haru",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Hajimari no Haru 3 - Chainsaw Rhapsody"
+   },
+   {
+    "record": {
+     "series_id": 20490480772,
+     "title": "Secret Boys",
+     "type": "Manhwa",
+     "year": "2016"
+    },
+    "hit_title": "Man and Man Secret"
+   },
+   {
+    "record": {
+     "series_id": 14276871794,
+     "title": "Sew in Love",
+     "type": "Manhwa",
+     "year": "2022"
+    },
+    "hit_title": "Suspicious Man Familiar Man"
+   },
+   {
+    "record": {
+     "series_id": 50337421154,
+     "title": "A Catman vs. A Dogman",
+     "type": "Manhua",
+     "year": "2017"
+    },
+    "hit_title": "Feline Man and Caine Man"
+   }
+  ]
+ }
+}

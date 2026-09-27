@@ -1,0 +1,104 @@
+{
+ "query": "Berserk",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 32,
+  "results": [
+   {
+    "record": {
+     "series_id": 51239621230,
+     "title": "Berserk",
+     "type": "Manga",
+     "year": "1989"
+    },
+    "hit_title": "Berserk"
+   },
+   {
+    "record": {
+     "series_id": 47096579692,
+     "title": "Kuang Bao Ni Xi",
+     "type": "Manhua",
+     "year": "2021"
+    },
+    "hit_title": "Berserk Counterattack"
+   },
+   {
+    "record": {
+     "series_id": 24874346495,
+     "title": "Berserk Princess",
+     "type": "Manhua",
+     "year": "2023"
+    },
+    "hit_title": "Berserk Princess"
+   },
+   {
+    "record": {
+     "series_id": 8339817000,
+     "title": "Berserk Gaiden",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Berserk Gaiden"
+   },
+   {
+    "record": {
+     "series_id": 17437724264,
+     "title": "Bousou Honnou Melancholia",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Berserk Instinct Melancholia"
+   },
+   {
+    "record": {
+     "series_id": 36730971975,
+     "title": "I'm Berserk to Upgrade",
+     "type": "Manhua",
+     "year": "2020"
+    },
+    "hit_title": "I'm Berserk to Upgrade"
+   },
+   {
+    "record": {
+     "series_id": 61936312589,
+     "title": "Tantei Akechi wa Kyouran su",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "The Detective Akechi is Berserk"
+   },
+   {
+    "record": {
+     "series_id": 58227033939,
+     "title": "Her Ladyship's Going Berserk Again",
+     "type": "Manhua",
+     "year": "2024"
+    },
+    "hit_title": "Her Ladyship's Going Berserk Again"
+   },
+   {
+    "record": {
+     "series_id": 8947479390,
+     "title": "Boushoku no Berserk: Ore dake Level to Iu Gainen o Toppa Shite Saikyou",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Berserk of Gluttony (Webtoon)"
+   },
+   {
+    "record": {
+     "series_id": 74072114866,
+     "title": "Boushoku no Berserk: Ore dake Level to Iu Gainen o Toppa Suru THE COMIC",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Berserk of Gluttony"
+   }
+  ]
+ }
+}

@@ -1,0 +1,52 @@
+{
+ "series_id": 63636494324,
+ "title": "Kenki Renka: Re:Zero kara Hajimeru Isekai Seikatsu † Shinmeitan",
+ "associated": [
+  {
+   "title": "Re: Zero Kara Hajimeru Isekai Seikatsu - Kenki Koiuta"
+  },
+  {
+   "title": "Re:ZERO -Starting Life in Another World-, Sword Demon Love Ballad"
+  },
+  {
+   "title": "Re:Zero Chronicles: La ballade amoureuse de la lame démoniaque  (French)"
+  },
+  {
+   "title": "Re:Жизнь с нуля в альтернативном мире. Баллада о Демоне меча"
+  },
+  {
+   "title": "剣鬼恋歌　Ｒｅ：ゼロから始める異世界生活†真銘譚"
+  },
+  {
+   "title": "검귀연가 Re:제로부터 시작하는 이세계 생활 † 전일담"
+  },
+  {
+   "title": "검귀연가 리제로부터 시작하는 이세계 생활 † 전일담"
+  }
+ ],
+ "type": "Manga",
+ "year": "2018",
+ "status": "4 Volumes (Complete)",
+ "latest_chapter": 16,
+ "authors": [
+  {
+   "name": "NAGATSUKI Tappei",
+   "type": "Author"
+  },
+  {
+   "name": "NOZAKI Tsubata",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Adapted From",
+   "related_series_id": 24904499723
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 11106634916
+  }
+ ]
+}

@@ -1,0 +1,104 @@
+{
+ "query": "Tokyo Ghoul",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 650,
+  "results": [
+   {
+    "record": {
+     "series_id": 26272522291,
+     "title": "Tokyo Ghoul",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Tokyo Ghoul"
+   },
+   {
+    "record": {
+     "series_id": 2196193038,
+     "title": "Toukyou Ghoul: JACK",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Tokyo Ghoul - Jack"
+   },
+   {
+    "record": {
+     "series_id": 42723551898,
+     "title": "Kuu Onna",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Ghoul Woman"
+   },
+   {
+    "record": {
+     "series_id": 50820213381,
+     "title": "Mother Ghoul",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Mother Ghoul"
+   },
+   {
+    "record": {
+     "series_id": 74370562662,
+     "title": "Otsukaresama, Kurose-kun",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Ghoul Work, Kurose"
+   },
+   {
+    "record": {
+     "series_id": 66406593680,
+     "title": "Toukyou",
+     "type": "Manga",
+     "year": "1999"
+    },
+    "hit_title": "Tokyo"
+   },
+   {
+    "record": {
+     "series_id": 45405144027,
+     "title": "Toukyou Ghoul:re",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Tokyo Ghoul:re"
+   },
+   {
+    "record": {
+     "series_id": 27090344714,
+     "title": "Holy Holy",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Kyuuyaku Mother Ghoul"
+   },
+   {
+    "record": {
+     "series_id": 25368776004,
+     "title": "Tokyo Ravens - Tokyo Fox",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Tokyo Ravens - Tokyo Fox"
+   },
+   {
+    "record": {
+     "series_id": 45359242133,
+     "title": "Tokyo Aliens",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Tokyo Aliens"
+   }
+  ]
+ }
+}

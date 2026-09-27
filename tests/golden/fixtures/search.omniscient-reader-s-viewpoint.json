@@ -1,0 +1,104 @@
+{
+ "query": "Omniscient Reader's Viewpoint",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 69,
+  "results": [
+   {
+    "record": {
+     "series_id": 50369844984,
+     "title": "Omniscient Reader",
+     "type": "Manhwa",
+     "year": "2020"
+    },
+    "hit_title": "Omniscient Reader's Viewpoint"
+   },
+   {
+    "record": {
+     "series_id": 24335375809,
+     "title": "The Omniscient One",
+     "type": "Manhua",
+     "year": "2024"
+    },
+    "hit_title": "Omniscient"
+   },
+   {
+    "record": {
+     "series_id": 73316828782,
+     "title": "Leader's High!",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "Reader's High!"
+   },
+   {
+    "record": {
+     "series_id": 23168913074,
+     "title": "Quanzhi Xiuxian Zhe",
+     "type": "Manhua",
+     "year": "2023"
+    },
+    "hit_title": "Omniscient Cultivator"
+   },
+   {
+    "record": {
+     "series_id": 33771067189,
+     "title": "Appraiser With Divine Eye",
+     "type": "Manhua",
+     "year": "2018"
+    },
+    "hit_title": "The Omniscient Appraiser"
+   },
+   {
+    "record": {
+     "series_id": 68284246192,
+     "title": "Zenchi Zennou Trap Master",
+     "type": "Manga",
+     "year": "2026"
+    },
+    "hit_title": "The Omniscient Trapmaster"
+   },
+   {
+    "record": {
+     "series_id": 15311342600,
+     "title": "Survive With Omniscient Skills",
+     "type": "Manhua",
+     "year": "2025"
+    },
+    "hit_title": "Survive With Omniscient Skills"
+   },
+   {
+    "record": {
+     "series_id": 36992895133,
+     "title": "Cannon Fodder Demon, Omniscient Streamer",
+     "type": "Manhua",
+     "year": "2025"
+    },
+    "hit_title": "Cannon Fodder Demon, Omniscient Streamer"
+   },
+   {
+    "record": {
+     "series_id": 40814729655,
+     "title": "Crush of a Lifetime",
+     "type": "Manhwa",
+     "year": "2019"
+    },
+    "hit_title": "The Omniscient POV of an Unrequited Love"
+   },
+   {
+    "record": {
+     "series_id": 18208436790,
+     "title": "Eye of Providence",
+     "type": "Manhua",
+     "year": "2022"
+    },
+    "hit_title": "I Became The Villain In The Omniscient Game"
+   }
+  ]
+ }
+}

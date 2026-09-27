@@ -1,0 +1,58 @@
+{
+ "series_id": 49449837876,
+ "title": "Hunter x Hunter",
+ "associated": [
+  {
+   "title": "HUNTER×HUNTER"
+  },
+  {
+   "title": "Medžiotojas x Medžiotojas"
+  },
+  {
+   "title": "Охотник х Охотник"
+  },
+  {
+   "title": "القناص"
+  },
+  {
+   "title": "هانتر x هانتر"
+  },
+  {
+   "title": "هنتر x هنتر"
+  },
+  {
+   "title": "हन्टर×हन्टर"
+  },
+  {
+   "title": "ハンター×ハンター"
+  },
+  {
+   "title": "헌터X헌터"
+  }
+ ],
+ "type": "Manga",
+ "year": "1998",
+ "status": "39 Volumes + Volume 0 (Hiatus)      \n",
+ "latest_chapter": 420,
+ "authors": [
+  {
+   "name": "TOGASHI Yoshihiro",
+   "type": "Author"
+  },
+  {
+   "name": "TOGASHI Yoshihiro",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 40518429354
+  },
+  {
+   "relation_type": "Alternate Version",
+   "related_series_id": 11192078759
+  }
+ ]
+}

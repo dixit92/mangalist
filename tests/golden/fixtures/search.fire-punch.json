@@ -1,0 +1,104 @@
+{
+ "query": "Fire Punch",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 1072,
+  "results": [
+   {
+    "record": {
+     "series_id": 32334361267,
+     "title": "Fire Punch",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Fire Punch"
+   },
+   {
+    "record": {
+     "series_id": 63659606542,
+     "title": "Fire Fire Fire",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "Fire Fire Fire"
+   },
+   {
+    "record": {
+     "series_id": 73351666487,
+     "title": "Rumble on the Campus",
+     "type": "Manhwa",
+     "year": "2016"
+    },
+    "hit_title": "Punch"
+   },
+   {
+    "record": {
+     "series_id": 29200188691,
+     "title": "CROSS PUNCH",
+     "type": "Manhwa",
+     "year": "2001"
+    },
+    "hit_title": "CROSS PUNCH"
+   },
+   {
+    "record": {
+     "series_id": 74083983152,
+     "title": "God Bless You (MilaeJu)",
+     "type": "Manhwa",
+     "year": "2018"
+    },
+    "hit_title": "Punch Lady"
+   },
+   {
+    "record": {
+     "series_id": 62913576611,
+     "title": "Oira Houkago Wakadaishou",
+     "type": "Manga",
+     "year": "1979"
+    },
+    "hit_title": "Kimagure Punch"
+   },
+   {
+    "record": {
+     "series_id": 12074834727,
+     "title": "Panchi Kurenzo!",
+     "type": "Manga",
+     "year": "1994"
+    },
+    "hit_title": "Punch Kurenzo!"
+   },
+   {
+    "record": {
+     "series_id": 42072873366,
+     "title": "Space Punch",
+     "type": "French",
+     "year": "2021"
+    },
+    "hit_title": "Space Punch"
+   },
+   {
+    "record": {
+     "series_id": 75227513380,
+     "title": "Straight Punch",
+     "type": "Manga",
+     "year": "2025"
+    },
+    "hit_title": "Straight Punch"
+   },
+   {
+    "record": {
+     "series_id": 225273532,
+     "title": "Avec Punch",
+     "type": "Manga",
+     "year": "2007"
+    },
+    "hit_title": "Avec Punch"
+   }
+  ]
+ }
+}

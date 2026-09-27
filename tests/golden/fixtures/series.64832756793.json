@@ -1,0 +1,54 @@
+{
+ "series_id": 64832756793,
+ "title": "21 Seiki Shounen",
+ "associated": [
+  {
+   "title": "21 Seiki Shōnen"
+  },
+  {
+   "title": "21st Century Boys"
+  },
+  {
+   "title": "21stCB"
+  },
+  {
+   "title": "21世紀少年"
+  },
+  {
+   "title": "21世纪少年"
+  },
+  {
+   "title": "21세기 소년"
+  },
+  {
+   "title": "Chłopaki z dwudziestego pierwszego wieku (Polish)"
+  },
+  {
+   "title": "Twenty-First Century Boys"
+  },
+  {
+   "title": "Мальчишки двадцать первого века"
+  }
+ ],
+ "type": "Manga",
+ "year": "2006",
+ "status": "2 Volumes (Complete)  \n1 Volume Kanzenhan (Complete)",
+ "latest_chapter": 16,
+ "authors": [
+  {
+   "name": "URASAWA Naoki",
+   "type": "Author"
+  },
+  {
+   "name": "URASAWA Naoki",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 45334600346
+  }
+ ]
+}

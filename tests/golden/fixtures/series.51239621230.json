@@ -1,0 +1,85 @@
+{
+ "series_id": 51239621230,
+ "title": "Berserk",
+ "associated": [
+  {
+   "title": "Берсерк"
+  },
+  {
+   "title": "ברזרק"
+  },
+  {
+   "title": "برزرک"
+  },
+  {
+   "title": "बर्जर्क"
+  },
+  {
+   "title": "बर्सर्क"
+  },
+  {
+   "title": "เบอร์เซิร์ก"
+  },
+  {
+   "title": "ベルセルク"
+  },
+  {
+   "title": "烙印勇士"
+  },
+  {
+   "title": "烙印战士"
+  },
+  {
+   "title": "베르세르크"
+  }
+ ],
+ "type": "Manga",
+ "year": "1989",
+ "status": "43 Volumes (Ongoing)\n\n*[MORI Kouji](https://www.mangaupdates.com/authors.html?id=38824888050) took over the writing and [Studio Gaga](https://www.mangaupdates.com/authors.html?id=58953789514) the art starting with Vol 42, Episode 365. More details [here](https://www.hakusensha.co.jp/information/63802).*",
+ "latest_chapter": 386,
+ "authors": [
+  {
+   "name": "MIURA Kentaro",
+   "type": "Author"
+  },
+  {
+   "name": "MORI Kouji",
+   "type": "Author"
+  },
+  {
+   "name": "MIURA Kentaro",
+   "type": "Artist"
+  },
+  {
+   "name": "Studio Gaga",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 13692341141
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 6245502908
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 64094408039
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 68255986488
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 8339817000
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 15824827248
+  }
+ ]
+}

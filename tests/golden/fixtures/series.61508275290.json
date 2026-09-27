@@ -1,0 +1,67 @@
+{
+ "series_id": 61508275290,
+ "title": "Jigokuraku (KAKU Yuuji)",
+ "associated": [
+  {
+   "title": "Cehennemdeki Cennet"
+  },
+  {
+   "title": "Hell’s Paradise"
+  },
+  {
+   "title": "Hell’s Paradise: Jigokuraku"
+  },
+  {
+   "title": "Jigoku Raku (KAKU Yuuji)"
+  },
+  {
+   "title": "Piekielny raj (Polish)"
+  },
+  {
+   "title": "Адский рай"
+  },
+  {
+   "title": "地狱乐"
+  },
+  {
+   "title": "地獄楽"
+  },
+  {
+   "title": "地獄樂"
+  },
+  {
+   "title": "지고쿠라쿠"
+  },
+  {
+   "title": "지옥락"
+  }
+ ],
+ "type": "Manga",
+ "year": "2018",
+ "status": "13 Volumes (Complete)",
+ "latest_chapter": 3,
+ "authors": [
+  {
+   "name": "KAKU Yuuji",
+   "type": "Author"
+  },
+  {
+   "name": "KAKU Yuuji",
+   "type": "Artist"
+  }
+ ],
+ "categories": [
+  {
+   "category": "Webtoon/Webcomic",
+   "votes": 1,
+   "votes_plus": 0,
+   "votes_minus": 1
+  }
+ ],
+ "related_series": [
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 76554797640
+  }
+ ]
+}

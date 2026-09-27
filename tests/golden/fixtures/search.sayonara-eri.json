@@ -1,0 +1,104 @@
+{
+ "query": "Sayonara Eri",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 2458,
+  "results": [
+   {
+    "record": {
+     "series_id": 47603342373,
+     "title": "Sayonara Eri",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Sayonara Eri"
+   },
+   {
+    "record": {
+     "series_id": 14209770890,
+     "title": "Ellie Doing!",
+     "type": "Manga",
+     "year": "1981"
+    },
+    "hit_title": "Eri Doing"
+   },
+   {
+    "record": {
+     "series_id": 48926941857,
+     "title": "Alien Eri",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Alien Eri"
+   },
+   {
+    "record": {
+     "series_id": 58806635230,
+     "title": "Itoshi no Eri",
+     "type": "Manga",
+     "year": "1984"
+    },
+    "hit_title": "Itoshi no Eri"
+   },
+   {
+    "record": {
+     "series_id": 69817699540,
+     "title": "Atsui Sayonara",
+     "type": "Manga",
+     "year": "1993"
+    },
+    "hit_title": "Atsui Sayonara"
+   },
+   {
+    "record": {
+     "series_id": 39381079342,
+     "title": "Bitter Sweet Complex",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Sayonara Tenkousei"
+   },
+   {
+    "record": {
+     "series_id": 3792120949,
+     "title": "Sayonara Akanezora",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Sayonara Akanezora"
+   },
+   {
+    "record": {
+     "series_id": 73193204246,
+     "title": "Sayonara Caravan",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "Sayonara Caravan"
+   },
+   {
+    "record": {
+     "series_id": 77072158131,
+     "title": "Sayonara Chocolate",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Sayonara Chocolate"
+   },
+   {
+    "record": {
+     "series_id": 47027504788,
+     "title": "Sayonara December",
+     "type": "Manga",
+     "year": "1983"
+    },
+    "hit_title": "Sayonara December"
+   }
+  ]
+ }
+}

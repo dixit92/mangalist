@@ -1,0 +1,104 @@
+{
+ "query": "Jigokuraku",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 61,
+  "results": [
+   {
+    "record": {
+     "series_id": 10294535868,
+     "title": "Jigokuraku",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Jigokuraku"
+   },
+   {
+    "record": {
+     "series_id": 76554797640,
+     "title": "Jigokuraku (Oohashi)",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Jigokuraku (Oohashi)"
+   },
+   {
+    "record": {
+     "series_id": 55431132229,
+     "title": "Jigokuraku Mandara",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Jigokuraku Mandara"
+   },
+   {
+    "record": {
+     "series_id": 61508275290,
+     "title": "Jigokuraku (KAKU Yuuji)",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Jigokuraku (KAKU Yuuji)"
+   },
+   {
+    "record": {
+     "series_id": 51061380336,
+     "title": "Gokuraku Butterfly",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Gokuraku Butterfly"
+   },
+   {
+    "record": {
+     "series_id": 63469897646,
+     "title": "Gokuraku Connection",
+     "type": "Manga",
+     "year": "1990"
+    },
+    "hit_title": "Gokuraku Connection"
+   },
+   {
+    "record": {
+     "series_id": 948918800,
+     "title": "Gokuraku Doumei",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Gokuraku Doumei"
+   },
+   {
+    "record": {
+     "series_id": 56896288053,
+     "title": "Gokuraku Family",
+     "type": "Manga",
+     "year": "1991"
+    },
+    "hit_title": "Gokuraku Family"
+   },
+   {
+    "record": {
+     "series_id": 72706494715,
+     "title": "Gokuraku Mishin",
+     "type": "Manga",
+     "year": "1994"
+    },
+    "hit_title": "Gokuraku Mishin"
+   },
+   {
+    "record": {
+     "series_id": 44319549492,
+     "title": "Gokuraku Nagaya",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Gokuraku Nagaya"
+   }
+  ]
+ }
+}

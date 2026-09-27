@@ -1,0 +1,160 @@
+{
+ "series_id": 23393951235,
+ "title": "Shingeki no Kyojin",
+ "associated": [
+  {
+   "title": "AoT"
+  },
+  {
+   "title": "Atak Tytanów"
+  },
+  {
+   "title": "Ataque a los titanes"
+  },
+  {
+   "title": "Attack on Titan"
+  },
+  {
+   "title": "L'attacco dei giganti"
+  },
+  {
+   "title": "L'Attaque des Titans"
+  },
+  {
+   "title": "Napad Titana"
+  },
+  {
+   "title": "Titaanien sota"
+  },
+  {
+   "title": "Titana Saldırı"
+  },
+  {
+   "title": "Titānu uzbrukums"
+  },
+  {
+   "title": "Útok Titánů"
+  },
+  {
+   "title": "Đại chiến Titan"
+  },
+  {
+   "title": "Атака на титанов"
+  },
+  {
+   "title": "Атака титанів"
+  },
+  {
+   "title": "Титандарға шабуыл"
+  },
+  {
+   "title": "Տիտանների Գրոհը"
+  },
+  {
+   "title": "מתקפת הטיטאנים"
+  },
+  {
+   "title": "اتاالعملاق  المهاجم"
+  },
+  {
+   "title": "الهجوم على العمالقه"
+  },
+  {
+   "title": "تایتان مهاجم"
+  },
+  {
+   "title": "حمله به تایتان"
+  },
+  {
+   "title": "هجوم العمالقة"
+  },
+  {
+   "title": "অ্যাট্যাক অন টাইটান"
+  },
+  {
+   "title": "ผ่าพิภพไททัน"
+  },
+  {
+   "title": "ტიტანებზე შეტევა"
+  },
+  {
+   "title": "進撃の巨人"
+  },
+  {
+   "title": "진격의 거인"
+  }
+ ],
+ "type": "Manga",
+ "year": "2009",
+ "status": "34 Volumes (Complete)",
+ "latest_chapter": 139,
+ "authors": [
+  {
+   "name": "ISAYAMA Hajime",
+   "type": "Author"
+  },
+  {
+   "name": "ISAYAMA Hajime",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 76604664566
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 17626521035
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 67255843590
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 31991570419
+  },
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 28267595998
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 33958065118
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 60264364507
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 68760026065
+  },
+  {
+   "relation_type": "Alternate Version",
+   "related_series_id": 5209556547
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 39394570253
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 30929739203
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 52178603384
+  },
+  {
+   "relation_type": "Alternate Version",
+   "related_series_id": 25409301309
+  },
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 53755792111
+  }
+ ]
+}

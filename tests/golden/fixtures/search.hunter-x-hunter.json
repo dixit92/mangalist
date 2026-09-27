@@ -1,0 +1,104 @@
+{
+ "query": "Hunter x Hunter",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 6641,
+  "results": [
+   {
+    "record": {
+     "series_id": 49449837876,
+     "title": "Hunter x Hunter",
+     "type": "Manga",
+     "year": "1998"
+    },
+    "hit_title": "Hunter x Hunter"
+   },
+   {
+    "record": {
+     "series_id": 30068044702,
+     "title": "Koisuru Hunter x Hunter",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Koisuru Hunter x Hunter"
+   },
+   {
+    "record": {
+     "series_id": 31128471796,
+     "title": "Gedou Hunter X",
+     "type": "Manga",
+     "year": "2000"
+    },
+    "hit_title": "Gedou Hunter X"
+   },
+   {
+    "record": {
+     "series_id": 67792274676,
+     "title": "Hunter",
+     "type": "Manhwa",
+     "year": "2000"
+    },
+    "hit_title": "Hunter"
+   },
+   {
+    "record": {
+     "series_id": 57251946394,
+     "title": "Vampire and Hunter",
+     "type": "Manhua",
+     "year": "2015"
+    },
+    "hit_title": "Vampire X Hunter"
+   },
+   {
+    "record": {
+     "series_id": 40518429354,
+     "title": "Hunter x Hunter - Hisoka Origin Story",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Hunter x Hunter - Hisoka Origin Story"
+   },
+   {
+    "record": {
+     "series_id": 56806953040,
+     "title": "Witch Hunter Hunt",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Witch Hunter Hunt"
+   },
+   {
+    "record": {
+     "series_id": 11942368136,
+     "title": "Taimashi Daraku Osen ~Futanari ni Ochita Taima Miko wa Inran Mesuonika~",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Demon Hunter Turned Semen Hunter"
+   },
+   {
+    "record": {
+     "series_id": 41955129189,
+     "title": "Ayakashi Hunter",
+     "type": "Manga",
+     "year": "1988"
+    },
+    "hit_title": "Ayakashi Hunter"
+   },
+   {
+    "record": {
+     "series_id": 49889937139,
+     "title": "Bondage Fairies",
+     "type": "Manga",
+     "year": "1990"
+    },
+    "hit_title": "Insect Hunter"
+   }
+  ]
+ }
+}

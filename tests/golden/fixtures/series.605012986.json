@@ -1,0 +1,65 @@
+{
+ "series_id": 605012986,
+ "title": "Mob Psycho 100",
+ "associated": [
+  {
+   "title": "Mob Psycho One Hundred"
+  },
+  {
+   "title": "One Hundred Mob Psycho"
+  },
+  {
+   "title": "Onehundred MobPsycho"
+  },
+  {
+   "title": "Моб Психо 100"
+  },
+  {
+   "title": "موب  سايكو 100"
+  },
+  {
+   "title": "ม็อบไซโค 100 คนพลังจิต (SIC)"
+  },
+  {
+   "title": "モブサイコ１００"
+  },
+  {
+   "title": "灵能百分百"
+  },
+  {
+   "title": "路人超能100"
+  }
+ ],
+ "type": "Manga",
+ "year": "2012",
+ "status": "16 Volumes (Complete)",
+ "latest_chapter": 101,
+ "authors": [
+  {
+   "name": "ONE",
+   "type": "Author"
+  },
+  {
+   "name": "ONE",
+   "type": "Artist"
+  }
+ ],
+ "categories": [
+  {
+   "category": "Webtoon/Webcomic",
+   "votes": 11,
+   "votes_plus": 14,
+   "votes_minus": 3
+  }
+ ],
+ "related_series": [
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 36505554988
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 34913908515
+  }
+ ]
+}

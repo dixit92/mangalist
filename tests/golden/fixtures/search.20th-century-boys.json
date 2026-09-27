@@ -1,0 +1,104 @@
+{
+ "query": "20th Century Boys",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 3324,
+  "results": [
+   {
+    "record": {
+     "series_id": 45334600346,
+     "title": "20 Seiki Shounen",
+     "type": "Manga",
+     "year": "1999"
+    },
+    "hit_title": "20th Century Boys"
+   },
+   {
+    "record": {
+     "series_id": 15829710487,
+     "title": "20 Seiki Shounen Tanteidan",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "20th Century Boys Detectives"
+   },
+   {
+    "record": {
+     "series_id": 16336078335,
+     "title": "20 Seiki Densetsu",
+     "type": "Manga",
+     "year": "1994"
+    },
+    "hit_title": "20th Century Legend"
+   },
+   {
+    "record": {
+     "series_id": 4370760270,
+     "title": "20 Seiki no Cleopatra",
+     "type": "Manga",
+     "year": "1980"
+    },
+    "hit_title": "20th Century Cleopatra"
+   },
+   {
+    "record": {
+     "series_id": 5588513396,
+     "title": "20 Seiki Shounen no Wakiyaku",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "20th Century Boys Spinoff - Ujiko Ujio Anthology"
+   },
+   {
+    "record": {
+     "series_id": 4435490469,
+     "title": "Hitler",
+     "type": "Manga",
+     "year": "1971"
+    },
+    "hit_title": "20th Century Madness: Gekiga Hitler"
+   },
+   {
+    "record": {
+     "series_id": 3533292533,
+     "title": "20 Seiki Irodotta Onna-tachi",
+     "type": "Manga",
+     "year": "2001"
+    },
+    "hit_title": "Women Who Colored 20th Century"
+   },
+   {
+    "record": {
+     "series_id": 64832756793,
+     "title": "21 Seiki Shounen",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "21st Century Boys"
+   },
+   {
+    "record": {
+     "series_id": 58996013162,
+     "title": "Olympic no Seiki",
+     "type": "Manga",
+     "year": "2000"
+    },
+    "hit_title": "The 20th Century Is \"the Century of the Olympics\""
+   },
+   {
+    "record": {
+     "series_id": 16461964071,
+     "title": "22th Century",
+     "type": "Manhwa",
+     "year": "2023"
+    },
+    "hit_title": "22th Century"
+   }
+  ]
+ }
+}

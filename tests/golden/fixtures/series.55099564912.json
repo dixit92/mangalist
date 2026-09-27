@@ -1,0 +1,172 @@
+{
+ "series_id": 55099564912,
+ "title": "One Piece",
+ "associated": [
+  {
+   "title": "Đảo Hải Tặc"
+  },
+  {
+   "title": "Ван Пис"
+  },
+  {
+   "title": "Уан Пийс"
+  },
+  {
+   "title": "Վան Փիս"
+  },
+  {
+   "title": "וואן פיס"
+  },
+  {
+   "title": "وان بيس"
+  },
+  {
+   "title": "وان پیس"
+  },
+  {
+   "title": "वान पिस"
+  },
+  {
+   "title": "वान पीस"
+  },
+  {
+   "title": "ওয়ান পিস"
+  },
+  {
+   "title": "ஒன் பீஸ்"
+  },
+  {
+   "title": "วันพีซ"
+  },
+  {
+   "title": "ဝမ်းပိစ်"
+  },
+  {
+   "title": "ዋንፒስ"
+  },
+  {
+   "title": "ワンピース"
+  },
+  {
+   "title": "海賊王"
+  },
+  {
+   "title": "海贼王"
+  },
+  {
+   "title": "航海王"
+  },
+  {
+   "title": "원피스"
+  }
+ ],
+ "type": "Manga",
+ "year": "1997",
+ "status": "115 Volumes (Ongoing)  \n",
+ "latest_chapter": 1193,
+ "authors": [
+  {
+   "name": "ODA Eiichiro",
+   "type": "Author"
+  },
+  {
+   "name": "ODA Eiichiro",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 49512032547
+  },
+  {
+   "relation_type": "Alternate Version",
+   "related_series_id": 14853239448
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 29914497193
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 3789664759
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 6279374590
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 42064105448
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 69465560784
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 15967490973
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 46219761913
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 60737708220
+  },
+  {
+   "relation_type": "Alternate Version",
+   "related_series_id": 74145780592
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 55616213700
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 58820705296
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 26102898211
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 3272600520
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 50425009910
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 46471835179
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 66041204484
+  },
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 19206830993
+  },
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 23499427437
+  },
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 10602649749
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 77556276839
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 29564439351
+  }
+ ]
+}

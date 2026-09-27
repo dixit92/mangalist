@@ -1,0 +1,104 @@
+{
+ "query": "Oyasumi Punpun",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 380,
+  "results": [
+   {
+    "record": {
+     "series_id": 21944750964,
+     "title": "Oyasumi Punpun",
+     "type": "Manga",
+     "year": "2007"
+    },
+    "hit_title": "Oyasumi Punpun"
+   },
+   {
+    "record": {
+     "series_id": 56956994856,
+     "title": "Nikoniko x Punpun",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Nikoniko Punpun"
+   },
+   {
+    "record": {
+     "series_id": 43807964602,
+     "title": "Good Night (yu)",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Oyasumi"
+   },
+   {
+    "record": {
+     "series_id": 23330337744,
+     "title": "Oyasumi Memories",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Oyasumi Memories"
+   },
+   {
+    "record": {
+     "series_id": 17663116548,
+     "title": "Oyasumi Morning",
+     "type": "Manga",
+     "year": ""
+    },
+    "hit_title": "Oyasumi Morning"
+   },
+   {
+    "record": {
+     "series_id": 983744675,
+     "title": "Oyasumi Sheherazade",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Oyasumi Sheherazade"
+   },
+   {
+    "record": {
+     "series_id": 10247302009,
+     "title": "Dakishimete Oyasumi",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Dakishimete Oyasumi"
+   },
+   {
+    "record": {
+     "series_id": 15360737971,
+     "title": "Oyasumi Darling",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Oyasumi Darling"
+   },
+   {
+    "record": {
+     "series_id": 54094116093,
+     "title": "Oyasumi Étranger",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Oyasumi Étranger"
+   },
+   {
+    "record": {
+     "series_id": 2924541910,
+     "title": "Oyasumi Ribaibaru",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Oyasumi Ribaibaru"
+   }
+  ]
+ }
+}

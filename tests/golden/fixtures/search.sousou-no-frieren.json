@@ -1,0 +1,104 @@
+{
+ "query": "Sousou no Frieren",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 66296374554,
+     "title": "Sousou no Frieren",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Sousou no Frieren"
+   },
+   {
+    "record": {
+     "series_id": 49184761772,
+     "title": "Sousou no Frieren Anthology - Kotonaru Tabi wo Tanoshimu Mahou",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Sousou no Frieren Anthology"
+   },
+   {
+    "record": {
+     "series_id": 34082280286,
+     "title": "Sousou no Limit",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Sousou no Limit"
+   },
+   {
+    "record": {
+     "series_id": 9124294236,
+     "title": "Sousou Koushinkyoku",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Sousou Koushinkyoku"
+   },
+   {
+    "record": {
+     "series_id": 4404194203,
+     "title": "Rachel Sousou",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Rachel Sousou"
+   },
+   {
+    "record": {
+     "series_id": 15142063805,
+     "title": "Namida Sousou",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "Namida Sousou"
+   },
+   {
+    "record": {
+     "series_id": 56314226891,
+     "title": "Datsusara Souryo no Dungeon Sousou Haishin",
+     "type": "Manga",
+     "year": "2026"
+    },
+    "hit_title": "Datsusara Souryo no Dungeon Sousou Haishin"
+   },
+   {
+    "record": {
+     "series_id": 18419669402,
+     "title": "Sousou Moutoku Seiden",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Sousou Moutoku Seiden"
+   },
+   {
+    "record": {
+     "series_id": 13468326316,
+     "title": "Ippatsu Hyakuman Moushiukeru Sousou",
+     "type": "Manga",
+     "year": "1995"
+    },
+    "hit_title": "Ippatsu Hyakuman Moushiukeru Sousou"
+   },
+   {
+    "record": {
+     "series_id": 56339608351,
+     "title": "Sousou - 2011.3.11 Bokou ga Itaianchisho ni Natta Hi",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Sousou - 2011.3.11 Bokou ga Itaianchisho ni Natta Hi"
+   }
+  ]
+ }
+}

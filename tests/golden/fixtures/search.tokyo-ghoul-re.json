@@ -1,0 +1,104 @@
+{
+ "query": "Tokyo Ghoul re",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 2196193038,
+     "title": "Toukyou Ghoul: JACK",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Tokyo Ghoul - Jack"
+   },
+   {
+    "record": {
+     "series_id": 26272522291,
+     "title": "Tokyo Ghoul",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Tokyo Ghoul"
+   },
+   {
+    "record": {
+     "series_id": 56093113414,
+     "title": "Re Re Reincarnation",
+     "type": "Manga",
+     "year": "2025"
+    },
+    "hit_title": "Re Re Reincarnation"
+   },
+   {
+    "record": {
+     "series_id": 42723551898,
+     "title": "Kuu Onna",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Ghoul Woman"
+   },
+   {
+    "record": {
+     "series_id": 50820213381,
+     "title": "Mother Ghoul",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Mother Ghoul"
+   },
+   {
+    "record": {
+     "series_id": 66742848782,
+     "title": "Re Cervin",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Re Cervin"
+   },
+   {
+    "record": {
+     "series_id": 6727917394,
+     "title": "Maou-sama, Re Re Revenge!",
+     "type": "Manga",
+     "year": "2026"
+    },
+    "hit_title": "Maou-sama, Re Re Revenge!"
+   },
+   {
+    "record": {
+     "series_id": 49292205528,
+     "title": "23:45 Re;",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "23:45 Re"
+   },
+   {
+    "record": {
+     "series_id": 74370562662,
+     "title": "Otsukaresama, Kurose-kun",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Ghoul Work, Kurose"
+   },
+   {
+    "record": {
+     "series_id": 53381788029,
+     "title": "Re-Season",
+     "type": "Manhwa",
+     "year": "2017"
+    },
+    "hit_title": "Re Season"
+   }
+  ]
+ }
+}

@@ -1,0 +1,104 @@
+{
+ "query": "Solo Leveling",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 1384,
+  "results": [
+   {
+    "record": {
+     "series_id": 15180124327,
+     "title": "Solo Leveling",
+     "type": "Manhwa",
+     "year": "2018"
+    },
+    "hit_title": "Solo Leveling"
+   },
+   {
+    "record": {
+     "series_id": 47955563021,
+     "title": "Solo Leveling: Ragnarok",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "Solo Leveling : Ragnarok"
+   },
+   {
+    "record": {
+     "series_id": 33692781764,
+     "title": "Solo Leveling: Arise",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "Solo Leveling: Arise"
+   },
+   {
+    "record": {
+     "series_id": 14394110555,
+     "title": "Sip of Poison",
+     "type": "Manhwa",
+     "year": "2021"
+    },
+    "hit_title": "Solo"
+   },
+   {
+    "record": {
+     "series_id": 271255463,
+     "title": "The Privilege of the Second Life Is Power Leveling",
+     "type": "Manhua",
+     "year": "2024"
+    },
+    "hit_title": "Solo Leveling in Apocalypse"
+   },
+   {
+    "record": {
+     "series_id": 48323007591,
+     "title": "Love Leveling",
+     "type": "Manhwa",
+     "year": "2020"
+    },
+    "hit_title": "Love Leveling"
+   },
+   {
+    "record": {
+     "series_id": 21971701677,
+     "title": "Back to the Earth",
+     "type": "Manhua",
+     "year": "2019"
+    },
+    "hit_title": "Urban Leveling"
+   },
+   {
+    "record": {
+     "series_id": 70247457446,
+     "title": "The Gourmet Gamer",
+     "type": "Manhwa",
+     "year": "2021"
+    },
+    "hit_title": "Leveling gourmet"
+   },
+   {
+    "record": {
+     "series_id": 19986257222,
+     "title": "Rising With the Monsters",
+     "type": "Manhua",
+     "year": "2024"
+    },
+    "hit_title": "Calamity Leveling"
+   },
+   {
+    "record": {
+     "series_id": 51853390031,
+     "title": "What Can I Do Alone?",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "Solo Whatevering"
+   }
+  ]
+ }
+}

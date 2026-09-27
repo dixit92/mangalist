@@ -1,0 +1,88 @@
+{
+ "series_id": 42553317740,
+ "title": "JoJo no Kimyou na Bouken Part 4: Diamond wa Kudakenai",
+ "associated": [
+  {
+   "title": "Diamond Is Not Crash"
+  },
+  {
+   "title": "Diamond Is Unbreakable"
+  },
+  {
+   "title": "Diamond wa Kudakenai"
+  },
+  {
+   "title": "JoJo's Bizarre Adventure Part 4: Diamond is Unbreakable"
+  },
+  {
+   "title": "La extraña aventura de JoJo Parte 4: El diamante es inquebrantable"
+  },
+  {
+   "title": "ジョジョの奇妙な冒険 ダイヤモンドは砕けない"
+  },
+  {
+   "title": "ダイヤモンドは砕けない"
+  }
+ ],
+ "type": "Manga",
+ "year": "1992",
+ "status": "18 Tankōbon Volumes (Complete)  \n12 Bunkoban Volumes (Complete)  \n6 Compilation Volumes (Complete)",
+ "latest_chapter": 174,
+ "authors": [
+  {
+   "name": "ARAKI Hirohiko",
+   "type": "Author"
+  },
+  {
+   "name": "ARAKI Hirohiko",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 60420553585
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 63711986459
+  },
+  {
+   "relation_type": "Adapted From",
+   "related_series_id": 74102321905
+  },
+  {
+   "relation_type": "Alternate Version",
+   "related_series_id": 49100542773
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 28090717540
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 37979312065
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 40948254190
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 72598972268
+  },
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 17577511143
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 32404359239
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 8807574054
+  }
+ ]
+}

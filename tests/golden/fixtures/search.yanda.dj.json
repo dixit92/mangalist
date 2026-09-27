@@ -1,0 +1,103 @@
+{
+ "query": "Yanda&",
+ "filter_types": [
+  "Novel",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 251,
+  "results": [
+   {
+    "record": {
+     "series_id": 57918701059,
+     "title": "Yotsuba dj - Yanda&!",
+     "type": "Doujinshi",
+     "year": "2007"
+    },
+    "hit_title": "Yotsuba dj - Yanda&!"
+   },
+   {
+    "record": {
+     "series_id": 41847164551,
+     "title": "Naruto dj - Panda Panda Panda!",
+     "type": "Doujinshi",
+     "year": "2010"
+    },
+    "hit_title": "Naruto dj - Panda Panda Panda!"
+   },
+   {
+    "record": {
+     "series_id": 13250721426,
+     "title": "Panda X Panda",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Panda X Panda"
+   },
+   {
+    "record": {
+     "series_id": 62889784650,
+     "title": "Q and A",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "QandA"
+   },
+   {
+    "record": {
+     "series_id": 2730344949,
+     "title": "Boku no Hero Academia dj - Nanda Kanda de 10-Nen Tachimashite.",
+     "type": "Doujinshi",
+     "year": "2024"
+    },
+    "hit_title": "My Hero Academia dj - Nanda Kanda de 10-Nen Tachimashite"
+   },
+   {
+    "record": {
+     "series_id": 60720558450,
+     "title": "Ganda",
+     "type": "Indonesian",
+     "year": "2021"
+    },
+    "hit_title": "Ganda"
+   },
+   {
+    "record": {
+     "series_id": 20934077627,
+     "title": "Busy Panda",
+     "type": "Manhua",
+     "year": "2020"
+    },
+    "hit_title": "Busy Panda"
+   },
+   {
+    "record": {
+     "series_id": 10962415173,
+     "title": "Datsugoku Panda",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Datsugoku Panda"
+   },
+   {
+    "record": {
+     "series_id": 50811546045,
+     "title": "Handa-kun",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Handa-kun"
+   },
+   {
+    "record": {
+     "series_id": 15686317061,
+     "title": "Ikemen Panda",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Ikemen Panda"
+   }
+  ]
+ }
+}

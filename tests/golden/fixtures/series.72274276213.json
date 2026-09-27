@@ -1,0 +1,54 @@
+{
+ "series_id": 72274276213,
+ "title": "Monster",
+ "associated": [
+  {
+   "title": "Monsutaa"
+  },
+  {
+   "title": "Naoki Urasawa's Monster"
+  },
+  {
+   "title": "Монстр"
+  },
+  {
+   "title": "मॉन्स्टर"
+  },
+  {
+   "title": "मोंस्टर"
+  },
+  {
+   "title": "คนปีศาจ"
+  },
+  {
+   "title": "モンスター"
+  },
+  {
+   "title": "怪物"
+  },
+  {
+   "title": "몬스터"
+  }
+ ],
+ "type": "Manga",
+ "year": "1994",
+ "status": "18 Volumes (Complete)  \n9 Volumes (Kanzenban, Complete)",
+ "latest_chapter": 0,
+ "authors": [
+  {
+   "name": "URASAWA Naoki",
+   "type": "Author"
+  },
+  {
+   "name": "URASAWA Naoki",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 77011590548
+  }
+ ]
+}

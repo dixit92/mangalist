@@ -1,0 +1,104 @@
+{
+ "query": "Mob Psycho 100",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 6157,
+  "results": [
+   {
+    "record": {
+     "series_id": 605012986,
+     "title": "Mob Psycho 100",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Mob Psycho 100"
+   },
+   {
+    "record": {
+     "series_id": 34913908515,
+     "title": "Mob Psycho 100 Anthology",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Mob Psycho 100 Anthology"
+   },
+   {
+    "record": {
+     "series_id": 36505554988,
+     "title": "Reigen",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Mob Psycho 100: Reigen"
+   },
+   {
+    "record": {
+     "series_id": 42479385009,
+     "title": "Psycho",
+     "type": "Manhua",
+     "year": "2018"
+    },
+    "hit_title": "Psycho"
+   },
+   {
+    "record": {
+     "series_id": 68075950117,
+     "title": "Psycho +",
+     "type": "Manga",
+     "year": "1992"
+    },
+    "hit_title": "Psycho +"
+   },
+   {
+    "record": {
+     "series_id": 4745400742,
+     "title": "Her Merry Obsession",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "Merry Psycho"
+   },
+   {
+    "record": {
+     "series_id": 21508916603,
+     "title": "Psycho Busters",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "Psycho Busters"
+   },
+   {
+    "record": {
+     "series_id": 19475440873,
+     "title": "Psycho Class",
+     "type": "Thai",
+     "year": "2021"
+    },
+    "hit_title": "Psycho Class"
+   },
+   {
+    "record": {
+     "series_id": 46617943980,
+     "title": "Psycho Face",
+     "type": "Manhwa",
+     "year": "2023"
+    },
+    "hit_title": "Psycho Face"
+   },
+   {
+    "record": {
+     "series_id": 66768736489,
+     "title": "Psycho Factory",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Psycho Factory"
+   }
+  ]
+ }
+}

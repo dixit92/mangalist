@@ -1,0 +1,104 @@
+{
+ "query": "Monster",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 1971,
+  "results": [
+   {
+    "record": {
+     "series_id": 72274276213,
+     "title": "Monster",
+     "type": "Manga",
+     "year": "1994"
+    },
+    "hit_title": "Monster"
+   },
+   {
+    "record": {
+     "series_id": 10829808480,
+     "title": "Monster Master",
+     "type": "Manga",
+     "year": "2010"
+    },
+    "hit_title": "Monster Master"
+   },
+   {
+    "record": {
+     "series_id": 16809057489,
+     "title": "Monster x Monster",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Monster x Monster"
+   },
+   {
+    "record": {
+     "series_id": 5655070221,
+     "title": "Demon Hunter",
+     "type": "Manhua",
+     "year": "2019"
+    },
+    "hit_title": "Monster Wanted"
+   },
+   {
+    "record": {
+     "series_id": 49649924403,
+     "title": "A to E no Aida",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Monster Students"
+   },
+   {
+    "record": {
+     "series_id": 77226146781,
+     "title": "Amasugi Monster",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Amasugi Monster"
+   },
+   {
+    "record": {
+     "series_id": 25359887789,
+     "title": "Demon Apartment",
+     "type": "Manhua",
+     "year": "2020"
+    },
+    "hit_title": "Monster Apartment"
+   },
+   {
+    "record": {
+     "series_id": 41730740208,
+     "title": "Hyakki Oukoku",
+     "type": "Manga",
+     "year": "2000"
+    },
+    "hit_title": "Monster Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 60041941164,
+     "title": "Ishu Renai",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Monster Romance"
+   },
+   {
+    "record": {
+     "series_id": 68285162495,
+     "title": "Kaibutsu-kun",
+     "type": "Manga",
+     "year": "1965"
+    },
+    "hit_title": "Little Monster"
+   }
+  ]
+ }
+}

@@ -1,0 +1,104 @@
+{
+ "query": "Zzqx Nonexistent Synthetic Title",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 198,
+  "results": [
+   {
+    "record": {
+     "series_id": 26647071068,
+     "title": "Hijitsuzaisei Shoujo",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Nonexistent Girl"
+   },
+   {
+    "record": {
+     "series_id": 40897060334,
+     "title": "Integrated Human",
+     "type": "Manhwa",
+     "year": "2023"
+    },
+    "hit_title": "Synthetic Human"
+   },
+   {
+    "record": {
+     "series_id": 57298488180,
+     "title": "Synthetic Man",
+     "type": "Manhwa",
+     "year": "2025"
+    },
+    "hit_title": "Synthetic Man"
+   },
+   {
+    "record": {
+     "series_id": 2721858057,
+     "title": "No Title",
+     "type": "Manga",
+     "year": "2001"
+    },
+    "hit_title": "No Title"
+   },
+   {
+    "record": {
+     "series_id": 40952104073,
+     "title": "No Title Yet",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "No Title Yet"
+   },
+   {
+    "record": {
+     "series_id": 54506143847,
+     "title": "Seme Chichi",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "No Title (Erect Sawaru)"
+   },
+   {
+    "record": {
+     "series_id": 214697158,
+     "title": "Shinzui",
+     "type": "Manga",
+     "year": "2007"
+    },
+    "hit_title": "No Title (Tsuya-Tsuya)"
+   },
+   {
+    "record": {
+     "series_id": 69986968356,
+     "title": "Title ga Kimaranai (Kari)",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Title ga Kimaranai (Kari)"
+   },
+   {
+    "record": {
+     "series_id": 77627232611,
+     "title": "I Can See the Title Though",
+     "type": "Manhwa",
+     "year": "2025"
+    },
+    "hit_title": "I Can See the Title"
+   },
+   {
+    "record": {
+     "series_id": 53576443258,
+     "title": "Title Mitei no Prologue",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Title Mitei no Prologue"
+   }
+  ]
+ }
+}

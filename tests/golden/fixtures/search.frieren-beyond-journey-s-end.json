@@ -1,0 +1,104 @@
+{
+ "query": "Frieren - Beyond Journey's End",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 66296374554,
+     "title": "Sousou no Frieren",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Frieren: Beyond Journey’s End"
+   },
+   {
+    "record": {
+     "series_id": 11441587927,
+     "title": "Sono Mukou no Mukougawa",
+     "type": "Manga",
+     "year": "2004"
+    },
+    "hit_title": "Beyond the Beyond"
+   },
+   {
+    "record": {
+     "series_id": 45702686526,
+     "title": "Tengoku Daimakyou",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "A Journey Beyond Heaven"
+   },
+   {
+    "record": {
+     "series_id": 49184761772,
+     "title": "Sousou no Frieren Anthology - Kotonaru Tabi wo Tanoshimu Mahou",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Sousou no Frieren Anthology"
+   },
+   {
+    "record": {
+     "series_id": 71490412927,
+     "title": "Be My Only Love",
+     "type": "Manhua",
+     "year": "2018"
+    },
+    "hit_title": "Beyond Forever"
+   },
+   {
+    "record": {
+     "series_id": 61423370455,
+     "title": "Beyond (GYARO)",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Beyond (GYARO)"
+   },
+   {
+    "record": {
+     "series_id": 72727517699,
+     "title": "Beyond Imagination",
+     "type": "Manhwa",
+     "year": "2015"
+    },
+    "hit_title": "Beyond Imagination"
+   },
+   {
+    "record": {
+     "series_id": 4201755328,
+     "title": "Beyond Walpurgis",
+     "type": "Manhwa",
+     "year": "2023"
+    },
+    "hit_title": "Beyond Walpurgis"
+   },
+   {
+    "record": {
+     "series_id": 60963083829,
+     "title": "Hyakki Yakoushou",
+     "type": "Manga",
+     "year": "1995"
+    },
+    "hit_title": "Beyond Twilight"
+   },
+   {
+    "record": {
+     "series_id": 10029998574,
+     "title": "Itsuwari no Konyakusha ni Kuchizuke o",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Beyond Innocence"
+   }
+  ]
+ }
+}

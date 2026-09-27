@@ -1,0 +1,104 @@
+{
+ "query": "Tower of God",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 13015731700,
+     "title": "Tower of God",
+     "type": "Manhwa",
+     "year": "2010"
+    },
+    "hit_title": "Tower of God"
+   },
+   {
+    "record": {
+     "series_id": 16346236814,
+     "title": "Tower of God: Urek Mazino",
+     "type": "Manhwa",
+     "year": "2025"
+    },
+    "hit_title": "Tower of God: Urek Mazino"
+   },
+   {
+    "record": {
+     "series_id": 40909803689,
+     "title": "Campanella no Tou",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Tower of Campanella"
+   },
+   {
+    "record": {
+     "series_id": 26359017580,
+     "title": "Hanabira no Tou",
+     "type": "Manga",
+     "year": "1989"
+    },
+    "hit_title": "Tower of petal"
+   },
+   {
+    "record": {
+     "series_id": 71679064578,
+     "title": "Chuuka Ichiban!",
+     "type": "Manga",
+     "year": "1995"
+    },
+    "hit_title": "King of Tower"
+   },
+   {
+    "record": {
+     "series_id": 45110212892,
+     "title": "Benibara no Densetsu",
+     "type": "Manga",
+     "year": "2001"
+    },
+    "hit_title": "Tower of Shadows"
+   },
+   {
+    "record": {
+     "series_id": 19134638589,
+     "title": "Karuma no Tou",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Tower of Karma"
+   },
+   {
+    "record": {
+     "series_id": 19645367381,
+     "title": "Kairaku no Tou",
+     "type": "Manga",
+     "year": "2001"
+    },
+    "hit_title": "Tower of Pleasure"
+   },
+   {
+    "record": {
+     "series_id": 16527191214,
+     "title": "Babel Shiki Kami Girl",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "The Female God of Babel: KAMISAMA Club in Tower of Babel"
+   },
+   {
+    "record": {
+     "series_id": 38821085677,
+     "title": "Omokage o Motomete",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "Prisoner of the Tower"
+   }
+  ]
+ }
+}

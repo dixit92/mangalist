@@ -1,0 +1,104 @@
+{
+ "query": "Spy x Family",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 7496,
+  "results": [
+   {
+    "record": {
+     "series_id": 67814124606,
+     "title": "Spy x Family",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Spy x Family"
+   },
+   {
+    "record": {
+     "series_id": 43398683898,
+     "title": "Shihou Yuugi",
+     "type": "Manga",
+     "year": "2000"
+    },
+    "hit_title": "Four Lives Remain: Tatsuya Endo Before Spy x Family"
+   },
+   {
+    "record": {
+     "series_id": 15638316060,
+     "title": "Gyakushuu Spy X Caliber",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Gyakushuu Spy X Caliber"
+   },
+   {
+    "record": {
+     "series_id": 54465462565,
+     "title": "Family X",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Family X"
+   },
+   {
+    "record": {
+     "series_id": 18928094432,
+     "title": "S.P.Y",
+     "type": "Manga",
+     "year": "2007"
+    },
+    "hit_title": "SPY"
+   },
+   {
+    "record": {
+     "series_id": 7739318662,
+     "title": "Peppermint Spy",
+     "type": "Manga",
+     "year": "1985"
+    },
+    "hit_title": "Peppermint Spy"
+   },
+   {
+    "record": {
+     "series_id": 44656981741,
+     "title": "Spy Handler",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Spy Handler"
+   },
+   {
+    "record": {
+     "series_id": 23710231209,
+     "title": "Campus Spy",
+     "type": "Manhwa",
+     "year": "2022"
+    },
+    "hit_title": "Campus Spy"
+   },
+   {
+    "record": {
+     "series_id": 58512755331,
+     "title": "Spy House",
+     "type": "Manhwa",
+     "year": "2023"
+    },
+    "hit_title": "Spy House"
+   },
+   {
+    "record": {
+     "series_id": 77245647030,
+     "title": "Spy MKT",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Spy MKT"
+   }
+  ]
+ }
+}
