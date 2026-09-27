@@ -1,89 +1,291 @@
-name: Build Executable
+name: Build packages
+
+# Every push to main, every pull request and every v* tag builds all packages and uploads them as
+# workflow artifacts. Only a v* tag creates the (draft) GitHub release with the packages attached.
+#
+# Versions: packaging/stamp_version.py - tag v1.2.3 -> 1.2.3, anything else -> 0.0.0+<short sha>.
+# Package names: MangaList-v<version>-windows-x64-setup.exe, -windows-x64.zip, -macos-arm64.dmg,
+# -macos-x64.dmg, -linux-x64.AppImage, -linux-x64.tar.gz, plus SHA256SUMS.
+# Nothing is signed yet; docs/packaging.md says where signing steps go (repository secrets).
 
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
-  build-windows:
-    runs-on: windows-latest
-    permissions:
-      # Required for creating the release and uploading assets on tag pushes.
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+env:
+  PYTHON_VERSION: '3.12'
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  windows:
+    name: Windows x64 (installer + portable zip)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements-dev.txt
-
-      - name: Determine version
-        id: ver
-        shell: pwsh
-        run: |
-          if ($env:GITHUB_REF -like 'refs/tags/v*') {
-            $v = $env:GITHUB_REF_NAME -replace '^v', ''
-          } else {
-            $v = "0.0.0+$($env:GITHUB_SHA.Substring(0, 7))"
-          }
-          Write-Host "Building version $v"
-          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "name=MangaList-v$v-win-x64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        run: pip install -r requirements-dev.txt
 
       - name: Stamp version
-        shell: pwsh
-        run: |
-          $v = '${{ steps.ver.outputs.version }}'
-          Set-Content -Path 'manga_list/_version.py' -Encoding utf8 -Value @(
-            '"""Version stamped by CI at build time."""'
-            ''
-            "__version__ = '$v'"
-          )
+        id: ver
+        run: python packaging/stamp_version.py
 
-      - name: Build executable
+      - name: Build (PyInstaller onedir)
         run: |
+          python packaging/make_icon.py
           pyinstaller MangaList.spec --clean --noconfirm
 
-      - name: Package zip bundle
-        shell: pwsh
+      - name: Smoke-test the build
         run: |
-          $name = '${{ steps.ver.outputs.name }}'
-          New-Item -ItemType Directory -Path "package/$name" -Force | Out-Null
-          Copy-Item 'dist/MangaList.exe' "package/$name/"
-          Copy-Item 'README.md', 'LICENSE' "package/$name/"
-          # Archive the folder itself so unzipping creates a single directory.
-          Compress-Archive -Path "package/$name" -DestinationPath "package/$name.zip"
-          $hash = (Get-FileHash "package/$name.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Set-Content "package/$name.zip.sha256" -Encoding ascii
-          Write-Host "SHA256: $hash"
+          $env:MANGA_LIST_DATA_DIR = "$env:RUNNER_TEMP\ml-smoke"
+          $p = Start-Process -FilePath dist\MangaList\MangaList.exe -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "smoke test exit code $($p.ExitCode)" }
+          if (-not (Test-Path "$env:MANGA_LIST_DATA_DIR\config.json")) { throw "no config.json written" }
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      # Signing hook: sign dist\MangaList\MangaList.exe here (signtool, certificate from a repository
+      # secret) before it is zipped and wrapped by the installer. See docs/packaging.md.
+
+      - name: Portable zip
+        run: |
+          $name = '${{ steps.ver.outputs.basename }}-windows-x64'
+          $stage = "package\stage\$name"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Recurse dist\MangaList\* $stage
+          Copy-Item README.md $stage
+          Copy-Item LICENSE "$stage\LICENSE.txt"
+          # The marker keeps settings, cache and logs in data\ and logs\ next to MangaList.exe.
+          Set-Content -Path "$stage\portable" -Encoding ascii -Value 'Portable mode: Manga List keeps its settings, cache and logs next to MangaList.exe. Delete this file to use %LOCALAPPDATA%\MangaList instead.'
+          Compress-Archive -Path $stage -DestinationPath "package\$name.zip"
+          Remove-Item -Recurse -Force package\stage
+
+      - name: Installer (Inno Setup)
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc /Q "/DAppVersion=${{ steps.ver.outputs.version }}" "/DAppVersionNumeric=${{ steps.ver.outputs.numeric }}" packaging\windows\MangaList.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+
+      # Signing hook: sign package\*-setup.exe here.
+
+      - name: Installer check (per-user install, upgrade keeps data, uninstall)
+        run: |
+          $setup = (Get-Item 'package\*-setup.exe').FullName
+          $app = "$env:LOCALAPPDATA\Programs\MangaList"
+          $data = "$env:LOCALAPPDATA\MangaList"
+          $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Manga List.lnk"
+          function Invoke-Setup($exe) {
+            $p = Start-Process -FilePath $exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$exe exit code $($p.ExitCode)" }
+          }
+          Invoke-Setup $setup
+          if (-not (Test-Path "$app\MangaList.exe")) { throw "not installed to $app" }
+          if (-not (Test-Path $menu)) { throw "no Start-menu entry" }
+          $p = Start-Process -FilePath "$app\MangaList.exe" -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installed app smoke test exit code $($p.ExitCode)" }
+          if (-not (Test-Path "$data\config.json")) { throw "no per-user config.json in $data" }
+          Invoke-Setup $setup   # upgrade in place
+          if (-not (Test-Path "$app\MangaList.exe")) { throw "app missing after upgrade" }
+          if (-not (Test-Path "$data\config.json")) { throw "user data lost on upgrade" }
+          Invoke-Setup "$app\unins000.exe"
+          # The uninstaller re-launches itself from %TEMP%: wait for it to finish removing files.
+          for ($i = 0; $i -lt 60 -and (Test-Path "$app\MangaList.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$app\MangaList.exe") { throw "app still present after uninstall" }
+          if (Test-Path $menu) { throw "Start-menu entry still present after uninstall" }
+          if (-not (Test-Path "$data\config.json")) { throw "uninstall removed user data" }
+          Write-Host "install / upgrade / uninstall OK; user data kept in $data"
+
+      - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.ver.outputs.name }}
+          name: ${{ steps.ver.outputs.basename }}-windows-x64
           path: |
+            package/*-setup.exe
             package/*.zip
-            package/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
 
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
+  macos:
+    name: macOS ${{ matrix.arch }} (.dmg)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest     # Apple silicon
+            arch: arm64
+          - runner: macos-15-intel   # last Intel image family on GitHub-hosted runners
+            arch: x64
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
         with:
-          files: |
-            package/*.zip
-            package/*.zip.sha256
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Stamp version
+        id: ver
+        run: python packaging/stamp_version.py
+
+      - name: Build (PyInstaller .app)
+        run: |
+          python packaging/make_icon.py
+          pyinstaller MangaList.spec --clean --noconfirm
+
+      - name: Smoke-test the app bundle
+        run: |
+          MANGA_LIST_DATA_DIR="$RUNNER_TEMP/ml-smoke" dist/MangaList.app/Contents/MacOS/MangaList --smoke-test
+          test -f "$RUNNER_TEMP/ml-smoke/config.json"
+
+      # Signing hook: codesign --deep --options runtime + notarytool + stapler go here, with an
+      # Apple Developer ID from repository secrets. See docs/packaging.md.
+
+      - name: Disk image
+        run: packaging/macos/build_dmg.sh "${{ steps.ver.outputs.version }}" "${{ matrix.arch }}"
+
+      - name: Check the disk image
+        run: |
+          dmg=$(ls package/*.dmg)
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
+          test -L "$RUNNER_TEMP/dmg/Applications"
+          "$RUNNER_TEMP/dmg/Manga List.app/Contents/MacOS/MangaList" --version
+          hdiutil detach "$RUNNER_TEMP/dmg"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.ver.outputs.basename }}-macos-${{ matrix.arch }}
+          path: package/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+  linux:
+    name: Linux x64 (AppImage + tar.gz)
+    # Built on the oldest supported Ubuntu: the AppImage then runs on distributions with glibc >= 2.35.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Qt runtime libraries and fonts
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libegl1 libgl1 libxkbcommon0 libfontconfig1 \
+            libdbus-1-3 fonts-dejavu-core
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Stamp version
+        id: ver
+        run: python packaging/stamp_version.py
+
+      - name: Build (PyInstaller onedir)
+        run: |
+          python packaging/make_icon.py
+          pyinstaller MangaList.spec --clean --noconfirm
+
+      - name: Smoke-test the build
+        run: |
+          MANGA_LIST_DATA_DIR="$RUNNER_TEMP/ml-smoke" dist/MangaList/MangaList --smoke-test
+          test -f "$RUNNER_TEMP/ml-smoke/config.json"
+
+      - name: AppImage and tar.gz
+        run: packaging/linux/build_packages.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Check the packages
+        run: |
+          MANGA_LIST_DATA_DIR="$RUNNER_TEMP/ml-smoke-appimage" ./package/*.AppImage --appimage-extract-and-run --smoke-test
+          test -f "$RUNNER_TEMP/ml-smoke-appimage/config.json"
+          tar -tzf package/*.tar.gz | grep -q '/MangaList$'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.ver.outputs.basename }}-linux-x64
+          path: |
+            package/*.AppImage
+            package/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  checksums:
+    name: SHA256SUMS
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version
+        id: ver
+        run: python3 packaging/stamp_version.py --dry-run
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: MangaList-v*
+          path: package
+          merge-multiple: true
+
+      - name: Check names and write SHA256SUMS
+        working-directory: package
+        run: |
+          base='${{ steps.ver.outputs.basename }}'
+          for f in "$base-windows-x64-setup.exe" "$base-windows-x64.zip" "$base-macos-arm64.dmg" \
+                   "$base-macos-x64.dmg" "$base-linux-x64.AppImage" "$base-linux-x64.tar.gz"; do
+            test -s "$f" || { echo "missing package: $f"; exit 1; }
+          done
+          sha256sum MangaList-v* > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SHA256SUMS
+          path: package/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: checksums
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: package
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: package/*
           draft: true
           generate_release_notes: true

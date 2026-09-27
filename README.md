@@ -7,21 +7,64 @@ archives.
 
 ![Main window](docs/screenshot.png)
 
-## Download
+## Install
 
-Grab the latest `MangaList-vX.Y.Z-win-x64.zip` from the
-[Releases](../../releases) page, unzip it anywhere, and run `MangaList.exe`.
-No installer and no Python required — settings and cache are written to a
-`data/` folder next to the executable, so it works fine from a USB stick.
+Download the package for your system from the [Releases](../../releases) page.
+Every file is listed in `SHA256SUMS` next to the downloads (see
+[Verify a download](#verify-a-download)).
 
-Windows SmartScreen will likely show a "Windows protected your PC" warning
-because the executable is not code-signed. Choose **More info → Run anyway**, or
-build it yourself with the instructions below.
+| System | File | How |
+| --- | --- | --- |
+| Windows 10/11 x64 | `MangaList-vX.Y.Z-windows-x64-setup.exe` | Run it. Installs for your user only (no administrator rights) to `%LOCALAPPDATA%\Programs\MangaList`, with a Start-menu entry and an uninstaller (Settings > Apps). A newer setup upgrades in place and keeps your settings and cache. |
+| Windows, no install | `MangaList-vX.Y.Z-windows-x64.zip` | Unzip anywhere (also a USB stick) and run `MangaList.exe`. The zip is *portable*: settings, cache and logs stay in `data\` and `logs\` next to the exe (delete the `portable` file to use the per-user folder instead). |
+| macOS (Apple silicon) | `MangaList-vX.Y.Z-macos-arm64.dmg` | Open the disk image and drag **Manga List** to Applications. |
+| macOS (Intel) | `MangaList-vX.Y.Z-macos-x64.dmg` | Same. |
+| Linux x64 | `MangaList-vX.Y.Z-linux-x64.AppImage` | `chmod +x` it and run it. Needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later) and the usual desktop libraries (X11 / Wayland, OpenGL, fontconfig). Without FUSE: `./MangaList-*.AppImage --appimage-extract-and-run`. |
+| Linux x64, fallback | `MangaList-vX.Y.Z-linux-x64.tar.gz` | Unpack and run `./MangaList` inside the folder. A `.desktop` file and an icon are included. |
 
-To verify your download against the published `.sha256` file:
+### First launch of an unsigned build
+
+The packages are not code-signed yet, so the systems warn once:
+
+- **Windows** (SmartScreen: "Windows protected your PC"): choose **More info > Run anyway**.
+- **macOS** (Gatekeeper: "cannot be opened because the developer cannot be verified" or "is
+  damaged"): in Finder, right-click (Control-click) **Manga List** in Applications and choose
+  **Open**, then **Open** again. On macOS 15 and later, if there is no Open button: try to open it
+  once, then go to **System Settings > Privacy & Security** and click **Open Anyway**. From a
+  terminal the same is `xattr -dr com.apple.quarantine "/Applications/Manga List.app"`.
+- **Linux**: nothing to confirm; the AppImage only needs the executable bit.
+
+### Where your data lives
+
+Settings (`config.json`), the MangaUpdates cache (`mu_cache.db`) and the logs are kept per user,
+outside the program folder, so upgrades and uninstalls never touch them:
+
+| System | Settings and cache | Logs |
+| --- | --- | --- |
+| Windows | `%LOCALAPPDATA%\MangaList` | `%LOCALAPPDATA%\MangaList\Logs` |
+| macOS | `~/Library/Application Support/MangaList` | `~/Library/Logs/MangaList` |
+| Linux | `~/.local/share/MangaList` | `~/.local/state/MangaList/log` |
+
+- **Upgrading from an older version** (which kept `data\` next to `MangaList.exe` or in the source
+  folder): on first start, the new version copies that `data\` folder into the per-user folder
+  once and leaves the old folder as it was (`migrated-from.txt` records where it came from). If
+  you install with the setup while your old data sits next to an old downloaded exe elsewhere,
+  copy that old `data\` folder's contents to `%LOCALAPPDATA%\MangaList` before the first start.
+- The portable Windows zip keeps using `data\` and `logs\` next to the exe.
+- To use another folder, set the environment variable `MANGA_LIST_DATA_DIR` (logs go to its `logs`
+  subfolder).
+
+### Verify a download
 
 ```powershell
-Get-FileHash MangaList-vX.Y.Z-win-x64.zip -Algorithm SHA256
+# Windows (PowerShell): compare with the line for this file in SHA256SUMS
+Get-FileHash MangaList-vX.Y.Z-windows-x64-setup.exe -Algorithm SHA256
+```
+
+```sh
+# macOS / Linux, in the folder with the downloads and SHA256SUMS
+shasum -a 256 -c SHA256SUMS --ignore-missing      # macOS
+sha256sum -c SHA256SUMS --ignore-missing          # Linux
 ```
 
 ## Install (from source)
@@ -113,48 +156,47 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-## Build Executable
+## Build packages
 
-### Windows
+`MangaList.spec` builds a PyInstaller *onedir* app on every platform (a folder with the executable
+and its libraries; on macOS also a windowed `MangaList.app`). Details, the package scripts and
+where code signing plugs in: [docs/packaging.md](docs/packaging.md).
 
-Build a single-file executable with PyInstaller:
-
-```powershell
-# Using the build script
-.\build.bat
-
-# Or manually
+```sh
 pip install -r requirements-dev.txt
-pyinstaller MangaList.spec --clean
+python packaging/make_icon.py            # icons for the exe / installer / bundle
+pyinstaller MangaList.spec --clean --noconfirm
+dist/MangaList/MangaList --smoke-test    # starts, opens the window once, exits 0
 ```
 
-Output: `dist/MangaList.exe` — a self-contained executable that includes Python and all dependencies.
-
-### Notes
-
-- The executable is built with `--windowed` (no console window)
-- The `data/` directory (SQLite cache and config) is created at runtime in the executable's directory
-- First launch may be slightly slower as the bundled libraries are extracted
+On Windows, `build.bat` runs the same steps. `python -m manga_list --version` prints the version;
+`--smoke-test` (with `QT_QPA_PLATFORM=offscreen` on a headless machine) is what CI runs against
+every package.
 
 ## GitHub Actions
 
-- `Tests` — runs the pytest suite on Windows across Python 3.10–3.12 for every push and pull request.
-- `Build Executable` — builds the Windows executable on every push and uploads it
-  as a build artifact. Pushing a `v*` tag additionally packages
-  `MangaList-v<tag>-win-x64.zip` plus a SHA256 checksum and attaches both to a
-  **draft** release, which you then review and publish manually.
+- **Tests** (`.github/workflows/test.yml`): pytest on Windows, macOS and Linux with Python 3.11 and
+  3.12, plus 3.10 on Linux, for every push to `main` and every pull request. A second job runs
+  the matcher, golden-set and data-location tests in an environment without PySide6, to keep them
+  free of Qt and of any display.
+- **Build packages** (`.github/workflows/build.yml`): for every push to `main`, every pull
+  request and every `v*` tag, builds the Windows installer and portable zip, the macOS disk images
+  (Apple silicon and Intel), and the Linux AppImage and tar.gz. Each package is smoke-tested (the
+  Windows installer also through install, upgrade and uninstall) and uploaded as a workflow
+  artifact, with a `SHA256SUMS` artifact. Only a `v*` tag also creates a **draft** GitHub
+  release with all packages attached; you review and publish it.
 
 ### Cutting a release
 
 The version is derived from the git tag, so there is nothing to bump by hand:
 
-```powershell
+```sh
 git tag v0.2.0
 git push origin v0.2.0
 ```
 
-CI stamps `manga_list/_version.py` with the tag (minus the leading `v`), builds,
-and opens the draft release. Non-tag builds report `0.0.0+<short-sha>`.
+CI stamps `manga_list/_version.py` with the tag (minus the leading `v`), builds every package,
+and opens the draft release. Builds that are not tags report `0.0.0+<short-sha>`.
 
 ## Data sources & attribution
 
@@ -165,7 +207,8 @@ with, endorsed by, or sponsored by either service.
   status, and scanlation/publisher progress, via the
   [MangaUpdates API](https://api.mangaupdates.com/). Used in accordance with their
   Acceptable Use Policy: requests are rate-limited (`REQUEST_DELAY` in
-  `manga_list/mu_client.py`) and all responses are cached locally under `data/`.
+  `manga_list/mu_client.py`) and matches are cached locally in your data folder
+  (see [Where your data lives](#where-your-data-lives)).
 - **[AniList](https://anilist.co)** — supplementary volume/chapter counts via the
   [AniList GraphQL API](https://docs.anilist.co/).
 

@@ -41,8 +41,10 @@ desktop.ini
 # --- Project-specific ------------------------------------------------------
 # Per-user runtime data (config, MU cache DB + WAL). The data/ dir is created at runtime.
 data/
-# Rotating application logs.
+# Rotating application logs (from source runs before the per-user folders).
 logs/
+# Packages built by packaging/ scripts and CI.
+package/
 # Upstream MangaUpdates API spec — fetch on demand, see README.
 mangaupdates_openapi.json
 openapi.yaml
