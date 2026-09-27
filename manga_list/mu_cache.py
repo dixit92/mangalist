@@ -10,7 +10,7 @@ Caching rules
   mu_associated, licensed, publisher_name) are persisted across restarts.
 - ``mu_score_version`` records what ``mu_score`` means: rows written before
   the stage-2 matcher are version 1 (word-set Jaccard) and keep that value;
-  new scores are version 2 (``MU_SCORE_VERSION``). A version-1 score
+  new scores carry ``MU_SCORE_VERSION``. An older-version score
   is never compared with the stage-2 tiers. ``mu_band`` / ``mu_reasons`` hold
   the matcher's tier and reason names.
 - Progress fields (publisher_chapters, publisher_volumes, publisher_status,
@@ -83,9 +83,11 @@ _MIGRATIONS = [
     "ALTER TABLE mu_cache ADD COLUMN mu_reasons TEXT NOT NULL DEFAULT '[]'",
 ]
 
-# Version of the mu_score semantics written by this build: 1 = legacy word-set Jaccard,
-# 2 = the stage-2 matcher's raw title score (manga_list.matcher). Bump when scoring semantics change.
-MU_SCORE_VERSION = 2
+# Version of the mu_score semantics written by this build. Bump when scoring semantics change.
+#   1 = legacy word-set Jaccard (before the stage-2 matcher)
+#   2 = stage-2 raw title score, MangaPixer 1.26.0 port (never released)
+#   3 = MangaPixer 1.26.1 port (a "Title: Subtitle" head match is capped at 0.80)
+MU_SCORE_VERSION = 3
 
 
 def _connect() -> sqlite3.Connection:

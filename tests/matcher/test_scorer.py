@@ -304,3 +304,39 @@ def test_score_is_deterministic_regardless_of_input_order():
     o2 = score(query(["Some Series"]), b, a)
 
     assert [r.candidate.external_id for r in o1.ranked] == [r.candidate.external_id for r in o2.ranked]
+
+
+# --- 1.26.1 ---------------------------------------------------------------------------------
+
+def with_hints(q: MatchQuery, *hints: str) -> MatchQuery:
+    return replace(q, context=replace(q.context, creator_hints=tuple(hints)))
+
+
+def test_creator_hint_separates_same_titled_records_by_their_disambiguator():
+    # "Sprout [Family Given].cbz" in a one-shot collection: three records score 1.00 on the title.
+    q = with_hints(query(["Sprout"], WorkClass.COLLECTION_LEAF, archives=1), "Family Given")
+    o = score(q, rec("1", "Sprout (OTHER Person)"), rec("2", "Sprout", volumes=15), rec("3", "Sprout (FAMILY Given)"))
+
+    assert o.ranked[0].candidate.external_id == "3"
+    assert o.band == MatchBand.AUTO
+
+
+def test_creator_hint_matches_record_authors_in_either_name_order_and_never_vetoes():
+    q = with_hints(query(["Some Series"]), "Family Given")
+    agree = score(q, rec("1", "Some Series", authors=["Given Family"]), rec("2", "Some Series 2nd"))
+    none = score(with_hints(query(["Some Series"]), "English Words"), rec("1", "Some Series", authors=["Given Family"]))
+
+    assert round(agree.ranked[0].adjusted_score, 6) == round(1.0 + scorer.CREATOR_HINT_AGREE, 6)
+    assert round(none.ranked[0].adjusted_score, 6) == round(1.0, 6)
+    assert none.ranked[0].reasons & scorer.VETO_REASONS == MatchReason.NONE
+
+
+def test_record_title_with_subtitle_ranks_by_the_head_before_the_colon_but_never_auto_links():
+    o = score(query(["Fake Hero of the Year"]),
+              rec("1", "Fake Hero of the Year: Ideal Hero? Sorry, a Fake"), rec("2", "The Year of Nothing"))
+    exact = score(query(["Some Saga"]), rec("1", "Some Saga"), rec("2", "Some Saga: Before the Fall"))
+
+    assert o.ranked[0].candidate.external_id == "1"
+    assert round(o.ranked[0].title_score, 6) == round(scorer.SUBTITLE_HEAD_CAP, 6)
+    assert o.band == MatchBand.NEEDS_REVIEW
+    assert (exact.ranked[0].candidate.external_id, exact.band) == ("1", MatchBand.AUTO)

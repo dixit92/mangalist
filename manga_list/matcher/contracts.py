@@ -1,4 +1,4 @@
-"""The stage-2 matcher contract (port of MangaPixer 1.26.0 ``AutoMatchContracts.cs``).
+"""The stage-2 matcher contract (port of MangaPixer 1.26.1 ``AutoMatchContracts.cs``).
 
 Rules carried over unchanged (MangaPixer owner decisions, 2026-09-26): only folders the detector
 classes as series-like are matched at folder level; archive-level matching only inside collection
@@ -188,6 +188,9 @@ class MatchContext:
     tall_strips: bool
     author_tags: Tuple[str, ...]
     comic_info_series: Optional[str] = None
+    # 1.26.1: names from [...] / (...) groups of the folder or archive name that may be an author;
+    # positive evidence only - unlike author_tags they never veto.
+    creator_hints: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

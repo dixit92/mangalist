@@ -28,6 +28,11 @@ _RELEASE_TAG = regex.compile(
     r"|censored|colou?r(?:ed|ized)?|full\s*colou?r|hd|hq|lq|web|webrip|scan(?:ned)?|translated|complete"
     r"|ongoing|one-?shot|x\d+|\d{3,4}p|v\d+|(?:ch|vol)\.?\s*\d+.*)$", _I)
 
+def is_release_tag(text: Optional[str]) -> bool:
+    """A parenthesized release tag (year, language, quality, edition or unit marker, scan note)."""
+    return not is_null_or_whitespace(text) and _RELEASE_TAG.search(text.strip()) is not None
+
+
 _UNIT_TOKEN = regex.compile(
     r"(?<![\p{L}\p{N}])(?:v|vol|vols|volume|volumes|ch|chap|chapter|chapters|c)\.?\s*\d+", _I)
 

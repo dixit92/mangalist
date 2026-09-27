@@ -1,4 +1,4 @@
-"""Candidate scoring and banding (port of MangaPixer 1.26.0 ``MatchScorer.cs``). Pure, deterministic.
+"""Candidate scoring and banding (port of MangaPixer 1.26.1 ``MatchScorer.cs``). Pure, deterministic.
 
 - **Title**: :func:`similarity.score` over every (variant, record title / alt title) pair - a title's
   trailing ``(disambiguator)`` also counts stripped - minus :data:`NUMBER_PENALTY` when the pair
@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import auto_match_text as amt
 from . import similarity
-from ._text import contains_ignore_case, is_null_or_whitespace
+from ._text import any_letter, contains_ignore_case, is_null_or_whitespace
 from .contracts import (
     DEFAULT_THRESHOLDS,
     MatchBand,
@@ -56,6 +56,12 @@ YEAR_AGREE = 0.01
 ONE_SHOT_AGREE = 0.02
 COMIC_INFO_AGREE = 0.05
 AUTHOR_AGREE = 0.05
+# A creator hint from the name names the record's author or its "(AUTHOR Name)" disambiguator
+# (1.26.1): enough to separate same-titled records. Replaces AUTHOR_AGREE when both apply.
+CREATOR_HINT_AGREE = 0.10
+# Title score of a record whose title up to its colon EQUALS the searched name ("Title" vs
+# "Title: Long Subtitle", 1.26.1): below the auto threshold, so it ranks for review only.
+SUBTITLE_HEAD_CAP = 0.80
 
 RELATED_SEPARATION = 0.10
 
@@ -170,12 +176,30 @@ def _score_one(c: MatchCandidate, variants: List[_PreparedVariant], ctx: MatchCo
         if not contains_ignore_case(titles, stripped):
             titles.append(stripped)
     title_numbers = [number_tokens(t) for t in titles]
+    # "Title: Long Subtitle" records also compare by the part before the colon, capped (1.26.1).
+    heads: List[str] = []
+    for t in titles:
+        i = t.find(":")
+        head = t[:i].strip() if i > 0 else None
+        if head is not None and any_letter(head) and not contains_ignore_case(titles, head) \
+                and not contains_ignore_case(heads, head):
+            heads.append(head)
+    capped = len(titles)
+    titles.extend(heads)
+    title_numbers.extend(number_tokens(h) for h in heads)
 
     best = 0.0
     best_penalized = False
     for v in variants:
         for i, t in enumerate(titles):
-            raw = similarity.score(v.text, t)
+            if i >= capped:
+                # Only a head EQUAL to the searched name counts, never a merely similar one - that is
+                # how spin-offs ("Title: Side Story") look.
+                if scoring_form(v.text) != scoring_form(t):
+                    continue
+                raw = SUBTITLE_HEAD_CAP
+            else:
+                raw = similarity.score(v.text, t)
             if raw <= 0:
                 continue
             penalized = v.numbers != title_numbers[i]
@@ -252,11 +276,22 @@ def _score_one(c: MatchCandidate, variants: List[_PreparedVariant], ctx: MatchCo
     # record's authors (undecidable when either side is empty).
     tags = [t for t in (ctx.author_tags or ()) if not is_null_or_whitespace(t)]
     authors = [a for a in (c.authors or ()) if not is_null_or_whitespace(a)]
+    author_bonus = 0.0
     if tags and authors:
         if any(amt.names_equal(t, a) for t in tags for a in authors):
-            delta += AUTHOR_AGREE
+            author_bonus = AUTHOR_AGREE
         elif is_archive_level(ctx.cls):
             reasons |= MatchReason.AUTHOR_CONFLICT
+
+    # Creator hints from the name: positive only. The record's authors come from a full read; its
+    # "(AUTHOR Name)" disambiguator is on every search hit, so ties are broken without a read.
+    hints = [h for h in (ctx.creator_hints or ()) if not is_null_or_whitespace(h)]
+    if hints:
+        named = authors + [d for d in (amt.disambiguator_tag(t) for t in (c.title, *(c.alt_titles or ())))
+                           if d is not None]
+        if any(amt.names_equal(h, n) for h in hints for n in named):
+            author_bonus = CREATOR_HINT_AGREE
+    delta += author_bonus
 
     return ScoredCandidate(c, title, title + delta, reasons)
 

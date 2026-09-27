@@ -12,6 +12,7 @@ from manga_list.matcher.normalizer import (
     derived_variants,
     normalize,
     number_tokens,
+    numbered_series_head,
     scoring_form,
 )
 
@@ -190,10 +191,12 @@ def test_scoring_form_removes_apostrophes_instead_of_splitting(a, b):
 @pytest.mark.parametrize(
     ("input_", "expected"),
     [
-        ("Some Title (unclosed", "Some Title unclosed"),
-        ("Some Title [Tag", "Some Title Tag"),
+        # 1.26.1: an unmatched bracket marks a tag (a YACReader jump-bar convention), so the text on
+        # its outer side leaves the title; "Some Title) v01" keeps its title (no title text after).
+        ("Some Title (unclosed", "Some Title"),
+        ("Some Title [Tag", "Some Title"),
         ("Some Title) v01", "Some Title"),
-        ("Some Title (Digital) [Group", "Some Title Group"),
+        ("Some Title (Digital) [Group", "Some Title"),
     ],
 )
 def test_normalize_unbalanced_bracket_does_not_survive_into_primary(input_, expected):
@@ -281,3 +284,38 @@ def test_archive_title_returns_the_base_most_archives_share():
     assert archive_title(["Alpha.cbz", "Beta.cbz", "Gamma.cbz"]) is None
     assert archive_title(["001.cbz", "002.cbz"]) is None
     assert archive_title([]) is None
+
+
+# --- 1.26.1 ---------------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("names", "head"),
+    [
+        ([f"Cloud Flower {i:03d} Title Word{i}.cbz" for i in range(1, 13)], "Cloud Flower"),
+        (["Steel Rider 000 Oneshot.cbz", "Steel Rider 001 Rise.cbz", "Steel Rider 002 Iron Fire!.cbz",
+          "Steel Rider 006 HQ Version.cbz"], "Steel Rider"),
+        ([f"Level 1 Hero {i:03d} Part Name.cbz" for i in range(1, 7)], "Level 1 Hero"),
+        (["Alpha Story.cbz", "Beta Tale.cbz", "Gamma Saga.cbz", "Delta Night.cbz"], None),
+        (["Alpha Story 1.cbz", "Alpha Story 2.cbz", "Beta Tale.cbz", "Gamma Saga.cbz", "Delta Night.cbz"], None),
+        (["Same Title 005 Only One.cbz"], None),
+    ],
+)
+def test_numbered_series_head_finds_the_title_in_front_of_a_varying_chapter_number(names, head):
+    assert numbered_series_head(names, 0.8) == head
+
+
+@pytest.mark.parametrize(
+    ("name", "primary"),
+    [
+        ("Family Given] Some Words", "Some Words"),
+        ("Some Words [Family Given", "Some Words"),
+        ("Some Words]", "Some Words"),
+    ],
+)
+def test_normalize_unmatched_bracket_tag_is_not_part_of_the_title(name, primary):
+    assert normalize(name).primary == primary
+
+
+def test_normalize_english_title_survives_a_trailing_creator_group_but_not_a_release_tag():
+    assert list(normalize("Some Words [Joined Hands] (Family Given)").variants) == ["Some Words", "Joined Hands"]
+    assert list(normalize("Some Words [Joined Hands] (Digital)").variants) == ["Some Words"]

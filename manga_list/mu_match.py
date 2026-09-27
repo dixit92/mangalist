@@ -11,9 +11,10 @@ The matcher decides the tier; Manga-List keeps its own flow and UI:
 
 Confirmed matches are the user's decision and are never re-scored.
 
-``mu_score`` holds the RAW title score of the chosen record (0..1). Its meaning changed with this
-matcher (score version 2): version-1 scores (word-set Jaccard, with a subset scoring 1.0) are kept in
-old cache rows but never compared with the new thresholds. Pure: no Qt import.
+``mu_score`` holds the RAW title score of the chosen record (0..1). Its meaning is versioned
+(``mu_cache.MU_SCORE_VERSION``): scores of an older version (e.g. the version-1 word-set Jaccard, where
+a subset scored 1.0) are kept in old cache rows but never compared with the current tiers. Pure: no Qt
+import.
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ from .matcher.retrieval import RetrievalResult, retrieve_and_score
 from .models import MangaEntry
 from .mu_cache import MU_SCORE_VERSION
 
-# Version of the mu_score semantics (owned by the cache): 1 = legacy word-set Jaccard (rows written
-# before this matcher); 2 = stage-2 raw title score (MangaPixer 1.26.0 port).
+# The mu_score semantics are versioned by the cache (mu_cache.MU_SCORE_VERSION); 1 = legacy word-set
+# Jaccard (rows written before the stage-2 matcher).
 LEGACY_SCORE_VERSION = 1
 
 BAND_AUTO = "auto"

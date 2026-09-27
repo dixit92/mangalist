@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from typing import FrozenSet, Iterable, Optional
+from typing import FrozenSet, Iterable, List, Optional, Tuple
 
 import regex
 
-from ._text import any_letter_or_digit, is_digit, is_null_or_whitespace, nfkc, split_nonempty
+from ._text import (
+    any_letter,
+    any_letter_or_digit,
+    contains_ignore_case,
+    is_digit,
+    is_null_or_whitespace,
+    nfkc,
+    split_nonempty,
+)
+from .anatomy import is_release_tag
 from .contracts import MetadataOrigin
-from .normalizer import archive_base_title, scoring_form
+from .normalizer import archive_base_title, scoring_form, split_unmatched_bracket_tags
 
 _I = regex.IGNORECASE
 
@@ -95,6 +104,62 @@ def contains_tokens(text: Optional[str], part: Optional[str]) -> bool:
     t = scoring_form(text)
     p = scoring_form(part)
     return bool(p) and bool(t) and (" " + p + " ") in (" " + t + " ")
+
+
+_ARCHIVE_EXTENSION = regex.compile(r"\.(?:cbz|zip|cbr|rar|cb7|7z|cbt|tar|pdf|epub)$", _I)
+_YEAR_ONLY = regex.compile(r"^(?:19|20)\d{2}$")
+_INNER_CIRCLE_ARTIST = regex.compile(r"^(?P<circle>[^()]*?)\s*\((?P<artist>[^()]+)\)\s*$")
+
+
+def creator_hints(display_name: Optional[str]) -> Tuple[str, ...]:
+    """Creator hints of a display name (1.26.1): the text of every bracket group anywhere in the name
+    (``[Family Given] Title``, ``Title [Family Given]``, ``Title [English Title] (Family Given)``;
+    ``[Circle (Artist)]`` gives both names), and of unmatched brackets (``Family Given] Title``, a
+    YACReader jump-bar convention, and ``Title [Family Given``). Years, release tags, unit markers and
+    groups without letters are skipped; a name that is nothing but tags gives none. The scorer only
+    uses a hint when a record's authors (or its ``(AUTHOR Name)`` disambiguator) name it - positive
+    evidence only. Plain separators (``Author - Title``) are not read."""
+    if is_null_or_whitespace(display_name):
+        return ()
+    rest = _ARCHIVE_EXTENSION.sub("", nfkc(display_name).strip()).strip()
+    hints: List[str] = []
+
+    def add(text: Optional[str]) -> None:
+        text = text.strip() if text is not None else None
+        if (not text or not any_letter(text) or _YEAR_ONLY.search(text) or is_release_tag(text)
+                or _VOLUME_TOKEN.search(text) or _CHAPTER_TOKEN.search(text)
+                or len(split_nonempty(text)) > 5 or contains_ignore_case(hints, text)):
+            return
+        hints.append(text)
+
+    for _ in range(4):
+        groups = list(_BRACKET_GROUP.finditer(rest))
+        if not groups:
+            break
+        for g in groups:
+            inner = g.group(0)[1:-1]
+            ca = _INNER_CIRCLE_ARTIST.search(inner)
+            if ca:
+                add(ca.group("circle"))  # "[Circle (Artist)]" gives both names
+                add(ca.group("artist"))
+            else:
+                add(inner)
+        rest = _BRACKET_GROUP.sub(" ", rest)
+    rest, leading, trailing = split_unmatched_bracket_tags(rest)
+    add(leading)
+    add(trailing)
+    return tuple(hints) if any_letter(rest) else ()
+
+
+def disambiguator_tag(title: Optional[str]) -> Optional[str]:
+    """The trailing ``(disambiguator)`` of a provider title (``Sprite (OOBA Douzu)`` -> ``OOBA Douzu``),
+    or None."""
+    if is_null_or_whitespace(title):
+        return None
+    m = _TRAILING_DISAMBIGUATOR.search(title)
+    if m and any_letter(m.group("tag")) and any_letter_or_digit(m.group("head")):
+        return m.group("tag").strip()
+    return None
 
 
 def without_disambiguator(title: Optional[str]) -> Optional[str]:

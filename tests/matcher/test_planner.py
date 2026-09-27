@@ -127,3 +127,10 @@ def test_loose_archive_group_in_a_container_is_scored_as_a_collection_work():
 
     assert c.cls == WorkClass.COLLECTION_CONTAINER
     assert q.context.cls == WorkClass.COLLECTION_LEAF
+
+
+def test_folder_with_english_title_and_creator_searches_both_and_carries_the_creator_hint():
+    q = plan_folder(folder("Tsunagu Te [Joined Hands] (Family Given)", ["Tsunagu Te v01.cbz", "Tsunagu Te v02.cbz"]))
+
+    assert any(v.text == "Joined Hands" and v.kind == QueryVariantKind.ENGLISH_TITLE for v in q.variants)
+    assert "Family Given" in q.context.creator_hints
