@@ -6,7 +6,7 @@ name: Build packages
 # Versions: packaging/stamp_version.py - tag v1.2.3 -> 1.2.3, anything else -> 0.0.0+<short sha>.
 # Package names: MangaList-v<version>-windows-x64-setup.exe, -windows-x64.zip, -macos-arm64.dmg,
 # -macos-x64.dmg, -linux-x64.AppImage, -linux-x64.tar.gz, plus SHA256SUMS.
-# Nothing is signed yet; docs/packaging.md says where signing steps go (repository secrets).
+# Not code-signed (like MangaPixer): SHA256SUMS lets users check their downloads.
 
 on:
   push:
@@ -62,9 +62,6 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "smoke test exit code $($p.ExitCode)" }
           if (-not (Test-Path "$env:MANGA_LIST_DATA_DIR\config.json")) { throw "no config.json written" }
 
-      # Signing hook: sign dist\MangaList\MangaList.exe here (signtool, certificate from a repository
-      # secret) before it is zipped and wrapped by the installer. See docs/packaging.md.
-
       - name: Portable zip
         run: |
           $name = '${{ steps.ver.outputs.basename }}-windows-x64'
@@ -88,8 +85,6 @@ jobs:
           }
           & $iscc /Q "/DAppVersion=${{ steps.ver.outputs.version }}" "/DAppVersionNumeric=${{ steps.ver.outputs.numeric }}" packaging\windows\MangaList.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
-
-      # Signing hook: sign package\*-setup.exe here.
 
       - name: Installer check (per-user install, upgrade keeps data, uninstall)
         run: |
@@ -162,9 +157,6 @@ jobs:
         run: |
           MANGA_LIST_DATA_DIR="$RUNNER_TEMP/ml-smoke" dist/MangaList.app/Contents/MacOS/MangaList --smoke-test
           test -f "$RUNNER_TEMP/ml-smoke/config.json"
-
-      # Signing hook: codesign --deep --options runtime + notarytool + stapler go here, with an
-      # Apple Developer ID from repository secrets. See docs/packaging.md.
 
       - name: Disk image
         run: packaging/macos/build_dmg.sh "${{ steps.ver.outputs.version }}" "${{ matrix.arch }}"

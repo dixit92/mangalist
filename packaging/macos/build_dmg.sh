@@ -2,7 +2,7 @@
 # macOS package from the PyInstaller bundle (dist/MangaList.app):
 #   package/MangaList-v<version>-macos-<arch>.dmg  (drag Manga List to Applications)
 # Usage: packaging/macos/build_dmg.sh <version> <arm64|x64>
-# The bundle is only ad-hoc signed (PyInstaller does that); see docs/packaging.md for signing.
+# The bundle is only ad-hoc signed (PyInstaller does that); releases rely on SHA256SUMS.
 set -euo pipefail
 
 VERSION="${1:?usage: build_dmg.sh <version> <arm64|x64>}"

@@ -12,7 +12,7 @@
 ; - User data lives in %LOCALAPPDATA%\MangaList (settings, MangaUpdates cache, logs) - outside {app},
 ;   so neither an upgrade nor an uninstall touches it.
 ; - Never change AppId: it is how Windows recognises an installed Manga List.
-; - Not signed. Signing plugs in with a SignTool directive (see docs/packaging.md).
+; - Not code-signed; releases publish SHA256SUMS.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
