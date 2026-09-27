@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.9.0] - 2026-09-27
+
 First packaged release.
 
 - MangaUpdates matching uses a port of MangaPixer's matcher (1.26.1): it first decides whether a
