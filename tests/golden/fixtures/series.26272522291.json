@@ -1,0 +1,78 @@
+{
+ "series_id": 26272522291,
+ "title": "Tokyo Ghoul",
+ "associated": [
+  {
+   "title": "Tokyo Gûl"
+  },
+  {
+   "title": "Tokyo Kushu"
+  },
+  {
+   "title": "Toukyou Ghoul"
+  },
+  {
+   "title": "Toukyou Kuishuu"
+  },
+  {
+   "title": "Toukyou Kushu"
+  },
+  {
+   "title": "Токийский Гуль"
+  },
+  {
+   "title": "دێوى تۆكيۆ"
+  },
+  {
+   "title": "غول طوكيو"
+  },
+  {
+   "title": "टोक्यो घुल"
+  },
+  {
+   "title": "โตเกียว กูล"
+  },
+  {
+   "title": "东京食尸鬼"
+  },
+  {
+   "title": "東京喰種"
+  },
+  {
+   "title": "東京喰種トーキョーグール"
+  }
+ ],
+ "type": "Manga",
+ "year": "2011",
+ "status": "14 Volumes (Complete)",
+ "latest_chapter": 143,
+ "authors": [
+  {
+   "name": "ISHIDA Sui",
+   "type": "Author"
+  },
+  {
+   "name": "ISHIDA Sui",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 45405144027
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 2196193038
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 59339830798
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 52983874881
+  }
+ ]
+}

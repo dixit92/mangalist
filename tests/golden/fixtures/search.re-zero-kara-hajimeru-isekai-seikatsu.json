@@ -1,0 +1,104 @@
+{
+ "query": "Re Zero kara Hajimeru Isekai Seikatsu",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 63636494324,
+     "title": "Kenki Renka: Re:Zero kara Hajimeru Isekai Seikatsu † Shinmeitan",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Re: Zero Kara Hajimeru Isekai Seikatsu - Kenki Koiuta"
+   },
+   {
+    "record": {
+     "series_id": 42257196969,
+     "title": "Re:Zero kara Hajimeru Isekai Seikatsu: Hyouketsu no Kizuna",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Re: Zero Kara Hajimeru Isekai Seikatsu: Hyouketsu no Kizuna"
+   },
+   {
+    "record": {
+     "series_id": 59214500369,
+     "title": "Re:Zero Kara Hajimeru Isekai Seikatsu Official Anthology",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Re:Zero Kara Hajimeru Isekai Seikatsu Official Anthology"
+   },
+   {
+    "record": {
+     "series_id": 48841652069,
+     "title": "Zero kara Hajimeru Jikobukken Seikatsu",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Zero kara Hajimeru Jikobukken Seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 75981803511,
+     "title": "Shojo kara Hajimeru Kekkon Seikatsu",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Shojo kara Hajimeru Kekkon Seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 22918692722,
+     "title": "1 kara Hajimeru Seidorei Seikatsu",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "1 kara Hajimeru Seidorei Seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 43996263021,
+     "title": "Ojou-sama kara hajimeru kekkon seikatsu",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Ojou-sama kara hajimeru kekkon seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 25870218721,
+     "title": "Isekai Shihai no Skill Taker - Zero kara Hajimeru Dorei Harem",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Isekai Shihai no Skill Taker: Zero Kara Hajimeru Dorei Harem"
+   },
+   {
+    "record": {
+     "series_id": 49565732520,
+     "title": "Hitojichi Seikatsu kara Hajimeru Slow Life",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Hitojichi Seikatsu kara Hajimeru Slow Life"
+   },
+   {
+    "record": {
+     "series_id": 41657965464,
+     "title": "Chuusotsu Worker kara Hajimeru Koukou Seikatsu",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Chuusotsu Worker kara Hajimeru Koukou Seikatsu"
+   }
+  ]
+ }
+}

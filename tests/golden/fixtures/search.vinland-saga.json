@@ -1,0 +1,104 @@
+{
+ "query": "Vinland Saga",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 4634,
+  "results": [
+   {
+    "record": {
+     "series_id": 27728982867,
+     "title": "VINLAND SAGA",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "VINLAND SAGA"
+   },
+   {
+    "record": {
+     "series_id": 31895038628,
+     "title": "Finland Saga",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Finland Saga"
+   },
+   {
+    "record": {
+     "series_id": 51572888943,
+     "title": "Apaimanee Saga",
+     "type": "Thai",
+     "year": "2001"
+    },
+    "hit_title": "Apaimanee Saga"
+   },
+   {
+    "record": {
+     "series_id": 74024259904,
+     "title": "Genei Kitan",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Phantom Saga"
+   },
+   {
+    "record": {
+     "series_id": 67177150083,
+     "title": "Mingyue Chuanqi",
+     "type": "Manhua",
+     "year": "2022"
+    },
+    "hit_title": "Mingyue Saga"
+   },
+   {
+    "record": {
+     "series_id": 21136359174,
+     "title": "Orfina Saga",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Orfina Saga"
+   },
+   {
+    "record": {
+     "series_id": 23569624369,
+     "title": "Sivern Saga",
+     "type": "Manga",
+     "year": "1992"
+    },
+    "hit_title": "Sivern Saga"
+   },
+   {
+    "record": {
+     "series_id": 49440313181,
+     "title": "Unbalanced Saga",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Unbalanced Saga"
+   },
+   {
+    "record": {
+     "series_id": 70962574630,
+     "title": "Beast Saga",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Beast Saga"
+   },
+   {
+    "record": {
+     "series_id": 65345087240,
+     "title": "DQN Saga",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "DQN Saga"
+   }
+  ]
+ }
+}

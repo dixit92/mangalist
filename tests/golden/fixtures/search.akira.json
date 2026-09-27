@@ -1,0 +1,104 @@
+{
+ "query": "Akira",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 353,
+  "results": [
+   {
+    "record": {
+     "series_id": 46397795369,
+     "title": "Akira",
+     "type": "Manga",
+     "year": "1982"
+    },
+    "hit_title": "Akira"
+   },
+   {
+    "record": {
+     "series_id": 54888573379,
+     "title": "Akira to Akira",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Akira to Akira"
+   },
+   {
+    "record": {
+     "series_id": 30967925624,
+     "title": "Kirakira Akira",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "Kirakira Akira"
+   },
+   {
+    "record": {
+     "series_id": 47120720616,
+     "title": "Akira Start!",
+     "type": "Manga",
+     "year": ""
+    },
+    "hit_title": "Akira Start!"
+   },
+   {
+    "record": {
+     "series_id": 65853814621,
+     "title": "Akira Tobu!!",
+     "type": "Manga",
+     "year": "1989"
+    },
+    "hit_title": "Akira Tobu!!"
+   },
+   {
+    "record": {
+     "series_id": 50068149682,
+     "title": "Katsura Akira",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Katsura Akira"
+   },
+   {
+    "record": {
+     "series_id": 66935099655,
+     "title": "Shinri & Akira",
+     "type": "Manga",
+     "year": "1979"
+    },
+    "hit_title": "Shinri & Akira"
+   },
+   {
+    "record": {
+     "series_id": 40956729452,
+     "title": "Akira No. 2",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Akira No.2"
+   },
+   {
+    "record": {
+     "series_id": 2426517530,
+     "title": "Kuimonodokoro Akira",
+     "type": "Manga",
+     "year": "2007"
+    },
+    "hit_title": "Kuimonodokoro Akira"
+   },
+   {
+    "record": {
+     "series_id": 50443140658,
+     "title": "Oze Akira Senshuu",
+     "type": "Manga",
+     "year": "1983"
+    },
+    "hit_title": "Oze Akira Senshuu"
+   }
+  ]
+ }
+}

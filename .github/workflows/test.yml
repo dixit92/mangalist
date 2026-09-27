@@ -4,31 +4,70 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pytest:
-    runs-on: windows-latest
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        python-version: ['3.11', '3.12']
+        include:
+          # Oldest supported Python, on one platform.
+          - os: ubuntu-latest
+            python-version: '3.10'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
         run: |
-          pip install -r requirements-dev.txt
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
 
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: |
-          python -m pytest -q
+        run: python -m pytest -q
+
+  matcher-without-qt:
+    # The matcher, the golden set and the data-location code must not need Qt or a display.
+    name: matcher tests without PySide6
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install the non-GUI dependencies only
+        run: pip install pytest regex platformdirs requests
+
+      - name: Import check
+        run: python -c "import sys, manga_list.matcher, manga_list.mu_match, manga_list.paths; assert 'PySide6' not in sys.modules"
+
+      - name: Run tests
+        run: >
+          python -m pytest -q tests/matcher tests/golden tests/test_mu_match.py tests/test_mu_cache.py
+          tests/test_paths.py tests/test_classifier.py

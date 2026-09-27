@@ -1,0 +1,104 @@
+{
+ "query": "JoJo no Kimyou na Bouken Part 3 - Stardust Crusaders",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 60420553585,
+     "title": "JoJo no Kimyou na Bouken Part 3: Stardust Crusaders",
+     "type": "Manga",
+     "year": "1989"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 3: Stardust Crusaders"
+   },
+   {
+    "record": {
+     "series_id": 39475021878,
+     "title": "JoJo no Kimyou na Bouken Part 9: The JOJOLands",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 9: The JOJOLands"
+   },
+   {
+    "record": {
+     "series_id": 49100542773,
+     "title": "JoJo no Kimyou na Bouken Part 8: JoJolion",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 8: JoJolion"
+   },
+   {
+    "record": {
+     "series_id": 74102321905,
+     "title": "JoJo no Kimyou na Bouken",
+     "type": "Manga",
+     "year": "1986"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken"
+   },
+   {
+    "record": {
+     "series_id": 65532796324,
+     "title": "JoJo no Kimyou na Bouken Part 1: Phantom Blood",
+     "type": "Manga",
+     "year": "1986"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 1: Phantom Blood"
+   },
+   {
+    "record": {
+     "series_id": 54897639880,
+     "title": "JoJo no Kimyou na Bouken Part 2: Sentou Chouryuu",
+     "type": "Manga",
+     "year": "1987"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 2: Sentou Chouryuu"
+   },
+   {
+    "record": {
+     "series_id": 63711986459,
+     "title": "JoJo no Kimyou na Bouken Part 5: Ougon no Kaze",
+     "type": "Manga",
+     "year": "1995"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 5: Ougon no Kaze"
+   },
+   {
+    "record": {
+     "series_id": 26157317860,
+     "title": "Tobaku Datenroku Kaiji",
+     "type": "Manga",
+     "year": "2004"
+    },
+    "hit_title": "Kaiji Part 3"
+   },
+   {
+    "record": {
+     "series_id": 42553317740,
+     "title": "JoJo no Kimyou na Bouken Part 4: Diamond wa Kudakenai",
+     "type": "Manga",
+     "year": "1992"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 4: Diamond wa Kudakenai"
+   },
+   {
+    "record": {
+     "series_id": 2655353745,
+     "title": "JoJo no Kimyou na Bouken Part 6: Stone Ocean",
+     "type": "Manga",
+     "year": "2000"
+    },
+    "hit_title": "JoJo no Kimyou na Bouken Part 6: Stone Ocean"
+   }
+  ]
+ }
+}

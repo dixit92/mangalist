@@ -1,0 +1,52 @@
+{
+ "series_id": 27728982867,
+ "title": "VINLAND SAGA",
+ "associated": [
+  {
+   "title": "Saga Winlandzka"
+  },
+  {
+   "title": "Vinland Destanı"
+  },
+  {
+   "title": "Vinrando Saga"
+  },
+  {
+   "title": "Сага про Вінланд"
+  },
+  {
+   "title": "ヴィンランド サガ"
+  },
+  {
+   "title": "ヴィンランド・サガ"
+  },
+  {
+   "title": "海盜戰記"
+  }
+ ],
+ "type": "Manga",
+ "year": "2005",
+ "status": "29 Volumes (Complete)",
+ "latest_chapter": 220,
+ "authors": [
+  {
+   "name": "YUKIMURA Makoto",
+   "type": "Author"
+  },
+  {
+   "name": "YUKIMURA Makoto",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 36813031019
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 16520492571
+  }
+ ]
+}

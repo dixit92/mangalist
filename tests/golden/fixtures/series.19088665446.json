@@ -1,0 +1,76 @@
+{
+ "series_id": 19088665446,
+ "title": "Dungeon Meshi",
+ "associated": [
+  {
+   "title": "Danjon Meshi"
+  },
+  {
+   "title": "Delicious in Dungeon"
+  },
+  {
+   "title": "Dungeon Meshi. Lochy i smakołyki (Polish)"
+  },
+  {
+   "title": "Gloutons et Dragons"
+  },
+  {
+   "title": "Hảo Vị Hầm Ngục"
+  },
+  {
+   "title": "Mỹ Vị Hầm Ngục"
+  },
+  {
+   "title": "Požemio Maistas"
+  },
+  {
+   "title": "Tragones y Mazmorras"
+  },
+  {
+   "title": "Подземелье вкусностей"
+  },
+  {
+   "title": "Підземелля смакоти"
+  },
+  {
+   "title": "สูตรลับตำรับดันเจี้ยน (DEXpress)"
+  },
+  {
+   "title": "ダンジョン飯"
+  },
+  {
+   "title": "迷宫饭"
+  },
+  {
+   "title": "迷宮飯"
+  },
+  {
+   "title": "던전밥"
+  }
+ ],
+ "type": "Manga",
+ "year": "2014",
+ "status": "14 Volumes (Complete)",
+ "latest_chapter": 97,
+ "authors": [
+  {
+   "name": "KUI Ryoko",
+   "type": "Author"
+  },
+  {
+   "name": "KUI Ryoko",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 64558810039
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 23542250984
+  }
+ ]
+}

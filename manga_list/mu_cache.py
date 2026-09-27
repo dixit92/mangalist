@@ -1,6 +1,6 @@
 """Persistent cache for MangaUpdates lookups — backed by SQLite.
 
-Database: ``data/mu_cache.db``.
+Database: ``mu_cache.db`` in the per-user data folder (``paths.data_dir()``).
 
 Caching rules
 -------------
@@ -8,6 +8,11 @@ Caching rules
   for explicit user toggles).
 - Series identity fields (mu_id, mu_title, mu_url, mu_confirmed, mu_score,
   mu_associated, licensed, publisher_name) are persisted across restarts.
+- ``mu_score_version`` records what ``mu_score`` means: rows written before
+  the stage-2 matcher are version 1 (word-set Jaccard) and keep that value;
+  new scores are version 2 (``MU_SCORE_VERSION``). A version-1 score
+  is never compared with the stage-2 tiers. ``mu_band`` / ``mu_reasons`` hold
+  the matcher's tier and reason names.
 - Progress fields (publisher_chapters, publisher_volumes, publisher_status,
   scan_latest_chapter) are always refreshed from the MU API on every scan
   for confirmed matches, so Behind stays current.
@@ -26,18 +31,13 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from . import paths
+
 _log = logging.getLogger(__name__)
 
-if getattr(sys, "frozen", False):
-    # PyInstaller one-file build: store data next to the exe (portable).
-    _DATA_DIR = Path(sys.executable).resolve().parent / "data"
-else:
-    _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_DB_FILE = _DATA_DIR / "mu_cache.db"
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -62,7 +62,10 @@ CREATE TABLE IF NOT EXISTS mu_cache (
     anilist_chapters   REAL,
     anilist_volumes    REAL,
     completed_in_origin INTEGER,
-    behind_override    TEXT             -- NULL | 'done'
+    behind_override    TEXT,            -- NULL | 'done'
+    mu_score_version   INTEGER NOT NULL DEFAULT 1,      -- 1 = legacy Jaccard, 2 = stage-2 matcher
+    mu_band            TEXT,             -- NULL | 'auto' | 'review'
+    mu_reasons         TEXT    NOT NULL DEFAULT '[]'    -- JSON array of matcher reason names
 );
 """
 
@@ -74,12 +77,20 @@ _MIGRATIONS = [
     "ALTER TABLE mu_cache ADD COLUMN anilist_volumes REAL",
     "ALTER TABLE mu_cache ADD COLUMN completed_in_origin INTEGER",
     "ALTER TABLE mu_cache ADD COLUMN behind_override TEXT",
+    # Stage-2 matcher: existing rows keep their old Jaccard score, marked as version 1.
+    "ALTER TABLE mu_cache ADD COLUMN mu_score_version INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE mu_cache ADD COLUMN mu_band TEXT",
+    "ALTER TABLE mu_cache ADD COLUMN mu_reasons TEXT NOT NULL DEFAULT '[]'",
 ]
+
+# Version of the mu_score semantics written by this build: 1 = legacy word-set Jaccard,
+# 2 = the stage-2 matcher's raw title score (manga_list.matcher). Bump when scoring semantics change.
+MU_SCORE_VERSION = 2
 
 
 def _connect() -> sqlite3.Connection:
-    _DATA_DIR.mkdir(exist_ok=True)
-    con = sqlite3.connect(_DB_FILE)
+    paths.ensure_data_dir()
+    con = sqlite3.connect(paths.cache_file())
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute(_DDL)
@@ -111,6 +122,11 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         d["mu_associated"] = json.loads(d.get("mu_associated") or "[]")
     except (TypeError, ValueError):
         d["mu_associated"] = []
+    try:
+        d["mu_reasons"] = json.loads(d.get("mu_reasons") or "[]")
+    except (TypeError, ValueError):
+        d["mu_reasons"] = []
+    d["mu_score_version"] = int(d.get("mu_score_version") or 1)
     return d
 
 
@@ -141,8 +157,15 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
                anilist_chapters: Optional[float] = None,
                anilist_volumes: Optional[float] = None,
                completed_in_origin: Optional[bool] = None,
-               behind_override: Optional[str] = None) -> None:
-    """Upsert a MangaUpdates match for *folder*."""
+               behind_override: Optional[str] = None,
+               mu_score_version: int = MU_SCORE_VERSION,
+               mu_band: Optional[str] = None,
+               mu_reasons: Optional[list] = None) -> None:
+    """Upsert a MangaUpdates match for *folder*.
+
+    ``mu_score_version`` defaults to this build's version; pass the cached value
+    when re-saving a row without re-scoring it (e.g. refreshing a confirmed match).
+    """
     key = str(folder)
     # Never silently downgrade a confirmed match.
     if not mu_confirmed:
@@ -154,6 +177,7 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
             mu_confirmed = True
 
     assoc_json = json.dumps(mu_associated or [], ensure_ascii=False)
+    reasons_json = json.dumps(list(mu_reasons or []), ensure_ascii=False)
     with _connect() as con:
         con.execute("""
             INSERT INTO mu_cache
@@ -161,8 +185,9 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
                  mu_associated, mu_score, scan_latest_chapter,
                  publisher_name, publisher_chapters, publisher_volumes, publisher_status,
                  scan_latest_volume, anilist_id, anilist_chapters, anilist_volumes,
-                 completed_in_origin, behind_override)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 completed_in_origin, behind_override,
+                 mu_score_version, mu_band, mu_reasons)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(folder) DO UPDATE SET
                 mu_id              = excluded.mu_id,
                 mu_title           = excluded.mu_title,
@@ -181,7 +206,10 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
                 anilist_chapters   = excluded.anilist_chapters,
                 anilist_volumes    = excluded.anilist_volumes,
                 completed_in_origin= excluded.completed_in_origin,
-                behind_override    = COALESCE(mu_cache.behind_override, excluded.behind_override)
+                behind_override    = COALESCE(mu_cache.behind_override, excluded.behind_override),
+                mu_score_version   = excluded.mu_score_version,
+                mu_band            = excluded.mu_band,
+                mu_reasons         = excluded.mu_reasons
         """, (
             key, mu_id, mu_title, mu_url,
             _bool_to_int(licensed), 1 if mu_confirmed else 0,
@@ -189,6 +217,7 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
             publisher_name, publisher_chapters, publisher_volumes, publisher_status,
             scan_latest_volume, anilist_id, anilist_chapters, anilist_volumes,
             _bool_to_int(completed_in_origin), behind_override,
+            int(mu_score_version), mu_band, reasons_json,
         ))
 
 

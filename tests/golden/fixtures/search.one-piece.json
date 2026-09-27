@@ -1,0 +1,104 @@
+{
+ "query": "One Piece",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 55099564912,
+     "title": "One Piece",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "One Piece"
+   },
+   {
+    "record": {
+     "series_id": 34866131632,
+     "title": "Odekake One Piece",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Odekake One Piece"
+   },
+   {
+    "record": {
+     "series_id": 49512032547,
+     "title": "One Piece Party",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "One Piece Party"
+   },
+   {
+    "record": {
+     "series_id": 77556276839,
+     "title": "Koisuru One Piece",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Koisuru One Piece"
+   },
+   {
+    "record": {
+     "series_id": 15967490973,
+     "title": "One Piece Gakuen",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "One Piece Gakuen"
+   },
+   {
+    "record": {
+     "series_id": 48642213704,
+     "title": "Boku no One Piece",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Boku no One Piece"
+   },
+   {
+    "record": {
+     "series_id": 4449274402,
+     "title": "Noroi no one piece",
+     "type": "Manga",
+     "year": "1993"
+    },
+    "hit_title": "Noroi no one piece"
+   },
+   {
+    "record": {
+     "series_id": 42064105448,
+     "title": "One Piece Film: Gold",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "One Piece Film: Gold"
+   },
+   {
+    "record": {
+     "series_id": 51801206166,
+     "title": "Kenkoukotsu to One Piece",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Kenkoukotsu to One Piece"
+   },
+   {
+    "record": {
+     "series_id": 9082699179,
+     "title": "Show Love",
+     "type": "Manga",
+     "year": "2010"
+    },
+    "hit_title": "Mizutama no One Piece"
+   }
+  ]
+ }
+}

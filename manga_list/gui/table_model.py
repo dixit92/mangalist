@@ -9,7 +9,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
 from ..models import MangaEntry
-from ..mu_match import WEAK_THRESHOLD, is_weak_match
+from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 
 COLUMNS = [
@@ -49,7 +49,7 @@ COL_COMPLETED = 14
 # Saturated dark green for examined rows — contrasts strongly with white text
 # on dark themes, distinct from the table's alternating rows and selection highlight.
 EXAMINED_ROW_BG = QColor(38, 110, 55)      # saturated forest green
-# Saturated orange for weak/suspect MU auto-matches — opaque so it reads well on dark themes.
+# Saturated orange for MU matches the matcher put in the review tier — opaque so it reads well on dark themes.
 WEAK_MATCH_BG = QColor(196, 96, 30)         # saturated burnt orange
 # Deep blue-purple highlight for the row currently being fetched from MU.
 MU_PROCESSING_BG = QColor(60, 80, 160)      # deep blue-purple
@@ -155,6 +155,8 @@ class MangaTableModel(QAbstractTableModel):
         e.mu_confirmed = False
         e.mu_associated = []
         e.mu_score = 0.0
+        e.mu_band = None
+        e.mu_reasons = []
         e.scan_latest_chapter = None
         e.publisher_name = None
         e.publisher_chapters = None
@@ -250,10 +252,7 @@ class MangaTableModel(QAbstractTableModel):
                 return MU_PROCESSING_BG
             if e.examined:
                 return EXAMINED_ROW_BG
-            if (col == COL_MU_TITLE
-                    and e.mu_title is not None
-                    and not e.mu_confirmed
-                    and is_weak_match(e.mu_score)):
+            if col == COL_MU_TITLE and needs_review(e):
                 return WEAK_MATCH_BG
 
         if role == Qt.ToolTipRole:
@@ -265,18 +264,10 @@ class MangaTableModel(QAbstractTableModel):
                     other_folders = [str(self._entries[r].folder.name) for r in dupes]
                     return f"Duplicate MU match\nAlso found in: {', '.join(other_folders)}"
                 return None
-            if col == COL_MU_TITLE and e.mu_title is not None:
-                parts = []
-                if e.mu_url:
-                    parts.append(e.mu_url)
-                if e.mu_confirmed:
-                    parts.append("(confirmed — right-click or double-click to un-confirm)")
-                else:
-                    score_pct = f"{e.mu_score * 100:.0f}%"
-                    parts.append(f"(auto-matched, score {score_pct} — right-click or double-click to confirm)")
-                    if is_weak_match(e.mu_score):
-                        parts.append("— low similarity, consider fixing via right-click")
-                return "  ".join(parts)
+            if col == COL_MU_TITLE:
+                tip = match_tooltip(e)
+                if tip is not None:
+                    return tip
             if col == COL_LICENSED and e.licensed is True:
                 return "Licensed in English"
             if col == COL_BEHIND:

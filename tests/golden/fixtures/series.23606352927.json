@@ -1,0 +1,60 @@
+{
+ "series_id": 23606352927,
+ "title": "Yotsuba to!",
+ "associated": [
+  {
+   "title": "Yotsuba and!"
+  },
+  {
+   "title": "Yotsuba!"
+  },
+  {
+   "title": "Yotsuba&!"
+  },
+  {
+   "title": "Yotsubato!"
+  },
+  {
+   "title": "Ёцуба!"
+  },
+  {
+   "title": "योत्सुबा र!"
+  },
+  {
+   "title": "โยทสึบะ หนูเด๋อจอมป่วน! (NED)"
+  },
+  {
+   "title": "よつばと！"
+  },
+  {
+   "title": "四叶妹妹！"
+  },
+  {
+   "title": "四葉妹妹！"
+  },
+  {
+   "title": "요츠바랑!"
+  }
+ ],
+ "type": "Manga",
+ "year": "2003",
+ "status": "16 Volumes (Ongoing)",
+ "latest_chapter": 114,
+ "authors": [
+  {
+   "name": "AZUMA Kiyohiko",
+   "type": "Author"
+  },
+  {
+   "name": "AZUMA Kiyohiko",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Adapted From",
+   "related_series_id": 45545425890
+  }
+ ]
+}

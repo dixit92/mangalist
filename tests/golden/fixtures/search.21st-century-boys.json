@@ -1,0 +1,104 @@
+{
+ "query": "21st Century Boys",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 3318,
+  "results": [
+   {
+    "record": {
+     "series_id": 64832756793,
+     "title": "21 Seiki Shounen",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "21st Century Boys"
+   },
+   {
+    "record": {
+     "series_id": 64835795460,
+     "title": "21st Century Mermaid",
+     "type": "Manhwa",
+     "year": "2001"
+    },
+    "hit_title": "21st Century Mermaid"
+   },
+   {
+    "record": {
+     "series_id": 11709431165,
+     "title": "Adventure 21",
+     "type": "Manga",
+     "year": "1970"
+    },
+    "hit_title": "21st Century Adventure"
+   },
+   {
+    "record": {
+     "series_id": 1164712246,
+     "title": "21 Seiki Maid",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "21st Century Maid"
+   },
+   {
+    "record": {
+     "series_id": 18752250350,
+     "title": "21st Century Martial Artist",
+     "type": "Manhwa",
+     "year": "2022"
+    },
+    "hit_title": "21st Century Martial Artist"
+   },
+   {
+    "record": {
+     "series_id": 78155045370,
+     "title": "21st Century Half Rupee Coin",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "21st Century Retrogression"
+   },
+   {
+    "record": {
+     "series_id": 35435143240,
+     "title": "21st Century Martial Artist (2015)",
+     "type": "Manhwa",
+     "year": "2015"
+    },
+    "hit_title": "21st Century Martial Artist (2015)"
+   },
+   {
+    "record": {
+     "series_id": 45334600346,
+     "title": "20 Seiki Shounen",
+     "type": "Manga",
+     "year": "1999"
+    },
+    "hit_title": "Twentieth Century Boys"
+   },
+   {
+    "record": {
+     "series_id": 50474838788,
+     "title": "21 Seiki Tantei Jimusho",
+     "type": "Manga",
+     "year": "1993"
+    },
+    "hit_title": "21st Century Investigative Firm"
+   },
+   {
+    "record": {
+     "series_id": 15829710487,
+     "title": "20 Seiki Shounen Tanteidan",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "20th Century Boys Detectives"
+   }
+  ]
+ }
+}

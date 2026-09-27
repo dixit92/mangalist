@@ -3,3 +3,4 @@
 
 pytest>=8.0
 pyinstaller>=6.0
+pillow>=10.0          # packaging/make_icon.py (installer icons)

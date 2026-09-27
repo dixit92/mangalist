@@ -137,34 +137,38 @@ class _SortProxy(QSortFilterProxyModel):
 # ---------------------------------------------------------------------------
 
 
+def render_app_icon(size: int) -> QPixmap:
+    """Paint the app icon at *size* px (also used by packaging/make_icon.py for the installers)."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+
+    # Rounded gradient background (purple -> blue, evoking Volumes/Chapters/Both)
+    grad = QLinearGradient(0, 0, size, size)
+    grad.setColorAt(0.0, QColor("#6a1b9a"))
+    grad.setColorAt(1.0, QColor("#1565c0"))
+    p.setBrush(QBrush(grad))
+    p.setPen(Qt.NoPen)
+    radius = max(2, size // 6)
+    p.drawRoundedRect(0, 0, size, size, radius, radius)
+
+    # Stylized white "M" glyph
+    p.setPen(QPen(QColor("white")))
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(int(size * 0.7))
+    p.setFont(font)
+    p.drawText(pm.rect(), Qt.AlignCenter, "M")
+    p.end()
+    return pm
+
+
 def _build_app_icon() -> QIcon:
     """Generate a simple multi-resolution app icon at runtime (no asset file)."""
     icon = QIcon()
     for size in (16, 24, 32, 48, 64, 128, 256):
-        pm = QPixmap(size, size)
-        pm.fill(Qt.transparent)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing, True)
-
-        # Rounded gradient background (purple -> blue, evoking Volumes/Chapters/Both)
-        grad = QLinearGradient(0, 0, size, size)
-        grad.setColorAt(0.0, QColor("#6a1b9a"))
-        grad.setColorAt(1.0, QColor("#1565c0"))
-        p.setBrush(QBrush(grad))
-        p.setPen(Qt.NoPen)
-        radius = max(2, size // 6)
-        p.drawRoundedRect(0, 0, size, size, radius, radius)
-
-        # Stylized white "M" glyph
-        p.setPen(QPen(QColor("white")))
-        font = QFont()
-        font.setBold(True)
-        font.setPixelSize(int(size * 0.7))
-        p.setFont(font)
-        p.drawText(pm.rect(), Qt.AlignCenter, "M")
-        p.end()
-
-        icon.addPixmap(pm)
+        icon.addPixmap(render_app_icon(size))
     return icon
 
 
@@ -864,6 +868,11 @@ class MainWindow(QMainWindow):
         entry.mu_url = mu_url
         entry.licensed = licensed
         entry.mu_confirmed = True
+        # A manual pick is not scored by the matcher: no score, band or reasons.
+        entry.mu_score = 0.0
+        entry.mu_score_version = mu_cache.MU_SCORE_VERSION
+        entry.mu_band = None
+        entry.mu_reasons = []
         _apply_progress(entry, progress)
 
         mu_cache.save_entry(

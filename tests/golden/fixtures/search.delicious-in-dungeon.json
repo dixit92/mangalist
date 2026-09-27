@@ -1,0 +1,104 @@
+{
+ "query": "Delicious in Dungeon",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 19088665446,
+     "title": "Dungeon Meshi",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Delicious in Dungeon"
+   },
+   {
+    "record": {
+     "series_id": 61050584756,
+     "title": "Corruption in the Dungeon",
+     "type": "Manhwa",
+     "year": "2022"
+    },
+    "hit_title": "Corruption in Dungeon"
+   },
+   {
+    "record": {
+     "series_id": 20650770518,
+     "title": "Renjian Meiwei",
+     "type": "Manhua",
+     "year": "2019"
+    },
+    "hit_title": "Delicious Food in the World"
+   },
+   {
+    "record": {
+     "series_id": 59384965393,
+     "title": "Delicious",
+     "type": "Manhwa",
+     "year": "2015"
+    },
+    "hit_title": "Delicious"
+   },
+   {
+    "record": {
+     "series_id": 43333433004,
+     "title": "My Best Mistake",
+     "type": "Manhwa",
+     "year": "2019"
+    },
+    "hit_title": "Delicious Sister-in-Law"
+   },
+   {
+    "record": {
+     "series_id": 40157061626,
+     "title": "Narusawa-kun wa Oishii Kao ni Koishiteru",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "DELICIOUS FOODS, DELICIOUS FACES"
+   },
+   {
+    "record": {
+     "series_id": 62482087450,
+     "title": "Knights in Ero Trap Dungeon",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Knights in Ero Trap Dungeon"
+   },
+   {
+    "record": {
+     "series_id": 16194518393,
+     "title": "First Time in Taiwan: A Delicious Adventure",
+     "type": "Manga",
+     "year": null
+    },
+    "hit_title": "First Time in Taiwan: A Delicious Adventure"
+   },
+   {
+    "record": {
+     "series_id": 63908262529,
+     "title": "Pleasure in the Dungeon",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "Pleasure in the Dungeon"
+   },
+   {
+    "record": {
+     "series_id": 20015631709,
+     "title": "Oishii Veranda.",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Delicious Veranda"
+   }
+  ]
+ }
+}

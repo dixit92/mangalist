@@ -1,0 +1,104 @@
+{
+ "query": "Attack on Titan",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 23393951235,
+     "title": "Shingeki no Kyojin",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Attack on Titan"
+   },
+   {
+    "record": {
+     "series_id": 17626521035,
+     "title": "Sungeki no Kyojin",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Attack on Titan - Short Play on Titan"
+   },
+   {
+    "record": {
+     "series_id": 39404417014,
+     "title": "Attack On",
+     "type": "Manga",
+     "year": "1996"
+    },
+    "hit_title": "Attack On"
+   },
+   {
+    "record": {
+     "series_id": 25409301309,
+     "title": "Attack on Titan Anthology",
+     "type": "OEL",
+     "year": "2016"
+    },
+    "hit_title": "The Attack Titan Anthology"
+   },
+   {
+    "record": {
+     "series_id": 8428463101,
+     "title": "Ahegao o Sarashisu Midarana Otome",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Climax on Titan"
+   },
+   {
+    "record": {
+     "series_id": 28259384115,
+     "title": "Bougyaku no Kokekko",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Attack on Cocks"
+   },
+   {
+    "record": {
+     "series_id": 31991570419,
+     "title": "Shingeki no Kyojin Gaiden - Kuinaki Sentaku",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Attack on Titan - Birth of Levi"
+   },
+   {
+    "record": {
+     "series_id": 76604664566,
+     "title": "Shingeki! Kyojin Chuugakkou",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Attack on Titan: Junior High"
+   },
+   {
+    "record": {
+     "series_id": 33958065118,
+     "title": "Shingeki no Kyojin - Lost Girls",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Attack on Titan: Lost Girls"
+   },
+   {
+    "record": {
+     "series_id": 49933699035,
+     "title": "Shingeki no Eroko-san: Hen na Oneesan wa Danshi Kousei to Nakayoku Naritai",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Eroko-san on the Attack"
+   }
+  ]
+ }
+}

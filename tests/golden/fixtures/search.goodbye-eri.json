@@ -1,0 +1,104 @@
+{
+ "query": "Goodbye, Eri",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 2137,
+  "results": [
+   {
+    "record": {
+     "series_id": 47603342373,
+     "title": "Sayonara Eri",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Goodbye, Eri"
+   },
+   {
+    "record": {
+     "series_id": 14209770890,
+     "title": "Ellie Doing!",
+     "type": "Manga",
+     "year": "1981"
+    },
+    "hit_title": "Eri Doing"
+   },
+   {
+    "record": {
+     "series_id": 29822361141,
+     "title": "Goodbye, Angel",
+     "type": "Manhwa",
+     "year": "2011"
+    },
+    "hit_title": "Goodbye, Angel"
+   },
+   {
+    "record": {
+     "series_id": 1240414658,
+     "title": "Goodbye, Dieting!",
+     "type": "Manhwa",
+     "year": "2021"
+    },
+    "hit_title": "Goodbye, Dieting!"
+   },
+   {
+    "record": {
+     "series_id": 66556821942,
+     "title": "Goodbye, Ghostwriter",
+     "type": "Manga",
+     "year": "2026"
+    },
+    "hit_title": "Goodbye, Ghostwriter"
+   },
+   {
+    "record": {
+     "series_id": 48321307992,
+     "title": "Huckleberry ni Sayonara o",
+     "type": "Manga",
+     "year": "1999"
+    },
+    "hit_title": "Goodbye, Huckleberry"
+   },
+   {
+    "record": {
+     "series_id": 52593176748,
+     "title": "Sayonara, Manga",
+     "type": "Indonesian",
+     "year": "2019"
+    },
+    "hit_title": "Goodbye, Manga"
+   },
+   {
+    "record": {
+     "series_id": 48926941857,
+     "title": "Alien Eri",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Alien Eri"
+   },
+   {
+    "record": {
+     "series_id": 59623333419,
+     "title": "Sayounara, Utsukushii Hito",
+     "type": "Manga",
+     "year": "2007"
+    },
+    "hit_title": "Goodbye, Beauty"
+   },
+   {
+    "record": {
+     "series_id": 46980690845,
+     "title": "Goodbye, Nobel!",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Goodbye, Nobel!"
+   }
+  ]
+ }
+}

@@ -1,0 +1,104 @@
+{
+ "query": "Dungeon Meshi",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 968,
+  "results": [
+   {
+    "record": {
+     "series_id": 19088665446,
+     "title": "Dungeon Meshi",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Dungeon Meshi"
+   },
+   {
+    "record": {
+     "series_id": 77136728451,
+     "title": "Kashimashi Meshi",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Kashimashi Meshi"
+   },
+   {
+    "record": {
+     "series_id": 51717428985,
+     "title": "Hero meshi",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Hero meshi"
+   },
+   {
+    "record": {
+     "series_id": 68820562555,
+     "title": "Joyuu Meshi",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Joyuu Meshi"
+   },
+   {
+    "record": {
+     "series_id": 72682597375,
+     "title": "Rori Meshi",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Rori Meshi"
+   },
+   {
+    "record": {
+     "series_id": 25866529324,
+     "title": "Yakekuso Meshi",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Yakekuso Meshi"
+   },
+   {
+    "record": {
+     "series_id": 30215952161,
+     "title": "Gokudou Meshi",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "Gokudou Meshi"
+   },
+   {
+    "record": {
+     "series_id": 69440754581,
+     "title": "Gorgeous Meshi",
+     "type": "Manga",
+     "year": "2004"
+    },
+    "hit_title": "Gorgeous Meshi"
+   },
+   {
+    "record": {
+     "series_id": 37055223853,
+     "title": "Hanashi Meshi",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Hanashi Meshi"
+   },
+   {
+    "record": {
+     "series_id": 21341873682,
+     "title": "Kowa Meshi",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Kowa Meshi"
+   }
+  ]
+ }
+}

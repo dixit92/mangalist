@@ -1,0 +1,67 @@
+{
+ "series_id": 60420553585,
+ "title": "JoJo no Kimyou na Bouken Part 3: Stardust Crusaders",
+ "associated": [
+  {
+   "title": "JoJo's Bizarre Adventure Part 3: Stardust Crusaders"
+  },
+  {
+   "title": "Stardust Crusaders"
+  },
+  {
+   "title": "ジョジョの奇妙な冒険 スターダストクルセイダース"
+  },
+  {
+   "title": "スターダストクルセイダース"
+  }
+ ],
+ "type": "Manga",
+ "year": "1989",
+ "status": "16 Tankōbon Volumes (Complete)  \n10 Bunkoban Volumes (Complete)  \n10 Kanzenban Volumes (Complete)  \n5 Compilation Volumes (Complete)",
+ "latest_chapter": 3,
+ "authors": [
+  {
+   "name": "ARAKI Hirohiko",
+   "type": "Author"
+  },
+  {
+   "name": "ARAKI Hirohiko",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 54897639880
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 42553317740
+  },
+  {
+   "relation_type": "Adapted From",
+   "related_series_id": 74102321905
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 2989597857
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 18231132924
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 17577511143
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 7745776384
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 54014685734
+  }
+ ]
+}

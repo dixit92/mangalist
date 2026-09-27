@@ -1,0 +1,104 @@
+{
+ "query": "Kaguya-sama wa Kokurasetai",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 14811425807,
+     "title": "Kaguya Wants to be Confessed to Official Doujin",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Kaguya-sama wa Kokurasetai: Doujin-ban"
+   },
+   {
+    "record": {
+     "series_id": 40032173896,
+     "title": "Kaguya-sama wa Kokurasetai: Tensai-tachi no Ren'ai Zunousen",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Kaguya-sama wa Kokurasetai - Tensai-tachi no Renai Zunousen"
+   },
+   {
+    "record": {
+     "series_id": 39787047546,
+     "title": "We Want to Talk About Kaguya",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Kaguya-sama wo Kataritai"
+   },
+   {
+    "record": {
+     "series_id": 50021115589,
+     "title": "Kaguya-sama wa Tsugera Setai - Tensai-tachi no Renai Zunousen - Bangai-he",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Kaguya-sama wa Tsugera Setai - Tensai-tachi no Renai Zunousen - Bangai-he"
+   },
+   {
+    "record": {
+     "series_id": 38398911845,
+     "title": "Kaguya-kun wa Dekiaisareru",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Kaguya-kun wa Dekiaisareru"
+   },
+   {
+    "record": {
+     "series_id": 56156867034,
+     "title": "Mama wa Maria-sama",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Mama wa Maria-sama"
+   },
+   {
+    "record": {
+     "series_id": 25596087084,
+     "title": "Goshujin-sama wa Oisha-sama",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Goshujin-sama wa Oisha-sama"
+   },
+   {
+    "record": {
+     "series_id": 3128101002,
+     "title": "Danna-sama wa Goshujin-sama",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Danna-sama wa Goshujin-sama"
+   },
+   {
+    "record": {
+     "series_id": 15490502861,
+     "title": "Hades Could Use Some Divine Intervention",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Hades-sama wa Okinodoku-sama"
+   },
+   {
+    "record": {
+     "series_id": 25449109618,
+     "title": "Hentai-sama wa Senpai-sama!",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Hentai-sama wa Senpai-sama!"
+   }
+  ]
+ }
+}

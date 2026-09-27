@@ -3,8 +3,11 @@
 Pipeline per entry (runs in a worker thread):
   1. If a confirmed match is cached and licensed==True, apply cache and skip API call.
   2. If a confirmed match is cached but licensed is unknown/False, re-fetch licensed flag.
-  3. Otherwise: search MU by title (and alternative title), pick best fuzzy match,
-     store result + fetch licensed flag.
+  3. Otherwise: the stage-2 matcher (``mu_match.match_entry``) classifies the
+     folder, searches MU with its query variants (automatic type filter), scores
+     the candidates and bands the result: auto / review are stored as an
+     unconfirmed match (review gets the amber highlight), unmatched and
+     not-one-work folders clear an unconfirmed older match.
 
 Rate limiting: REQUEST_DELAY seconds between every outbound HTTP call.
 """
@@ -13,46 +16,17 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 
 from ..models import MangaEntry
 from .. import anilist_client, mu_cache, mu_client
-from ..mu_match import associated_titles, score_candidate
+from ..matcher.mangaupdates import AUTO_SEARCH_FILTER, map_search_hit, map_series
+from ..mu_match import BAND_NOT_A_WORK, BAND_UNMATCHED, candidate_titles, match_entry
 from ..mu_progress import english_publisher, parse_publisher_notes
 
 _log = logging.getLogger(__name__)
-
-
-def _best_match(query_title: str, query_alt: Optional[str],
-                candidates: list) -> tuple:
-    """Return (best_result_dict, best_score) from *candidates*.
-
-    *candidates* are ``{"record": ..., "hit_title": ...}`` dicts as returned
-    by ``mu_client.search_series``.
-
-    Tie-breaking: when two candidates share the highest score, prefer the one
-    whose ``record["type"]`` is ``"Manga"`` over ``"Novel"`` (or any other type).
-    """
-    if not candidates:
-        return None, 0.0
-    best_score = -1.0
-    best = candidates[0]
-    for item in candidates:
-        record = item.get("record") or {}
-        hit_title = item.get("hit_title") or ""
-        score = score_candidate(query_title, query_alt, record, hit_title)
-        if score > best_score:
-            best_score = score
-            best = item
-        elif score == best_score and score >= 0:
-            # Prefer Manga over non-Manga on ties.
-            rec_type = (record.get("type") or "").lower()
-            best_type = ((best.get("record") or {}).get("type") or "").lower()
-            if rec_type == "manga" and best_type != "manga":
-                best = item
-    return best, max(best_score, 0.0)
 
 
 def _clear_examined_if_newly_licensed(entry: MangaEntry, new_licensed: bool | None) -> None:
@@ -158,53 +132,69 @@ class MuWorker(QObject):
                     cached.get("mu_url") or "", licensed, mu_confirmed=True,
                     mu_associated=cached.get("mu_associated") or [],
                     mu_score=float(cached.get("mu_score") or 0.0),
+                    # Not re-scored: keep what the stored score means.
+                    mu_score_version=cached.get("mu_score_version") or 1,
+                    mu_band=cached.get("mu_band"),
+                    mu_reasons=cached.get("mu_reasons") or [],
                     **progress,
                 )
                 self.entry_updated.emit(entry, row)
                 return
 
-        # --- Fresh lookup ---
-        # Try folder title first, then alt title as fallback query.
-        queries = [entry.title]
-        if entry.english_title:
-            queries.append(entry.english_title)
+        # --- Fresh lookup: the stage-2 matcher decides auto / review / unmatched ---
+        # Full records fetched by the retrieval loop are kept, so the chosen one is not fetched twice.
+        details: Dict[str, dict] = {}
 
-        candidates = []
-        for q in queries:
+        def search(text: str):
+            time.sleep(mu_client.REQUEST_DELAY)
+            results = mu_client.search_series(text, page_size=10, filter_types=list(AUTO_SEARCH_FILTER))
+            return [map_search_hit(r) for r in results]
+
+        def get(external_id: str):
+            time.sleep(mu_client.REQUEST_DELAY)
+            try:
+                detail = mu_client.get_series(int(external_id))
+            except Exception:  # noqa: BLE001
+                _log.warning("get_series failed for '%s' (id=%s)", entry.title, external_id, exc_info=True)
+                return None
+            details[external_id] = detail
+            return map_series(detail)
+
+        try:
+            match = match_entry(entry, search, get)
+        except Exception:  # noqa: BLE001
+            _log.warning("MU lookup failed for '%s'", entry.title, exc_info=True)
+            self.entry_updated.emit(entry, row)
+            return
+
+        entry.mu_work_class = match.classification.cls.name
+        if match.band in (BAND_UNMATCHED, BAND_NOT_A_WORK):
+            _log.info("No MU match for '%s': %s (%s)", entry.title, match.band,
+                      "; ".join(match.classification.reasons))
+            if cached:
+                # An unconfirmed match from an earlier lookup: the matcher no longer supports it.
+                mu_cache.delete_entry(folder)
+                _clear_match(entry)
+            entry.mu_band = match.band
+            self.entry_updated.emit(entry, row)
+            return
+
+        top = match.top.candidate
+        mu_id = int(top.external_id)
+        mu_title = top.title or entry.title
+        assoc = candidate_titles(top)
+
+        # Licensed flag + publisher/scan progress from the full record.
+        detail = details.get(top.external_id)
+        if detail is None:
             try:
                 time.sleep(mu_client.REQUEST_DELAY)
-                candidates = mu_client.search_series(q, page_size=10)
-                if candidates:
-                    break
+                detail = mu_client.get_series(mu_id)
             except Exception:  # noqa: BLE001
-                pass
-
-        best_item, best_score = _best_match(entry.title, entry.english_title, candidates)
-        if best_item is None:
-            _log.info("No MU match found for: %s", entry.title)
-            return
-
-        record = best_item.get("record") or {}
-        hit_title = best_item.get("hit_title") or ""
-
-        mu_id = record.get("series_id")
-        if not mu_id:
-            _log.warning("Best match for '%s' has no series_id — skipping", entry.title)
-            return
-        mu_title = record.get("title") or entry.title
-        mu_url = record.get("url") or ""
-        assoc = associated_titles(record, hit_title)
-
-        # Fetch full record for licensed flag + publisher/scan progress.
-        licensed: Optional[bool] = None
-        progress = _detail_progress(None)
-        try:
-            time.sleep(mu_client.REQUEST_DELAY)
-            detail = mu_client.get_series(mu_id)
-            licensed = detail.get("licensed")
-            progress = _detail_progress(detail)
-        except Exception:  # noqa: BLE001
-            _log.warning("get_series failed for '%s' (id=%s)", entry.title, mu_id, exc_info=True)
+                _log.warning("get_series failed for '%s' (id=%s)", entry.title, mu_id, exc_info=True)
+        licensed: Optional[bool] = detail.get("licensed") if detail else None
+        mu_url = (detail or {}).get("url") or ""
+        progress = _detail_progress(detail)
 
         extra = _fetch_extra(
             mu_id=mu_id,
@@ -215,8 +205,8 @@ class MuWorker(QObject):
         )
         progress.update(extra)
 
-        _log.info("Matched '%s' -> '%s' (score=%.2f, licensed=%s)",
-                  entry.title, mu_title, best_score, licensed)
+        _log.info("Matched '%s' -> '%s' (%s, title score=%.3f, reasons=%s, licensed=%s)",
+                  entry.title, mu_title, match.band, match.title_score, ",".join(match.reasons) or "-", licensed)
         # Clear examined if becoming licensed
         _clear_examined_if_newly_licensed(entry, licensed)
         entry.mu_id = mu_id
@@ -225,13 +215,43 @@ class MuWorker(QObject):
         entry.licensed = licensed
         entry.mu_confirmed = False
         entry.mu_associated = assoc
-        entry.mu_score = best_score
+        entry.mu_score = match.title_score
+        entry.mu_score_version = mu_cache.MU_SCORE_VERSION
+        entry.mu_band = match.band
+        entry.mu_reasons = list(match.reasons)
         _apply_progress(entry, progress)
 
         mu_cache.save_entry(folder, mu_id, mu_title, mu_url, licensed,
                             mu_confirmed=False, mu_associated=assoc,
-                            mu_score=best_score, **progress)
+                            mu_score=match.title_score, mu_band=match.band,
+                            mu_reasons=list(match.reasons), **progress)
         self.entry_updated.emit(entry, row)
+
+
+def _clear_match(entry: MangaEntry) -> None:
+    """Forget an unconfirmed match on the in-memory entry (the cache row is deleted separately),
+    including the progress read from its record, so Behind / Completed do not show stale data."""
+    entry.mu_id = None
+    entry.mu_title = None
+    entry.mu_url = None
+    entry.licensed = None
+    entry.mu_confirmed = False
+    entry.mu_associated = []
+    entry.mu_score = 0.0
+    entry.mu_score_version = mu_cache.MU_SCORE_VERSION
+    entry.mu_band = None
+    entry.mu_reasons = []
+    entry.scan_latest_chapter = None
+    entry.scan_latest_volume = None
+    entry.publisher_name = None
+    entry.publisher_chapters = None
+    entry.publisher_volumes = None
+    entry.publisher_status = None
+    entry.anilist_id = None
+    entry.anilist_chapters = None
+    entry.anilist_volumes = None
+    entry.completed_in_origin = None
+    entry.behind_override = None
 
 
 def _apply_cache(entry: MangaEntry, cached: dict) -> None:
@@ -242,6 +262,9 @@ def _apply_cache(entry: MangaEntry, cached: dict) -> None:
     entry.mu_confirmed = cached.get("mu_confirmed", False)
     entry.mu_associated = cached.get("mu_associated") or []
     entry.mu_score = float(cached.get("mu_score") or 0.0)
+    entry.mu_score_version = int(cached.get("mu_score_version") or 1)
+    entry.mu_band = cached.get("mu_band")
+    entry.mu_reasons = list(cached.get("mu_reasons") or [])
     # Tolerate older caches missing the new keys.
     entry.scan_latest_chapter = _opt_float(cached.get("scan_latest_chapter"))
     entry.publisher_name = cached.get("publisher_name")

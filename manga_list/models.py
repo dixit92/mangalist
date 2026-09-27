@@ -115,7 +115,11 @@ class MangaEntry:
     licensed: Optional[bool] = None      # True / False / None = unknown
     mu_confirmed: bool = False           # user has manually confirmed the match
     mu_associated: List[str] = field(default_factory=list)  # all alt titles from MU
-    mu_score: float = 0.0               # best Jaccard score achieved at match time
+    mu_score: float = 0.0               # raw title score of the match (meaning depends on the version)
+    mu_score_version: int = 2           # 1 = legacy Jaccard (old cache rows), 2 = stage-2 matcher
+    mu_band: Optional[str] = None       # "auto" | "review" | "unmatched" | "not_a_work" (mu_match.BAND_*)
+    mu_reasons: List[str] = field(default_factory=list)  # matcher reason names of the match
+    mu_work_class: Optional[str] = None  # detector class name (in memory only)
     # Latest chapter reported by scanlation feed (MU's series.latest_chapter).
     scan_latest_chapter: Optional[float] = None
     # English publisher info parsed from publishers[].notes:

@@ -1,22 +1,14 @@
-"""Tiny JSON config persistence (last folder, window size)."""
+"""Tiny JSON config persistence (last folder, window size).
+
+Stored as ``config.json`` in the per-user data folder (``paths.data_dir()``).
+"""
 
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import Any, Dict
 
-if getattr(sys, "frozen", False):
-    # PyInstaller one-file build: store data next to the exe (portable).
-    _BASE_DIR = Path(sys.executable).resolve().parent
-else:
-    _BASE_DIR = Path(__file__).resolve().parent.parent
-
-CONFIG_PATH = _BASE_DIR / "data" / "config.json"
-
-# Ensure the data directory exists.
-CONFIG_PATH.parent.mkdir(exist_ok=True)
+from . import paths
 
 _DEFAULTS: Dict[str, Any] = {
     "last_root": "",
@@ -35,10 +27,11 @@ _DEFAULTS: Dict[str, Any] = {
 
 
 def load() -> Dict[str, Any]:
-    if not CONFIG_PATH.exists():
+    path = paths.config_file()
+    if not path.exists():
         return dict(_DEFAULTS)
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return dict(_DEFAULTS)
     merged = dict(_DEFAULTS)
@@ -56,7 +49,8 @@ def load() -> Dict[str, Any]:
 
 def save(cfg: Dict[str, Any]) -> None:
     try:
-        CONFIG_PATH.write_text(
+        paths.ensure_data_dir()
+        paths.config_file().write_text(
             json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8"
         )
     except OSError:

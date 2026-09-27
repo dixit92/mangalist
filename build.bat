@@ -1,11 +1,14 @@
 @echo off
-REM Build script for MangaList Windows executable
-REM Creates a single-file executable using PyInstaller
+REM Build script for the MangaList Windows app (PyInstaller onedir build).
+REM Output: dist\MangaList\MangaList.exe plus dist\MangaList\_internal\
+REM The installer and the portable zip are made by CI (.github\workflows\build.yml);
+REM to make the installer locally, install Inno Setup 6 and run:
+REM   iscc /DAppVersion=0.0.0 packaging\windows\MangaList.iss
 
 setlocal enabledelayedexpansion
 
 echo ===========================================
-echo Building MangaList Executable
+echo Building MangaList
 echo ===========================================
 echo.
 
@@ -29,8 +32,15 @@ echo Cleaning previous builds...
 if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 
+REM Icons for the exe and the installer
+python packaging\make_icon.py
+if errorlevel 1 (
+    echo ERROR: Icon generation failed
+    exit /b 1
+)
+
 REM Build with PyInstaller
-echo Building executable with PyInstaller...
+echo Building with PyInstaller...
 pyinstaller MangaList.spec --clean --noconfirm
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed
@@ -38,15 +48,12 @@ if errorlevel 1 (
 )
 
 REM Verify output
-if exist "dist\MangaList.exe" (
+if exist "dist\MangaList\MangaList.exe" (
     echo.
     echo ===========================================
     echo Build successful!
-    echo Output: dist\MangaList.exe
+    echo Output: dist\MangaList\MangaList.exe
     echo ===========================================
-    echo.
-    echo File size:
-    dir "dist\MangaList.exe" | find "MangaList.exe"
 ) else (
     echo ERROR: Expected output file not found
     exit /b 1
