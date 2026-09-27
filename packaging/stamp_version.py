@@ -1,7 +1,7 @@
 """Work out the build version and stamp ``manga_list/_version.py`` (CI and local builds).
 
 - A ``v*`` tag build (``GITHUB_REF=refs/tags/v1.2.3``) is version ``1.2.3``.
-- Anything else is ``0.0.0+<short sha>`` (``GITHUB_SHA``, else ``git rev-parse``).
+- Anything else is ``0.0.0+<short sha>`` (``STAMP_SHA``, else ``GITHUB_SHA``, else ``git rev-parse``).
 
 Prints ``version=...``, ``numeric=...`` (the dotted-number prefix, for installer and bundle metadata)
 and ``basename=MangaList-v<version>`` and appends them to ``$GITHUB_OUTPUT`` when set.
@@ -23,7 +23,9 @@ VERSION_FILE = ROOT / "manga_list" / "_version.py"
 
 
 def _short_sha() -> str:
-    sha = os.environ.get("GITHUB_SHA", "")
+    # STAMP_SHA: the commit to name the build after. CI sets it to the PR head for pull requests
+    # (GITHUB_SHA is then GitHub's temporary merge commit, which exists nowhere on the branch).
+    sha = os.environ.get("STAMP_SHA", "") or os.environ.get("GITHUB_SHA", "")
     if not sha:
         try:
             sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True,

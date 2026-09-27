@@ -25,6 +25,8 @@ concurrency:
 env:
   PYTHON_VERSION: '3.12'
   QT_QPA_PLATFORM: offscreen
+  # Name non-tag builds after the branch commit (for PRs, not GitHub's temporary merge commit).
+  STAMP_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   windows:
