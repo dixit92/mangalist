@@ -3,7 +3,8 @@ name: Build packages
 # Every push to main, every pull request and every v* tag builds all packages and uploads them as
 # workflow artifacts. Only a v* tag creates the (draft) GitHub release with the packages attached.
 #
-# Versions: packaging/stamp_version.py - tag v1.2.3 -> 1.2.3, anything else -> 0.0.0+<short sha>.
+# Versions: packaging/stamp_version.py - calendar versions, tag v2026.9.0 -> 2026.9.0 (needs a CHANGELOG.md
+# section); anything else -> 0.0.0+<short sha>.
 # Package names: MangaList-v<version>-windows-x64-setup.exe, -windows-x64.zip, -macos-arm64.dmg,
 # -macos-x64.dmg, -linux-x64.AppImage, -linux-x64.tar.gz, plus SHA256SUMS.
 # Not code-signed (like MangaPixer): SHA256SUMS lets users check their downloads.
@@ -273,6 +274,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+
+      - name: Release notes from CHANGELOG.md
+        run: python3 packaging/stamp_version.py --dry-run --release-notes "$RUNNER_TEMP/release-notes.md"
+
       - uses: actions/download-artifact@v8
         with:
           path: package
@@ -282,4 +288,4 @@ jobs:
         with:
           files: package/*
           draft: true
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md

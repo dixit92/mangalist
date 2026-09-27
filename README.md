@@ -64,9 +64,11 @@ MangaUpdates responses and check that the results equal MangaPixer's.
 
 CI (`.github/workflows`) runs the tests on Windows, macOS and Linux and builds every package
 (PyInstaller via `MangaList.spec`, scripts in `packaging/`) for each push to `main` and each pull
-request. Pushing a `v*` tag also creates a draft release with the packages and `SHA256SUMS`; the
-version comes from the tag. Build locally with `python packaging/make_icon.py && pyinstaller
-MangaList.spec --clean --noconfirm` (`build.bat` on Windows).
+request. Versions are calendar versions `YEAR.MONTH.N` (`2026.9.0`); each release has a section in
+[CHANGELOG.md](CHANGELOG.md), which says how to cut one. Pushing a `vYEAR.MONTH.N` tag creates a
+draft release with the packages, `SHA256SUMS` and that section as its notes. Build locally with
+`python packaging/make_icon.py && pyinstaller MangaList.spec --clean --noconfirm` (`build.bat` on
+Windows).
 
 ## Data sources & attribution
 
