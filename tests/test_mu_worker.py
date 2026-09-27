@@ -73,10 +73,13 @@ def test_unmatched_clears_a_stale_unconfirmed_match(fake):
                                                         "Zzqx Nonexistent Synthetic Title v02.cbz"])
     # A legacy (version 1) unconfirmed match from the old matcher.
     mu_cache.save_entry(entry.folder, 999, "Something Else", "", None, mu_confirmed=False,
-                        mu_score=1.0, mu_score_version=1)
+                        mu_score=1.0, mu_score_version=1, scan_latest_chapter=12.0,
+                        completed_in_origin=True)
     _run(entry)
     assert entry.mu_band == "unmatched"
     assert entry.mu_id is None and entry.mu_title is None
+    # Progress read from the old record goes with it (Behind / Completed must not show it).
+    assert entry.scan_latest_chapter is None and entry.completed_in_origin is None
     assert mu_cache.load_entry(entry.folder) is None
 
 

@@ -229,7 +229,8 @@ class MuWorker(QObject):
 
 
 def _clear_match(entry: MangaEntry) -> None:
-    """Forget an unconfirmed match on the in-memory entry (the cache row is deleted separately)."""
+    """Forget an unconfirmed match on the in-memory entry (the cache row is deleted separately),
+    including the progress read from its record, so Behind / Completed do not show stale data."""
     entry.mu_id = None
     entry.mu_title = None
     entry.mu_url = None
@@ -240,6 +241,17 @@ def _clear_match(entry: MangaEntry) -> None:
     entry.mu_score_version = mu_cache.MU_SCORE_VERSION
     entry.mu_band = None
     entry.mu_reasons = []
+    entry.scan_latest_chapter = None
+    entry.scan_latest_volume = None
+    entry.publisher_name = None
+    entry.publisher_chapters = None
+    entry.publisher_volumes = None
+    entry.publisher_status = None
+    entry.anilist_id = None
+    entry.anilist_chapters = None
+    entry.anilist_volumes = None
+    entry.completed_in_origin = None
+    entry.behind_override = None
 
 
 def _apply_cache(entry: MangaEntry, cached: dict) -> None:
