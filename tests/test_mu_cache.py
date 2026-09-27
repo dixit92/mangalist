@@ -49,7 +49,7 @@ def test_new_scores_are_written_as_the_current_version(cache_db):
     mu_cache.save_entry(folder, 2, "Title", "", None, mu_confirmed=False, mu_score=0.93,
                         mu_band="review", mu_reasons=["CloseSecond"])
     row = mu_cache.load_entry(folder)
-    assert mu_cache.MU_SCORE_VERSION == 2
+    assert mu_cache.MU_SCORE_VERSION == 3  # MangaPixer 1.26.1 port
     assert row["mu_score_version"] == mu_cache.MU_SCORE_VERSION
     assert row["mu_band"] == "review"
     assert row["mu_reasons"] == ["CloseSecond"]
@@ -62,4 +62,4 @@ def test_resaving_without_rescoring_keeps_the_stored_version(cache_db):
     # Re-scored later: the new version replaces it.
     mu_cache.save_entry(folder, 3, "Title", "", None, mu_confirmed=True, mu_score=1.0, mu_band="auto")
     row = mu_cache.load_entry(folder)
-    assert row["mu_score_version"] == 2 and row["mu_confirmed"] is True
+    assert row["mu_score_version"] == mu_cache.MU_SCORE_VERSION and row["mu_confirmed"] is True

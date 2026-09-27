@@ -1,4 +1,4 @@
-"""Title normalization (port of MangaPixer 1.26.0 ``TitleNormalizer.cs``).
+"""Title normalization (port of MangaPixer 1.26.1 ``TitleNormalizer.cs``).
 
 Turns a folder or archive display name into clean title query variants plus hints. Pure and
 deterministic; it only ever sees a display name, never the filesystem.
@@ -11,8 +11,10 @@ volume and chapter tokens are removed, edition words and phrases ("Master Editio
 are removed but kept as hints -> whitespace collapsed, edge punctuation trimmed.
 
 Stage-2 helpers never change :attr:`NormalizedTitle.primary`: derived retrieval variants
-(:func:`derived_variants`), sequel / part numbers (:func:`number_tokens`) and the base title of an
-archive name (:func:`archive_base_title`, :func:`archive_title`).
+(:func:`derived_variants`), sequel / part numbers (:func:`number_tokens`), the base title of an
+archive name (:func:`archive_base_title`, :func:`archive_title`) and the head of numbered chapters
+with subtitles (:func:`numbered_series_head`, 1.26.1). An unmatched bracket marks a tag on its outer
+side (``Family Given] Title``, 1.26.1).
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from enum import IntEnum
 from functools import lru_cache
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import regex
 
@@ -31,6 +33,7 @@ from ._text import (
     contains_ignore_case,
     distinct_ignore_case,
     eq_ignore_case,
+    is_letter,
     is_letter_or_digit,
     is_null_or_whitespace,
     lower_invariant,
@@ -89,6 +92,12 @@ _LEADING_UNIT_NUMBER = regex.compile(r"^\d+(?:\.\d+)?\s*(?:[-.:)–—]\s*|$)")
 _TRAILING_NUMBERS = regex.compile(r"(?:[\s\-_.#–—]+\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?)+$")
 
 _NO_LETTERS = regex.compile(r"^[\p{P}\p{S}\p{N}\s]*$")
+
+# A standalone chapter-like number inside a name: "Title 025 Subtitle", "Title 012.5 Subtitle".
+_STANDALONE_NUMBER = regex.compile(r"(?<![\p{L}\p{N}.])\d{1,4}(?:\.\d+)?(?![\p{L}\p{N}])")
+
+# One parenthesized group after a trailing [English Title]: "(Family Given)".
+_LONE_PAREN_GROUP = regex.compile(r"^\(([^()\[\]]{2,60})\)$")
 
 _TRIM_CHARS = " -_.,:;~!|/+='\""
 _TRIM_CHARS_NO_BANG = " -_.,:;~|/+='\""
@@ -152,7 +161,16 @@ def _normalize_cached(display_name: str) -> NormalizedTitle:
     if last is not None and last.start() > 0:  # a leading [Group] tag is never a title
         after = s[last.end():]
         inner = last.group(1).strip()
-        tags_after = any(c in _BRACKET_CHARS for c in _YEAR_GROUP.sub(" ", after))
+        after_no_year = _YEAR_GROUP.sub(" ", after).strip()
+        tags_after = any(c in _BRACKET_CHARS for c in after_no_year)
+        # "Title [English Title] (Family Given)": one creator-looking group after the English title
+        # does not make it a scanlation tag (1.26.1). Release tags still do.
+        if tags_after:
+            from .anatomy import is_release_tag  # anatomy imports this module
+
+            paren = _LONE_PAREN_GROUP.search(after_no_year)
+            if paren and any_letter(paren.group(1)) and not is_release_tag(paren.group(1).strip()):
+                tags_after = False
         if not tags_after and _count_words(inner) >= 2 and any_letter(inner):
             english_variant = inner
 
@@ -271,6 +289,39 @@ def _archive_base_title_cached(archive_name: str) -> str:
     return "" if _NO_LETTERS.search(s) else s
 
 
+def numbered_series_head(archive_names: Sequence[str], min_share: float) -> Optional[str]:
+    """The title that numbered chapters of one work share in front of their number, when the names
+    also carry a per-chapter subtitle (``Title 025 Subtitle``, ``Title 000 Oneshot``): the longest
+    head that at least ``min_share`` of the archives have in front of a number that VARIES between
+    them. None when no head qualifies. Bracket groups are ignored."""
+    if len(archive_names) < 2:
+        return None
+    heads: dict = {}  # key -> [spellings, numbers seen, archives carrying it]
+    for name in archive_names:
+        s = nfkc(name or "").strip()
+        s = _strip_archive_extension(s)
+        if " " not in s:
+            s = s.replace("_", " ").replace(".", " ")
+        s = _WHITESPACE.sub(" ", _remove_bracket_groups(s)).strip()
+        seen = set()
+        for number in _STANDALONE_NUMBER.finditer(s):
+            head = _trim_edges(s[:number.start()])
+            key = scoring_form(head)
+            if not key or _NO_LETTERS.search(head) or key in seen:
+                continue
+            seen.add(key)
+            entry = heads.setdefault(key, [[], set(), 0])
+            entry[0].append(head)
+            entry[1].add(_normalize_number(number.group(0)) or number.group(0))
+            entry[2] += 1
+    qualifying = [(key, e) for key, e in heads.items()
+                  if len(e[1]) >= 2 and e[2] / len(archive_names) >= min_share]
+    if not qualifying:
+        return None
+    _, best = min(qualifying, key=lambda kv: (-kv[1][2], -len(kv[0]), kv[0]))
+    return min(best[0])
+
+
 def archive_title(archive_names: Iterable[str]) -> Optional[str]:
     """The dominant archive-derived title of a folder: the base title that at least half of the
     archives share (compared by scoring form), or None. Deterministic: the ordinal-first spelling of
@@ -347,7 +398,41 @@ def _remove_bracket_groups(s: str) -> str:
         if nxt == s:
             break
         s = nxt
-    return _STRAY_BRACKET.sub(" ", s)
+    rest, _, _ = split_unmatched_bracket_tags(s)
+    return _STRAY_BRACKET.sub(" ", rest)
+
+
+def split_unmatched_bracket_tags(s: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """Unmatched tag brackets (1.26.1): ``Family Given] Title`` - a YACReader jump-bar convention - and
+    ``Title [Family Given``. Call after balanced groups are removed, so every bracket left is unmatched:
+    the text before a lone closing bracket at the start, and after a lone opening bracket at the end,
+    is a tag. Returns (rest, leading tag, trailing tag). Only splits when both sides have letters, so a
+    title is never emptied."""
+    leading = trailing = None
+    first_close = _first_index(s, "])}")
+    first_open = _first_index(s, "[({")
+    if (first_close > 0 and (first_open < 0 or first_open > first_close)
+            and any_letter(s[:first_close]) and _has_title_text(s[first_close + 1:])):
+        leading = s[:first_close].strip()
+        s = s[first_close + 1:]
+    last_open = max(s.rfind(c) for c in "[({")
+    last_close = max(s.rfind(c) for c in "])}")
+    if (last_open >= 0 and last_close < last_open
+            and _has_title_text(s[:last_open]) and any_letter(s[last_open + 1:])):
+        trailing = s[last_open + 1:].strip()
+        s = s[:last_open]
+    return s, leading, trailing
+
+
+def _first_index(s: str, chars: str) -> int:
+    found = [i for i in (s.find(c) for c in chars) if i >= 0]
+    return min(found) if found else -1
+
+
+def _has_title_text(s: str) -> bool:
+    """At least two letters once volume / chapter / number tokens are gone ("v01" is not title text)."""
+    rest = _HASH_NUMBER.sub(" ", _CHAPTER_TOKEN.sub(" ", _VOLUME_TOKEN.sub(" ", s)))
+    return sum(1 for c in rest if is_letter(c)) >= 2
 
 
 def _trim_edges(s: str) -> str:

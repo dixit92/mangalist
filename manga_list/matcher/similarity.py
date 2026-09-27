@@ -1,4 +1,4 @@
-"""Title similarity (port of MangaPixer 1.26.0 ``TitleSimilarity.cs``).
+"""Title similarity (port of MangaPixer 1.26.1 ``TitleSimilarity.cs``).
 
 ``score = 0.45 * tokenSortRatio + 0.35 * tokenSetRatio' + 0.20 * trigramDice``, where
 ``tokenSetRatio'`` is the classic token-set ratio multiplied by ``(1 - 0.5 * unmatchedTokenMass)``.

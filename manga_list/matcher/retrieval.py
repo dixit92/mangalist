@@ -1,4 +1,4 @@
-"""The retrieval loop around the scorer (MangaPixer 1.26.0's automatic search, as modelled by its
+"""The retrieval loop around the scorer (MangaPixer 1.26.1's automatic search, as modelled by its
 golden-set harness): search the variants in order - at most :data:`MAX_SEARCHES`, the next one only
 while the best title score is below :data:`NEXT_VARIANT_BELOW` - then GET the top candidate (and
 the second when it is within :data:`SECOND_GET_WITHIN`), only at or above the review floor, and

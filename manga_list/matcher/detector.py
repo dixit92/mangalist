@@ -1,4 +1,4 @@
-"""The work detector (port of MangaPixer 1.26.0 ``WorkDetector.cs``).
+"""The work detector (port of MangaPixer 1.26.1 ``WorkDetector.cs``).
 
 Classifies a folder from its shape alone - display names and counts, no IO - so only folders that
 ARE one work are matched at folder level, collections are matched archive by archive (numbered
@@ -39,7 +39,14 @@ from .contracts import (
     WorkClass,
     WorkClassification,
 )
-from .normalizer import DerivedTitleKind, archive_base_title, derived_variants, normalize, scoring_form
+from .normalizer import (
+    DerivedTitleKind,
+    archive_base_title,
+    derived_variants,
+    normalize,
+    numbered_series_head,
+    scoring_form,
+)
 
 UNIT_NAMED_SHARE = 0.80
 DOMINANT_BASE_SHARE = 0.80
@@ -170,6 +177,13 @@ def _classify_leaf(folder: FolderShape, archives: Sequence[str], content: Conten
 
     if unit_share >= UNIT_NAMED_SHARE or base_share >= DOMINANT_BASE_SHARE or match_share >= FOLDER_MATCH_SHARE:
         return _result(WorkClass.SERIES, MatchLevel.FOLDER, ["archives are units of one work: " + shares],
+                       content=content)
+
+    # "Title 025 Subtitle" chapters: the per-chapter subtitle makes every base different, but the
+    # title in front of a varying number is shared (1.26.1).
+    if numbered_series_head(archives, DOMINANT_BASE_SHARE) is not None:
+        return _result(WorkClass.SERIES, MatchLevel.FOLDER,
+                       ["archives are numbered chapters of one title (with chapter subtitles): " + shares],
                        content=content)
 
     # "Head - Subtitle" names sharing one head: a series with subtitled volumes or a creator folder

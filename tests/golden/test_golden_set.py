@@ -3,7 +3,7 @@
 Every case runs the real detector, planner, scorer AND the production retrieval loop
 (``manga_list.matcher.retrieval``) over RECORDED MangaUpdates responses - no network. Asserts the
 class, band and chosen id per case, then compares every case and the aggregate numbers with
-MangaPixer's own golden report at v1.26.0 (``mangapixer_v1.26.0_report.txt``), so any divergence
+MangaPixer's own golden report (``mangapixer_report.txt``, header says which version), so any divergence
 between the port and the reference shows up by case.
 """
 
@@ -35,7 +35,7 @@ from .golden_cases import ALL, GoldenCase
 
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE / "fixtures"
-REFERENCE_REPORT = HERE / "mangapixer_v1.26.0_report.txt"
+REFERENCE_REPORT = HERE / "mangapixer_report.txt"
 
 BAND_NAMES = {MatchBand.AUTO: "Auto", MatchBand.NEEDS_REVIEW: "NeedsReview", MatchBand.UNMATCHED: "Unmatched"}
 
@@ -200,6 +200,8 @@ def _reference_lines() -> Tuple[Dict[str, str], Dict[str, str]]:
     per_case: Dict[str, str] = {}
     aggregates: Dict[str, str] = {}
     for line in REFERENCE_REPORT.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            continue
         if line.startswith("GOLDEN "):
             name, _, rest = line[len("GOLDEN "):].partition(": ")
             aggregates[name] = rest
@@ -211,7 +213,7 @@ def _reference_lines() -> Tuple[Dict[str, str], Dict[str, str]]:
 
 def test_report_and_reference_comparison(capsys):
     """Prints the per-case and aggregate report (as MangaPixer's CI does) and requires every line to be
-    identical to MangaPixer's own run of the same set at v1.26.0: same band, chosen id, title and
+    identical to MangaPixer's own run of the same set (``mangapixer_report.txt``): same band, chosen id, title and
     adjusted score (3 decimals) and reasons per case, and the same aggregate at all three threshold
     settings. At the defaults every auto link must also be right."""
     reference_cases, reference_aggregates = _reference_lines()
@@ -232,4 +234,4 @@ def test_report_and_reference_comparison(capsys):
                 assert auto == auto_correct, "a wrong auto link at the default thresholds"
 
     assert len(reference_cases) == 55
-    assert not differences, "Differences from MangaPixer v1.26.0:\n" + "\n".join(differences)
+    assert not differences, "Differences from MangaPixer's report:\n" + "\n".join(differences)

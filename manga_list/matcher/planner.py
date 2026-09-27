@@ -1,4 +1,4 @@
-"""Query planning (port of MangaPixer 1.26.0 ``MatchQueryPlanner.cs``).
+"""Query planning (port of MangaPixer 1.26.1 ``MatchQueryPlanner.cs``).
 
 Builds the provider queries for one work: ordered, de-duplicated query variants plus the local
 corroboration context. Pure; the variants come from display names only and nothing here is sent
@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from . import anatomy as _anatomy
+from ._text import distinct_ignore_case
 from . import auto_match_text as amt
 from .contracts import (
     ArchiveGroup,
@@ -115,6 +116,7 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
         tall_strips=False,
         author_tags=tuple(author_tags),
         comic_info_series=comic_info_series.strip() if comic_info_series and comic_info_series.strip() else None,
+        creator_hints=amt.creator_hints(folder.display_name),
     )
     return MatchQuery(variants.to_tuple(), context)
 
@@ -171,6 +173,7 @@ def plan_archive_group(folder: FolderShape, classification: WorkClassification, 
         category_hint=folder.category_hint,
         tall_strips=False,
         author_tags=tuple(author_tags),
+        creator_hints=tuple(distinct_ignore_case(h for n in names for h in amt.creator_hints(n))),
     )
     return MatchQuery(variants.to_tuple(), context)
 

@@ -285,3 +285,18 @@ def test_reasons_carry_no_names():
         assert "secret" not in r.lower()
         assert "hidden" not in r.lower()
         assert "private" not in r.lower()
+
+
+def test_numbered_chapters_with_subtitles_are_one_series_not_a_collection():
+    # "<Title> 025 <chapter subtitle>" (1.26.1): every base differs, the head does not.
+    subtitled = [f"Cloud Flower {i:03d} Title Word{i} Other{i % 7}.cbz" for i in range(1, 26)]
+    c = detector.classify(folder("Kumo no Hana Senpai [Cloud Flower]", subtitled, depth=1))
+    zero = detector.classify(folder("Steel Rider", ["Steel Rider 000 Oneshot.cbz", "Steel Rider 001 Rise.cbz",
+                                                    "Steel Rider 002 Iron Fire!.cbz", "Steel Rider 006 HQ Version.cbz"],
+                                    depth=1))
+    shelf = detector.classify(folder("Anthology Shelf", ["Alpha Story.cbz", "Beta Tale.cbz", "Gamma Saga.cbz",
+                                                         "Delta Night.cbz", "Epsilon Dawn.cbz"]))
+
+    assert (c.cls, c.level) == (WorkClass.SERIES, MatchLevel.FOLDER)
+    assert (zero.cls, zero.level) == (WorkClass.SERIES, MatchLevel.FOLDER)
+    assert shelf.cls == WorkClass.COLLECTION_LEAF

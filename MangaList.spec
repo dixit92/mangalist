@@ -9,7 +9,7 @@ Output (onedir - an installer around a one-file exe would unpack it to a temp fo
     macOS:            dist/MangaList.app (windowed bundle) and dist/MangaList/
 
 The version comes from manga_list/_version.py (stamped by packaging/stamp_version.py in CI).
-Nothing is signed; see docs/packaging.md for where signing plugs in.
+Not code-signed; releases publish SHA256SUMS instead.
 """
 
 import re

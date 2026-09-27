@@ -1,3 +1,4 @@
+# MangaPixer 1.26.1 (release commit 1e4132d) GoldenSetTests.Report_AutoRateAndPrecision output, default thresholds per case + three sweeps.
 F01 romaji, digital volumes: Auto 51239621230 title 1.000 adj 1.030 [None]
 F02 romaji + [English], English archive names: Auto 19088665446 title 1.000 adj 1.020 [None]
 F03 English folder name finds the romaji record: Auto 19088665446 title 1.000 adj 1.010 [None]
@@ -16,7 +17,7 @@ F15 one-shot folder, romaji: Auto 47603342373 title 1.000 adj 1.020 [None]
 F16 one-shot folder, English: Auto 47603342373 title 1.000 adj 1.020 [None]
 F17 numbered part with subtitle: Auto 60420553585 title 1.000 adj 1.000 [None]
 F18 numbered part, the provider ranks another part first: Auto 42553317740 title 1.000 adj 1.000 [None]
-F19 short romaji; official doujin + subtitled main record: NeedsReview 14811425807 title 0.818 adj 0.718 [CloseSecond, CountConflict]
+F19 short romaji; official doujin + subtitled main record: NeedsReview 40032173896 title 0.800 adj 0.810 [CloseSecond, RelatedPair]
 F20 main record absent from the search results: NeedsReview 59214500369 title 0.771 adj 0.771 [CloseSecond]
 F21 sequel exists (:re): Auto 26272522291 title 1.000 adj 1.010 [None]
 F22 sequel folder whose record the search misses (the prequel must not count as right): NeedsReview 26272522291 title 0.855 adj 0.865 [None]
@@ -43,16 +44,16 @@ F42 underscores: Auto 66296374554 title 1.000 adj 1.010 [None]
 F43 doujinshi allowed: dj look-alikes stay below the series: Auto 23606352927 title 1.000 adj 1.010 [None]
 F44 category agrees: Auto 23393951235 title 1.000 adj 1.030 [None]
 F45 season subfolders: Auto 13015731700 title 1.000 adj 1.020 [None]
-A01 artist folder: one-shot: Auto 62512335978 title 1.000 adj 1.080 [None]
-A02 artist folder: second one-shot: Auto 47603342373 title 1.000 adj 1.080 [None]
-A03 artist folder: numbered volumes grouped: Auto 32334361267 title 1.000 adj 1.060 [None]
+A01 artist folder: one-shot: Auto 62512335978 title 1.000 adj 1.130 [None]
+A02 artist folder: second one-shot: Auto 47603342373 title 1.000 adj 1.130 [None]
+A03 artist folder: numbered volumes grouped: Auto 32334361267 title 1.000 adj 1.110 [None]
 A04 artist folder: a mis-tagged volume, the author conflict alone vetoes auto: NeedsReview 51239621230 title 1.000 adj 1.010 [AuthorConflict]
 A05 collection leaf: a lone volume of a long series: Auto 49449837876 title 1.000 adj 1.010 [None]
 A06 collection leaf: one-shot: Auto 62512335978 title 1.000 adj 1.020 [None]
-A07 doujin anatomy: numbered dj mini-series, parody dj form, author agrees: Auto 57918701059 title 1.000 adj 1.050 [None]
+A07 doujin anatomy: numbered dj mini-series, parody dj form, author agrees: Auto 57918701059 title 1.000 adj 1.100 [None]
 A08 ambiguous folder: review only: NeedsReview 27728982867 title 1.000 adj 1.000 [ReviewOnlyClass]
-A10 doujin anatomy: a lone archive of a 7-volume dj record links to it (one archive may hold the whole series): Auto 57918701059 title 1.000 adj 1.050 [None]
+A10 doujin anatomy: a lone archive of a 7-volume dj record links to it (one archive may hold the whole series): Auto 57918701059 title 1.000 adj 1.100 [None]
 A09 mixed folder: review only: NeedsReview 51239621230 title 1.000 adj 1.010 [ReviewOnlyClass]
-GOLDEN default: matched cases 55: auto 44 (80.0%), review 10, unmatched 1; auto precision 44/44 (100.0%); review top correct 7/7; requests 55 searches + 56 GETs (2.02 per work); fixtures 37 searches, 31 series
-GOLDEN loosest: matched cases 55: auto 45 (81.8%), review 10, unmatched 0; auto precision 44/45 (97.8%); review top correct 7/7; requests 55 searches + 56 GETs (2.02 per work); fixtures 37 searches, 31 series
-GOLDEN strictest: matched cases 55: auto 27 (49.1%), review 24, unmatched 4; auto precision 27/27 (100.0%); review top correct 24/24; requests 55 searches + 56 GETs (2.02 per work); fixtures 37 searches, 31 series
+GOLDEN default: matched cases 55: auto 44 (80.0%), review 10, unmatched 1; auto precision 44/44 (100.0%); review top correct 7/7; requests 55 searches + 57 GETs (2.04 per work); fixtures 37 searches, 32 series
+GOLDEN loosest: matched cases 55: auto 45 (81.8%), review 10, unmatched 0; auto precision 44/45 (97.8%); review top correct 7/7; requests 55 searches + 57 GETs (2.04 per work); fixtures 37 searches, 32 series
+GOLDEN strictest: matched cases 55: auto 25 (45.5%), review 26, unmatched 4; auto precision 25/25 (100.0%); review top correct 26/26; requests 55 searches + 57 GETs (2.04 per work); fixtures 37 searches, 32 series
