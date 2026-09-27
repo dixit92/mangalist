@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_list import mu_cache
+from manga_list import mu_cache, paths
 
 # The schema as shipped before the stage-2 matcher (no mu_score_version / mu_band / mu_reasons).
 _LEGACY_DDL = """
@@ -23,11 +23,9 @@ CREATE TABLE mu_cache (
 
 
 @pytest.fixture
-def cache_db(tmp_path, monkeypatch) -> Path:
-    db = tmp_path / "data" / "mu_cache.db"
-    monkeypatch.setattr(mu_cache, "_DATA_DIR", db.parent)
-    monkeypatch.setattr(mu_cache, "_DB_FILE", db)
-    return db
+def cache_db() -> Path:
+    # The per-test data folder (conftest.py sets MANGA_LIST_DATA_DIR).
+    return paths.cache_file()
 
 
 def test_legacy_rows_are_marked_version_1(cache_db):

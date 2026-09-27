@@ -20,10 +20,8 @@ ROOT = Path("/library/Manga")
 
 
 @pytest.fixture
-def fake(tmp_path, monkeypatch) -> FakeMangaUpdates:
-    db = tmp_path / "data" / "mu_cache.db"
-    monkeypatch.setattr(mu_cache, "_DATA_DIR", db.parent)
-    monkeypatch.setattr(mu_cache, "_DB_FILE", db)
+def fake(monkeypatch) -> FakeMangaUpdates:
+    # The cache lives in the per-test data folder (conftest.py sets MANGA_LIST_DATA_DIR).
     f = FakeMangaUpdates()
     monkeypatch.setattr(mu_client, "search_series", f.search_series)
     monkeypatch.setattr(mu_client, "get_series", f.get_series)

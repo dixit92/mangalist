@@ -1,6 +1,6 @@
 """Persistent cache for MangaUpdates lookups — backed by SQLite.
 
-Database: ``data/mu_cache.db``.
+Database: ``mu_cache.db`` in the per-user data folder (``paths.data_dir()``).
 
 Caching rules
 -------------
@@ -31,18 +31,13 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from . import paths
+
 _log = logging.getLogger(__name__)
 
-if getattr(sys, "frozen", False):
-    # PyInstaller one-file build: store data next to the exe (portable).
-    _DATA_DIR = Path(sys.executable).resolve().parent / "data"
-else:
-    _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_DB_FILE = _DATA_DIR / "mu_cache.db"
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -94,8 +89,8 @@ MU_SCORE_VERSION = 2
 
 
 def _connect() -> sqlite3.Connection:
-    _DATA_DIR.mkdir(exist_ok=True)
-    con = sqlite3.connect(_DB_FILE)
+    paths.ensure_data_dir()
+    con = sqlite3.connect(paths.cache_file())
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute(_DDL)

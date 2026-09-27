@@ -1,6 +1,6 @@
 """Centralised logging configuration for manga-list.
 
-Writes rotating log files to ``<repo-root>/logs/``.  Call ``setup()`` once at
+Writes rotating log files to the per-user log folder (``paths.log_dir()``).  Call ``setup()`` once at
 application startup (from ``__main__.py``).  All other modules obtain loggers
 via the standard ``logging.getLogger(__name__)`` pattern.
 
@@ -16,15 +16,9 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
-import sys
-from pathlib import Path
 
-if getattr(sys, "frozen", False):
-    # PyInstaller one-file build: store logs next to the exe (portable).
-    _LOG_DIR = Path(sys.executable).resolve().parent / "logs"
-else:
-    _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
-_LOG_FILE = _LOG_DIR / "manga_list.log"
+from . import paths
+
 
 _FMT = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
@@ -39,7 +33,8 @@ def setup(level: int = logging.DEBUG) -> None:
         return
     _configured = True
 
-    _LOG_DIR.mkdir(exist_ok=True)
+    log_dir = paths.log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     root = logging.getLogger()
     root.setLevel(level)
@@ -48,7 +43,7 @@ def setup(level: int = logging.DEBUG) -> None:
 
     # --- Rotating file handler (DEBUG and above) ---
     fh = logging.handlers.RotatingFileHandler(
-        _LOG_FILE,
+        log_dir / "manga_list.log",
         maxBytes=2 * 1024 * 1024,   # 2 MB per file
         backupCount=5,
         encoding="utf-8",
