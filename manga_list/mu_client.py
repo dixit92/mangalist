@@ -13,11 +13,13 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from .http_identity import USER_AGENT
+
 _log = logging.getLogger(__name__)
 
 _BASE = "https://api.mangaupdates.com/v1"
 _SESSION = requests.Session()
-_SESSION.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
+_SESSION.headers.update({"Content-Type": "application/json", "Accept": "application/json", "User-Agent": USER_AGENT})
 
 # Polite inter-request delay (seconds).
 REQUEST_DELAY = 0.3

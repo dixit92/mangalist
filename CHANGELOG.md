@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- AniList lookups (the Behind column's chapters-per-volume estimate) work again under AniList's current
+  limit of 30 requests a minute: requests are spaced to fit, a rate-limit answer is retried once after the
+  wait AniList asks for, and the log shows the real HTTP status and reason (it used to say "HTTP 0"). AniList
+  states chapter and volume totals only for finished series, so ongoing series still get none.
+- Manga-List identifies itself to MangaUpdates and AniList with its own User-Agent
+  (`MangaList/<version>`); AniList's front end blocks generic client signatures.
+
 ## [2026.10.0] - 2026-10-02
 
 - MangaUpdates matching follows MangaPixer's matcher up to 1.31.1 (was 1.26.1):
