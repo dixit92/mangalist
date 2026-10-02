@@ -1,4 +1,4 @@
-"""Title normalization (port of MangaPixer 1.26.1 ``TitleNormalizer.cs``).
+"""Title normalization (port of MangaPixer 1.31.1 ``TitleNormalizer.cs``).
 
 Turns a folder or archive display name into clean title query variants plus hints. Pure and
 deterministic; it only ever sees a display name, never the filesystem.
@@ -13,8 +13,10 @@ are removed but kept as hints -> whitespace collapsed, edge punctuation trimmed.
 Stage-2 helpers never change :attr:`NormalizedTitle.primary`: derived retrieval variants
 (:func:`derived_variants`), sequel / part numbers (:func:`number_tokens`), the base title of an
 archive name (:func:`archive_base_title`, :func:`archive_title`) and the head of numbered chapters
-with subtitles (:func:`numbered_series_head`, 1.26.1). An unmatched bracket marks a tag on its outer
-side (``Family Given] Title``, 1.26.1).
+with subtitles (:func:`numbered_series_head`, 1.26.1), record-title subtitle heads and tails
+(:func:`subtitle_head`, :func:`subtitle_tail`, 1.27.0 / 1.30.0) and the subtitle a name states
+(:func:`name_subtitle`, 1.30.0). An unmatched bracket marks a tag on its outer side
+(``Family Given] Title``, 1.26.1).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ import regex
 
 from ._text import (
     any_letter,
+    any_letter_or_digit,
     contains_ignore_case,
     distinct_ignore_case,
     eq_ignore_case,
@@ -73,17 +76,24 @@ _BARE_UNIT_WORD = regex.compile(r"(?<![\p{L}\p{N}])(?:chapter|chapters|volume|vo
 _WHITESPACE = regex.compile(r"\s+")
 _STRAY_BRACKET = regex.compile(r"[\[\](){}]")
 
-# Subtitle separator: " - ", " – ", " — ", " ~ " or ": " (NFKC folds the full-width colon).
-_SUBTITLE_SEPARATOR = regex.compile(r"\s+[-–—~]\s+|:\s+")
+# Subtitle separator: " - ", " – ", " — ", ": " (NFKC folds the full-width colon) or a tilde with or
+# without spaces around it (1.27.0: English light-novel titles write "Title ~Subtitle~"; NFKC folds the
+# wave dash).
+_SUBTITLE_SEPARATOR = regex.compile(r"\s+[-–—]\s+|\s*[~\u301C]\s*|:\s+")
+
+# The break before a record title's subtitle: any colon ("Title: Sub", "Title:re"), a tilde, or a
+# spaced dash (1.27.0).
+_SUBTITLE_BREAK = regex.compile(r":|\s*[~\u301C]|\s+[-–—]\s+")
 
 # A sequel / part number: "Part 3", "Season 2", "Book II", "Arc 4", "Phase 2", "Stage 3", or a bare
-# number / roman numeral II-X standing alone before the end or a subtitle separator. Four-digit
-# numbers are years, never sequel numbers. (The group name "num" is used twice, as in the .NET
-# pattern; the `regex` module allows that, `re` does not.)
+# number / roman numeral II-X standing alone before the end or a subtitle separator (a tilde counts
+# with or without a space after it: "Title 99 ~Subtitle~", 1.27.0). Four-digit numbers are years,
+# never sequel numbers. (The group name "num" is used twice, as in the .NET pattern; the `regex`
+# module allows that, `re` does not.)
 _SEQUEL_NUMBER = regex.compile(
     r"(?<![\p{L}\p{N}/])(?:(?P<unit>part|season|book|arc|phase|stage)\s*\.?\s*(?P<num>\d{1,3}|[ivx]{1,4})"
     r"|(?P<num>\d{1,3}(?:\.\d)?|ii|iii|iv|v|vi|vii|viii|ix|x))"
-    r"(?=\s*$|\s+[-–—~]\s+|:\s+|\s*[-–—~:]\s*$)", _I)
+    r"(?=\s*$|\s+[-–—]\s+|\s*[~\u301C]|:\s+|\s*[-–—:]\s*$)", _I)
 
 # A leading unit number of an archive name: "001 - Title", "01. Title", "12) Title".
 _LEADING_UNIT_NUMBER = regex.compile(r"^\d+(?:\.\d+)?\s*(?:[-.:)–—]\s*|$)")
@@ -255,6 +265,54 @@ def _number_tokens_cached(title: str) -> Tuple[str, ...]:
             result.append(n)
     result.sort()
     return tuple(result)
+
+
+def subtitle_head(title: Optional[str]) -> Optional[str]:
+    """The text before a record title's subtitle break (1.27.0): the first colon (``Title: Sub``,
+    ``Title:re``), tilde (``Title ~Sub~``, ``Title~Sub~``) or spaced dash (``Title - Sub``). None when the
+    title has no break, or nothing with a letter precedes it."""
+    if is_null_or_whitespace(title):
+        return None
+    t = nfkc(title)
+    m = _SUBTITLE_BREAK.search(t)
+    if m is None or m.start() == 0:
+        return None
+    head = _trim_edges(t[:m.start()])
+    return head if any_letter(head) and _trim_edges(t[m.end():]) else None
+
+
+def name_subtitle(name: Optional[str]) -> Optional[str]:
+    """The subtitle a NAME states after the separator its subtitle-split variant cuts at
+    (``Title Words - Subtitle`` -> ``Subtitle``, 1.30.0); None when :func:`derived_variants` derives no
+    subtitle split."""
+    if is_null_or_whitespace(name):
+        return None
+    t = _WHITESPACE.sub(" ", nfkc(name)).strip()
+    sep = _SUBTITLE_SEPARATOR.search(t)
+    if sep is None or sep.start() == 0:
+        return None
+    head = _trim_edges(t[:sep.start()])
+    tail = _trim_edges(t[sep.end():])
+    return tail if _count_words(head) >= 2 and any_letter_or_digit(tail) else None
+
+
+def subtitle_tail(title: Optional[str]) -> Optional[str]:
+    """The subtitle of a RECORD title after its :func:`subtitle_head` break (``Title: Sub``,
+    ``Title ~Sub~``, ``Title - Sub`` -> ``Sub``, 1.30.0); None when the title has no break."""
+    if subtitle_head(title) is None:
+        return None
+    t = nfkc(title)
+    m = _SUBTITLE_BREAK.search(t)
+    tail = _trim_edges(t[m.end():]).rstrip("~\u301C ")
+    return tail or None
+
+
+def contains_number(text: Optional[str], number: str) -> bool:
+    """True when ``number`` (a normalized :func:`number_tokens` value such as ``99``) stands as a whole
+    number anywhere in ``text`` (``Title Level 99 ~Sub~``, ``Level 099``)."""
+    if is_null_or_whitespace(text):
+        return False
+    return any(_normalize_number(m.group(0)) == number for m in _STANDALONE_NUMBER.finditer(nfkc(text)))
 
 
 def archive_base_title(archive_name: Optional[str]) -> str:

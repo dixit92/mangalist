@@ -7,6 +7,25 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- MangaUpdates matching follows MangaPixer's matcher up to 1.31.1 (was 1.26.1):
+  - The volume / chapter count check compares the highest volume or chapter number in the file names,
+    not the number of files. `.5` extras do not count, and neither do volume and chapter files mixed in
+    one folder. It also reads the English publisher's totals and the chapter total in the status line,
+    so long-running webtoons and English re-releases no longer go to *needs review* for a count
+    conflict.
+  - A category folder (`Manga`, `Manhwa`, ...) and tall pages only ever add confidence. A manhwa
+    under a `Manga` folder is no longer marked *needs review*.
+  - A folder subtitle that belongs to a spin-off ranks the spin-off first, but always as *needs
+    review* (new reasons: series family, subtitle family).
+  - Author names written as `Title by Author` or `Author - Title` help pick the right record.
+  - A record listed under another work's name with an author tag (`English Title (AUTHOR Name)`) is
+    found and checked.
+  - Search reads a second results page when the first one ends in a tie.
+- Matches from earlier versions keep their tier, marked as from an older version; **Check MU**
+  re-matches them. Confirmed matches are never re-scored.
+- A MangaUpdates record that no longer exists is never linked. A failed request now leaves the row
+  unchanged instead of scoring it on partial data.
+
 ## [2026.9.0] - 2026-09-27
 
 First packaged release.

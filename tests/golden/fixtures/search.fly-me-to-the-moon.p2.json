@@ -1,0 +1,105 @@
+{
+ "query": "Fly Me to the Moon",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 49959992966,
+     "title": "Naege On Dal",
+     "type": "Manhwa",
+     "year": "2014"
+    },
+    "hit_title": "The Moon Came to Me"
+   },
+   {
+    "record": {
+     "series_id": 32365525702,
+     "title": "Ten made Agare!",
+     "type": "Manga",
+     "year": "1975"
+    },
+    "hit_title": "Fly Up to the Sky!"
+   },
+   {
+    "record": {
+     "series_id": 13941656523,
+     "title": "Gessekai Ryokou - Fly Me to Type-Moon",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Gessekai Ryokou - Fly Me to Type-Moon"
+   },
+   {
+    "record": {
+     "series_id": 57187765476,
+     "title": "Tian Yue",
+     "type": "Manhua",
+     "year": "2025"
+    },
+    "hit_title": "To Taste the Moon"
+   },
+   {
+    "record": {
+     "series_id": 63930685586,
+     "title": "Get the Moon",
+     "type": "Manga",
+     "year": "2002"
+    },
+    "hit_title": "Get Me To The Moon"
+   },
+   {
+    "record": {
+     "series_id": 75332421613,
+     "title": "Hug Me When the Full Moon Rises",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "Hug Me When the Full Moon Rises"
+   },
+   {
+    "record": {
+     "series_id": 70459202201,
+     "title": "Moon Under the Moon",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Moon Under the Moon"
+   },
+   {
+    "record": {
+     "series_id": 50696837853,
+     "title": "Fortissimo de Tobitate!",
+     "type": "Manga",
+     "year": "1968"
+    },
+    "hit_title": "Fly Off at the ff!"
+   },
+   {
+    "record": {
+     "series_id": 14792435181,
+     "title": "Tsuki e no Hashigo",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Ladder to the Moon"
+   },
+   {
+    "record": {
+     "series_id": 43718441735,
+     "title": "The Moon",
+     "type": "Manga",
+     "year": "1972"
+    },
+    "hit_title": "The Moon"
+   }
+  ]
+ }
+}

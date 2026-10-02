@@ -1,4 +1,4 @@
-"""Stage-2 matcher: a Python port of MangaPixer 1.26.1's metadata auto-match core.
+"""Stage-2 matcher: a Python port of MangaPixer 1.31.1's metadata auto-match core.
 
 Pure (no Qt, no IO): the work detector decides what a folder is, the planner builds the query
 variants and local evidence, the scorer ranks provider candidates and bands the result

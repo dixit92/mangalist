@@ -23,7 +23,7 @@ ROOT = Path("/library/Manga")
 def fake(monkeypatch) -> FakeMangaUpdates:
     # The cache lives in the per-test data folder (conftest.py sets MANGA_LIST_DATA_DIR).
     f = FakeMangaUpdates()
-    monkeypatch.setattr(mu_client, "search_series", f.search_series)
+    monkeypatch.setattr(mu_client, "search_series_page", f.search_series_page)
     monkeypatch.setattr(mu_client, "get_series", f.get_series)
     monkeypatch.setattr(mu_client, "get_latest_releases", lambda *a, **k: [])
     monkeypatch.setattr(mu_client, "REQUEST_DELAY", 0)

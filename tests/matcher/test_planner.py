@@ -134,3 +134,40 @@ def test_folder_with_english_title_and_creator_searches_both_and_carries_the_cre
 
     assert any(v.text == "Joined Hands" and v.kind == QueryVariantKind.ENGLISH_TITLE for v in q.variants)
     assert "Family Given" in q.context.creator_hints
+
+
+# --- 1.27.0 / 1.29.0 (ported from MangaPixer 1.31.1 MatchQueryPlannerTests) ---------------------
+
+def test_archive_title_that_extends_the_folder_name_is_the_second_search():
+    # The folder is the leading words of a long title; the archives carry the whole title.
+    q = plan_folder(folder("Alpha to Beta Gamma [Some English Name]",
+                           ["Alpha to Beta Gamma Delta Epsilon Zeta v01.cbz", "Alpha to Beta Gamma Delta Epsilon Zeta v02.cbz"]))
+
+    assert [(v.text, v.kind) for v in q.variants] == [
+        ("Alpha to Beta Gamma", QueryVariantKind.PRIMARY),
+        ("Alpha to Beta Gamma Delta Epsilon Zeta", QueryVariantKind.ARCHIVE_DERIVED_TITLE),
+        ("Some English Name", QueryVariantKind.ENGLISH_TITLE),
+    ]
+
+
+def test_context_local_units_are_the_highest_numbers_and_unit_subfolder_counts():
+    names = [f"Some Series v0{i}.cbz" for i in range(1, 7)] + [f"Some Series v0{i}.5.cbz" for i in range(1, 7)]
+    q = plan_folder(folder("Some Series", names))
+    assert q.context.volume_like_count == 12
+    assert q.context.local_volumes == 6
+    assert q.context.local_chapters is None
+
+    # 1.29.0: a unit subfolder adds the numbers its archive names state, never its archive count.
+    units = plan_folder(FolderShape("Some Series", 2, (), (
+        ChildFolderShape("Volumes", 3, ("Some Series v09.cbz", "Some Series v10.cbz", "Some Series v10.5.cbz")),
+        ChildFolderShape("Chapters", 80, tuple(f"Some Series - Chapter {i}.cbz" for i in range(101, 181))),
+    )))
+    assert units.context.local_volumes == 10
+    assert units.context.local_chapters == 180
+    u = units.context.units
+    assert (u.volume_archives, u.chapter_archives, u.lowest_volume, u.lowest_chapter) == (3, 80, 9, 101)
+
+    # Without the names only a range the subfolder's own name states counts (never the 11 archives).
+    counted = plan_folder(folder("Some Series", [], subs=[("Volumes", 11), ("Chapters 1-50", 80)]))
+    assert counted.context.local_volumes is None
+    assert counted.context.local_chapters == 50

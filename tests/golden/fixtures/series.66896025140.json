@@ -1,0 +1,73 @@
+{
+ "series_id": 66896025140,
+ "title": "Re:Zero kara Hajimeru Isekai Seikatsu - Dainishou - Yashiki no Isshuukan Hen",
+ "associated": [
+  {
+   "title": "Re:Zero - Capítulo 2: Uma semana na mansão (Brazil)"
+  },
+  {
+   "title": "Re:Zero - Życie w innym świecie od zera - Księga druga: Tydzień w posiadłości (Polish)"
+  },
+  {
+   "title": "Re:ZERO -Starting Life in Another World-, Chapter 2: A Week at the Mansion"
+  },
+  {
+   "title": "Re:Zero kara Hajimeru Isekai Seikatsu: Dai 2-shou—Yashiki no Isshuukan-hen"
+  },
+  {
+   "title": "Re:Zero kara Hajimeru Isekai Seikatsu: Dai Ni-shou—Yashiki no Isshuukan-hen"
+  },
+  {
+   "title": "Re:Zero. Жизнь с нуля в альтернативном мире. Неделя в особняке. Часть вторая"
+  },
+  {
+   "title": "Re:제로부터 시작하는 이세계 생활 제2장 저택의 일주일"
+  },
+  {
+   "title": "리제로부터 시작하는 이세계 생활 제2장 저택의 일주일"
+  },
+  {
+   "title": "Ｒｅ：ゼロから始める異世界生活　第二章　屋敷の一週間編"
+  }
+ ],
+ "type": "Manga",
+ "year": "2014",
+ "status": "5 Volumes (Complete)",
+ "latest_chapter": 20,
+ "authors": [
+  {
+   "name": "NAGATSUKI Tappei",
+   "type": "Author"
+  },
+  {
+   "name": "FUUGETSU Makoto",
+   "type": "Artist"
+  }
+ ],
+ "related_series": [
+  {
+   "relation_type": "Prequel",
+   "related_series_id": 11106634916
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 42146648530
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 59214500369
+  }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "Square Enix",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "Yen Press",
+   "type": "English",
+   "notes": "5 Vols - Complete"
+  }
+ ]
+}

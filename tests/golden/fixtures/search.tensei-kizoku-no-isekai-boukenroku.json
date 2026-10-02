@@ -1,0 +1,164 @@
+{
+ "query": "Tensei Kizoku no Isekai Boukenroku",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 6665493020,
+     "title": "Tensei Kizoku no Isekai Boukenroku - Cain no Yarisugi Guild Nikki",
+     "type": "Manga",
+     "year": "2020",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i519419.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i519419.jpg"
+      }
+     }
+    },
+    "hit_title": "Tensei Kizoku no Isekai Boukenroku"
+   },
+   {
+    "record": {
+     "series_id": 24816446069,
+     "title": "Tensei Kizoku no Isekai Boukenroku Anthology Comic",
+     "type": "Manga",
+     "year": "2022",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i401093.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i401093.jpg"
+      }
+     }
+    },
+    "hit_title": "Tensei Kizoku no Isekai Boukenroku Anthology Comic"
+   },
+   {
+    "record": {
+     "series_id": 46692009496,
+     "title": "Tensei Kizoku no Isekai Boukenroku - Jichou o Shiranai Kamigami no Shito",
+     "type": "Manga",
+     "year": "2018",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i523619.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i523619.jpg"
+      }
+     }
+    },
+    "hit_title": "Tensei Kizoku no Isekai Boukenroku ~Jichou wo Shiranai Kamigami no Shito~"
+   },
+   {
+    "record": {
+     "series_id": 58674038011,
+     "title": "Tensei Kizoku no Yuugana Seikatsu",
+     "type": "Manga",
+     "year": "2023",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i490749.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i490749.jpg"
+      }
+     }
+    },
+    "hit_title": "Tensei Kizoku no Yuugana Seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 5474542097,
+     "title": "Sekai Saikou no Ansatsusha, Isekai Kizoku ni Tensei Suru",
+     "type": "Manga",
+     "year": "2019",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i514180.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i514180.jpg"
+      }
+     }
+    },
+    "hit_title": "Sekai Saikou no Ansatsusha, Isekai Kizoku ni Tensei Suru"
+   },
+   {
+    "record": {
+     "series_id": 39950806273,
+     "title": "Jakushou Kizoku no Isekai Funtouki",
+     "type": "Manga",
+     "year": "2020",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i351120.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i351120.jpg"
+      }
+     }
+    },
+    "hit_title": "Jakushou Kizoku no Isekai Funtouki"
+   },
+   {
+    "record": {
+     "series_id": 15470150829,
+     "title": "Aldo no Isekai Tensei",
+     "type": "Manga",
+     "year": "2025",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i539204.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i539204.jpg"
+      }
+     }
+    },
+    "hit_title": "Aldo no Isekai Tensei"
+   },
+   {
+    "record": {
+     "series_id": 14617271279,
+     "title": "Tensei Nihakobinin no Isekai Kouryakuhou",
+     "type": "Manga",
+     "year": "2023",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i537848.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i537848.jpg"
+      }
+     }
+    },
+    "hit_title": "Tensei Nihakobinin no Isekai Kouryakuhou"
+   },
+   {
+    "record": {
+     "series_id": 46633285822,
+     "title": "Fukushuu no Tensei Kizoku ~Subete o Ubawareta Daikenja, Onore o [Fukusei] shite Nidome no Sei o Eru~",
+     "type": "Manga",
+     "year": "2023",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i528934.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i528934.jpg"
+      }
+     }
+    },
+    "hit_title": "Fukushuu no Tensei Kizoku"
+   },
+   {
+    "record": {
+     "series_id": 52560040452,
+     "title": "Goodbye Isekai Tensei",
+     "type": "Manga",
+     "year": "2017",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i486359.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i486359.jpg"
+      }
+     }
+    },
+    "hit_title": "Goodbye Isekai Tensei"
+   }
+  ]
+ }
+}

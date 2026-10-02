@@ -72,5 +72,22 @@
    "relation_type": "Side Story",
    "related_series_id": 16346236814
   }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "LINE Webtoon",
+   "type": "English",
+   "notes": "Digital, Print"
+  },
+  {
+   "publisher_name": "Naver",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "YOUNG COM",
+   "type": "Original",
+   "notes": ""
+  }
  ]
 }

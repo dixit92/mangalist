@@ -1,4 +1,4 @@
-"""Query planning (port of MangaPixer 1.26.1 ``MatchQueryPlanner.cs``).
+"""Query planning (port of MangaPixer 1.31.1 ``MatchQueryPlanner.cs``).
 
 Builds the provider queries for one work: ordered, de-duplicated query variants plus the local
 corroboration context. Pure; the variants come from display names only and nothing here is sent
@@ -6,8 +6,10 @@ anywhere - the caller decides how many variants it sends.
 
 Variant order (= ``QueryVariantKind`` order): ComicInfo series, folder primary, trailing
 ``[English Title]``, subtitle split, sequel-number split, archive-derived title, and for doujin-shaped
-archives the MangaUpdates ``<parody> dj - <title>`` form. Variants are de-duplicated by their scoring
-form (a variant that differs only in case or punctuation is one query).
+archives the MangaUpdates ``<parody> dj - <title>`` form. One exception (1.27.0): an archive-derived
+title that extends the folder name word for word (the folder is the leading part of a long title) is the
+second search, right after the folder's own names. Variants are de-duplicated by their scoring form (a
+variant that differs only in case or punctuation is one query).
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from . import anatomy as _anatomy
+from . import count_evidence
 from ._text import distinct_ignore_case
 from . import auto_match_text as amt
 from .contracts import (
@@ -31,15 +34,18 @@ from .normalizer import DerivedTitleKind, NormalizedTitle, archive_title, normal
 
 MAX_VARIANTS = 8
 
+# Order key between the folder's own names (PRIMARY) and the English title.
+_SECOND_SEARCH = int(QueryVariantKind.PRIMARY) + 0.5
+
 
 class _VariantList:
-    """Variants in kind order, de-duplicated by scoring form, capped."""
+    """Variants in kind order (or an explicit order key), de-duplicated by scoring form, capped."""
 
     def __init__(self) -> None:
-        self._items: List[QueryVariant] = []
+        self._items: List[Tuple[QueryVariant, float]] = []
         self._keys: set = set()
 
-    def add(self, text: Optional[str], kind: QueryVariantKind) -> None:
+    def add(self, text: Optional[str], kind: QueryVariantKind, order: Optional[float] = None) -> None:
         t = text.strip() if text is not None else None
         if not t:
             return
@@ -51,11 +57,11 @@ class _VariantList:
         if dedupe_key in self._keys:
             return
         self._keys.add(dedupe_key)
-        self._items.append(QueryVariant(t, kind))
+        self._items.append((QueryVariant(t, kind), float(kind) if order is None else order))
 
     def to_tuple(self) -> Tuple[QueryVariant, ...]:
-        ordered = sorted(enumerate(self._items), key=lambda iv: (int(iv[1].kind), iv[0]))
-        return tuple(v for _, v in ordered[:MAX_VARIANTS])
+        ordered = sorted(enumerate(self._items), key=lambda iv: (iv[1][1], iv[0]))
+        return tuple(v for _, (v, _) in ordered[:MAX_VARIANTS])
 
 
 def plan_folder(folder: FolderShape, classification: WorkClassification,
@@ -70,10 +76,14 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
 
     name = normalize(folder.display_name)
     _add_name_variants(variants, name)
+    _add_creator_splits(variants, folder.display_name)
 
     derived_title = archive_title(archives)
     if derived_title is not None:
-        variants.add(derived_title, QueryVariantKind.ARCHIVE_DERIVED_TITLE)
+        # The archives carry a LONGER name that starts with the folder's (a folder named after the leading
+        # words of a long title, 1.27.0): that name is the second search, right after the folder's own.
+        extends = bool(name.primary) and scoring_form(derived_title).startswith(scoring_form(name.primary) + " ")
+        variants.add(derived_title, QueryVariantKind.ARCHIVE_DERIVED_TITLE, _SECOND_SEARCH if extends else None)
     elif len(archives) == 1:
         single = normalize(archives[0]).primary
         if single:
@@ -98,6 +108,9 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
             volume_like += sub.descendant_archive_count
         elif amt.is_chapter_folder_name(sub.display_name):
             chapter_like += sub.descendant_archive_count
+    # The count rule compares unit NUMBERS (1.27.0), and since 1.29.0 unit subfolders add the numbers their
+    # archive names state, never their archive count (count_evidence.local_of).
+    units = count_evidence.local_of(archives, folder.subfolders)
 
     years = []
     archive_year = amt.earliest_year(archives)
@@ -117,6 +130,9 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
         author_tags=tuple(author_tags),
         comic_info_series=comic_info_series.strip() if comic_info_series and comic_info_series.strip() else None,
         creator_hints=amt.creator_hints(folder.display_name),
+        local_volumes=units.highest_volume if (units.highest_volume or 0) > 0 else None,
+        local_chapters=units.highest_chapter if (units.highest_chapter or 0) > 0 else None,
+        units=units,
     )
     return MatchQuery(variants.to_tuple(), context)
 
@@ -140,6 +156,9 @@ def plan_archive_group(folder: FolderShape, classification: WorkClassification, 
     for d in group_title.derived:
         variants.add(d.text, QueryVariantKind.SUBTITLE_SPLIT if d.kind == DerivedTitleKind.SUBTITLE_SPLIT
                      else QueryVariantKind.SEQUEL_NUMBER_SPLIT)
+    _add_creator_splits(variants, group.query_title)
+    if len(names) == 1:
+        _add_creator_splits(variants, names[0])
     derived_title = archive_title(names)
     if derived_title is not None:
         variants.add(derived_title, QueryVariantKind.ARCHIVE_DERIVED_TITLE)
@@ -174,6 +193,9 @@ def plan_archive_group(folder: FolderShape, classification: WorkClassification, 
         tall_strips=False,
         author_tags=tuple(author_tags),
         creator_hints=tuple(distinct_ignore_case(h for n in names for h in amt.creator_hints(n))),
+        local_volumes=_max_or_none(amt.volume_number_of(n) for n in names),
+        local_chapters=_max_or_none(amt.chapter_number_of(n) for n in names),
+        units=count_evidence.local_of(names, None),
     )
     return MatchQuery(variants.to_tuple(), context)
 
@@ -191,6 +213,18 @@ def _add_name_variants(variants: _VariantList, name: NormalizedTitle) -> None:
     for d in name.derived:
         if d.kind == DerivedTitleKind.SEQUEL_NUMBER_SPLIT:
             variants.add(d.text, QueryVariantKind.SEQUEL_NUMBER_SPLIT)
+
+
+def _add_creator_splits(variants: _VariantList, display_name: Optional[str]) -> None:
+    for title in amt.creator_split_titles(display_name):
+        clean = normalize(title).primary
+        if clean:
+            variants.add(clean, QueryVariantKind.CREATOR_SPLIT)
+
+
+def _max_or_none(values) -> Optional[int]:
+    present = [v for v in values if v is not None]
+    return max(present) if present else None
 
 
 def _dominant_creator_tags(anatomies: List[_anatomy.ArchiveNameAnatomy]) -> List[str]:

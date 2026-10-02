@@ -50,5 +50,17 @@
    "relation_type": "Side Story",
    "related_series_id": 77011590548
   }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "Shogakukan",
+   "type": "Original",
+   "notes": "1995, 2008"
+  },
+  {
+   "publisher_name": "Viz",
+   "type": "English",
+   "notes": "18 Physical Volumes; Complete | 9 Physical Perfect Edition Omnibuses; Complete"
+  }
  ]
 }

@@ -1,0 +1,105 @@
+{
+ "query": "Kaguya-sama wa Kokurasetai",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 26512577769,
+     "title": "Oyome-sama wa Kami-sama",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Oyome-sama wa Kami-sama"
+   },
+   {
+    "record": {
+     "series_id": 75091156529,
+     "title": "Ou-sama wa Shitsuji-sama",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Ou-sama wa Shitsuji-sama"
+   },
+   {
+    "record": {
+     "series_id": 26666105146,
+     "title": "Ore-sama wa?",
+     "type": "Manga",
+     "year": "2003"
+    },
+    "hit_title": "Ore-sama wa?"
+   },
+   {
+    "record": {
+     "series_id": 60228643461,
+     "title": "Ashita wa Kyouso-sama",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Ashita wa Kyouso-sama"
+   },
+   {
+    "record": {
+     "series_id": 68766834087,
+     "title": "Danna-sama wa Yuurei",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Danna-sama wa Yuurei"
+   },
+   {
+    "record": {
+     "series_id": 47790853013,
+     "title": "Imouto wa Ojou-sama",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Imouto wa Ojou-sama"
+   },
+   {
+    "record": {
+     "series_id": 15795673810,
+     "title": "Kami-sama wa Yakutatazu",
+     "type": "Manga",
+     "year": "1994"
+    },
+    "hit_title": "Kami-sama wa Yakutatazu"
+   },
+   {
+    "record": {
+     "series_id": 13485431652,
+     "title": "Kannushi-sama wa Sugoirashii",
+     "type": "Manga",
+     "year": "1989"
+    },
+    "hit_title": "Kannushi-sama wa Sugoirashii"
+   },
+   {
+    "record": {
+     "series_id": 17852864264,
+     "title": "Koibito wa Tsukumogami-sama!?",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Koibito wa Tsukumogami-sama!?"
+   },
+   {
+    "record": {
+     "series_id": 66575975693,
+     "title": "Ojou-sama wa Semeraretai",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Ojou-sama wa Semeraretai"
+   }
+  ]
+ }
+}

@@ -14,7 +14,13 @@
      "series_id": 10294535868,
      "title": "Jigokuraku",
      "type": "Manga",
-     "year": "2005"
+     "year": "2005",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i34298.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i34298.jpg"
+      }
+     }
     },
     "hit_title": "Jigokuraku"
    },
@@ -23,7 +29,13 @@
      "series_id": 76554797640,
      "title": "Jigokuraku (Oohashi)",
      "type": "Manga",
-     "year": "2020"
+     "year": "2020",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i324917.png",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i324917.png"
+      }
+     }
     },
     "hit_title": "Jigokuraku (Oohashi)"
    },
@@ -32,7 +44,13 @@
      "series_id": 55431132229,
      "title": "Jigokuraku Mandara",
      "type": "Manga",
-     "year": "2011"
+     "year": "2011",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i221506.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i221506.jpg"
+      }
+     }
     },
     "hit_title": "Jigokuraku Mandara"
    },
@@ -41,7 +59,13 @@
      "series_id": 61508275290,
      "title": "Jigokuraku (KAKU Yuuji)",
      "type": "Manga",
-     "year": "2018"
+     "year": "2018",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i523282.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i523282.jpg"
+      }
+     }
     },
     "hit_title": "Jigokuraku (KAKU Yuuji)"
    },
@@ -50,7 +74,13 @@
      "series_id": 51061380336,
      "title": "Gokuraku Butterfly",
      "type": "Manga",
-     "year": "1997"
+     "year": "1997",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i159275.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i159275.jpg"
+      }
+     }
     },
     "hit_title": "Gokuraku Butterfly"
    },
@@ -59,7 +89,13 @@
      "series_id": 63469897646,
      "title": "Gokuraku Connection",
      "type": "Manga",
-     "year": "1990"
+     "year": "1990",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i193537.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i193537.jpg"
+      }
+     }
     },
     "hit_title": "Gokuraku Connection"
    },
@@ -68,7 +104,13 @@
      "series_id": 948918800,
      "title": "Gokuraku Doumei",
      "type": "Manga",
-     "year": "2005"
+     "year": "2005",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i193538.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i193538.jpg"
+      }
+     }
     },
     "hit_title": "Gokuraku Doumei"
    },
@@ -77,7 +119,13 @@
      "series_id": 56896288053,
      "title": "Gokuraku Family",
      "type": "Manga",
-     "year": "1991"
+     "year": "1991",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i159277.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i159277.jpg"
+      }
+     }
     },
     "hit_title": "Gokuraku Family"
    },
@@ -86,7 +134,13 @@
      "series_id": 72706494715,
      "title": "Gokuraku Mishin",
      "type": "Manga",
-     "year": "1994"
+     "year": "1994",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i401629.jpg",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i401629.jpg"
+      }
+     }
     },
     "hit_title": "Gokuraku Mishin"
    },
@@ -95,7 +149,13 @@
      "series_id": 44319549492,
      "title": "Gokuraku Nagaya",
      "type": "Manga",
-     "year": "2012"
+     "year": "2012",
+     "image": {
+      "url": {
+       "original": "https://cdn.mangaupdates.com/image/i222361.png",
+       "thumb": "https://cdn.mangaupdates.com/image/thumb/i222361.png"
+      }
+     }
     },
     "hit_title": "Gokuraku Nagaya"
    }

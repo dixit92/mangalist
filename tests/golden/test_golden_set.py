@@ -1,10 +1,11 @@
-"""The stage-2 golden set (port of MangaPixer 1.26.0 ``GoldenSetTests.cs``).
+"""The stage-2 golden set (port of MangaPixer 1.31.1 ``GoldenSetTests.cs``).
 
 Every case runs the real detector, planner, scorer AND the production retrieval loop
-(``manga_list.matcher.retrieval``) over RECORDED MangaUpdates responses - no network. Asserts the
-class, band and chosen id per case, then compares every case and the aggregate numbers with
-MangaPixer's own golden report (``mangapixer_report.txt``, header says which version), so any divergence
-between the port and the reference shows up by case.
+(``manga_list.matcher.retrieval``) and provider mapping (``manga_list.matcher.mangaupdates``) over RECORDED
+MangaUpdates responses - no network. Asserts the class, band and chosen id per case, then compares every
+case (class, band, chosen id, scores, reasons, and the searches and GETs sent) and the aggregate numbers
+with MangaPixer's own run of the same cases (``mangapixer_report.txt``), so any divergence between the port
+and the reference shows up by case.
 """
 
 from __future__ import annotations
@@ -20,15 +21,15 @@ import pytest
 from manga_list.matcher import (
     DEFAULT_THRESHOLDS,
     MatchBand,
-    MatchCandidate,
     MatchOutcome,
     MatchThresholds,
+    WorkClass,
     WorkClassification,
     reasons_text,
 )
 from manga_list.matcher import detector, planner, scorer
 from manga_list.matcher._text import format_fixed
-from manga_list.matcher.mangaupdates import map_search_hit, map_series
+from manga_list.matcher.mangaupdates import SearchPage, map_search_page, map_series
 from manga_list.matcher.retrieval import retrieve_and_score
 
 from .golden_cases import ALL, GoldenCase
@@ -40,20 +41,20 @@ REFERENCE_REPORT = HERE / "mangapixer_report.txt"
 BAND_NAMES = {MatchBand.AUTO: "Auto", MatchBand.NEEDS_REVIEW: "NeedsReview", MatchBand.UNMATCHED: "Unmatched"}
 
 
-class MissingFixture(Exception):
-    pass
+def class_name(cls: WorkClass) -> str:
+    """The reference's enum name (``SERIES_WITH_UNITS`` -> ``SeriesWithUnits``)."""
+    return "".join(part.capitalize() for part in cls.name.split("_"))
 
 
 @lru_cache(maxsize=1)
-def _fixtures() -> Tuple[Dict[Tuple[str, bool], List[MatchCandidate]], Dict[str, dict]]:
-    searches: Dict[Tuple[str, bool], List[MatchCandidate]] = {}
+def _fixtures() -> Tuple[Dict[Tuple[str, bool, int], dict], Dict[str, dict]]:
+    searches: Dict[Tuple[str, bool, int], dict] = {}
     series: Dict[str, dict] = {}
     for path in sorted(FIXTURES.glob("*.json")):
         root = json.loads(path.read_text(encoding="utf-8"))
         if path.name.startswith("search."):
             doujin_allowed = "Doujinshi" not in root["filter_types"]
-            hits = [map_search_hit(r) for r in root["response"]["results"]]
-            searches[(root["query"], doujin_allowed)] = hits
+            searches[(root["query"], doujin_allowed, int(root.get("page", 1)))] = root["response"]
         elif path.name.startswith("series."):
             series[str(root["series_id"])] = root
     return searches, series
@@ -82,24 +83,23 @@ def execute(c: GoldenCase, thresholds: MatchThresholds = DEFAULT_THRESHOLDS) -> 
     searches_by_query, series_by_id = _fixtures()
     missing: List[str] = []
 
-    def search(text: str):
-        hits = searches_by_query.get((text, c.doujin_allowed))
-        if hits is None:
-            missing.append(json.dumps({"kind": "search", "query": text, "doujin": c.doujin_allowed}))
-            raise MissingFixture(missing[-1])
-        return hits
+    # A request without a recording is noted (the exact request the set needs) and answered like the
+    # reference's harness: no hits / not found.
+    def search(text: str, page: int) -> SearchPage:
+        response = searches_by_query.get((text, c.doujin_allowed, page))
+        if response is None:
+            missing.append(json.dumps({"kind": "search", "query": text, "doujin": c.doujin_allowed, "page": page}))
+            return SearchPage((), 0)
+        return map_search_page(response)
 
     def get(external_id: str):
         record = series_by_id.get(external_id)
         if record is None:
             missing.append(json.dumps({"kind": "get", "id": external_id}))
             return None
-        return map_series(record)
+        return map_series(record, external_id)
 
-    try:
-        result = retrieve_and_score(query, search, get, thresholds)
-    except MissingFixture:
-        return Run(classification, None, tuple(missing), 0, 0)
+    result = retrieve_and_score(query, search, get, thresholds)
     outcome = result.outcome if not missing else None
     return Run(classification, outcome, tuple(missing), result.searches, result.gets)
 
@@ -118,8 +118,8 @@ def _detail(outcome: MatchOutcome) -> str:
 
 
 def test_case_count_matches_the_reference():
-    assert len(ALL) == 61
-    assert sum(1 for c in ALL if c.band is not None) == 55
+    assert len(ALL) == 85
+    assert sum(1 for c in ALL if c.band is not None) == 77
 
 
 @pytest.mark.parametrize("case", ALL, ids=[c.id.split(" ")[0] for c in ALL])
@@ -145,13 +145,21 @@ def test_case(case: GoldenCase):
             f"chosen {top.candidate.external_id if top else None}, expected {case.expected_id}: {detail}"
 
 
-def _case_line(c: GoldenCase) -> str:
-    """One line in the reference's per-case report format."""
-    o = execute(c).outcome
+def _case_lines(c: GoldenCase) -> List[str]:
+    """The case in the reference report's format: its class, and for a scored case the band line and the
+    requests it sent."""
+    key = c.id.split(" ")[0]
+    run = execute(c)
+    lines = [f"CLASS {key}: {class_name(run.classification.cls)}"]
+    if c.band is None:
+        return lines
+    o = run.outcome
     top = o.ranked[0] if o is not None and o.ranked else None
-    return (f"{c.id}: {BAND_NAMES[o.band]} {top.candidate.external_id if top else ''} "
-            f"title {format_fixed(top.title_score, 3) if top else ''} adj {format_fixed(top.adjusted_score, 3) if top else ''} "
-            f"[{reasons_text(top.reasons) if top else ''}]")
+    lines.append(f"{c.id}: {BAND_NAMES[o.band]} {top.candidate.external_id if top else ''} "
+                 f"title {format_fixed(top.title_score, 3) if top else ''} adj {format_fixed(top.adjusted_score, 3) if top else ''} "
+                 f"[{reasons_text(top.reasons) if top else ''}]")
+    lines.append(f"REQUESTS {key}: {run.searches} searches + {run.gets} GETs")
+    return lines
 
 
 def aggregate(thresholds: MatchThresholds) -> Tuple[str, int, int]:
@@ -196,42 +204,43 @@ SWEEP = (
 )
 
 
-def _reference_lines() -> Tuple[Dict[str, str], Dict[str, str]]:
-    per_case: Dict[str, str] = {}
-    aggregates: Dict[str, str] = {}
-    for line in REFERENCE_REPORT.read_text(encoding="utf-8").splitlines():
-        if line.startswith("#"):
-            continue
-        if line.startswith("GOLDEN "):
-            name, _, rest = line[len("GOLDEN "):].partition(": ")
-            aggregates[name] = rest
-        elif line.strip():
-            case_id = line.split(": ", 1)[0]
-            per_case[case_id] = line
-    return per_case, aggregates
+def _line_key(line: str) -> str:
+    """``CLASS F01`` / ``REQUESTS F01`` / ``F01`` (a case line) / ``GOLDEN default``."""
+    head = line.split(": ", 1)[0]
+    if head.startswith(("CLASS ", "REQUESTS ", "GOLDEN ")):
+        return head
+    return head.split(" ", 1)[0]
+
+
+def _reference_lines() -> Dict[str, str]:
+    return {_line_key(line): line for line in REFERENCE_REPORT.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")}
 
 
 def test_report_and_reference_comparison(capsys):
-    """Prints the per-case and aggregate report (as MangaPixer's CI does) and requires every line to be
-    identical to MangaPixer's own run of the same set (``mangapixer_report.txt``): same band, chosen id, title and
-    adjusted score (3 decimals) and reasons per case, and the same aggregate at all three threshold
-    settings. At the defaults every auto link must also be right."""
-    reference_cases, reference_aggregates = _reference_lines()
-    lines = [_case_line(c) for c in ALL if c.band is not None]
-    differences = [f"  ours: {line}\n  ref:  {reference_cases.get(line.split(': ', 1)[0])}"
-                   for line in lines if reference_cases.get(line.split(": ", 1)[0]) != line]
+    """Prints the per-case and aggregate report and requires every line to be identical to MangaPixer's own
+    run of the same cases (``mangapixer_report.txt``): same detector class, band, chosen id, title and
+    adjusted score (3 decimals), reasons and request counts per case, and the same aggregate at all three
+    threshold settings. At the defaults every auto link must also be right."""
+    reference = _reference_lines()
+    lines = [line for c in ALL for line in _case_lines(c)]
+    differences = [f"  ours: {line}\n  ref:  {reference.get(_line_key(line))}"
+                   for line in lines if reference.get(_line_key(line)) != line]
 
     with capsys.disabled():
         print()
         for line in lines:
-            print(line)
+            if not line.startswith(("CLASS ", "REQUESTS ")):
+                print(line)
         for name, thresholds in SWEEP:
             report, auto, auto_correct = aggregate(thresholds)
-            print(f"GOLDEN {name}: {report}")
-            if reference_aggregates.get(name) != report:
-                differences.append(f"  ours: GOLDEN {name}: {report}\n  ref:  GOLDEN {name}: {reference_aggregates.get(name)}")
+            line = f"GOLDEN {name}: {report}"
+            print(line)
+            lines.append(line)
+            if reference.get(f"GOLDEN {name}") != line:
+                differences.append(f"  ours: {line}\n  ref:  {reference.get(f'GOLDEN {name}')}")
             if name == "default":
                 assert auto == auto_correct, "a wrong auto link at the default thresholds"
 
-    assert len(reference_cases) == 55
+    assert len(reference) == len(lines) == 85 + 2 * 77 + 3
     assert not differences, "Differences from MangaPixer's report:\n" + "\n".join(differences)

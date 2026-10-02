@@ -1,0 +1,67 @@
+{
+ "series_id": 4324727424,
+ "title": "Kingdom",
+ "associated": [
+  {
+   "title": "Karalystė"
+  },
+  {
+   "title": "المملكة"
+  },
+  {
+   "title": "پادشاهی"
+  },
+  {
+   "title": "کینگدام"
+  },
+  {
+   "title": "キングダム"
+  },
+  {
+   "title": "王者天下"
+  },
+  {
+   "title": "킹덤"
+  }
+ ],
+ "type": "Manga",
+ "year": "2006",
+ "status": "80 Volumes (Ongoing)",
+ "latest_chapter": 832,
+ "authors": [
+  {
+   "name": "HARA Yasuhisa",
+   "type": "Author"
+  },
+  {
+   "name": "HARA Yasuhisa",
+   "type": "Artist"
+  }
+ ],
+ "related_series": [
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 38638691729
+  },
+  {
+   "relation_type": "Side Story",
+   "related_series_id": 45021591110
+  },
+  {
+   "relation_type": "Spin-Off",
+   "related_series_id": 949319086
+  }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "Shueisha",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "Viz Media",
+   "type": "English",
+   "notes": "11 Vol - Ongoing"
+  }
+ ]
+}

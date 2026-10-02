@@ -1,0 +1,105 @@
+{
+ "query": "Isekai de Cheat Skill",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 16660816091,
+     "title": "Isekai Cheat Senshi to Mahou Tsukai",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Isekai Cheat Warrior & Wizard"
+   },
+   {
+    "record": {
+     "series_id": 57519006615,
+     "title": "Isekai de Seijo ni natta Watashi, Genjitsu Sekai demo Seijo Cheat de Kanzen Shouri!",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Isekai de Seijo ni natta Watashi, Genjitsu Sekai demo Seijo Cheat de Kanzen Shouri!"
+   },
+   {
+    "record": {
+     "series_id": 64999099101,
+     "title": "Isekai de Skill o Kaitai Shitara Cheat na Yome ga Zoushoku Shimashita: Gainen Kousa no Structure",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Isekai de Skill o Kaitai Shitara Cheat na Yome ga Zoushoku Shimashita: Gainen Kousa no Structure"
+   },
+   {
+    "record": {
+     "series_id": 32586370052,
+     "title": "Seikan Massage Skill de Isekai Heroine to Musubareyou! Anthology Comic",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Seikan Massage Skill de Isekai Heroine to Musubareyou! Anthology Comic"
+   },
+   {
+    "record": {
+     "series_id": 30527571732,
+     "title": "Tensei Shita Moto Dorei, Cheat Skill \"Senpenbanka\" de Saikyou Harem wo Tsukuru",
+     "type": "Manga",
+     "year": "2025"
+    },
+    "hit_title": "Tensei Shita Moto Dorei, Cheat Skill \"Senpenbanka\" de Saikyou Harem wo Tsukuru"
+   },
+   {
+    "record": {
+     "series_id": 69967670683,
+     "title": "Ware ni Cheat o - Hazure Cheat no Shoukan Yuusha wa Isekai de Yukkuri Kurashitai",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Ware ni Cheat o - Hazure Cheat no Shoukan Yuusha wa Isekai de Yukkuri Kurashitai"
+   },
+   {
+    "record": {
+     "series_id": 2901750334,
+     "title": "Isekai Kita node Sukebe Skill de Zenryoku Ouka Shiyou to Omou",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Isekai Kita node Sukebe Skill de Zenryoku Ouka Shiyou to Omou"
+   },
+   {
+    "record": {
+     "series_id": 4246498214,
+     "title": "Tensei Healing Life Inou Skill \"Chiyu\" no Chikara de Isekai Harem",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Tensei Healing Life Inou Skill \"Chiyu\" no Chikara de Isekai Harem"
+   },
+   {
+    "record": {
+     "series_id": 56290352101,
+     "title": "Himajin, Maou no Sugata de Isekai e Tokidoki Cheat na burari Tabi",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Himajin, Maou no Sugata de Isekai e Tokidoki Cheat na burari Tabi"
+   },
+   {
+    "record": {
+     "series_id": 65360979666,
+     "title": "Drawing: Saikyou Mangaka wa Oekaki Skill de Isekai Musou Suru!",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Drawing: Saikyou Mangaka wa Oekaki Skill de Isekai Musou Suru!"
+   }
+  ]
+ }
+}

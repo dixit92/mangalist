@@ -1,0 +1,105 @@
+{
+ "query": "Tensei Kizoku no Isekai Boukenroku",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 7130426087,
+     "title": "Tensei Daiseijo no Isekai Nonbiri Kikou",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Tensei Daiseijo no Isekai Nonbiri Kikou"
+   },
+   {
+    "record": {
+     "series_id": 40777447876,
+     "title": "Isekai Tensei Soudouki",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Isekai Tensei Soudouki"
+   },
+   {
+    "record": {
+     "series_id": 17980684027,
+     "title": "Isekai Tensei no Boukensha",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Isekai Tensei no Boukensha"
+   },
+   {
+    "record": {
+     "series_id": 20018559751,
+     "title": "Isekai Kenja no Tensei Musou: Game no Chishiki de Isekai Saikyou",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Isekai Kenja no Tensei Musou: Game no Chishiki de Isekai Saikyou"
+   },
+   {
+    "record": {
+     "series_id": 26125673067,
+     "title": "Moto Ansatsusha, Tensei shita Kizoku no Reijou ni narimashita.",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Moto Ansatsusha, Tensei shita Kizoku no Reijou ni narimashita."
+   },
+   {
+    "record": {
+     "series_id": 17749786214,
+     "title": "Tensei Reijou no Isekai Hokkori Onsen Monogatari",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Tensei Reijou no Isekai Hokkori Onsen Monogatari"
+   },
+   {
+    "record": {
+     "series_id": 47695640395,
+     "title": "Tensei Oujo no Mattari Nonbiri!? Isekai Recipe",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Tensei Oujo no Mattari Nonbiri!? Isekai Recipe"
+   },
+   {
+    "record": {
+     "series_id": 11158238044,
+     "title": "Tensei Shitara Isekai Saikyou no Kishi Danchou",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Tensei Shitara Isekai Saikyou no Kishi Danchou"
+   },
+   {
+    "record": {
+     "series_id": 12567872372,
+     "title": "Gyaku Isekai Tensei Kyoushitsu",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Gyaku Isekai Tensei Kyoushitsu"
+   },
+   {
+    "record": {
+     "series_id": 69098346221,
+     "title": "Both of Them Were Reincarnated Into Another World",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Docchi mo Isekai Tensei"
+   }
+  ]
+ }
+}

@@ -1,0 +1,104 @@
+{
+ "query": "Kingdom",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 349,
+  "results": [
+   {
+    "record": {
+     "series_id": 4324727424,
+     "title": "Kingdom",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 52652192387,
+     "title": "Kin no Kuni Mizu no Kuni",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Gold Kingdom and Water Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 47263570872,
+     "title": "Aquadom",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Aqua Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 35740899938,
+     "title": "Doubutsu no Kuni",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Animal Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 58749846369,
+     "title": "Girl's Kingdom",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Girl's Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 17009181812,
+     "title": "His Kingdom",
+     "type": "Manhwa",
+     "year": "2001"
+    },
+    "hit_title": "His Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 32314030808,
+     "title": "Magic Kingdom",
+     "type": "Manhua",
+     "year": "2007"
+    },
+    "hit_title": "Magic Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 74795398878,
+     "title": "Renai Oukoku",
+     "type": "Manga",
+     "year": "1999"
+    },
+    "hit_title": "Romance Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 49536099847,
+     "title": "Shoujo Zukan",
+     "type": "Manga",
+     "year": "2002"
+    },
+    "hit_title": "Warped Kingdom"
+   },
+   {
+    "record": {
+     "series_id": 41062053043,
+     "title": "Yue Zhi Guo Du",
+     "type": "Manhua",
+     "year": "2016"
+    },
+    "hit_title": "Moon Kingdom"
+   }
+  ]
+ }
+}

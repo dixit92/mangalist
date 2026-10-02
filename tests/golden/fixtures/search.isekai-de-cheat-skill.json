@@ -1,0 +1,104 @@
+{
+ "query": "Isekai de Cheat Skill",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 46683807703,
+     "title": "Isekai Cheat Breakers",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Isekai Cheat Breakers"
+   },
+   {
+    "record": {
+     "series_id": 2954059413,
+     "title": "Isekai Cheat Kaitakuki",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Isekai Cheat Kaitakuki"
+   },
+   {
+    "record": {
+     "series_id": 56046390115,
+     "title": "Isekai Cheat Magician",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Isekai Cheat Magician"
+   },
+   {
+    "record": {
+     "series_id": 5116261254,
+     "title": "Cheat Skill \"Shihai\" Otsukatte Isekai Harem!",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Cheat Skill \"Shihai\" Otsukatte Isekai Harem!"
+   },
+   {
+    "record": {
+     "series_id": 25944992434,
+     "title": "Youtou Tsukai ga Cheat Skill wo Motte Isekai Hourou - Umaremotta Cheat wa Saikyou!!",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Youtoutsukai ga Cheat Skill wo Motte Isekai Hourou - Umaremotta Cheat wa Saikyou!!"
+   },
+   {
+    "record": {
+     "series_id": 52959646713,
+     "title": "Ero Skill de Isekai Musou the Comic",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Ero Skill de Isekai Musou"
+   },
+   {
+    "record": {
+     "series_id": 15345022984,
+     "title": "Sazukari Musou - Kozukuri Skill de Isekai Heitei",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Sazukari Musou - Kozukuri Skill de Isekai Heitei"
+   },
+   {
+    "record": {
+     "series_id": 27667669945,
+     "title": "Ie Tsukuri Skill de Isekai o Ikinobiro",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Ietsukuri Skill de Isekai wo Ikinobiro"
+   },
+   {
+    "record": {
+     "series_id": 14176644774,
+     "title": "Living a Slow Life in the Countryside With My Otherworld Fortune",
+     "type": "Manga",
+     "year": "2026"
+    },
+    "hit_title": "Cheat Skill wo Te ni Ireta Ore Isekai de Kaseida Kane wo Moto ni Nihon no Inaka de Nonbiri Sugoshimasu."
+   },
+   {
+    "record": {
+     "series_id": 31083309720,
+     "title": "Erosugi Cheat de Isekai Harem♪ Comic Anthology",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Erosugi Cheat de Isekai Harem♪ Comic Anthology"
+   }
+  ]
+ }
+}

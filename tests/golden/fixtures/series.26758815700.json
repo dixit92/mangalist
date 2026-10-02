@@ -1,0 +1,70 @@
+{
+ "series_id": 26758815700,
+ "title": "Watashi o Tsuki Made Tsuretette!",
+ "associated": [
+  {
+   "title": "Fly Me to the Moon!"
+  },
+  {
+   "title": "Take Me to the Moon!"
+  },
+  {
+   "title": "Watashi o Tsuki Made Tsurete tte!"
+  },
+  {
+   "title": "Watashi wo Tsuki Made Tsuretette!"
+  },
+  {
+   "title": "わたしをつきまでつれてって"
+  },
+  {
+   "title": "私を月まで連れてって!"
+  },
+  {
+   "title": "私を月まで連れてって！"
+  }
+ ],
+ "type": "Manga",
+ "year": "1977",
+ "status": "6 Volumes (Complete)  \n4 Volumes (In TK Collection, Complete)  \n2 Volumes (Aizouban, Complete)  \n4 Volumes (Bunkoban, Complete)  \n6 Volumes (Kanzenban, Complete)",
+ "latest_chapter": 0,
+ "authors": [
+  {
+   "name": "TAKEMIYA Keiko",
+   "type": "Author"
+  },
+  {
+   "name": "TAKEMIYA Keiko",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 29375540072
+  }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "Chuokoron Shinsha",
+   "type": "Original",
+   "notes": "1992"
+  },
+  {
+   "publisher_name": "Hakusensha",
+   "type": "Original",
+   "notes": "2005"
+  },
+  {
+   "publisher_name": "Kadokawa Shoten",
+   "type": "Original",
+   "notes": "1989"
+  },
+  {
+   "publisher_name": "Shogakukan",
+   "type": "Original",
+   "notes": "1982,1995"
+  }
+ ]
+}

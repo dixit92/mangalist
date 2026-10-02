@@ -1,4 +1,4 @@
-"""Title similarity (port of MangaPixer 1.26.1 ``TitleSimilarity.cs``).
+"""Title similarity (port of MangaPixer 1.31.1 ``TitleSimilarity.cs``).
 
 ``score = 0.45 * tokenSortRatio + 0.35 * tokenSetRatio' + 0.20 * trigramDice``, where
 ``tokenSetRatio'`` is the classic token-set ratio multiplied by ``(1 - 0.5 * unmatchedTokenMass)``.
@@ -136,6 +136,14 @@ def trigram_dice(a: str, b: str) -> float:
 def _trigrams(s: str) -> Set[str]:
     padded = "  " + s + " "
     return {padded[i:i + 3] for i in range(len(padded) - 2)}
+
+
+def shares_only_digit_tokens(a: str | None, b: str | None) -> bool:
+    """True when the two titles share at least one token and every shared token is digits only
+    (``Some Title 99`` vs ``Other Words 99``, 1.27.0): the similarity then rests on the number alone."""
+    x = set(_tokens(scoring_form(a)))
+    common = [t for t in _tokens(scoring_form(b)) if t in x]
+    return bool(common) and all(all("0" <= ch <= "9" for ch in t) for t in common)
 
 
 def _tokens(s: str) -> List[str]:

@@ -1,0 +1,104 @@
+{
+ "query": "Urasawa Naoki - Monster",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 3609341269,
+     "title": "Kushami",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Kushami: Urasawa Naoki Tanpenshuu"
+   },
+   {
+    "record": {
+     "series_id": 41307999372,
+     "title": "Shoki no Urasawa",
+     "type": "Manga",
+     "year": "2000"
+    },
+    "hit_title": "Naoki Urasawa - Gli Esordi"
+   },
+   {
+    "record": {
+     "series_id": 72274276213,
+     "title": "Monster",
+     "type": "Manga",
+     "year": "1994"
+    },
+    "hit_title": "Naoki Urasawa's Monster"
+   },
+   {
+    "record": {
+     "series_id": 77611613541,
+     "title": "Hanzawa Naoki",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Hanzawa Naoki"
+   },
+   {
+    "record": {
+     "series_id": 3366005318,
+     "title": "Yattaze! Naoki",
+     "type": "Manga",
+     "year": "1984"
+    },
+    "hit_title": "Yattaze! Naoki"
+   },
+   {
+    "record": {
+     "series_id": 53241879181,
+     "title": "Cherry Teacher Sakura Naoki",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Cherry Teacher Sakura Naoki"
+   },
+   {
+    "record": {
+     "series_id": 24154218397,
+     "title": "Yamamoto Naoki Latest Series",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Yamamoto Naoki Latest Series"
+   },
+   {
+    "record": {
+     "series_id": 10829808480,
+     "title": "Monster Master",
+     "type": "Manga",
+     "year": "2010"
+    },
+    "hit_title": "Monster Master"
+   },
+   {
+    "record": {
+     "series_id": 70969490932,
+     "title": "Shougakusei Hanzawa Naoki-kun",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Elementary school student Naoki Hanzawa"
+   },
+   {
+    "record": {
+     "series_id": 16809057489,
+     "title": "Monster x Monster",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Monster x Monster"
+   }
+  ]
+ }
+}

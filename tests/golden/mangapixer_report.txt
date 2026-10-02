@@ -1,59 +1,243 @@
-# MangaPixer 1.26.1 (release commit 1e4132d) GoldenSetTests.Report_AutoRateAndPrecision output, default thresholds per case + three sweeps.
-F01 romaji, digital volumes: Auto 51239621230 title 1.000 adj 1.030 [None]
+# MangaPixer 1.31.1 (release commit 858c7df): its golden harness (production detector, planner, retrieval loop, provider mapping, scorer) over the cases Manga-List runs; per case the class, the default-threshold result and the requests sent, then the aggregates at three threshold settings.
+CLASS F01: Series
+F01 romaji, digital volumes: Auto 51239621230 title 1.000 adj 1.030 [SeriesFamily]
+REQUESTS F01: 1 searches + 1 GETs
+CLASS F02: Series
 F02 romaji + [English], English archive names: Auto 19088665446 title 1.000 adj 1.020 [None]
+REQUESTS F02: 1 searches + 1 GETs
+CLASS F03: Series
 F03 English folder name finds the romaji record: Auto 19088665446 title 1.000 adj 1.010 [None]
+REQUESTS F03: 1 searches + 1 GETs
+CLASS F04: Series
 F04 chapter archives: Auto 19088665446 title 1.000 adj 1.010 [None]
-F05 romaji, chapters (novel twins filtered): Auto 23393951235 title 1.000 adj 1.010 [None]
-F06 English name, volumes: Auto 23393951235 title 1.000 adj 1.010 [None]
-F07 manhwa under a Manhwa category: Auto 15180124327 title 1.000 adj 1.030 [None]
-F08 manhwa under a Manga category: origin conflict -> review: NeedsReview 15180124327 title 1.000 adj 0.910 [TypeConflict]
+REQUESTS F04: 1 searches + 1 GETs
+CLASS F05: Series
+F05 romaji, chapters (novel twins filtered): Auto 23393951235 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F05: 1 searches + 1 GETs
+CLASS F06: Series
+F06 English name, volumes: Auto 23393951235 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F06: 1 searches + 1 GETs
+CLASS F07: Series
+F07 manhwa under a Manhwa category: Auto 15180124327 title 1.000 adj 1.030 [SeriesFamily]
+REQUESTS F07: 1 searches + 1 GETs
+CLASS F08: Series
+F08 manhwa under a Manga category: the hint is positive-only, still auto: Auto 15180124327 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F08: 1 searches + 1 GETs
+CLASS F09: Series
 F09 scene-style archive names: Auto 27728982867 title 1.000 adj 1.020 [None]
+REQUESTS F09: 1 searches + 1 GETs
+CLASS F10: Series
 F10 meaningless folder name, ComicInfo series: Auto 27728982867 title 1.000 adj 1.060 [None]
-F11 long-running chapters: Auto 55099564912 title 1.000 adj 1.010 [None]
+REQUESTS F10: 1 searches + 1 GETs
+CLASS F11: Series
+F11 long-running chapters: Auto 55099564912 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F11: 1 searches + 1 GETs
+CLASS F12: Series
 F12 volumes: Auto 75336092483 title 1.000 adj 1.010 [None]
+REQUESTS F12: 1 searches + 1 GETs
+CLASS F13: OneShot
 F13 one-shot folder, disambiguated provider title: Auto 62512335978 title 1.000 adj 1.030 [None]
+REQUESTS F13: 1 searches + 1 GETs
+CLASS F14: Series
 F14 one-shot title with ten volume archives: count conflict: NeedsReview 62512335978 title 1.000 adj 0.900 [CountConflict]
+REQUESTS F14: 1 searches + 1 GETs
+CLASS F15: OneShot
 F15 one-shot folder, romaji: Auto 47603342373 title 1.000 adj 1.020 [None]
+REQUESTS F15: 1 searches + 1 GETs
+CLASS F16: OneShot
 F16 one-shot folder, English: Auto 47603342373 title 1.000 adj 1.020 [None]
-F17 numbered part with subtitle: Auto 60420553585 title 1.000 adj 1.000 [None]
-F18 numbered part, the provider ranks another part first: Auto 42553317740 title 1.000 adj 1.000 [None]
-F19 short romaji; official doujin + subtitled main record: NeedsReview 40032173896 title 0.800 adj 0.810 [CloseSecond, RelatedPair]
-F20 main record absent from the search results: NeedsReview 59214500369 title 0.771 adj 0.771 [CloseSecond]
-F21 sequel exists (:re): Auto 26272522291 title 1.000 adj 1.010 [None]
-F22 sequel folder whose record the search misses (the prequel must not count as right): NeedsReview 26272522291 title 0.855 adj 0.865 [None]
-F23 number that is part of the name: Auto 605012986 title 1.000 adj 1.010 [None]
-F24 leading number, English alt title: Auto 45334600346 title 1.000 adj 1.010 [None]
+REQUESTS F16: 1 searches + 1 GETs
+CLASS F17: Series
+F17 numbered part with subtitle: Auto 60420553585 title 1.000 adj 1.000 [SeriesFamily]
+REQUESTS F17: 1 searches + 1 GETs
+CLASS F18: Series
+F18 numbered part, the provider ranks another part first: Auto 42553317740 title 1.000 adj 1.000 [SeriesFamily]
+REQUESTS F18: 1 searches + 1 GETs
+CLASS F19: Series
+F19 short romaji; official doujin + subtitled main record: NeedsReview 40032173896 title 0.800 adj 0.810 [CloseSecond, RelatedPair, SeriesFamily]
+REQUESTS F19: 2 searches + 2 GETs
+CLASS F20: Series
+F20 main record absent from the search results: NeedsReview 63636494324 title 0.828 adj 0.828 [CloseSecond, SeriesFamily]
+REQUESTS F20: 1 searches + 2 GETs
+CLASS F21: Series
+F21 sequel exists (:re): Auto 26272522291 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F21: 1 searches + 1 GETs
+CLASS F22: Series
+F22 sequel folder whose record the search misses (the prequel must not count as right): NeedsReview 26272522291 title 0.855 adj 0.865 [SeriesFamily]
+REQUESTS F22: 1 searches + 1 GETs
+CLASS F23: Series
+F23 number that is part of the name: Auto 605012986 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F23: 1 searches + 1 GETs
+CLASS F24: Series
+F24 leading number, English alt title: Auto 45334600346 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F24: 1 searches + 1 GETs
+CLASS F25: Series
 F25 sequel of F24: Auto 64832756793 title 1.000 adj 1.010 [None]
-F26 punctuation title: Auto 23606352927 title 1.000 adj 1.010 [None]
-F27 x-titled, look-alike supersets: Auto 49449837876 title 1.000 adj 1.010 [None]
-F28 three same-titled records (disambiguated): NeedsReview 61508275290 title 1.000 adj 1.020 [CloseSecond, RelatedPair]
-F29 long vowel romaji: Auto 66296374554 title 1.000 adj 1.010 [None]
+REQUESTS F25: 1 searches + 1 GETs
+CLASS F26: Series
+F26 punctuation title: Auto 23606352927 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F26: 1 searches + 1 GETs
+CLASS F27: Series
+F27 x-titled, look-alike supersets: Auto 49449837876 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F27: 1 searches + 1 GETs
+CLASS F28: Series
+F28 three same-titled records (disambiguated): NeedsReview 61508275290 title 1.000 adj 1.020 [CloseSecond, RelatedPair, SeriesFamily]
+REQUESTS F28: 2 searches + 2 GETs
+CLASS F29: Series
+F29 long vowel romaji: Auto 66296374554 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F29: 1 searches + 1 GETs
+CLASS F30: Series
 F30 English with subtitle and apostrophe: Auto 66296374554 title 1.000 adj 1.010 [None]
+REQUESTS F30: 1 searches + 1 GETs
+CLASS F31: Series
 F31 x-titled: Auto 67814124606 title 1.000 adj 1.010 [None]
-F32 webtoon chapters under Manhwa: Auto 13015731700 title 1.000 adj 1.030 [None]
+REQUESTS F31: 1 searches + 1 GETs
+CLASS F32: Series
+F32 webtoon chapters under Manhwa: Auto 13015731700 title 1.000 adj 1.030 [SeriesFamily]
+REQUESTS F32: 1 searches + 1 GETs
+CLASS F33: Series
 F33 English webtoon name with apostrophe: Auto 50369844984 title 1.000 adj 1.030 [None]
+REQUESTS F33: 1 searches + 1 GETs
+CLASS F34: Series
 F34 generic one-word title under an author folder: Auto 72274276213 title 1.000 adj 1.060 [None]
+REQUESTS F34: 1 searches + 1 GETs
+CLASS F35: Series
 F35 one-word title: Auto 46397795369 title 1.000 adj 1.010 [None]
+REQUESTS F35: 1 searches + 1 GETs
+CLASS F36: Series
 F36 romaji: Auto 21944750964 title 1.000 adj 1.010 [None]
+REQUESTS F36: 1 searches + 1 GETs
+CLASS F37: Series
 F37 volumes: Auto 32334361267 title 1.000 adj 1.010 [None]
-F38 nothing on the provider: Unmatched 57298488180 title 0.406 adj 0.406 [CloseSecond]
-F39 files older than the series: year conflict: NeedsReview 51239621230 title 1.000 adj 0.910 [YearConflict]
-F40 unit subfolders only: Auto 75336092483 title 1.000 adj 1.020 [None]
-F41 leading scan-group tag on the folder: Auto 49449837876 title 1.000 adj 1.010 [None]
-F42 underscores: Auto 66296374554 title 1.000 adj 1.010 [None]
-F43 doujinshi allowed: dj look-alikes stay below the series: Auto 23606352927 title 1.000 adj 1.010 [None]
-F44 category agrees: Auto 23393951235 title 1.000 adj 1.030 [None]
-F45 season subfolders: Auto 13015731700 title 1.000 adj 1.020 [None]
+REQUESTS F37: 1 searches + 1 GETs
+CLASS F38: Series
+F38 nothing on the provider: Unmatched 57298488180 title 0.406 adj 0.406 [None]
+REQUESTS F38: 2 searches + 0 GETs
+CLASS F39: Series
+F39 files older than the series: year conflict: NeedsReview 51239621230 title 1.000 adj 0.910 [YearConflict, SeriesFamily]
+REQUESTS F39: 1 searches + 1 GETs
+CLASS F40: SeriesWithUnits
+F40 unit subfolders only: Auto 75336092483 title 1.000 adj 1.000 [None]
+REQUESTS F40: 1 searches + 1 GETs
+CLASS F41: Series
+F41 leading scan-group tag on the folder: Auto 49449837876 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F41: 1 searches + 1 GETs
+CLASS F42: Series
+F42 underscores: Auto 66296374554 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F42: 1 searches + 1 GETs
+CLASS F43: Series
+F43 doujinshi allowed: dj look-alikes stay below the series: Auto 23606352927 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS F43: 1 searches + 1 GETs
+CLASS F44: Series
+F44 category agrees: Auto 23393951235 title 1.000 adj 1.030 [SeriesFamily]
+REQUESTS F44: 1 searches + 1 GETs
+CLASS F45: SeriesWithUnits
+F45 season subfolders: Auto 13015731700 title 1.000 adj 1.020 [SeriesFamily]
+REQUESTS F45: 1 searches + 1 GETs
+CLASS A01: ArtistCollection
 A01 artist folder: one-shot: Auto 62512335978 title 1.000 adj 1.130 [None]
+REQUESTS A01: 1 searches + 1 GETs
+CLASS A02: ArtistCollection
 A02 artist folder: second one-shot: Auto 47603342373 title 1.000 adj 1.130 [None]
+REQUESTS A02: 1 searches + 1 GETs
+CLASS A03: ArtistCollection
 A03 artist folder: numbered volumes grouped: Auto 32334361267 title 1.000 adj 1.110 [None]
-A04 artist folder: a mis-tagged volume, the author conflict alone vetoes auto: NeedsReview 51239621230 title 1.000 adj 1.010 [AuthorConflict]
-A05 collection leaf: a lone volume of a long series: Auto 49449837876 title 1.000 adj 1.010 [None]
+REQUESTS A03: 1 searches + 1 GETs
+CLASS A04: ArtistCollection
+A04 artist folder: a mis-tagged volume, the author conflict alone vetoes auto: NeedsReview 51239621230 title 1.000 adj 1.010 [AuthorConflict, SeriesFamily]
+REQUESTS A04: 1 searches + 1 GETs
+CLASS A05: CollectionLeaf
+A05 collection leaf: a lone volume of a long series: Auto 49449837876 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS A05: 1 searches + 1 GETs
+CLASS A06: CollectionLeaf
 A06 collection leaf: one-shot: Auto 62512335978 title 1.000 adj 1.020 [None]
+REQUESTS A06: 1 searches + 1 GETs
+CLASS A07: CollectionLeaf
 A07 doujin anatomy: numbered dj mini-series, parody dj form, author agrees: Auto 57918701059 title 1.000 adj 1.100 [None]
+REQUESTS A07: 1 searches + 1 GETs
+CLASS A08: Ambiguous
 A08 ambiguous folder: review only: NeedsReview 27728982867 title 1.000 adj 1.000 [ReviewOnlyClass]
+REQUESTS A08: 1 searches + 1 GETs
+CLASS A10: CollectionLeaf
 A10 doujin anatomy: a lone archive of a 7-volume dj record links to it (one archive may hold the whole series): Auto 57918701059 title 1.000 adj 1.100 [None]
-A09 mixed folder: review only: NeedsReview 51239621230 title 1.000 adj 1.010 [ReviewOnlyClass]
-GOLDEN default: matched cases 55: auto 44 (80.0%), review 10, unmatched 1; auto precision 44/44 (100.0%); review top correct 7/7; requests 55 searches + 57 GETs (2.04 per work); fixtures 37 searches, 32 series
-GOLDEN loosest: matched cases 55: auto 45 (81.8%), review 10, unmatched 0; auto precision 44/45 (97.8%); review top correct 7/7; requests 55 searches + 57 GETs (2.04 per work); fixtures 37 searches, 32 series
-GOLDEN strictest: matched cases 55: auto 25 (45.5%), review 26, unmatched 4; auto precision 25/25 (100.0%); review top correct 26/26; requests 55 searches + 57 GETs (2.04 per work); fixtures 37 searches, 32 series
+REQUESTS A10: 1 searches + 1 GETs
+CLASS A09: Mixed
+A09 mixed folder: a loose archive that is its own work is matched on its own: Auto 51239621230 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS A09: 1 searches + 1 GETs
+CLASS A09b: Mixed
+A09b mixed folder: loose units of one work keep the folder review-only: NeedsReview 51239621230 title 1.000 adj 1.010 [ReviewOnlyClass, SeriesFamily]
+REQUESTS A09b: 1 searches + 1 GETs
+CLASS P01: ArtistCollection
+P01 provider-author artist folder, untagged names: one-shot: Auto 62512335978 title 1.000 adj 1.080 [None]
+REQUESTS P01: 1 searches + 1 GETs
+CLASS P02: ArtistCollection
+P02 provider-author artist folder, untagged names: numbered volumes grouped: Auto 32334361267 title 1.000 adj 1.060 [None]
+REQUESTS P02: 1 searches + 1 GETs
+CLASS P03: ArtistCollection
+P03 provider-author artist folder: a mis-filed volume, the author conflict alone vetoes auto: NeedsReview 51239621230 title 1.000 adj 1.010 [AuthorConflict, SeriesFamily]
+REQUESTS P03: 1 searches + 1 GETs
+CLASS P04: Series
+P04 a series named like a linked author stays a series: Auto 46397795369 title 1.000 adj 1.010 [None]
+REQUESTS P04: 1 searches + 1 GETs
+CLASS P05: OneShot
+CLASS P00: Ambiguous
+CLASS H04: Series
+H04 a declared creator no candidate has changes nothing (the order stays): NeedsReview 10294535868 title 1.000 adj 1.010 [CloseSecond]
+REQUESTS H04: 2 searches + 2 GETs
+CLASS H07: Series
+H07 an origin tie on the title stays in review without a declaration: NeedsReview 18602075756 title 1.000 adj 1.010 [CloseSecond, SeriesFamily]
+REQUESTS H07: 2 searches + 4 GETs
+CLASS S01: Series
+S01 subtitle: the spin-off first, not the main series - for review: NeedsReview 28267595998 title 1.000 adj 1.000 [SubtitleFamily, SeriesFamily]
+REQUESTS S01: 1 searches + 1 GETs
+CLASS S02: Series
+S02 subtitle with the English series name - for review: NeedsReview 28267595998 title 1.000 adj 1.000 [SubtitleFamily, SeriesFamily]
+REQUESTS S02: 1 searches + 1 GETs
+CLASS T01: Series
+T01 author-tagged alias: the record is fetched and the tag verified: NeedsReview 37088343287 title 1.000 adj 1.010 [CloseSecond]
+REQUESTS T01: 2 searches + 5 GETs
+CLASS L01: Series
+L01 T: season-renumbered webtoon, chapter-token archives (latest chapter 235, status total 652): Auto 13015731700 title 1.000 adj 1.030 [SeriesFamily]
+REQUESTS L01: 1 searches + 1 GETs
+CLASS L02: Series
+L02 category hint positive-only: a webtoon under a Manga folder: Auto 13015731700 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS L02: 1 searches + 1 GETs
+CLASS L03: Series
+L03 count by number: six volumes plus six .5 extras: Auto 46397795369 title 1.000 adj 1.010 [None]
+REQUESTS L03: 1 searches + 1 GETs
+CLASS L04: Series
+L04 V: tilde / dash subtitle heads, spin-off alias: NeedsReview 46692009496 title 0.802 adj 0.812 [CloseSecond, SeriesFamily]
+REQUESTS L04: 2 searches + 3 GETs
+CLASS L05: Series
+L05 R: the leading words of a long title: Unmatched 5116261254 title 0.566 adj 0.566 [None]
+REQUESTS L05: 2 searches + 0 GETs
+CLASS L06: Series
+L06 R: the archives carry the whole long title: NeedsReview 15495823031 title 0.825 adj 0.835 [CloseSecond, RelatedPair, SeriesFamily]
+REQUESTS L06: 2 searches + 2 GETs
+CLASS L07: Series
+L07 one-word title with many look-alike records: Auto 4324727424 title 1.000 adj 1.010 [None]
+REQUESTS L07: 1 searches + 1 GETs
+CLASS L11: Series
+L11 B trap: another record's alt title carries a (disambiguator): Auto 74072114866 title 1.000 adj 1.010 [SeriesFamily]
+REQUESTS L11: 1 searches + 1 GETs
+CLASS L12: Series
+L12 English totals reach the count rule (IZE Press 13+2 volumes, five chapter platforms at 201): Auto 15180124327 title 1.000 adj 1.030 [SeriesFamily]
+REQUESTS L12: 1 searches + 1 GETs
+CLASS L08: Series
+L08 author before a plain dash: Auto 72274276213 title 0.970 adj 1.080 [None]
+REQUESTS L08: 1 searches + 1 GETs
+CLASS L09: CollectionLeaf
+L09 author after "by" in a collection: Auto 62512335978 title 0.970 adj 1.090 [None]
+REQUESTS L09: 1 searches + 1 GETs
+CLASS L10: Series
+L10 trailing [Two Words] that is the author: Auto 72274276213 title 1.000 adj 1.110 [None]
+REQUESTS L10: 1 searches + 1 GETs
+CLASS D01: CollectionContainer
+CLASS D02: FranchiseContainer
+CLASS D03: Wrapper
+CLASS D04: UnitSub
+CLASS D05: UnitSub
+CLASS D06: Excluded
+GOLDEN default: matched cases 77: auto 58 (75.3%), review 17, unmatched 2; auto precision 58/58 (100.0%); review top correct 13/13; requests 86 searches + 89 GETs (2.27 per work); fixtures 56 searches, 51 series
+GOLDEN loosest: matched cases 77: auto 59 (76.6%), review 18, unmatched 0; auto precision 58/59 (98.3%); review top correct 13/13; requests 86 searches + 89 GETs (2.27 per work); fixtures 56 searches, 51 series
+GOLDEN strictest: matched cases 77: auto 31 (40.3%), review 39, unmatched 7; auto precision 31/31 (100.0%); review top correct 38/38; requests 86 searches + 89 GETs (2.27 per work); fixtures 56 searches, 51 series

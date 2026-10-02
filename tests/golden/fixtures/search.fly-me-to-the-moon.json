@@ -1,0 +1,104 @@
+{
+ "query": "Fly Me to the Moon",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 47897284496,
+     "title": "Fly Me to the Moon",
+     "type": "Manhwa",
+     "year": "2022"
+    },
+    "hit_title": "Fly Me to the Moon"
+   },
+   {
+    "record": {
+     "series_id": 60739271901,
+     "title": "Fly Me to the Moon (ASAHI)",
+     "type": "Manga",
+     "year": "2025"
+    },
+    "hit_title": "Fly Me to the Moon (ASAHI)"
+   },
+   {
+    "record": {
+     "series_id": 66862616473,
+     "title": "Fly Me to the Moon (Booch)",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Fly Me to the Moon (Booch)"
+   },
+   {
+    "record": {
+     "series_id": 35418227427,
+     "title": "Yamitsuki Marisu",
+     "type": "Manga",
+     "year": "2008"
+    },
+    "hit_title": "やみ憑きマリス Fly me to the moon"
+   },
+   {
+    "record": {
+     "series_id": 47442687219,
+     "title": "Jagan wa Gachirin ni Tobu",
+     "type": "Manga",
+     "year": "2007"
+    },
+    "hit_title": "Wicked Eyes Fly to the Full Moon"
+   },
+   {
+    "record": {
+     "series_id": 1206243599,
+     "title": "Tonde Saitama",
+     "type": "Manga",
+     "year": "1982"
+    },
+    "hit_title": "Fly Me to Saitama"
+   },
+   {
+    "record": {
+     "series_id": 17415529478,
+     "title": "Yue Liang Ben Wo Er Lai",
+     "type": "Manhua",
+     "year": "2022"
+    },
+    "hit_title": "The Moon Comes to Me"
+   },
+   {
+    "record": {
+     "series_id": 37088343287,
+     "title": "Tonikaku Kawaii",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Fly Me to the Moon (HATA Kenjiro)"
+   },
+   {
+    "record": {
+     "series_id": 26758815700,
+     "title": "Watashi o Tsuki Made Tsuretette!",
+     "type": "Manga",
+     "year": "1977"
+    },
+    "hit_title": "Fly Me to the Moon!"
+   },
+   {
+    "record": {
+     "series_id": 67725556566,
+     "title": "Fly Me to Your Heart",
+     "type": "Manhua",
+     "year": "2023"
+    },
+    "hit_title": "Fly Me to Your Heart"
+   }
+  ]
+ }
+}

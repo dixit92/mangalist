@@ -19,7 +19,7 @@ import.
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
@@ -39,6 +39,7 @@ from .matcher import (
     reason_names,
 )
 from .matcher import auto_match_text, detector, planner
+from .matcher.mangaupdates import SearchPage
 from .matcher.retrieval import RetrievalResult, retrieve_and_score
 from .models import MangaEntry
 from .mu_cache import MU_SCORE_VERSION
@@ -46,6 +47,9 @@ from .mu_cache import MU_SCORE_VERSION
 # The mu_score semantics are versioned by the cache (mu_cache.MU_SCORE_VERSION); 1 = legacy word-set
 # Jaccard (rows written before the stage-2 matcher).
 LEGACY_SCORE_VERSION = 1
+
+# At most this many archive names of one unit subfolder reach the count rule (as MangaPixer).
+MAX_UNIT_ARCHIVE_NAMES = 500
 
 BAND_AUTO = "auto"
 BAND_REVIEW = "review"
@@ -60,14 +64,16 @@ _BAND_BY_OUTCOME = {
 
 REASON_LABELS = {
     "CloseSecond": "close second candidate",
-    "CountConflict": "file count does not fit the record",
+    "CountConflict": "volume / chapter numbers go far past the record",
     "YearConflict": "files older than the series",
-    "TypeConflict": "type / origin conflict",
+    "TypeConflict": "the record is a novel, artbook or audio drama",
     "RelatedPair": "related records (sequel, spin-off) score alike",
     "OneShotMismatch": "one-shot mismatch",
     "AuthorConflict": "creator tag names none of the authors",
     "NumberMismatch": "sequel / part number differs",
     "ReviewOnlyClass": "folder shape is review-only",
+    "SubtitleFamily": "only the folder's subtitle tells it from a related record (main series vs spin-off)",
+    "SeriesFamily": "a related record (main story, spin-off, sequel) is also a candidate",
 }
 
 _CLASS_LABELS = {
@@ -106,12 +112,15 @@ def folder_shape(entry: MangaEntry) -> FolderShape:
 
     Depth: the Manga Root is the library root (0), its folders 1, a franchise subseries 2. Archive
     names are the entry's direct archives; subfolders are counted from the archives found below
-    them (the scanner walks at most three levels). The category hint is the nearest ancestor named
-    like a category (e.g. a Manga Root called "Manhwa").
+    them (the scanner walks at most three levels), and a unit subfolder (``Volumes``, ``Season 2``)
+    also lists their names, so the count rule reads their numbers. The category hint is the nearest
+    ancestor named exactly like a category word (e.g. a Manga Root called "Manhwa"); unlike
+    MangaPixer, whose library root is never read, the Manga Root counts - the hint only ever adds
+    evidence.
     """
     folder = Path(entry.folder)
     direct: List[str] = []
-    below: Counter = Counter()
+    below = defaultdict(list)
     for f in entry.files:
         try:
             rel = Path(f.path).relative_to(folder)
@@ -120,13 +129,16 @@ def folder_shape(entry: MangaEntry) -> FolderShape:
         if len(rel.parts) <= 1:
             direct.append(rel.name)
         else:
-            below[rel.parts[0]] += 1
-    subfolders = tuple(ChildFolderShape(name, count) for name, count in sorted(below.items()))
+            below[rel.parts[0]].append(rel.name)
+    subfolders = tuple(
+        ChildFolderShape(name, len(names),
+                         tuple(sorted(names)[:MAX_UNIT_ARCHIVE_NAMES]) if auto_match_text.is_unit_folder_name(name) else None)
+        for name, names in sorted(below.items()))
 
     ancestors = [folder.parent]
     if entry.parent_folder is not None:
         ancestors.append(folder.parent.parent)
-    category = next((a.name for a in ancestors if a.name and auto_match_text.is_category_word(a.name)), None)
+    category = next((a.name.strip().lower() for a in ancestors if auto_match_text.is_category_folder_name(a.name)), None)
 
     return FolderShape(
         display_name=folder.name,
@@ -144,11 +156,12 @@ def folder_shape(entry: MangaEntry) -> FolderShape:
 
 def match_entry(
     entry: MangaEntry,
-    search: Callable[[str], Sequence[MatchCandidate]],
+    search: Callable[[str, int], SearchPage],
     get: Callable[[str], Optional[MatchCandidate]],
     thresholds: MatchThresholds = DEFAULT_THRESHOLDS,
 ) -> EntryMatch:
-    """Classify the entry and, when it is one work, search, score and band it."""
+    """Classify the entry and, when it is one work, search, score and band it. ``search(text, page)``
+    returns one page of hits; ``get(id)`` a full record, None when the provider no longer has it."""
     shape = folder_shape(entry)
     classification = detector.classify(shape)
     if classification.level not in (MatchLevel.FOLDER, MatchLevel.REVIEW_ONLY):

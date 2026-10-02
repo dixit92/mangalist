@@ -153,5 +153,72 @@
    "relation_type": "Spin-Off",
    "related_series_id": 33692781764
   }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "Daum",
+   "type": "Original",
+   "notes": null
+  },
+  {
+   "publisher_name": "DNC Webtoon",
+   "type": "Original",
+   "notes": null
+  },
+  {
+   "publisher_name": "IZE Press",
+   "type": "English",
+   "notes": "13+2 Volumes; Complete"
+  },
+  {
+   "publisher_name": "Kakao",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "Manga Mirai",
+   "type": "English",
+   "notes": null
+  },
+  {
+   "publisher_name": "MangaPlaza",
+   "type": "English",
+   "notes": null
+  },
+  {
+   "publisher_name": "Manta",
+   "type": "English",
+   "notes": "201 Chapters; Complete"
+  },
+  {
+   "publisher_name": "Pocket Comics",
+   "type": "English",
+   "notes": "201 Chapters; Defunct"
+  },
+  {
+   "publisher_name": "REDICE STUDIO",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "Tapas",
+   "type": "English",
+   "notes": "201 Chapters; Complete"
+  },
+  {
+   "publisher_name": "Tappytoon",
+   "type": "English",
+   "notes": "201 Chapters; Complete"
+  },
+  {
+   "publisher_name": "Webcomics",
+   "type": "English",
+   "notes": null
+  },
+  {
+   "publisher_name": "Webnovel",
+   "type": "English",
+   "notes": "201 Chapters; Complete"
+  }
  ]
 }

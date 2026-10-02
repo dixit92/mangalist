@@ -4,8 +4,8 @@ Pipeline per entry (runs in a worker thread):
   1. If a confirmed match is cached and licensed==True, apply cache and skip API call.
   2. If a confirmed match is cached but licensed is unknown/False, re-fetch licensed flag.
   3. Otherwise: the stage-2 matcher (``mu_match.match_entry``) classifies the
-     folder, searches MU with its query variants (automatic type filter), scores
-     the candidates and bands the result: auto / review are stored as an
+     folder, searches MU with its query variants (automatic type filter; page 2
+     on a tie), scores the candidates and bands the result: auto / review are stored as an
      unconfirmed match (review gets the amber highlight), unmatched and
      not-one-work folders clear an unconfirmed older match.
 
@@ -22,7 +22,7 @@ from PySide6.QtCore import QObject, Signal
 
 from ..models import MangaEntry
 from .. import anilist_client, mu_cache, mu_client
-from ..matcher.mangaupdates import AUTO_SEARCH_FILTER, map_search_hit, map_series
+from ..matcher.mangaupdates import AUTO_SEARCH_FILTER, SEARCH_PAGE_SIZE, map_search_page, map_series
 from ..mu_match import BAND_NOT_A_WORK, BAND_UNMATCHED, candidate_titles, match_entry
 from ..mu_progress import english_publisher, parse_publisher_notes
 
@@ -145,20 +145,24 @@ class MuWorker(QObject):
         # Full records fetched by the retrieval loop are kept, so the chosen one is not fetched twice.
         details: Dict[str, dict] = {}
 
-        def search(text: str):
+        def search(text: str, page: int):
             time.sleep(mu_client.REQUEST_DELAY)
-            results = mu_client.search_series(text, page_size=10, filter_types=list(AUTO_SEARCH_FILTER))
-            return [map_search_hit(r) for r in results]
+            response = mu_client.search_series_page(text, page=page, page_size=SEARCH_PAGE_SIZE,
+                                                    filter_types=list(AUTO_SEARCH_FILTER))
+            return map_search_page(response)
 
         def get(external_id: str):
+            # A record MangaUpdates no longer has (404) is dropped from the candidates; any other failure
+            # ends this lookup (the entry keeps what it had and the next Check MU tries again).
             time.sleep(mu_client.REQUEST_DELAY)
             try:
                 detail = mu_client.get_series(int(external_id))
-            except Exception:  # noqa: BLE001
-                _log.warning("get_series failed for '%s' (id=%s)", entry.title, external_id, exc_info=True)
-                return None
+            except Exception as exc:  # noqa: BLE001
+                if mu_client.is_not_found(exc):
+                    return None
+                raise
             details[external_id] = detail
-            return map_series(detail)
+            return map_series(detail, external_id)
 
         try:
             match = match_entry(entry, search, get)

@@ -300,3 +300,51 @@ def test_numbered_chapters_with_subtitles_are_one_series_not_a_collection():
     assert (c.cls, c.level) == (WorkClass.SERIES, MatchLevel.FOLDER)
     assert (zero.cls, zero.level) == (WorkClass.SERIES, MatchLevel.FOLDER)
     assert shelf.cls == WorkClass.COLLECTION_LEAF
+
+
+# --- 1.28.0: the provider-author half of the artist rule (ported from MangaPixer 1.31.1) ---------
+
+def test_provider_author_turns_a_collection_leaf_into_an_artist_collection_with_the_same_groups():
+    archives = ["Alpha Story.cbz", "Beta Tale.cbz", "Gamma Saga.cbz", "Delta Night 1.cbz", "Delta Night 2.cbz"]
+    before = detector.classify(folder("Given Family", archives))
+    after = detector.classify(folder("Given Family", archives, known_authors=["Other Person", "Given Family"]))
+
+    assert before.cls == WorkClass.COLLECTION_LEAF
+    assert (after.cls, after.level) == (WorkClass.ARTIST_COLLECTION, MatchLevel.ARCHIVE)
+    assert [g.query_title for g in before.archive_groups] == [g.query_title for g in after.archive_groups]
+
+
+def test_provider_author_turns_unbracketed_author_dash_title_names_from_ambiguous_into_an_artist_collection():
+    archives = ["Given Family - Alpha Story.cbz", "Given Family - Beta Tale.cbz", "Given Family - Gamma Saga.cbz"]
+
+    assert detector.classify(folder("Given Family", archives)).cls == WorkClass.AMBIGUOUS
+    assert detector.classify(folder("Given Family", archives, known_authors=["Given Family"])).cls == WorkClass.ARTIST_COLLECTION
+
+
+def test_provider_author_never_overrides_a_series_shape_or_a_one_shot():
+    series = detector.classify(folder("Alpha", numbered("Alpha v{0:02d}.cbz", 6), known_authors=["Alpha"]))
+    chapters = detector.classify(folder("Given Family", numbered("{0:03d}.cbz", 12), known_authors=["Given Family"]))
+    single = detector.classify(folder("Given Family", ["Alpha Story.cbz"], known_authors=["Given Family"]))
+
+    assert (series.cls, series.level) == (WorkClass.SERIES, MatchLevel.FOLDER)
+    assert chapters.cls == WorkClass.SERIES
+    assert single.cls == WorkClass.ONE_SHOT
+
+
+@pytest.mark.parametrize("folder_name", [
+    "Given",  # one token of the author's name is not the author
+    "Given Family Works",  # nor is a longer name containing it
+    "Gi",  # too short to be author-like
+])
+def test_provider_author_needs_the_whole_name_to_be_equal(folder_name):
+    c = detector.classify(folder(folder_name, ["Alpha Story.cbz", "Beta Tale.cbz", "Gamma Saga.cbz"],
+                                 known_authors=["Given Family", "Gi"]))
+    assert c.cls == WorkClass.COLLECTION_LEAF
+
+
+def test_provider_author_reason_carries_no_names():
+    c = detector.classify(folder("Given Family", ["Alpha Story.cbz", "Beta Tale.cbz", "Gamma Saga.cbz"],
+                                 known_authors=["Given Family"]))
+
+    assert all("given" not in r.lower() for r in c.reasons)
+    assert any("author of a series linked in this library" in r for r in c.reasons)

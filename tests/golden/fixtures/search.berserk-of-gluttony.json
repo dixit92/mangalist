@@ -1,0 +1,104 @@
+{
+ "query": "Berserk of Gluttony",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 74072114866,
+     "title": "Boushoku no Berserk: Ore dake Level to Iu Gainen o Toppa Suru THE COMIC",
+     "type": "Manga",
+     "year": "2018"
+    },
+    "hit_title": "Berserk of Gluttony"
+   },
+   {
+    "record": {
+     "series_id": 8947479390,
+     "title": "Boushoku no Berserk: Ore dake Level to Iu Gainen o Toppa Shite Saikyou",
+     "type": "Manga",
+     "year": "2023"
+    },
+    "hit_title": "Berserk of Gluttony (Webtoon)"
+   },
+   {
+    "record": {
+     "series_id": 8601508780,
+     "title": "Boushoku-Hi no Ken",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "The Sword of Princess Gluttony"
+   },
+   {
+    "record": {
+     "series_id": 51239621230,
+     "title": "Berserk",
+     "type": "Manga",
+     "year": "1989"
+    },
+    "hit_title": "Berserk"
+   },
+   {
+    "record": {
+     "series_id": 47096579692,
+     "title": "Kuang Bao Ni Xi",
+     "type": "Manhua",
+     "year": "2021"
+    },
+    "hit_title": "Berserk Counterattack"
+   },
+   {
+    "record": {
+     "series_id": 24874346495,
+     "title": "Berserk Princess",
+     "type": "Manhua",
+     "year": "2023"
+    },
+    "hit_title": "Berserk Princess"
+   },
+   {
+    "record": {
+     "series_id": 23370831566,
+     "title": "Glotoneria",
+     "type": "Manhwa",
+     "year": "2019"
+    },
+    "hit_title": "Gluttony (Beginners village)"
+   },
+   {
+    "record": {
+     "series_id": 8339817000,
+     "title": "Berserk Gaiden",
+     "type": "Manga",
+     "year": "1997"
+    },
+    "hit_title": "Berserk Gaiden"
+   },
+   {
+    "record": {
+     "series_id": 40826766847,
+     "title": "Oogui Ookami to wa Tsukiawanai!",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "You are Gluttony Wolf!"
+   },
+   {
+    "record": {
+     "series_id": 17437724264,
+     "title": "Bousou Honnou Melancholia",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Berserk Instinct Melancholia"
+   }
+  ]
+ }
+}

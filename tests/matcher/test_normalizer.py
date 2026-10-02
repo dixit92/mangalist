@@ -319,3 +319,70 @@ def test_normalize_unmatched_bracket_tag_is_not_part_of_the_title(name, primary)
 def test_normalize_english_title_survives_a_trailing_creator_group_but_not_a_release_tag():
     assert list(normalize("Some Words [Joined Hands] (Family Given)").variants) == ["Some Words", "Joined Hands"]
     assert list(normalize("Some Words [Joined Hands] (Digital)").variants) == ["Some Words"]
+
+
+# --- 1.27.0 / 1.30.0 (ported from MangaPixer 1.31.1 TitleNormalizerTests) ----------------------
+
+from manga_list.matcher.normalizer import contains_number, name_subtitle, subtitle_head, subtitle_tail  # noqa: E402
+
+
+@pytest.mark.parametrize(("title", "expected"), [
+    ("Alpha Beta Level 99 ~Long Subtitle Here~", ("99",)),
+    ("Alpha Beta Level 99~Long Subtitle Here~", ("99",)),
+    ("Alpha Beta 2 ~ Subtitle", ("2",)),
+])
+def test_number_tokens_a_tilde_break_with_or_without_a_space_ends_the_number(title, expected):
+    assert number_tokens(title) == expected
+
+
+def test_derived_variants_split_at_a_tilde_without_a_space_after_it():
+    derived = derived_variants("Alpha Beta Level 99 ~Long Subtitle Here~")
+    assert DerivedTitle("Alpha Beta Level 99", DerivedTitleKind.SUBTITLE_SPLIT) in derived
+
+
+@pytest.mark.parametrize(("title", "expected"), [
+    ("Some Title: Long Subtitle", "Some Title"),
+    ("Some Title:re", "Some Title"),
+    ("Some Title ~Long Subtitle~", "Some Title"),
+    ("Some Title~Long Subtitle~", "Some Title"),
+    ("Some Title - Long Subtitle", "Some Title"),
+    ("Some-Title Here", None),  # a hyphen inside a word is no break
+    ("Some Title", None),
+    ("Some Title ~", None),  # nothing after the break
+    ("99: Something", None),  # nothing with a letter before it
+])
+def test_subtitle_head_is_the_text_before_the_first_break(title, expected):
+    assert subtitle_head(title) == expected
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("Series Name - Side Story", "Side Story"),
+    ("Series Name: Side Story", "Side Story"),
+    ("Series Name ~Side Story~", "Side Story"),
+    ("Word - Side Story", None),  # one word before the dash: no subtitle split (as derived_variants)
+    ("Series Name", None),
+    ("Series-Name Words", None),  # an unspaced hyphen is part of the name
+])
+def test_name_subtitle_is_what_the_subtitle_split_cuts_off(name, expected):
+    assert name_subtitle(name) == expected
+
+
+@pytest.mark.parametrize(("title", "expected"), [
+    ("Series Name: Side Story", "Side Story"),
+    ("Series Name - Side Story", "Side Story"),
+    ("Series Name ~Side Story~", "Side Story"),
+    ("Word:Re", "Re"),
+    ("Series Name", None),
+])
+def test_subtitle_tail_is_the_text_after_the_first_break(title, expected):
+    assert subtitle_tail(title) == expected
+
+
+@pytest.mark.parametrize(("text", "number", "expected"), [
+    ("Alpha Level 99 ~Sub~", "99", True),
+    ("Alpha Level 099", "99", True),
+    ("Alpha 1999", "99", False),
+    ("Alpha Level", "99", False),
+])
+def test_contains_number_matches_whole_numbers_only(text, number, expected):
+    assert contains_number(text, number) == expected
