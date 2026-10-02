@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.0] - 2026-10-02
+
 - MangaUpdates matching follows MangaPixer's matcher up to 1.31.1 (was 1.26.1):
   - The volume / chapter count check compares the highest volume or chapter number in the file names,
     not the number of files. `.5` extras do not count, and neither do volume and chapter files mixed in
