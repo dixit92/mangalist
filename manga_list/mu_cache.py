@@ -87,7 +87,9 @@ _MIGRATIONS = [
 #   1 = legacy word-set Jaccard (before the stage-2 matcher)
 #   2 = stage-2 raw title score, MangaPixer 1.26.0 port (never released)
 #   3 = MangaPixer 1.26.1 port (a "Title: Subtitle" head match is capped at 0.80)
-MU_SCORE_VERSION = 3
+#   4 = MangaPixer 1.31.1 port (count by unit numbers and English totals, positive-only category hint,
+#       page-2 search, series-family veto / chip, author-tagged aliases; see CHANGELOG 2026.10.0)
+MU_SCORE_VERSION = 4
 
 
 def _connect() -> sqlite3.Connection:

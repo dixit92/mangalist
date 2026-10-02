@@ -45,11 +45,14 @@ Folder names may be `Title`, `English Title` or `Romanized Title [English Title]
 ## MangaUpdates matching
 
 **Check MU** uses `manga_list/matcher/`, a Python port of the
-[MangaPixer](https://github.com/dixit92/mangapixer) 1.26.1 matcher with the same rules and
+[MangaPixer](https://github.com/dixit92/mangapixer) 1.31.1 matcher with the same rules and
 thresholds. It first decides whether a folder is one work (a series, a series with `Volumes/` /
 `Chapters/` / `Season N/` subfolders, or a one-shot) and matches only those. It searches a few title
-variants, then scores candidates by title similarity (sequel numbers count) and local evidence: file
-counts, years, the category folder, and author names in brackets.
+variants (and a second results page on a tie), then scores candidates by title similarity (sequel
+numbers count) and local evidence: the highest volume / chapter numbers against the record's
+totals, years, the category folder, author names in brackets or after `by`, and related records
+(a spin-off named only by the folder's subtitle always needs review). MangaPixer's cover comparison
+and admin-declared types are not ported: Manga-List has neither covers nor declarations.
 
 The **MU Title** column shows the result:
 
