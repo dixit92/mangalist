@@ -1,9 +1,13 @@
-"""The stage-2 golden set (port of MangaPixer 1.26.0 ``GoldenCases.cs``).
+"""The stage-2 golden set (port of MangaPixer 1.31.1 ``GoldenCases.cs``, release commit ``858c7df``).
 
 One case = a synthetic folder (PUBLIC, well-known titles rendered as folder / archive names - never
 anything from a real library) and the expected detector class, band and chosen MangaUpdates id.
 ``group_title`` selects an archive group (archive-level cases); ``band`` None makes it a
 detector-only case. ``vetoes``, when set, is the exact set of auto-vetoing reasons of the top.
+
+Every MangaPixer case is here except the ones whose input Manga-List cannot have: the cover cases
+C01-C05 (a local cover thumbnail) and the declared-fact cases H01-H03, H06, H08-H10 (a type or creator an
+admin declared). H04 declares a creator no record has, which changes nothing, so it runs undeclared.
 """
 
 from __future__ import annotations
@@ -39,8 +43,14 @@ class GoldenCase:
 
 
 def F(name: str, archives: Iterable[str], category: Optional[str] = None, parent: Optional[str] = None,
-      subs: Sequence[Tuple[str, int]] = (), depth: int = 2) -> FolderShape:
-    return FolderShape(name, depth, tuple(archives), tuple(ChildFolderShape(n, c) for n, c in subs), parent, category)
+      subs: Sequence[Tuple[str, int]] = (), depth: int = 2, authors: Optional[Sequence[str]] = None) -> FolderShape:
+    return FolderShape(name, depth, tuple(archives), tuple(ChildFolderShape(n, c) for n, c in subs), parent, category,
+                       tuple(authors) if authors is not None else None)
+
+
+# The author names MangaPixer hands to the detector when records by them are linked in the library (1.28.0,
+# the provider-author half of the artist-folder rule). Spelled as MangaUpdates lists them.
+LINKED_AUTHORS = ("FUJIMOTO Tatsuki", "URASAWA Naoki", "OTOMO Katsuhiro")
 
 
 def Vols(title: str, n: int, suffix: str = "") -> list:
@@ -49,6 +59,10 @@ def Vols(title: str, n: int, suffix: str = "") -> list:
 
 def Chaps(title: str, n: int) -> list:
     return [f"{title} - Chapter {i:03d}.cbz" for i in range(1, n + 1)]
+
+
+def ChapTokens(title: str, n: int) -> list:
+    return [f"{title} Ch. {i:03d}.cbz" for i in range(1, n + 1)]
 
 
 def Units(n: int) -> list:
@@ -82,6 +96,13 @@ AKIRA = "46397795369"
 PUNPUN = "21944750964"
 FIRE_PUNCH = "32334361267"
 YOTSUBA_DJ_YANDA = "57918701059"
+TENSEI_KIZOKU = "46692009496"
+ISEKAI_CHEAT_SKILL = "15495823031"
+KINGDOM = "4324727424"
+BERSERK_OF_GLUTTONY_COMIC = "74072114866"
+JIGOKURAKU_2005 = "10294535868"
+ATTACK_ON_TITAN_BEFORE_THE_FALL = "28267595998"
+TONIKAKU_KAWAII = "37088343287"
 
 ARTIST_FOLDER = [
     "[Fujimoto Tatsuki] Look Back (2021) (Digital).cbz",
@@ -90,6 +111,16 @@ ARTIST_FOLDER = [
     "[Fujimoto Tatsuki] Fire Punch v02.cbz",
     "[Fujimoto Tatsuki] Fire Punch v03.cbz",
     "[Fujimoto Tatsuki] Berserk v01.cbz",
+]
+
+# The same works without the creator tag: by shape alone neither one work nor a collection (review only).
+UNTAGGED_ARTIST_FOLDER = [
+    "Look Back (2021) (Digital).cbz",
+    "Sayonara Eri (2022) (Digital).cbz",
+    "Fire Punch v01.cbz",
+    "Fire Punch v02.cbz",
+    "Fire Punch v03.cbz",
+    "Berserk v01.cbz",
 ]
 
 COLLECTION_LEAF = [
@@ -130,7 +161,9 @@ ALL: Tuple[GoldenCase, ...] = (
     G("F05 romaji, chapters (novel twins filtered)", F("Shingeki no Kyojin", Chaps("Shingeki no Kyojin", 139)), S, AUTO, ATTACK_ON_TITAN),
     G("F06 English name, volumes", F("Attack on Titan", Vols("Attack on Titan", 34)), S, AUTO, ATTACK_ON_TITAN),
     G("F07 manhwa under a Manhwa category", F("Solo Leveling", Units(200), "Manhwa"), S, AUTO, SOLO_LEVELING),
-    G("F08 manhwa under a Manga category: origin conflict -> review", F("Solo Leveling", Units(200), "Manga"), S, REVIEW, SOLO_LEVELING, vetoes=MatchReason.TYPE_CONFLICT),
+    # 1.27.0 band change (intended): the category hint is positive-only, so a manhwa filed under a "Manga"
+    # folder auto-links instead of going to review with a type conflict.
+    G("F08 manhwa under a Manga category: the hint is positive-only, still auto", F("Solo Leveling", Units(200), "Manga"), S, AUTO, SOLO_LEVELING, vetoes=MatchReason.NONE),
     G("F09 scene-style archive names", F("Vinland Saga", Vols("Vinland Saga", 12, " (2013) (Digital) (Scan Team)")), S, AUTO, VINLAND_SAGA),
     G("F10 meaningless folder name, ComicInfo series", F("Unsorted Batch", Vols("Vinland Saga", 5)), S, AUTO, VINLAND_SAGA, comic_info="Vinland Saga"),
     G("F11 long-running chapters", F("One Piece", Chaps("One Piece", 1100)), S, AUTO, ONE_PIECE),
@@ -184,7 +217,75 @@ ALL: Tuple[GoldenCase, ...] = (
       WorkClass.AMBIGUOUS, REVIEW, VINLAND_SAGA),
     G("A10 doujin anatomy: a lone archive of a 7-volume dj record links to it (one archive may hold the whole series)", F("Doujin Shelf", DOUJIN_SHELF_LONE), WorkClass.COLLECTION_LEAF,
       AUTO, YOTSUBA_DJ_YANDA, doujin_allowed=True, group_title="Yanda&", content=ContentSuggestion.DOUJINSHI_AND_ADULT_ONE_SHOTS),
-    G("A09 mixed folder: review only", F("Berserk", ["Berserk v01.cbz"], subs=[("Berserk Gaiden", 2)]), WorkClass.MIXED, REVIEW, BERSERK),
+    # A Mixed folder is planned the way MangaPixer's production plans it: a loose archive that is its own work
+    # is matched on its own (archive level); loose UNITS of one work keep the folder review-only.
+    G("A09 mixed folder: a loose archive that is its own work is matched on its own",
+      F("Berserk", ["Berserk v01.cbz"], subs=[("Berserk Gaiden", 2)]), WorkClass.MIXED, AUTO, BERSERK, group_title="Berserk"),
+    G("A09b mixed folder: loose units of one work keep the folder review-only",
+      F("Berserk", ["Berserk v01.cbz", "Berserk v02.cbz", "Berserk v03.cbz"], subs=[("Berserk Gaiden", 2)]), WorkClass.MIXED, REVIEW, BERSERK),
+
+    # --- 1.28.0: the provider-author half of the artist-folder rule ---------------------------
+    G("P01 provider-author artist folder, untagged names: one-shot", F("Fujimoto Tatsuki", UNTAGGED_ARTIST_FOLDER, authors=LINKED_AUTHORS),
+      WorkClass.ARTIST_COLLECTION, AUTO, LOOK_BACK, group_title="Look Back"),
+    G("P02 provider-author artist folder, untagged names: numbered volumes grouped", F("Fujimoto Tatsuki", UNTAGGED_ARTIST_FOLDER, authors=LINKED_AUTHORS),
+      WorkClass.ARTIST_COLLECTION, AUTO, FIRE_PUNCH, group_title="Fire Punch"),
+    G("P03 provider-author artist folder: a mis-filed volume, the author conflict alone vetoes auto", F("Fujimoto Tatsuki", UNTAGGED_ARTIST_FOLDER, authors=LINKED_AUTHORS),
+      WorkClass.ARTIST_COLLECTION, REVIEW, BERSERK, group_title="Berserk", vetoes=MatchReason.AUTHOR_CONFLICT),
+    G("P04 a series named like a linked author stays a series", F("Akira", Vols("Akira", 6), authors=("Akira",) + LINKED_AUTHORS),
+      S, AUTO, AKIRA),
+    G("P05 a one-archive folder named like a linked author stays a one-shot", F("Fujimoto Tatsuki", ["Look Back (2021) (Digital).cbz"], authors=LINKED_AUTHORS),
+      ONE),
+    G("P00 the untagged artist folder without a linked author: review only (the 1.27.0 class)", F("Fujimoto Tatsuki", UNTAGGED_ARTIST_FOLDER),
+      WorkClass.AMBIGUOUS),
+
+    # --- Same-titled records without a declaration (MangaPixer's declared-facts block) --------
+    # Three records titled "Jigokuraku" tie at 1.00; MangaPixer's H04 declares a creator no record has, so it
+    # runs here undeclared with the same result.
+    G("H04 a declared creator no candidate has changes nothing (the order stays)", F("Jigokuraku", Vols("Jigokuraku", 2)),
+      S, REVIEW, JIGOKURAKU_2005),
+    # A Japanese manga and a Korean webtoon share the exact title "Wind Breaker": undeclared, a tie for review.
+    G("H07 an origin tie on the title stays in review without a declaration", F("Wind Breaker", Chaps("Wind Breaker", 40)),
+      S, REVIEW),
+
+    # --- 1.30.0: a folder subtitle that is a spin-off's subtitle; an author-tagged alias -------
+    # The spin-off ranks first, but only the subtitle separates the two records of one series family: review.
+    G("S01 subtitle: the spin-off first, not the main series - for review", F("Shingeki no Kyojin - Before the Fall", Chaps("Shingeki no Kyojin - Before the Fall", 58)),
+      S, REVIEW, ATTACK_ON_TITAN_BEFORE_THE_FALL),
+    G("S02 subtitle with the English series name - for review", F("Attack on Titan - Before the Fall", Chaps("Attack on Titan - Before the Fall", 58)),
+      S, REVIEW, ATTACK_ON_TITAN_BEFORE_THE_FALL),
+    # The right record's main title is the original name; the search matches its English alias with
+    # MangaUpdates' author tag, which counts in full only once the record is fetched (one extra GET per work).
+    G("T01 author-tagged alias: the record is fetched and the tag verified", F("Fly Me to the Moon", Vols("Fly Me to the Moon", 20)),
+      S, REVIEW, TONIKAKU_KAWAII),
+
+    # --- 1.27.0: MangaPixer's live automatic-matching run, as PUBLIC lookalikes ----------------
+    G("L01 T: season-renumbered webtoon, chapter-token archives (latest chapter 235, status total 652)",
+      F("Tower of God", ChapTokens("Tower of God", 600), "Manhwa"), S, AUTO, TOWER_OF_GOD, vetoes=MatchReason.NONE),
+    G("L02 category hint positive-only: a webtoon under a Manga folder", F("Tower of God", Units(600), "Manga"),
+      S, AUTO, TOWER_OF_GOD, vetoes=MatchReason.NONE),
+    G("L03 count by number: six volumes plus six .5 extras", F("Akira", Vols("Akira", 6) + Vols("Akira", 6, ".5")),
+      S, AUTO, AKIRA, vetoes=MatchReason.NONE),
+    # The series and its spin-off are named "<Title> - <Subtitle>" / "<Title> ~Subtitle~"; the spin-off also
+    # lists the bare "<Title>" as an alias. Both are the shared head: review, the series first.
+    G("L04 V: tilde / dash subtitle heads, spin-off alias", F("Tensei Kizoku no Isekai Boukenroku", Vols("Tensei Kizoku no Isekai Boukenroku", 5)),
+      S, REVIEW, TENSEI_KIZOKU),
+    # The long record is on neither page 1 nor page 2 - unmatched, and no "close second" chip.
+    G("L05 R: the leading words of a long title", F("Isekai de Cheat Skill", Vols("Isekai de Cheat Skill", 3)), S, UNMATCHED,
+      vetoes=MatchReason.NONE),
+    # The archive title extends the folder name, so it is the second search; two related records share that
+    # whole name before their subtitles - review, the series first.
+    G("L06 R: the archives carry the whole long title", F("Isekai de Cheat Skill",
+      Vols("Isekai de Cheat Skill wo Te ni Shita Ore wa, Genjitsu Sekai wo mo Musou Suru", 5)), S, REVIEW, ISEKAI_CHEAT_SKILL),
+    G("L07 one-word title with many look-alike records", F("Kingdom", Vols("Kingdom", 70)), S, AUTO, KINGDOM),
+    # The webtoon record's alt "Berserk of Gluttony (Webtoon)" scored a false 1.00 once stripped (1.26.1: review).
+    G("L11 B trap: another record's alt title carries a (disambiguator)", F("Berserk of Gluttony", Vols("Berserk of Gluttony", 8)), S,
+      AUTO, BERSERK_OF_GLUTTONY_COMIC),
+    G("L12 English totals reach the count rule (IZE Press 13+2 volumes, five chapter platforms at 201)",
+      F("Solo Leveling", Vols("Solo Leveling", 15), "Manhwa"), S, AUTO, SOLO_LEVELING, vetoes=MatchReason.NONE),
+    G("L08 author before a plain dash", F("Urasawa Naoki - Monster", Vols("Monster", 18)), S, AUTO, MONSTER_URASAWA),
+    G("L09 author after \"by\" in a collection", F("Shelf", ["Look Back by Fujimoto Tatsuki.cbz", "Akira v01.cbz", "Oyasumi Punpun v01.cbz"]),
+      WorkClass.COLLECTION_LEAF, AUTO, LOOK_BACK, group_title="Look Back by Fujimoto Tatsuki"),
+    G("L10 trailing [Two Words] that is the author", F("Monster [Urasawa Naoki]", Vols("Monster", 18)), S, AUTO, MONSTER_URASAWA),
 
     # --- Detector only ---------------------------------------------------------------------
     G("D01 category container", F("Manga", [], depth=1, subs=[("Berserk", 41), ("Vinland Saga", 12), ("One Piece", 1100)]), WorkClass.COLLECTION_CONTAINER),

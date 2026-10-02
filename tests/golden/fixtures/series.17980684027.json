@@ -1,0 +1,58 @@
+{
+ "series_id": 17980684027,
+ "title": "Isekai Tensei no Boukensha",
+ "associated": [
+  {
+   "title": "Isekai Tensei no Bōkensha"
+  },
+  {
+   "title": "Isekai Tensei: Recruited to Another World"
+  },
+  {
+   "title": "异世界转生的冒险者"
+  },
+  {
+   "title": "異世界転生の冒険者"
+  },
+  {
+   "title": "이세계 전생 모험가"
+  }
+ ],
+ "type": "Manga",
+ "year": "2018",
+ "status": "14 Volumes (Ongoing)",
+ "latest_chapter": 12,
+ "authors": [
+  {
+   "name": "Kenichi",
+   "type": "Author"
+  },
+  {
+   "name": "Shiba no Bancha",
+   "type": "Artist"
+  }
+ ],
+ "related_series": [
+  {
+   "relation_type": "Adapted From",
+   "related_series_id": 77244739130
+  }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "J-Novel",
+   "type": "English",
+   "notes": "13 Digital Volumes; Ongoing"
+  },
+  {
+   "publisher_name": "Mag Garden",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "Yen Press",
+   "type": "English",
+   "notes": "7 Physical Volumes; Ongoing"
+  }
+ ]
+}

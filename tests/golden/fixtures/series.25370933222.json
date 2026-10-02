@@ -1,0 +1,51 @@
+{
+ "series_id": 25370933222,
+ "title": "Wind Breaker (NII Satoru)",
+ "associated": [
+  {
+   "title": "WIND BREAKER -윈드 브레이커-"
+  },
+  {
+   "title": "Windbreaker"
+  },
+  {
+   "title": "Ветролом"
+  },
+  {
+   "title": "ウィンドブレイカー"
+  }
+ ],
+ "type": "Manga",
+ "year": "2021",
+ "status": "26 Volumes (Ongoing)",
+ "latest_chapter": 32,
+ "authors": [
+  {
+   "name": "NII Satoru",
+   "type": "Author"
+  },
+  {
+   "name": "NII Satoru",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [],
+ "publishers": [
+  {
+   "publisher_name": "K Manga",
+   "type": "English",
+   "notes": "Simulpub"
+  },
+  {
+   "publisher_name": "Kodansha",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "Kodansha USA",
+   "type": "English",
+   "notes": "Digital - 25 Vols: Ongoing; Print - 21 Vols: Ongoing"
+  }
+ ]
+}

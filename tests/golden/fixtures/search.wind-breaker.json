@@ -1,0 +1,104 @@
+{
+ "query": "Wind Breaker",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 2055,
+  "results": [
+   {
+    "record": {
+     "series_id": 18602075756,
+     "title": "Wind Breaker",
+     "type": "Manhwa",
+     "year": "2013"
+    },
+    "hit_title": "Wind Breaker"
+   },
+   {
+    "record": {
+     "series_id": 29783367048,
+     "title": "Wind Heart Breaker",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Wind Heart Breaker"
+   },
+   {
+    "record": {
+     "series_id": 25370933222,
+     "title": "Wind Breaker (NII Satoru)",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Wind Breaker (NII Satoru)"
+   },
+   {
+    "record": {
+     "series_id": 1156699482,
+     "title": "Wild Wind",
+     "type": "Manga",
+     "year": "2010"
+    },
+    "hit_title": "Wild Wind"
+   },
+   {
+    "record": {
+     "series_id": 50997611698,
+     "title": "The Breaker",
+     "type": "Manhwa",
+     "year": "2007"
+    },
+    "hit_title": "Breaker"
+   },
+   {
+    "record": {
+     "series_id": 4201403420,
+     "title": "Chrome Breaker",
+     "type": "Manga",
+     "year": "2006"
+    },
+    "hit_title": "Chrome Breaker"
+   },
+   {
+    "record": {
+     "series_id": 314346001,
+     "title": "Circuit Breaker",
+     "type": "Manhwa",
+     "year": "2024"
+    },
+    "hit_title": "Circuit Breaker"
+   },
+   {
+    "record": {
+     "series_id": 20198005969,
+     "title": "Hatsujou Kisetsu",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Yakusoku Breaker"
+   },
+   {
+    "record": {
+     "series_id": 25495484288,
+     "title": "Stone Breaker",
+     "type": "Manhwa",
+     "year": "2025"
+    },
+    "hit_title": "Stone Breaker"
+   },
+   {
+    "record": {
+     "series_id": 4190403163,
+     "title": "Suicide Blocker",
+     "type": "Manhwa",
+     "year": "2016"
+    },
+    "hit_title": "Suicide Breaker"
+   }
+  ]
+ }
+}

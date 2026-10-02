@@ -1,7 +1,11 @@
-"""Small name helpers shared by the detector, planner and scorer (port of ``AutoMatchText.cs``)."""
+"""Small name helpers shared by the detector, planner and scorer (port of MangaPixer 1.31.1
+``AutoMatchText.cs``)."""
 
 from __future__ import annotations
 
+import unicodedata
+from dataclasses import dataclass
+from decimal import Decimal
 from typing import FrozenSet, Iterable, List, Optional, Tuple
 
 import regex
@@ -10,7 +14,9 @@ from ._text import (
     any_letter,
     any_letter_or_digit,
     contains_ignore_case,
+    eq_ignore_case,
     is_digit,
+    is_letter,
     is_null_or_whitespace,
     nfkc,
     split_nonempty,
@@ -18,6 +24,7 @@ from ._text import (
 from .anatomy import is_release_tag
 from .contracts import MetadataOrigin
 from .normalizer import archive_base_title, scoring_form, split_unmatched_bracket_tags
+from . import similarity
 
 _I = regex.IGNORECASE
 
@@ -42,14 +49,24 @@ _CHAPTER_TOKEN = regex.compile(
 # A trailing "(disambiguator)" of a provider title: "Look Back (FUJIMOTO Tatsuki)", "Beyond (GYARO)".
 _TRAILING_DISAMBIGUATOR = regex.compile(r"^(?P<head>.*\S)\s*\((?P<tag>[^()]{1,80})\)\s*$")
 
-# Words that name a category or a generic shelf, never a creator ("Manga" exists as an author name on
-# the provider side, so a naive author match needs this stop list).
-_CATEGORY_WORDS = frozenset({
+# Category folder words (1.27.0: the ONE category list): a folder named exactly one of these (whole name,
+# case-insensitive) is the category hint of the folders below it. manga / manhwa / manhua / webtoon(s)
+# also name an origin (origins_for_category); the hint only ever ADDS evidence.
+CATEGORY_FOLDER_WORDS: Tuple[str, ...] = (
     "manga", "manhwa", "manhua", "webtoon", "webtoons", "comic", "comics", "doujin", "doujinshi",
+)
+
+# Shelf words: generic sorting folders (status, format, "misc") that name no work and no creator. Never a
+# category hint; with CATEGORY_FOLDER_WORDS they form the creator stop list ("Manga" exists as an author
+# name on the provider side).
+SHELF_WORDS: Tuple[str, ...] = (
     "one shots", "oneshots", "one shot", "oneshot", "anthology", "anthologies", "magazine", "magazines",
     "ongoing", "completed", "complete", "finished", "misc", "other", "others", "various", "unsorted",
     "new", "read", "unread", "hentai", "adult", "artbook", "artbooks", "novel", "novels", "light novels",
-})
+)
+
+# Both subsets, compared by scoring form: a category or shelf word, never a creator.
+_CATEGORY_WORDS = frozenset(scoring_form(w) for w in CATEGORY_FOLDER_WORDS + SHELF_WORDS)
 
 
 def is_unit_folder_name(name: Optional[str]) -> bool:
@@ -72,8 +89,13 @@ def is_chapter_folder_name(name: Optional[str]) -> bool:
 
 
 def is_category_word(name: Optional[str]) -> bool:
-    """A category or generic shelf word ("Manga", "Ongoing", "Doujinshi")."""
+    """A category or generic shelf word ("Manga", "Ongoing", "Doujinshi"), by scoring form."""
     return scoring_form(name) in _CATEGORY_WORDS
+
+
+def is_category_folder_name(name: Optional[str]) -> bool:
+    """True when a folder name, whole and trimmed, is a category folder word (1.27.0)."""
+    return name is not None and contains_ignore_case(CATEGORY_FOLDER_WORDS, name.strip())
 
 
 def is_author_like(name: Optional[str], require_two_tokens: bool) -> bool:
@@ -118,7 +140,9 @@ def creator_hints(display_name: Optional[str]) -> Tuple[str, ...]:
     YACReader jump-bar convention, and ``Title [Family Given``). Years, release tags, unit markers and
     groups without letters are skipped; a name that is nothing but tags gives none. The scorer only
     uses a hint when a record's authors (or its ``(AUTHOR Name)`` disambiguator) name it - positive
-    evidence only. Plain separators (``Author - Title``) are not read."""
+    evidence only. Since 1.27.0 plain separators are read too, in either order: ``Title by Author``,
+    ``Title - Chapter | Author``, ``Author - Title`` (a name-like part of 1-4 words without digits next to
+    the separator; a subtitle that looks like a name costs nothing either)."""
     if is_null_or_whitespace(display_name):
         return ()
     rest = _ARCHIVE_EXTENSION.sub("", nfkc(display_name).strip()).strip()
@@ -148,7 +172,80 @@ def creator_hints(display_name: Optional[str]) -> Tuple[str, ...]:
     rest, leading, trailing = split_unmatched_bracket_tags(rest)
     add(leading)
     add(trailing)
+
+    # Plain separators, either order (1.27.0): "Title by Author", "Title - Chapter | Author", "Author - Title".
+    for part in _separator_name_parts(rest):
+        add(part)
     return tuple(hints) if any_letter(rest) else ()
+
+
+_PIPE_SEPARATOR = regex.compile(r"\s*\|\s*")
+_BY_SEPARATOR = regex.compile(r"\s+by\s+", _I)
+_DASH_SEPARATOR = regex.compile(r"\s+[-–—]\s+")
+
+
+def _is_name_like(text: Optional[str]) -> bool:
+    """A plausible creator name next to a plain separator: 1-4 words, letters, no digits, not a category word."""
+    t = text.strip() if text is not None else ""
+    return (bool(t) and any_letter(t) and not any(is_digit(c) for c in t)
+            and len(split_nonempty(t)) <= 4 and is_author_like(t, require_two_tokens=False)
+            and _VOLUME_TOKEN.search(t) is None and _CHAPTER_TOKEN.search(t) is None)
+
+
+def _separator_name_parts(rest: str) -> List[str]:
+    """The name-like parts next to a pipe, a " by " or a spaced dash (the text after them, or the dash's
+    first part)."""
+    parts: List[str] = []
+    pipe = _PIPE_SEPARATOR.split(rest)
+    for part in pipe[1:]:
+        if _is_name_like(part):
+            parts.append(part.strip())
+    head = pipe[0]
+    by = list(_BY_SEPARATOR.finditer(head))
+    if by:
+        after = head[by[-1].end():]
+        if _is_name_like(after):
+            parts.append(after.strip())
+    dash = _DASH_SEPARATOR.split(head)
+    if len(dash) >= 2:
+        if _is_name_like(dash[0]):
+            parts.append(dash[0].strip())
+        if _is_name_like(dash[-1]):
+            parts.append(dash[-1].strip())
+    return parts
+
+
+def creator_split_titles(display_name: Optional[str]) -> Tuple[str, ...]:
+    """The title part of a name whose author is written with a plain separator (1.27.0): the text before
+    `` | Author`` or `` by Author``, and the text after ``Author - `` (a name-like first part). Empty when
+    the name has none. Retrieval only (``QueryVariantKind.CREATOR_SPLIT``)."""
+    if is_null_or_whitespace(display_name):
+        return ()
+    rest = _ARCHIVE_EXTENSION.sub("", nfkc(display_name).strip()).strip()
+    rest = _bare(rest)
+    result: List[str] = []
+
+    def add(title: Optional[str]) -> None:
+        t = title.strip() if title is not None else ""
+        if t and sum(1 for c in t if is_letter(c)) >= 2 and not contains_ignore_case(result, t):
+            result.append(t)
+
+    pipe = _PIPE_SEPARATOR.split(rest)
+    if len(pipe) >= 2 and any(_is_name_like(p) for p in pipe[1:]):
+        add(pipe[0])
+    head = pipe[0]
+    by = list(_BY_SEPARATOR.finditer(head))
+    if by and _is_name_like(head[by[-1].end():]):
+        add(head[:by[-1].start()])
+    # "Author - Title" only when no other form named the author, the first part is a name of 2+ words, and
+    # real title text follows (not just "Chapter 012").
+    dash = _DASH_SEPARATOR.search(head)
+    if (not result and dash is not None and dash.start() > 0 and _is_name_like(head[:dash.start()])
+            and len(split_nonempty(head[:dash.start()])) >= 2):
+        after = _CHAPTER_TOKEN.sub(" ", _VOLUME_TOKEN.sub(" ", head[dash.end():]))
+        if sum(1 for c in after if is_letter(c)) >= 2:
+            add(head[dash.end():])
+    return tuple(result)
 
 
 def disambiguator_tag(title: Optional[str]) -> Optional[str]:
@@ -171,6 +268,64 @@ def without_disambiguator(title: Optional[str]) -> Optional[str]:
     if m and any_letter_or_digit(m.group("tag")) and any_letter_or_digit(m.group("head")):
         return m.group("head").strip()
     return None
+
+
+def is_person_tag(tag: Optional[str]) -> bool:
+    """A disambiguator that names a person the MangaUpdates way (1.30.0): at least two words, one of them an
+    upper-case family name (``HATA Kenjiro``, ``JO Yongseok``) - not a format or edition note (``Webtoon``,
+    ``Pre-serialization``, ``Novel``)."""
+    return (is_author_like(tag, require_two_tokens=True)
+            and any(len(w) >= 2 and all(unicodedata.category(c) == "Lu" for c in w)
+                    for w in split_nonempty(tag)))
+
+
+# Score factor of a title that matches only once its trailing "(disambiguator)" is removed and the tag is
+# not known to name the record's own author (1.29.0): MangaUpdates adds the author to every same-named
+# title ("Fly Me to the Moon (HATA Kenjiro)"), so the stripped alias is real evidence - but several works
+# share the name, so on its own it stays below every automatic-link threshold.
+DISAMBIGUATED_ALIAS_FACTOR = 0.88
+
+
+def disambiguated_aliases(other_titles: Iterable[Optional[str]],
+                          authors: Optional[Iterable[str]]) -> List[Tuple[str, float]]:
+    """The stripped forms of a record's OTHER titles (alternative titles, a search hit's matched title) that
+    carry a trailing ``(disambiguator)``, each with its score factor (1.29.0): 1 when the tag names one of
+    the record's ``authors``, else :data:`DISAMBIGUATED_ALIAS_FACTOR` - a tag that names someone else, or
+    authors not known yet (a search hit), never makes a clean 1.00."""
+    known = [a for a in (authors or ()) if not is_null_or_whitespace(a)]
+    result: List[Tuple[str, float]] = []
+    for title in other_titles:
+        bare = without_disambiguator(title)
+        tag = disambiguator_tag(title)
+        if bare is None or tag is None:
+            continue
+        factor = 1.0 if any(names_equal(a, tag) for a in known) else DISAMBIGUATED_ALIAS_FACTOR
+        i = next((k for k, r in enumerate(result) if eq_ignore_case(r[0], bare)), -1)
+        if i < 0:
+            result.append((bare, factor))
+        elif factor > result[i][1]:
+            result[i] = (bare, factor)
+    return result
+
+
+def best_title_score(queries: Iterable[str], main_title: Optional[str], other_titles: Iterable[Optional[str]],
+                     authors: Optional[Iterable[str]] = None) -> float:
+    """The best title similarity of a record for display ranking (1.29.0): its main and other titles as
+    written, the main title without its disambiguator, and the other titles' :func:`disambiguated_aliases`
+    with their factors."""
+    others = [t for t in other_titles if not is_null_or_whitespace(t)]
+    plain: List[str] = []
+    if not is_null_or_whitespace(main_title):
+        plain.append(main_title)
+    plain.extend(others)
+    stripped_main = without_disambiguator(main_title)
+    if stripped_main is not None:
+        plain.append(stripped_main)
+    query_list = list(queries)
+    result = similarity.best(query_list, plain)
+    for title, factor in disambiguated_aliases(others, authors):
+        result = max(result, factor * similarity.best(query_list, [title]))
+    return result
 
 
 def earliest_year(names: Iterable[Optional[str]]) -> Optional[int]:
@@ -199,6 +354,151 @@ def is_chapter_like(archive_name: Optional[str]) -> bool:
         return True
     return (_VOLUME_TOKEN.search(archive_name) is None and archive_base_title(archive_name) == ""
             and any(is_digit(c) for c in archive_name))
+
+
+# Unit numbers (1.27.0 count rule): the number after a volume / chapter token, the upper end of a range.
+_VOLUME_NUMBER = regex.compile(
+    r"(?<![\p{L}\p{N}])(?:v|vol|vols|volume|volumes)\.?\s*(?P<n>\d{1,4})(?:\.\d+)?"
+    r"(?:\s*-\s*(?P<m>\d{1,4})(?:\.\d+)?)?(?![\p{N}])", _I)
+_CHAPTER_NUMBER = regex.compile(
+    r"(?<![\p{L}\p{N}])(?:(?:ch|chap|chapter|chapters|ep|episode)\.?\s*|c|#\s*)(?P<n>\d{1,4})(?:\.\d+)?"
+    r"(?:\s*-\s*(?P<m>\d{1,4})(?:\.\d+)?)?(?![\p{N}])", _I)
+_LEADING_NUMBER = regex.compile(r"^\s*(?P<n>\d{1,4})(?:\.\d+)?(?![\p{N}])")
+
+
+def volume_number_of(archive_name: Optional[str]) -> Optional[int]:
+    """The highest volume number a volume-like archive name states (``Title v03`` -> 3, ``Vol. 01-05`` -> 5,
+    ``v02.5`` -> 2, so an extra never inflates it), or None."""
+    if archive_name is None or not is_volume_like(archive_name):
+        return None
+    return _highest_number(_VOLUME_NUMBER.finditer(archive_name))
+
+
+def chapter_number_of(archive_name: Optional[str]) -> Optional[int]:
+    """The highest chapter number a chapter-like archive name states (``Title - Chapter 012`` -> 12,
+    ``c045.5`` -> 45, ``001 [Chapter Title]`` -> 1), or None. A leading 19xx / 20xx is a year."""
+    if archive_name is None or not is_chapter_like(archive_name):
+        return None
+    n = _highest_number(_CHAPTER_NUMBER.finditer(archive_name))
+    if n is not None:
+        return n
+    return _leading_number(archive_name)
+
+
+def bare_number_of(archive_name: Optional[str]) -> Optional[int]:
+    """The bare leading number of a name without a volume / chapter token and without a title (``01.cbz``,
+    ``012 [Title]``) - the unit number of an archive inside a ``Volumes`` / ``Chapters`` subfolder - or None."""
+    if (archive_name is None or _VOLUME_TOKEN.search(archive_name) or _CHAPTER_TOKEN.search(archive_name)
+            or not is_chapter_like(archive_name)):
+        return None
+    return _leading_number(archive_name)
+
+
+def _leading_number(archive_name: str) -> Optional[int]:
+    bare = _bare(_ARCHIVE_EXTENSION.sub("", archive_name))
+    m = _LEADING_NUMBER.search(bare)
+    if m is None or _YEAR_ONLY.search(m.group("n")):
+        return None
+    return int(m.group("n"))
+
+
+def _highest_number(matches) -> Optional[int]:
+    best: Optional[int] = None
+    for m in matches:
+        value = int(m.group("m") if m.group("m") is not None else m.group("n"))
+        if best is None or value > best:
+            best = value
+    return best
+
+
+@dataclass(frozen=True)
+class UnitNumbers:
+    """The unit numbers one archive name states (1.29.0, :func:`units_of`): decimals kept (``c045.5`` ->
+    45.5), both numbers of a name that states both (``v03 c012``), a range as start / end (``Vol. 01-05`` ->
+    1 / 5; the end is None when the name states one number). ``is_extra``: the name's own unit is
+    fractional - the chapter when it states one, otherwise the volume. All None: no unit number."""
+
+    volume: Optional[Decimal] = None
+    volume_end: Optional[Decimal] = None
+    chapter: Optional[Decimal] = None
+    chapter_end: Optional[Decimal] = None
+    is_extra: bool = False
+
+    @property
+    def is_empty(self) -> bool:
+        return self.volume is None and self.chapter is None
+
+
+# Unit numbers v2 (1.29.0): decimals kept, a range as start / end (the end may repeat the token: "v01-v05").
+# <t> is the token, so a bracketed single-letter token ("[v2]", a release revision) can be told apart.
+_VOLUME_UNIT = regex.compile(
+    r"(?<![\p{L}\p{N}])(?P<t>volumes|volume|vols|vol|v)\.?\s*(?P<n>\d{1,4}(?:\.\d{1,2})?)"
+    r"(?:\s*-\s*(?:(?:volumes|volume|vols|vol|v)\.?\s*)?(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])", _I)
+_CHAPTER_UNIT = regex.compile(
+    r"(?<![\p{L}\p{N}])(?:(?P<t>chapters|chapter|chap|ch|episode|ep)\.?\s*|(?P<t>c)|(?P<t>#)\s*)"
+    r"(?P<n>\d{1,4}(?:\.\d{1,2})?)(?:\s*-\s*(?:(?:chapters|chapter|chap|ch|episode|ep)\.?\s*|c|#\s*)?"
+    r"(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])", _I)
+_LEADING_UNIT = regex.compile(r"^\s*(?P<n>\d{1,4}(?:\.\d{1,2})?)(?:\s*-\s*(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])")
+
+
+def units_of(archive_name: Optional[str]) -> UnitNumbers:
+    """Every unit number an archive name states (1.29.0): ``Title v03 c012`` -> volume 3, chapter 12;
+    ``c045.5`` -> chapter 45.5, an extra; ``Vol. 01-05`` -> volumes 1 to 5; ``001 [Chapter Title]`` ->
+    chapter 1 (a bare leading number of a name without a title; a leading 19xx / 20xx is a year). Tokens
+    inside brackets are read only when the rest of the name states none, and then never a single-letter
+    token (``[v2]`` is a release revision). A range whose end is a year is one number."""
+    if is_null_or_whitespace(archive_name):
+        return UnitNumbers()
+    name = _ARCHIVE_EXTENSION.sub("", nfkc(archive_name).strip())
+    outside = _bare(name)
+
+    volume = _range_of(_VOLUME_UNIT.finditer(outside), allow_short_token=True)
+    chapter = _range_of(_chapter_units(outside, volume is not None), allow_short_token=True)
+    if volume is None and chapter is None:
+        # Only brackets name a unit ("Title (Vol. 3)"); a single letter there is a revision, not a unit.
+        volume = _range_of(_VOLUME_UNIT.finditer(name), allow_short_token=False)
+        chapter = _range_of(_chapter_units(name, volume is not None), allow_short_token=False)
+    if volume is None and chapter is None and is_chapter_like(archive_name):
+        lead = _LEADING_UNIT.search(outside)
+        if lead is not None and not _YEAR_ONLY.search(lead.group("n")):
+            chapter = _range_of([lead], allow_short_token=True)
+
+    if chapter is not None:
+        extra = chapter[0] != chapter[0].to_integral_value(rounding="ROUND_DOWN")
+    else:
+        extra = volume is not None and volume[0] != volume[0].to_integral_value(rounding="ROUND_DOWN")
+    return UnitNumbers(volume[0] if volume else None, volume[1] if volume else None,
+                       chapter[0] if chapter else None, chapter[1] if chapter else None, extra)
+
+
+def _chapter_units(text: str, states_volume: bool) -> List:
+    """The chapter tokens of a name (1.31.1): "Episode N" / "Ep N" next to a VOLUME token names a part or arc
+    of the series, not a chapter (each arc's volumes restart at 1), so it is not read as a chapter there;
+    without a volume token it stays a chapter (webtoons: ``Episode 45``)."""
+    return [m for m in _CHAPTER_UNIT.finditer(text)
+            if not (states_volume and (m.group("t") or "").lower().startswith("ep"))]
+
+
+def _range_of(matches: Iterable, allow_short_token: bool) -> Optional[Tuple[Decimal, Optional[Decimal]]]:
+    """The lowest start and the highest end over the matches; the end is None when it is not above the start."""
+    start: Optional[Decimal] = None
+    end: Optional[Decimal] = None
+    for m in matches:
+        token = m.groupdict().get("t")
+        if not allow_short_token and token is not None and len(token) == 1:
+            continue
+        n = Decimal(m.group("n"))
+        high = n
+        if m.group("m") is not None:
+            e = Decimal(m.group("m"))
+            # "Title v03 - 2019": a year, not the end of a range.
+            if e > n and not (n < 1900 and _YEAR_ONLY.search(m.group("m"))):
+                high = e
+        start = n if start is None else min(start, n)
+        end = high if end is None else max(end, high)
+    if start is None:
+        return None
+    return start, (end if end is not None and end > start else None)
 
 
 _JAPAN = frozenset({MetadataOrigin.Japan})

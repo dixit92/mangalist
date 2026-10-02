@@ -1,4 +1,4 @@
-"""The stage-2 matcher contract (port of MangaPixer 1.26.1 ``AutoMatchContracts.cs``).
+"""The stage-2 matcher contract (port of MangaPixer 1.31.1 ``AutoMatchContracts.cs``).
 
 Rules carried over unchanged (MangaPixer owner decisions, 2026-09-26): only folders the detector
 classes as series-like are matched at folder level; archive-level matching only inside collection
@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
+
+if TYPE_CHECKING:
+    from .count_evidence import LocalUnitCounts
 
 
 class WorkClass(IntEnum):
@@ -26,7 +29,7 @@ class WorkClass(IntEnum):
     FRANCHISE_CONTAINER = 6  # >= 2 related non-unit subfolders: its children are the candidates
     COLLECTION_CONTAINER = 7  # >= 2 unrelated non-unit subfolders: children are candidates
     WRAPPER = 8              # exactly one non-unit subfolder and no archives
-    MIXED = 9                # one non-unit subfolder plus loose archives: review only, never auto
+    MIXED = 9                # one non-unit subfolder plus loose archives (MangaPixer matches loose works one by one)
     UNIT_SUB = 10            # a unit subfolder below a series: inherits, never a candidate
     AMBIGUOUS = 11           # neither a clear series nor a clear collection: review only
 
@@ -35,7 +38,7 @@ class MatchLevel(IntEnum):
     NONE = 0         # not matched (containers, wrappers, unit subfolders, exclusions)
     FOLDER = 1       # the folder itself is the work
     ARCHIVE = 2      # each archive (or numbered archive group) is its own work
-    REVIEW_ONLY = 3  # may be matched but never auto-linked (Mixed, Ambiguous)
+    REVIEW_ONLY = 3  # may be matched but never auto-linked (Ambiguous; Mixed whose loose archives are units of one work)
 
 
 class ContentSuggestion(IntEnum):
@@ -53,6 +56,10 @@ class QueryVariantKind(IntEnum):
     SEQUEL_NUMBER_SPLIT = 4
     ARCHIVE_DERIVED_TITLE = 5
     DOUJIN_PARODY_FORM = 6
+    # 1.27.0: the title part of a name that also carries a plain-separator author ("Title by Author",
+    # "Title - Chapter | Author", "Author - Title"). Retrieval only: it scores at most the review-only cap
+    # unless a creator hint names one of the record's authors.
+    CREATOR_SPLIT = 7
 
 
 class MetadataOrigin(IntEnum):
@@ -101,6 +108,19 @@ class MatchReason(IntFlag):
     AUTHOR_CONFLICT = 1 << 6
     NUMBER_MISMATCH = 1 << 7
     REVIEW_ONLY_CLASS = 1 << 8
+    # The flags below keep the reference's bit values. Manga-List's scorer raises only SUBTITLE_FAMILY and
+    # SERIES_FAMILY of them; the others need MangaPixer-only inputs (cover images, admin-declared facts,
+    # stored volume data) and are listed so a stored reason name always means the same in both projects.
+    COVER_MATCH = 1 << 9              # 1.28.0: the candidate's cover equals the local cover (positive)
+    DECLARED_TYPE_AGREE = 1 << 10     # 1.30.0: the record fits the folder's declared type (positive)
+    DECLARED_TYPE_MISMATCH = 1 << 11  # 1.30.0: the record contradicts the declared type (never a veto)
+    REACH_CONFLICT = 1 << 12          # 1.30.0: after linking, the folder goes far past the record
+    # 1.30.0: only the folder name's subtitle decides between the top record and one of its series family
+    # (a main series vs its spin-off). A veto: the work goes to review.
+    SUBTITLE_FAMILY = 1 << 13
+    # 1.30.0: another candidate at the review floor is the top's series family. Informational, never a veto.
+    SERIES_FAMILY = 1 << 14
+    COVER_DIFFERS = 1 << 15           # 1.31.0: after linking, the local volume covers differ from the record's
 
 
 # .NET names of the reason flags, used for reports that must read like the reference's.
@@ -114,6 +134,13 @@ REASON_NAMES = {
     MatchReason.AUTHOR_CONFLICT: "AuthorConflict",
     MatchReason.NUMBER_MISMATCH: "NumberMismatch",
     MatchReason.REVIEW_ONLY_CLASS: "ReviewOnlyClass",
+    MatchReason.COVER_MATCH: "CoverMatch",
+    MatchReason.DECLARED_TYPE_AGREE: "DeclaredTypeAgree",
+    MatchReason.DECLARED_TYPE_MISMATCH: "DeclaredTypeMismatch",
+    MatchReason.REACH_CONFLICT: "ReachConflict",
+    MatchReason.SUBTITLE_FAMILY: "SubtitleFamily",
+    MatchReason.SERIES_FAMILY: "SeriesFamily",
+    MatchReason.COVER_DIFFERS: "CoverDiffers",
 }
 
 
@@ -130,8 +157,13 @@ def reasons_text(reasons: MatchReason) -> str:
 
 @dataclass(frozen=True)
 class ChildFolderShape:
+    """A direct subfolder. ``archive_names`` (optional, 1.29.0): the display names of the archives below a
+    UNIT subfolder, so the count rule reads their unit numbers (``count_evidence.local_of``); None for other
+    subfolders."""
+
     display_name: str
     descendant_archive_count: int
+    archive_names: Optional[Tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -140,7 +172,9 @@ class FolderShape:
 
     ``depth``: 0 = the library root, its direct children 1. ``category_hint``: the nearest ancestor
     named like a category ("Manga", "Manhwa"). ``known_author_names``: provider author names the
-    caller already holds; a folder named like one of them is an artist collection.
+    caller already holds locally (MangaPixer passes the creators of records linked in the library, 1.28.0);
+    a leaf of two or more archives named like one of them, whose shape is not one series, is an artist
+    collection.
     """
 
     display_name: str
@@ -177,7 +211,13 @@ class QueryVariant:
 
 @dataclass(frozen=True)
 class MatchContext:
-    """Local signals used to corroborate candidates (never sent anywhere)."""
+    """Local signals used to corroborate candidates (never sent anywhere).
+
+    ``local_volumes`` / ``local_chapters`` (1.27.0): the highest unit number the archive names state (the
+    count rule compares numbers, not file counts). ``units`` (1.29.0): the count rule's local side
+    (``count_evidence.local_of``); when None the rule reads the fields above. MangaPixer's ``CoverMatches``
+    and ``DeclaredType`` are not ported (no cover images, no declared facts in Manga-List).
+    """
 
     cls: WorkClass
     archive_count: int
@@ -191,6 +231,9 @@ class MatchContext:
     # 1.26.1: names from [...] / (...) groups of the folder or archive name that may be an author;
     # positive evidence only - unlike author_tags they never veto.
     creator_hints: Tuple[str, ...] = ()
+    local_volumes: Optional[int] = None
+    local_chapters: Optional[int] = None
+    units: Optional["LocalUnitCounts"] = None
 
 
 @dataclass(frozen=True)
@@ -213,7 +256,9 @@ class MatchCandidate:
 
     ``origin`` accepts a provider type ("Manga", "Manhwa", "Manhua", "OEL") or a ``MetadataOrigin``
     name. ``total_chapters``: the stated chapter total (MangaUpdates status "652 Chapters"); the
-    count rule compares chapters with the larger of it and ``latest_chapter``.
+    count rule compares chapters with the larger of it and ``latest_chapter``. ``english_volumes`` /
+    ``english_chapters`` (1.27.0): the English publisher's totals (``publishers[].notes``); the count rule
+    reads the largest published number of any source.
     """
 
     provider: str
@@ -229,6 +274,8 @@ class MatchCandidate:
     relations: Tuple[CandidateRelation, ...] = ()
     webtoon: Optional[bool] = None
     total_chapters: Optional[int] = None
+    english_volumes: Optional[int] = None
+    english_chapters: Optional[int] = None
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,104 @@
+{
+ "query": "Attack on Titan - Before the Fall",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 28267595998,
+     "title": "Shingeki no Kyojin - Before the Fall",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Attack on Titan: Before the Fall"
+   },
+   {
+    "record": {
+     "series_id": 17626521035,
+     "title": "Sungeki no Kyojin",
+     "type": "Manga",
+     "year": "2013"
+    },
+    "hit_title": "Attack on Titan - Short Play on Titan"
+   },
+   {
+    "record": {
+     "series_id": 25409301309,
+     "title": "Attack on Titan Anthology",
+     "type": "OEL",
+     "year": "2016"
+    },
+    "hit_title": "The Attack Titan Anthology"
+   },
+   {
+    "record": {
+     "series_id": 39404417014,
+     "title": "Attack On",
+     "type": "Manga",
+     "year": "1996"
+    },
+    "hit_title": "Attack On"
+   },
+   {
+    "record": {
+     "series_id": 49933699035,
+     "title": "Shingeki no Eroko-san: Hen na Oneesan wa Danshi Kousei to Nakayoku Naritai",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Eroko-san on the Attack"
+   },
+   {
+    "record": {
+     "series_id": 2205411467,
+     "title": "Stars and Dawn",
+     "type": "Manhua",
+     "year": "2019"
+    },
+    "hit_title": "Before Stars Fall"
+   },
+   {
+    "record": {
+     "series_id": 23393951235,
+     "title": "Shingeki no Kyojin",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Attack on Titan"
+   },
+   {
+    "record": {
+     "series_id": 28259384115,
+     "title": "Bougyaku no Kokekko",
+     "type": "Manga",
+     "year": "2017"
+    },
+    "hit_title": "Attack on Cocks"
+   },
+   {
+    "record": {
+     "series_id": 4444652968,
+     "title": "Otome, Sakazu ni Chiru na Kare.",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Don't Fall Before Bloom"
+   },
+   {
+    "record": {
+     "series_id": 76604664566,
+     "title": "Shingeki! Kyojin Chuugakkou",
+     "type": "Manga",
+     "year": "2012"
+    },
+    "hit_title": "Attack on Titan: Junior High"
+   }
+  ]
+ }
+}

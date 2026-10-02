@@ -1,0 +1,68 @@
+{
+ "series_id": 28267595998,
+ "title": "Shingeki no Kyojin - Before the Fall",
+ "associated": [
+  {
+   "title": "Atak Tytanów - Before the Fall (Polish)"
+  },
+  {
+   "title": "Ataque dos Titãs: Antes da queda"
+  },
+  {
+   "title": "Attack on Titan: Before the Fall"
+  },
+  {
+   "title": "Shingeki no Kyojin: Before the Fall"
+  },
+  {
+   "title": "Titana Saldırı: Çöküşten Önce"
+  },
+  {
+   "title": "ผ่าพิภพไททัน Before the fall (VBK)"
+  },
+  {
+   "title": "進撃の巨人 Before the fall"
+  }
+ ],
+ "type": "Manga",
+ "year": "2013",
+ "status": "17 Volumes (Complete)",
+ "latest_chapter": 4,
+ "authors": [
+  {
+   "name": "ISAYAMA Hajime",
+   "type": "Author"
+  },
+  {
+   "name": "SUZUKAZE Ryo",
+   "type": "Author"
+  },
+  {
+   "name": "SHIKI Satoshi",
+   "type": "Artist"
+  }
+ ],
+ "categories": [],
+ "related_series": [
+  {
+   "relation_type": "Adapted From",
+   "related_series_id": 53755792111
+  },
+  {
+   "relation_type": "Sequel",
+   "related_series_id": 23393951235
+  }
+ ],
+ "publishers": [
+  {
+   "publisher_name": "Kodansha",
+   "type": "Original",
+   "notes": ""
+  },
+  {
+   "publisher_name": "Kodansha USA",
+   "type": "English",
+   "notes": "17 Volumes; Complete"
+  }
+ ]
+}

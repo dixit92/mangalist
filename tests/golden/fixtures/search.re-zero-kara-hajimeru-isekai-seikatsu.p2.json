@@ -1,0 +1,105 @@
+{
+ "query": "Re Zero kara Hajimeru Isekai Seikatsu",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 10000,
+  "results": [
+   {
+    "record": {
+     "series_id": 8438280504,
+     "title": "0-Nichi Kara Hajimeru Dekiai Fuufu Seikatsu",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "0-Nichi Kara Hajimeru Dekiai Fuufu Seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 8939378028,
+     "title": "Elf Yome to Hajimeru Isekai Ryoushu Seikatsu",
+     "type": "Manga",
+     "year": "2016"
+    },
+    "hit_title": "Elf Yome to Hajimeru Isekai Ryoushu Seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 24798547010,
+     "title": "Zero kara Hajimeru Mahou no Sho Nano!",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Zero kara Hajimeru Mahou no Sho Nano!"
+   },
+   {
+    "record": {
+     "series_id": 66896025140,
+     "title": "Re:Zero kara Hajimeru Isekai Seikatsu - Dainishou - Yashiki no Isshuukan Hen",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Re:Zero kara Hajimeru Isekai Seikatsu - Dainishou - Yashiki no Isshuukan Hen"
+   },
+   {
+    "record": {
+     "series_id": 32146797012,
+     "title": "0 kara Hajimeru Manga Kyoushitsu",
+     "type": "Manga",
+     "year": "2009"
+    },
+    "hit_title": "Zero kara Hajimeru Manga"
+   },
+   {
+    "record": {
+     "series_id": 70719156246,
+     "title": "Re:Zero kara Hajimeru Isekai Seikatsu - Daiyonshou - Seiiki to Gouyoku no Majou",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Re:Zero kara Hajimeru Isekai Seikatsu - Daiyonshou - Seiiki to Gouyoku no Majou"
+   },
+   {
+    "record": {
+     "series_id": 11106634916,
+     "title": "Re:Zero kara Hajimeru Isekai Seikatsu - Daiisshou - Outo no Ichinichi Hen",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Re:Zero kara Hajimeru Isekai Seikatsu - Daiisshou - Outo no Ichinichi Hen"
+   },
+   {
+    "record": {
+     "series_id": 2685264483,
+     "title": "Metsubou Kokka no Yarinaoshi: Kyou kara Hajimeru Gunshi Seikatsu",
+     "type": "Manga",
+     "year": "2025"
+    },
+    "hit_title": "Metsubou Kokka no Yarinaoshi: Kyou kara Hajimeru Gunshi Seikatsu"
+   },
+   {
+    "record": {
+     "series_id": 71683565640,
+     "title": "Re:Zero kara Hajimeru Isekai Seikatsu - Daigoshou - Mizu no Miyako to Eiyuu no Uta",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Re:Zero kara Hajimeru Isekai Seikatsu - Daigoshou - Mizu no Miyako to Eiyuu no Uta"
+   },
+   {
+    "record": {
+     "series_id": 37900366161,
+     "title": "Dousei kara Hajimeru Dekamara Seikatsu ~Oide yo! Yarimokujima e~",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Dousei kara Hajimeru Dekamara Seikatsu ~Oide yo! Yarimokujima e~"
+   }
+  ]
+ }
+}

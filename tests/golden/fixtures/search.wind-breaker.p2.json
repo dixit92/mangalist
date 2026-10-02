@@ -1,0 +1,105 @@
+{
+ "query": "Wind Breaker",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 2055,
+  "results": [
+   {
+    "record": {
+     "series_id": 27272704190,
+     "title": "Aribai Kuzushi Uketamawarimasu",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Alibi Breaker"
+   },
+   {
+    "record": {
+     "series_id": 36295222942,
+     "title": "Breaker.Drawing",
+     "type": "Manhwa",
+     "year": "2020"
+    },
+    "hit_title": "Breaker Drawing"
+   },
+   {
+    "record": {
+     "series_id": 14341876845,
+     "title": "Couple Breaker",
+     "type": "Manhwa",
+     "year": "2023"
+    },
+    "hit_title": "Couple Breaker"
+   },
+   {
+    "record": {
+     "series_id": 39225961890,
+     "title": "Medal Breaker",
+     "type": "Manhwa",
+     "year": "2016"
+    },
+    "hit_title": "Medal Breaker"
+   },
+   {
+    "record": {
+     "series_id": 46010549479,
+     "title": "Real World Mobile",
+     "type": "Manhwa",
+     "year": "2021"
+    },
+    "hit_title": "Balance Breaker"
+   },
+   {
+    "record": {
+     "series_id": 14678799134,
+     "title": "Defense Breaker",
+     "type": "Manhwa",
+     "year": "2025"
+    },
+    "hit_title": "Defense Breaker"
+   },
+   {
+    "record": {
+     "series_id": 3796218942,
+     "title": "Doom Breaker",
+     "type": "Manhwa",
+     "year": "2021"
+    },
+    "hit_title": "Doom Breaker"
+   },
+   {
+    "record": {
+     "series_id": 20731651404,
+     "title": "Dream Breaker",
+     "type": "Manhua",
+     "year": "2017"
+    },
+    "hit_title": "Dream Breaker"
+   },
+   {
+    "record": {
+     "series_id": 50760714276,
+     "title": "Megane Breaker",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Megane Breaker"
+   },
+   {
+    "record": {
+     "series_id": 2548235858,
+     "title": "Sword Breaker",
+     "type": "Manga",
+     "year": "2002"
+    },
+    "hit_title": "Sword Breaker"
+   }
+  ]
+ }
+}

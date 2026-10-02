@@ -1,4 +1,4 @@
-"""The work detector (port of MangaPixer 1.26.1 ``WorkDetector.cs``).
+"""The work detector (port of MangaPixer 1.31.1 ``WorkDetector.cs``).
 
 Classifies a folder from its shape alone - display names and counts, no IO - so only folders that
 ARE one work are matched at folder level, collections are matched archive by archive (numbered
@@ -12,11 +12,14 @@ Order of the rules:
    least half related to the parent's name, or ``Part N - subtitle`` children) or a collection
    container; exactly one makes a wrapper (no archives) or ``MIXED``; only unit subfolders make
    ``SERIES_WITH_UNITS``.
-3. A leaf named like the creator its archives carry is an ``ARTIST_COLLECTION``.
+3. A leaf named like the creator its archives carry (the dominant ``[circle (artist)]`` tag) is an
+   ``ARTIST_COLLECTION``.
 4. One archive is a ``ONE_SHOT``.
 5. The E6 discriminator on archive base titles: unit-named share >= 0.8, or one base title >= 80%,
    or >= 60% of the titled archives matching the folder -> ``SERIES``; distinct-base ratio >= 0.6
    with no base at 50% or more -> ``COLLECTION_LEAF``; otherwise ``AMBIGUOUS`` (review only).
+6. A leaf of two or more archives that the discriminator did NOT call a series and whose name equals a
+   caller-supplied provider author (``FolderShape.known_author_names``) is an ``ARTIST_COLLECTION`` (1.28.0).
 
 Reasons never contain names (counts and shares only), so they are safe to log.
 """
@@ -107,7 +110,14 @@ def classify(folder: FolderShape) -> WorkClassification:
     if len(archives) == 1:
         return _result(WorkClass.ONE_SHOT, MatchLevel.FOLDER, ["exactly one archive"], content=content)
 
-    return _classify_leaf(folder, archives, content)
+    leaf = _classify_leaf(folder, archives, content)
+    # The provider-author half (1.28.0): only a leaf that is NOT one series by its own shape, so a series
+    # folder named like a linked record's author stays a series.
+    if leaf.cls != WorkClass.SERIES and _is_provider_author_folder(folder):
+        return _result(WorkClass.ARTIST_COLLECTION, MatchLevel.ARCHIVE,
+                       ["folder name equals the author of a series linked in this library; " + "; ".join(leaf.reasons)],
+                       group_archives(archives), content)
+    return leaf
 
 
 def _classify_container(folder: FolderShape, work_subs: List[ChildFolderShape], archives: Sequence[str],
@@ -210,22 +220,31 @@ def _classify_leaf(folder: FolderShape, archives: Sequence[str], content: Conten
 
 
 def _artist_folder_reason(folder: FolderShape, anatomies: List[_anatomy.ArchiveNameAnatomy]) -> Optional[str]:
-    """The reason when the folder name equals a caller-supplied provider author, or the creator tag
-    most archives carry in at least half of them; None otherwise. An unbracketed ``Name - Title``
-    prefix is deliberately NOT a creator tag (indistinguishable from ``Title - Chapter 001``)."""
+    """The reason when the creator tag most archives carry equals the folder name in at least half of
+    them; None otherwise. An unbracketed ``Name - Title`` prefix is deliberately NOT a creator tag
+    (indistinguishable from ``Title - Chapter 001``; a provider author can tell, see
+    :func:`_is_provider_author_folder`)."""
     folder_name = normalize(folder.display_name).primary
     if not folder_name or amt.is_category_word(folder_name):
         return None
-
-    known = folder.known_author_names
-    if known and any(amt.is_author_like(a, require_two_tokens=False) and amt.names_equal(a, folder_name)
-                     for a in known):
-        return "folder name equals a provider author name"
 
     carrying = sum(1 for a in anatomies if any(amt.names_equal(t, folder_name) for t in a.creator_tags))
     if carrying > 0 and carrying / len(anatomies) >= ARTIST_TAG_SHARE:
         return f"folder name equals the creator tag of {carrying} of {len(anatomies)} archives"
     return None
+
+
+def _is_provider_author_folder(folder: FolderShape) -> bool:
+    """The provider-author half of the artist rule (wired in MangaPixer 1.28.0): the folder's whole clean
+    name equals (:func:`amt.names_equal`) an author the caller already holds locally
+    (``FolderShape.known_author_names``) - nothing is sent."""
+    known = folder.known_author_names
+    if not known:
+        return False
+    folder_name = normalize(folder.display_name).primary
+    if not folder_name or amt.is_category_word(folder_name) or not amt.is_author_like(folder_name, require_two_tokens=False):
+        return False
+    return any(amt.is_author_like(a, require_two_tokens=False) and amt.names_equal(a, folder_name) for a in known)
 
 
 def group_archives(archives: Sequence[str]) -> Tuple[ArchiveGroup, ...]:

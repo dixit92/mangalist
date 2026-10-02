@@ -7,7 +7,9 @@ from typing import Optional, Sequence, Tuple
 
 import pytest
 
-from manga_list.matcher import detector, planner, scorer
+from manga_list.matcher import auto_match_text as amt
+from manga_list.matcher import detector, planner, scorer, similarity
+from manga_list.matcher.count_evidence import LocalUnitCounts
 from manga_list.matcher.contracts import (
     DEFAULT_THRESHOLDS,
     CandidateRelation,
@@ -119,8 +121,38 @@ def test_category_origin_breaks_a_tie_but_never_lifts_the_raw_score():
 
     assert o.ranked[0].candidate.external_id == "kr"
     assert round(o.ranked[0].title_score, 6) == round(1.0, 6)
-    assert o.ranked[1].reasons & MatchReason.TYPE_CONFLICT
-    assert o.band == MatchBand.AUTO  # 1.02 vs 0.90: lead 0.12
+    # Positive-only (1.27.0, owner option a'): the other origin is neutral, so the lead is only the +0.02.
+    assert not (o.ranked[1].reasons & MatchReason.TYPE_CONFLICT)
+    assert o.band == MatchBand.NEEDS_REVIEW
+
+
+def test_category_origin_mismatch_is_neutral_no_penalty_and_no_veto():
+    # A manhwa filed under a "Manga" folder still auto-links (live run, owner option a').
+    o = score(query(["Some Series"], category="Manga"), rec("kr", "Some Series", origin="Manhwa", webtoon=True))
+
+    assert o.band == MatchBand.AUTO
+    assert o.ranked[0].reasons == MatchReason.NONE
+    assert o.ranked[0].adjusted_score == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("Manga", True),
+    (" manhwa ", True),
+    ("WEBTOONS", True),
+    ("Manga Collection", False),  # whole name only
+    ("Ongoing", False),  # a shelf word is never a category hint
+    (None, False),
+])
+def test_category_folder_name_is_the_exact_whole_name(name, expected):
+    assert amt.is_category_folder_name(name) == expected
+
+
+def test_category_and_shelf_words_are_one_stop_list_for_creator_names():
+    assert amt.is_category_word("Manhwa")
+    assert amt.is_category_word("Light Novels")
+    assert not amt.is_author_like("Manga", require_two_tokens=False)
+    assert not amt.is_author_like("Light Novels", require_two_tokens=True)
+    assert not {w.lower() for w in amt.CATEGORY_FOLDER_WORDS} & {w.lower() for w in amt.SHELF_WORDS}
 
 
 def test_origin_name_of_the_enum_is_accepted_too():
@@ -129,11 +161,20 @@ def test_origin_name_of_the_enum_is_accepted_too():
     assert not (o.ranked[0].reasons & MatchReason.TYPE_CONFLICT)
 
 
-def test_tall_strips_conflict_with_a_print_record():
+def test_tall_strips_are_a_hint_only_a_print_record_is_not_a_conflict():
+    # Owner, 1.27.0 review: Japanese vertical manga exist - tall pages favour webtoon records but never block.
     o = score(query(["Some Series"], tall=True), rec("1", "Some Series", origin="Manga", webtoon=False))
 
-    assert o.ranked[0].reasons & MatchReason.TYPE_CONFLICT
-    assert o.band == MatchBand.NEEDS_REVIEW
+    assert not (o.ranked[0].reasons & MatchReason.TYPE_CONFLICT)
+    assert o.band == MatchBand.AUTO
+
+
+def test_tall_strips_favour_a_webtoon_record_over_a_print_record_of_the_same_title():
+    o = score(query(["Some Series"], tall=True),
+              rec("jp", "Some Series", origin="Manga", webtoon=False), rec("kr", "Some Series", origin="Manhwa"))
+
+    assert o.ranked[0].candidate.external_id == "kr"
+    assert o.ranked[0].adjusted_score > o.ranked[1].adjusted_score
 
 
 def test_chapters_are_compared_with_chapters_not_volumes():
@@ -340,3 +381,265 @@ def test_record_title_with_subtitle_ranks_by_the_head_before_the_colon_but_never
     assert round(o.ranked[0].title_score, 6) == round(scorer.SUBTITLE_HEAD_CAP, 6)
     assert o.band == MatchBand.NEEDS_REVIEW
     assert (exact.ranked[0].candidate.external_id, exact.band) == ("1", MatchBand.AUTO)
+
+
+# --- 1.27.0 - 1.30.0 (ported from MangaPixer 1.31.1 MatchScorerTests) --------------------------
+
+def test_disambiguator_is_stripped_from_the_main_title_only_never_from_an_alt_title():
+    # Live run (B): the right record is "Sprout (FAMILY Given)"; another record carries the ALT title
+    # "Sprout (OTHER Person)". Stripped, that alt scored a false 1.00 and tied the right record.
+    o = score(query(["Sprout"]), rec("1", "Sprout (FAMILY Given)"), rec("2", "Hana no Me", alt=["Sprout (OTHER Person)"]))
+
+    assert o.ranked[0].candidate.external_id == "1"
+    assert o.ranked[0].title_score == pytest.approx(1.0, abs=5e-4)
+    assert o.ranked[1].title_score < 0.92
+    assert o.band == MatchBand.AUTO
+
+
+def test_alt_title_disambiguator_naming_the_records_own_author_counts_in_full_otherwise_capped():
+    own = score(query(["Moon Letter"]), rec("1", "Moon Letter"),
+                rec("2", "Tsuki no Tegami", alt=["Moon Letter (SATO Hana)"], authors=["SATO Hana"]))
+    assert next(r for r in own.ranked if r.candidate.external_id == "2").title_score == pytest.approx(1.0, abs=5e-4)
+    assert own.band != MatchBand.AUTO  # two works share the name: review, the right one among the top
+
+    # A search hit (no authors yet): the stripped alias is evidence, never alone an auto link.
+    hit = score(query(["Moon Letter"]), rec("2", "Tsuki no Tegami", alt=["Moon Letter (SATO Hana)"]))
+    assert hit.ranked[0].title_score == pytest.approx(amt.DISAMBIGUATED_ALIAS_FACTOR, abs=5e-4)
+    assert hit.band not in (MatchBand.AUTO, MatchBand.UNMATCHED)
+
+
+def test_tilde_subtitle_and_a_title_number_reach_review_without_a_number_penalty():
+    o = score(query(["Alpha Beta Level 99"]),
+              rec("1", "Arufa Beta Reberu 99: Hidden Subtitle Words", alt=["Alpha Beta Level 99 ~Long Subtitle Words Here~"]))
+
+    assert o.ranked[0].title_score == pytest.approx(scorer.SUBTITLE_HEAD_CAP, abs=5e-4)
+    assert not (o.ranked[0].reasons & MatchReason.NUMBER_MISMATCH)
+    assert o.band == MatchBand.NEEDS_REVIEW
+
+
+def test_spaced_dash_subtitle_head_equal_to_the_name_is_review_only():
+    o = score(query(["Alpha Beta"]), rec("1", "Alpha Beta - The Long Subtitle of It"))
+
+    assert o.ranked[0].title_score == pytest.approx(scorer.SUBTITLE_HEAD_CAP, abs=5e-4)
+    assert o.band == MatchBand.NEEDS_REVIEW
+
+
+def test_sequel_number_still_penalized_when_the_record_title_lacks_it():
+    o = score(query(["Alpha Beta 2"]), rec("1", "Alpha Beta"))
+    assert o.ranked[0].reasons & MatchReason.NUMBER_MISMATCH
+
+
+def test_leading_words_of_a_long_title_are_review_only_even_at_the_loosest_thresholds():
+    q = query(["Alpha to Beta Gamma"])
+    record = rec("1", "Alpha to Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda Mu")
+    o = score(q, record)
+    loosest = scorer.score(q, [record], MatchThresholds(MatchThresholds.AUTO_TITLE_MIN, MatchThresholds.MARGIN_MIN,
+                                                        MatchThresholds.REVIEW_FLOOR_MIN))
+
+    assert o.ranked[0].title_score == pytest.approx(scorer.SUBTITLE_HEAD_CAP, abs=5e-4)
+    assert o.band == MatchBand.NEEDS_REVIEW
+    assert loosest.band == MatchBand.NEEDS_REVIEW
+
+
+def test_leading_part_needs_three_whole_words():
+    two = score(query(["Alpha Beta"]), rec("1", "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota"))
+    partial = score(query(["Alpha Beta Gam"]), rec("1", "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota"))
+
+    assert two.ranked[0].title_score < scorer.SUBTITLE_HEAD_CAP
+    assert partial.ranked[0].title_score < scorer.SUBTITLE_HEAD_CAP
+
+
+def test_close_second_is_only_raised_when_the_top_reaches_the_review_floor():
+    poor = score(query(["Alpha to Beta Gamma"]), rec("1", "Unrelated Words Here"), rec("2", "Other Unrelated Words"))
+    assert poor.band == MatchBand.UNMATCHED
+    assert not (poor.ranked[0].reasons & MatchReason.CLOSE_SECOND)
+
+    tied = score(query(["Sprout"]), rec("1", "Sprout (OTHER Person)"), rec("2", "Sprout (THIRD Person)"))
+    assert tied.ranked[0].reasons & MatchReason.CLOSE_SECOND
+
+
+def test_shared_number_alone_is_damped():
+    damped = score(query(["Alpha Beta 99"]), rec("1", "Kappa Lambda 99"))
+    plain = similarity.score("Alpha Beta 99", "Kappa Lambda 99")
+
+    assert similarity.shares_only_digit_tokens("Alpha Beta 99", "Kappa Lambda 99")
+    assert not similarity.shares_only_digit_tokens("Alpha Beta 99", "Alpha Kappa 99")
+    assert damped.ranked[0].title_score == pytest.approx(plain * scorer.DIGIT_ONLY_OVERLAP_FACTOR, abs=5e-7)
+
+
+def test_creator_split_is_review_only_unless_the_named_author_wrote_the_record():
+    shape = FolderShape("Family Given - Sprout Garden", 2,
+                        ("Family Given - Sprout Garden v01.cbz", "Family Given - Sprout Garden v02.cbz"), ())
+    q = planner.plan_folder(shape, detector.classify(shape))
+    assert any(v.kind == QueryVariantKind.CREATOR_SPLIT and v.text == "Sprout Garden" for v in q.variants)
+
+    stranger = scorer.score(q, [rec("1", "Sprout Garden", authors=["Other Person"])], DEFAULT_THRESHOLDS)
+    assert stranger.ranked[0].title_score == pytest.approx(scorer.SUBTITLE_HEAD_CAP - scorer.DERIVED_VARIANT_DISCOUNT, abs=5e-4)
+    assert stranger.band == MatchBand.NEEDS_REVIEW
+
+    author = scorer.score(q, [rec("1", "Sprout Garden", authors=["GIVEN Family"])], DEFAULT_THRESHOLDS)
+    assert author.ranked[0].title_score >= 0.92
+    assert author.band == MatchBand.AUTO
+
+
+def test_trailing_two_word_bracket_as_a_title_never_auto_links_on_its_own():
+    shape = FolderShape("Sprout [Family Given]", 2, ("Sprout v01.cbz", "Sprout v02.cbz"), ())
+    q = planner.plan_folder(shape, detector.classify(shape))
+    assert any(v.kind == QueryVariantKind.ENGLISH_TITLE and v.text == "Family Given" for v in q.variants)
+
+    titled = scorer.score(q, [rec("1", "Family Given")], DEFAULT_THRESHOLDS)
+    assert titled.band != MatchBand.AUTO
+    loose = scorer.score(q, [rec("1", "Family Given")], MatchThresholds(
+        MatchThresholds.AUTO_TITLE_MIN, MatchThresholds.MARGIN_MIN, MatchThresholds.REVIEW_FLOOR_MIN))
+    assert loose.band != MatchBand.AUTO
+
+    real = scorer.score(q, [rec("1", "Sprout", authors=["Family Given"])], DEFAULT_THRESHOLDS)
+    assert real.band == MatchBand.AUTO
+
+
+def test_romaji_with_english_bracket_still_auto_links_by_the_english_title():
+    q = MatchQuery(
+        (QueryVariant("Kappa Meshi", QueryVariantKind.PRIMARY), QueryVariant("Delicious Kappa", QueryVariantKind.ENGLISH_TITLE)),
+        MatchContext(WorkClass.SERIES, 5, 5, 0, None, None, False, (), creator_hints=("Delicious Kappa",)))
+    o = scorer.score(q, [rec("1", "Kappa Meshi", alt=["Delicious Kappa"])], DEFAULT_THRESHOLDS)
+
+    assert o.band == MatchBand.AUTO
+
+
+def test_an_alias_that_is_the_main_titles_head_is_review_only():
+    o = score(query(["Alpha Beta"]),
+              rec("spin", "Alpha Beta - Side Name Diary", alt=["Alpha Beta"]),
+              rec("main", "Alpha Beta - Main Subtitle Words", alt=["Alpha Beta ~Main Subtitle Words~"]))
+
+    assert all(r.title_score == pytest.approx(scorer.SUBTITLE_HEAD_CAP, abs=5e-4) for r in o.ranked)
+    assert o.band == MatchBand.NEEDS_REVIEW
+
+    # A plain alias of a record whose main title has no subtitle is still a full match.
+    plain = score(query(["Alpha Beta"]), rec("1", "Arufa Beta", alt=["Alpha Beta"]))
+    assert plain.band == MatchBand.AUTO
+
+
+def _with_units(q: MatchQuery, volume_like: int, chapter_like: int, local_volumes, local_chapters) -> MatchQuery:
+    return replace(q, context=replace(q.context, volume_like_count=volume_like, chapter_like_count=chapter_like,
+                                      local_volumes=local_volumes, local_chapters=local_chapters))
+
+
+def test_count_compares_the_highest_unit_number_not_the_file_count():
+    extras = score(_with_units(query(["Some Series"]), 12, 0, 6, None), rec("1", "Some Series", volumes=6))
+    assert not (extras.ranked[0].reasons & MatchReason.COUNT_CONFLICT)
+
+    late = score(_with_units(query(["Some Series"]), 0, 150, None, 1100), rec("1", "Some Series", chapter=200))
+    assert late.ranked[0].reasons & MatchReason.COUNT_CONFLICT
+
+
+def test_count_mixed_volume_and_chapter_archives_give_no_count_signal():
+    o = score(_with_units(query(["Some Series"]), 40, 300, 40, 300), rec("1", "Some Series", volumes=2, chapter=10))
+
+    assert not (o.ranked[0].reasons & MatchReason.COUNT_CONFLICT)
+    assert o.ranked[0].adjusted_score == pytest.approx(1.0, abs=1e-6)  # neither an agreement nor a conflict
+
+
+def test_count_published_side_is_the_largest_number_of_any_source():
+    season = score(_with_units(query(["Some Series"]), 0, 195, None, 195),
+                   replace(rec("1", "Some Series", chapter=18), total_chapters=195))
+    assert not (season.ranked[0].reasons & MatchReason.COUNT_CONFLICT)
+    assert season.band == MatchBand.AUTO
+
+    english = score(_with_units(query(["Some Series"]), 30, 0, 30, None),
+                    replace(rec("1", "Some Series", volumes=12), english_volumes=30, english_chapters=250))
+    assert not (english.ranked[0].reasons & MatchReason.COUNT_CONFLICT)
+    none = score(_with_units(query(["Some Series"]), 30, 0, 30, None), rec("1", "Some Series", volumes=12))
+    assert none.ranked[0].reasons & MatchReason.COUNT_CONFLICT
+
+
+def test_count_chapter_folder_of_a_volume_record_with_only_a_latest_chapter_is_no_conflict():
+    spin_off = score(_with_units(query(["Some Series"]), 0, 58, None, 58), rec("1", "Some Series", volumes=10, chapter=12))
+    assert not (spin_off.ranked[0].reasons & MatchReason.COUNT_CONFLICT)
+    assert spin_off.band == MatchBand.AUTO
+
+    total = score(_with_units(query(["Some Series"]), 0, 58, None, 58),
+                  replace(rec("1", "Some Series", volumes=10, chapter=12), total_chapters=20))
+    assert total.ranked[0].reasons & MatchReason.COUNT_CONFLICT
+
+
+def test_count_uses_the_planners_units_over_the_archive_counts():
+    units = LocalUnitCounts(40, 0, 1, 10, None, None)
+    b = query(["Some Series"], volumes=40)
+    q = replace(b, context=replace(b.context, units=units))
+    assert not (score(q, rec("1", "Some Series", volumes=10)).ranked[0].reasons & MatchReason.COUNT_CONFLICT)
+    assert score(query(["Some Series"], volumes=40), rec("1", "Some Series", volumes=10)).ranked[0].reasons & MatchReason.COUNT_CONFLICT
+
+
+def _planned(folder_name: str, chapters: int) -> MatchQuery:
+    shape = FolderShape(folder_name, 2, tuple(f"{folder_name} - Chapter {i:03d}.cbz" for i in range(1, chapters + 1)), ())
+    return planner.plan_folder(shape, detector.classify(shape))
+
+
+def test_a_folder_subtitle_that_is_a_spin_offs_subtitle_ranks_the_spin_off_first_but_only_for_review():
+    q = _planned("Alpha Garden - Before the Frost", 58)
+    main = rec("1", "Alpha Garden", volumes=30, related=[("2", "Spin-off")])
+    spin_off = rec("2", "Alpha Garden - Before the Frost", volumes=10, related=[("1", "Main Story")])
+
+    o = score(q, main, spin_off)
+
+    assert o.ranked[0].candidate.external_id == "2"
+    assert o.ranked[1].title_score == pytest.approx(scorer.SUBTITLE_HEAD_CAP, abs=5e-4)
+    assert o.band == MatchBand.NEEDS_REVIEW
+    family = MatchReason.SUBTITLE_FAMILY | MatchReason.SERIES_FAMILY | MatchReason.RELATED_PAIR
+    assert o.ranked[0].reasons & family == MatchReason.SUBTITLE_FAMILY | MatchReason.SERIES_FAMILY
+    assert sorted(p.candidate.external_id for p in o.to_persist) == ["1", "2"]
+
+
+def test_a_folder_subtitle_against_a_prequel_pair_goes_to_review():
+    q = _planned("Alpha Garden - Before the Frost", 58)
+
+    both = score(q, rec("1", "Alpha Garden", related=[("2", "prequel")]), rec("2", "Alpha Garden - Before the Frost", related=[("1", "sequel")]))
+    one_way = score(q, rec("1", "Alpha Garden"), rec("2", "Alpha Garden - Before the Frost", related=[("1", "sequel")]))
+
+    assert (both.ranked[0].candidate.external_id, both.band) == ("2", MatchBand.NEEDS_REVIEW)
+    assert (one_way.ranked[0].candidate.external_id, one_way.band) == ("2", MatchBand.NEEDS_REVIEW)
+    assert one_way.ranked[0].reasons & MatchReason.SUBTITLE_FAMILY
+
+
+def test_a_folder_subtitle_against_an_unrelated_head_record_stays_automatic():
+    q = _planned("Alpha Garden - Before the Frost", 58)
+
+    o = score(q, rec("1", "Alpha Garden", authors=["SMITH Anna"]), rec("2", "Alpha Garden - Before the Frost", authors=["JONES Bert"]))
+
+    assert (o.ranked[0].candidate.external_id, o.band) == ("2", MatchBand.AUTO)
+    assert o.ranked[0].reasons & (MatchReason.SUBTITLE_FAMILY | MatchReason.SERIES_FAMILY) == MatchReason.NONE
+
+
+def test_a_folder_subtitle_no_relation_but_the_same_author_is_one_family_review():
+    q = _planned("Alpha Garden - Before the Frost", 58)
+
+    o = score(q, rec("1", "Alpha Garden", authors=["SMITH Anna"]), rec("2", "Alpha Garden - Before the Frost", authors=["Smith Anna"]))
+
+    assert (o.ranked[0].candidate.external_id, o.band) == ("2", MatchBand.NEEDS_REVIEW)
+    assert o.ranked[0].reasons & MatchReason.SUBTITLE_FAMILY
+
+
+def test_the_main_series_folder_auto_links_the_main_record_with_a_family_chip():
+    o = score(query(["Alpha Garden"]), rec("1", "Alpha Garden", related=[("2", "spin-off")]),
+              rec("2", "Alpha Garden - Before the Frost", related=[("1", "main story")]))
+
+    assert (o.ranked[0].candidate.external_id, o.band) == ("1", MatchBand.AUTO)
+    assert o.ranked[0].reasons & MatchReason.SERIES_FAMILY
+    assert not (o.ranked[0].reasons & MatchReason.SUBTITLE_FAMILY)
+
+
+def test_a_folder_subtitle_no_candidate_has_leaves_the_head_match_alone():
+    q = _planned("Alpha Garden - Before the Frost", 20)
+
+    o = score(q, rec("1", "Alpha Garden", volumes=30))
+
+    assert o.ranked[0].title_score == pytest.approx(1.0 - scorer.DERIVED_VARIANT_DISCOUNT, abs=5e-4)
+
+
+def test_a_folder_subtitle_the_main_record_carries_itself_is_not_capped():
+    q = _planned("Alpha Garden - Before the Frost", 20)
+
+    o = score(q, rec("1", "Arufa Gaaden", alt=["Alpha Garden: Before the Frost"], volumes=30), rec("3", "Alpha Garden Other"))
+
+    assert o.ranked[0].candidate.external_id == "1"
+    assert o.ranked[0].title_score > 0.95

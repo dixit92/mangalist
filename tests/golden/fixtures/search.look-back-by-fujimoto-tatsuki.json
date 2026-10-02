@@ -1,0 +1,104 @@
+{
+ "query": "Look Back by Fujimoto Tatsuki",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "response": {
+  "total_hits": 7545,
+  "results": [
+   {
+    "record": {
+     "series_id": 62512335978,
+     "title": "Look Back (FUJIMOTO Tatsuki)",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Look Back (FUJIMOTO Tatsuki)"
+   },
+   {
+    "record": {
+     "series_id": 5300065649,
+     "title": "Fujimoto Tatsuki Tanpenshuu",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Fujimoto Tatsuki Tanpenshuu"
+   },
+   {
+    "record": {
+     "series_id": 53348009331,
+     "title": "Androids Don't Look Back",
+     "type": "Manga",
+     "year": "2002"
+    },
+    "hit_title": "Androids Don't Look Back"
+   },
+   {
+    "record": {
+     "series_id": 42663845255,
+     "title": "Post Girl",
+     "type": "Manga",
+     "year": "2005"
+    },
+    "hit_title": "Postgirl Can’t Look Back"
+   },
+   {
+    "record": {
+     "series_id": 27219517555,
+     "title": "Kami-sama no Yokogao",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "God, Look Back at Me Please"
+   },
+   {
+    "record": {
+     "series_id": 18429374528,
+     "title": "Gotou-san wa Furimukasetai",
+     "type": "Manga",
+     "year": "2021"
+    },
+    "hit_title": "Gotou-san Wants Me to Look Back"
+   },
+   {
+    "record": {
+     "series_id": 2515781902,
+     "title": "Otoko wa Senaka de Shoubusuru",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "He Fights by His Back"
+   },
+   {
+    "record": {
+     "series_id": 62447876250,
+     "title": "Gotou-san Wants Me to Turn Around (Pre-serialization)",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "Gotou-san Wants Me to Look Back (Pre-serialization)"
+   },
+   {
+    "record": {
+     "series_id": 42864656867,
+     "title": "Furimuite Yukino-chan!",
+     "type": "Manga",
+     "year": "2019"
+    },
+    "hit_title": "Look Back, Yukino-chan!"
+   },
+   {
+    "record": {
+     "series_id": 47374688941,
+     "title": "Look Look Kyoukaisen",
+     "type": "Manga",
+     "year": "2010"
+    },
+    "hit_title": "Look Look Kyoukaisen"
+   }
+  ]
+ }
+}

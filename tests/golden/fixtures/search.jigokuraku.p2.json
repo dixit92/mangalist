@@ -1,0 +1,105 @@
+{
+ "query": "Jigokuraku",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 61,
+  "results": [
+   {
+    "record": {
+     "series_id": 27773549264,
+     "title": "Gokuraku Sister",
+     "type": "Manga",
+     "year": "1998"
+    },
+    "hit_title": "Gokuraku Sister"
+   },
+   {
+    "record": {
+     "series_id": 36143075308,
+     "title": "Tsuma Jigokurou",
+     "type": "Manga",
+     "year": "2014"
+    },
+    "hit_title": "Tsuma Jigokurou"
+   },
+   {
+    "record": {
+     "series_id": 39603561803,
+     "title": "Gokuraku Akkandan",
+     "type": "Manga",
+     "year": "1994"
+    },
+    "hit_title": "Gokuraku Akkandan"
+   },
+   {
+    "record": {
+     "series_id": 54467780635,
+     "title": "Gokuraku Dynamite",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "Gokuraku Dynamite"
+   },
+   {
+    "record": {
+     "series_id": 24396264962,
+     "title": "Gokuraku Hunter",
+     "type": "Manga",
+     "year": "1990"
+    },
+    "hit_title": "Gokuraku Hunter"
+   },
+   {
+    "record": {
+     "series_id": 16820212895,
+     "title": "Gokuraku Smile",
+     "type": "Manga",
+     "year": "2000"
+    },
+    "hit_title": "Gokuraku Smile"
+   },
+   {
+    "record": {
+     "series_id": 68255496899,
+     "title": "Gokuraku Taishou",
+     "type": "Manga",
+     "year": "2001"
+    },
+    "hit_title": "Gokuraku Taishou"
+   },
+   {
+    "record": {
+     "series_id": 48349776222,
+     "title": "Gokuraku Tonbo",
+     "type": "Manga",
+     "year": "1992"
+    },
+    "hit_title": "Gokuraku Tonbo"
+   },
+   {
+    "record": {
+     "series_id": 58096286986,
+     "title": "Gokuraku Cafe",
+     "type": "Manga",
+     "year": "2002"
+    },
+    "hit_title": "Gokuraku Cafe"
+   },
+   {
+    "record": {
+     "series_id": 48504478226,
+     "title": "Gokurakugai",
+     "type": "Manga",
+     "year": "2022"
+    },
+    "hit_title": "Gokuraku Gai"
+   }
+  ]
+ }
+}

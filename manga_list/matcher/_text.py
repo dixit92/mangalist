@@ -1,6 +1,6 @@
 """Unicode helpers that mirror the .NET semantics the reference matcher relies on.
 
-The C# matcher (MangaPixer 1.26.1) uses ``char.IsLetter`` / ``char.IsLetterOrDigit`` /
+The C# matcher (MangaPixer 1.31.1) uses ``char.IsLetter`` / ``char.IsLetterOrDigit`` /
 ``char.IsDigit``, invariant lower-casing and ``StringComparer.OrdinalIgnoreCase``. Python's
 ``str.isalpha`` / ``str.isalnum`` / ``str.lower`` differ in small ways (``isalnum`` also accepts
 non-decimal numbers such as "½", ``lower`` applies the context-sensitive final sigma), so the

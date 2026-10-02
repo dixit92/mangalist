@@ -1,0 +1,105 @@
+{
+ "query": "Zzqx Nonexistent Synthetic Title",
+ "filter_types": [
+  "Novel",
+  "Doujinshi",
+  "Artbook",
+  "Drama CD"
+ ],
+ "page": 2,
+ "response": {
+  "total_hits": 198,
+  "results": [
+   {
+    "record": {
+     "series_id": 605534789,
+     "title": "I Abdicate My Title of Empress",
+     "type": "Manhwa",
+     "year": "2023"
+    },
+    "hit_title": "I Abdicate My Title of Empress"
+   },
+   {
+    "record": {
+     "series_id": 27640650445,
+     "title": "Yi Hou Li Tian: Shenyi Di Nv Hen Juese",
+     "type": "Manhua",
+     "year": "2020"
+    },
+    "hit_title": "Queen of Medicine: The Title of Divine Doctor"
+   },
+   {
+    "record": {
+     "series_id": 54090560961,
+     "title": "Kono Kanjou ni Title wo Tsukeru naraba",
+     "type": "Manga",
+     "year": "2024"
+    },
+    "hit_title": "Kono Kanjou ni Title wo Tsukeru naraba"
+   },
+   {
+    "record": {
+     "series_id": 14256303062,
+     "title": "Kensei no Shougou wo Motsu Ryourinin",
+     "type": "Manga",
+     "year": "2020"
+    },
+    "hit_title": "A Cook Having the Title of the Great Swordmaster"
+   },
+   {
+    "record": {
+     "series_id": 33230560923,
+     "title": "I Defeat Countless Tycoons With My Title System",
+     "type": "Manhua",
+     "year": "2022"
+    },
+    "hit_title": "I Defeat Countless Tycoons With My Title System"
+   },
+   {
+    "record": {
+     "series_id": 49057445217,
+     "title": "Overbearing Boss? Nonexistent!",
+     "type": "Manhua",
+     "year": "2019"
+    },
+    "hit_title": "Overbearing Boss? Nonexistent!"
+   },
+   {
+    "record": {
+     "series_id": 69202489602,
+     "title": "Gonggamgakjja",
+     "type": "Manhwa",
+     "year": "2019"
+    },
+    "hit_title": "Synesthetic"
+   },
+   {
+    "record": {
+     "series_id": 55669115661,
+     "title": "Suzuki-san wa Tada Shizuka ni Kurashitai",
+     "type": "Manga",
+     "year": "2015"
+    },
+    "hit_title": "Assassins (French title)"
+   },
+   {
+    "record": {
+     "series_id": 56530854529,
+     "title": "Assari Chocolate",
+     "type": "Manga",
+     "year": "2004"
+    },
+    "hit_title": "Easy Chocolate (Tentative Title)"
+   },
+   {
+    "record": {
+     "series_id": 52951629443,
+     "title": "Gukegete",
+     "type": "Manga",
+     "year": "2011"
+    },
+    "hit_title": "GuKeGuTe (Official English Title)"
+   }
+  ]
+ }
+}
