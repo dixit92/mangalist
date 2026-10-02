@@ -13,14 +13,18 @@ from typing import Any, Dict, Optional, Set
 
 import requests
 
+from .http_identity import USER_AGENT
+
 _log = logging.getLogger(__name__)
 
 _URL = "https://graphql.anilist.co"
 _SESSION = requests.Session()
-_SESSION.headers.update({"Content-Type": "application/json", "Accept": "application/json"})
+_SESSION.headers.update({"Content-Type": "application/json", "Accept": "application/json", "User-Agent": USER_AGENT})
 
-# AniList allows 90 req/min; stay well under.
-REQUEST_DELAY = 0.7
+# AniList allows 30 requests a minute (its X-RateLimit-Limit header, 2026 - the documented 90 is degraded);
+# stay under it. A 429 says how long to wait (Retry-After); that wait is honoured once, up to MAX_RETRY_AFTER.
+REQUEST_DELAY = 2.1
+MAX_RETRY_AFTER = 65.0
 
 _QUERY_SEARCH = """
 query ($search: String) {
@@ -66,32 +70,63 @@ def _title_similar(query: str, result_title: str) -> bool:
 
 
 def _execute(query: str, variables: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Run a GraphQL query with one retry on transient HTTP errors.
+    """Run a GraphQL query; one retry on a rate limit (429, after its Retry-After) or a server error.
 
-    Returns the ``data.Media`` dict or None on error / no match.
+    Returns the ``data.Media`` dict, or None on no match (AniList answers 404) or on error. Failures are
+    logged with their real HTTP status and AniList's (or Cloudflare's) short reason.
     """
     for attempt in range(2):
         try:
-            resp = _SESSION.post(
-                _URL,
-                json={"query": query, "variables": variables},
-                timeout=15,
-            )
-            resp.raise_for_status()
+            resp = _SESSION.post(_URL, json={"query": query, "variables": variables}, timeout=15)
+        except requests.RequestException as exc:
+            _log.warning("AniList request failed: %s", type(exc).__name__)
+            return None
+        status = resp.status_code
+        if status == 404:
+            _log.debug("AniList: no match")
+            return None
+        if (status == 429 or status >= 500) and attempt == 0:
+            wait = _retry_after(resp, default=1.0 if status >= 500 else MAX_RETRY_AFTER)
+            _log.info("AniList HTTP %s - retrying in %.0f s", status, wait)
+            time.sleep(wait)
+            continue
+        if not resp.ok:
+            _log.warning("AniList request failed (HTTP %s): %s", status, _reason(resp))
+            return None
+        try:
             data = resp.json()
-            return (data.get("data") or {}).get("Media")
-        except requests.HTTPError as exc:
-            status = exc.response.status_code if exc.response else 0
-            if status in (404, 429, 500, 502, 503) and attempt == 0:
-                _log.debug("AniList HTTP %s — retrying in 1s", status)
-                time.sleep(1.0)
-                continue
-            _log.warning("AniList request failed (HTTP %s)", status)
+        except ValueError:
+            _log.warning("AniList returned no JSON (HTTP %s)", status)
             return None
-        except Exception:  # noqa: BLE001
-            _log.warning("AniList request failed", exc_info=True)
-            return None
+        media = (data.get("data") or {}).get("Media") if isinstance(data, dict) else None
+        if media is None and isinstance(data, dict) and data.get("errors"):
+            _log.warning("AniList query error: %s", _reason(resp))
+        return media
     return None
+
+
+def _retry_after(resp: requests.Response, default: float) -> float:
+    """Seconds to wait before the retry: the Retry-After header (seconds), capped at MAX_RETRY_AFTER."""
+    try:
+        value = float(resp.headers.get("Retry-After", ""))
+    except ValueError:
+        value = default
+    return max(0.0, min(value, MAX_RETRY_AFTER))
+
+
+def _reason(resp: requests.Response) -> str:
+    """A short reason from an error body: GraphQL ``errors[0].message``, or Cloudflare's ``title``."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return (resp.text or "")[:120].strip() or "no details"
+    if isinstance(body, dict):
+        errors = body.get("errors")
+        if isinstance(errors, list) and errors and isinstance(errors[0], dict) and errors[0].get("message"):
+            return str(errors[0]["message"])[:200]
+        if body.get("title"):
+            return str(body["title"])[:200]
+    return "no details"
 
 
 def _normalise(media: Dict[str, Any]) -> Dict[str, Any]:
