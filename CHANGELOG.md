@@ -7,6 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Hand off missing chapters** (right-click on matched rows): Manga-List works out which chapters a series is
+  missing (after the highest chapter on disk, up to MangaUpdates' latest) and writes a file for a downloader you
+  run - it still downloads nothing itself:
+  - a **gallery-dl** input file (`gallery-dl -i <file>`) that picks exactly those chapters, in English, from the
+    series' MangaDex page;
+  - an **FMD2** import folder for FMD2's *Import favorites* (Domdomsoft type) - FMD2 adds the series to its
+    favorites and offers their new chapters.
+  Series are found on MangaDex by the MangaUpdates link MangaDex keeps on each record, never by title alone; the
+  result is cached (a series MangaDex does not have is looked up again after 30 days).
+
 ## [2026.10.1] - 2026-10-02
 
 - AniList lookups (the Behind column's chapters-per-volume estimate) work again under AniList's current

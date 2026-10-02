@@ -24,6 +24,7 @@ save_entry(folder, ...)
 update_licensed(folder, licensed)
 should_recheck_licensed(folder) -> bool
 load_all() -> dict[str, dict]
+load_mangadex_id(mu_id) / save_mangadex_id(mu_id, uuid)   (download hand-off)
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -69,6 +71,19 @@ CREATE TABLE IF NOT EXISTS mu_cache (
 );
 """
 
+# The MangaDex record of a MangaUpdates series (download hand-off). Keyed by MangaUpdates id, not by folder: one
+# series may sit in several folders. mangadex_id NULL = searched and not found (searched again after
+# MANGADEX_RETRY_DAYS).
+_DDL_MANGADEX = """
+CREATE TABLE IF NOT EXISTS mangadex_link (
+    mu_id       INTEGER PRIMARY KEY,
+    mangadex_id TEXT,
+    checked_at  REAL NOT NULL
+);
+"""
+
+MANGADEX_RETRY_DAYS = 30
+
 # Columns added in later versions — applied via ALTER TABLE for existing DBs.
 _MIGRATIONS = [
     "ALTER TABLE mu_cache ADD COLUMN scan_latest_volume REAL",
@@ -98,6 +113,7 @@ def _connect() -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute(_DDL)
+    con.execute(_DDL_MANGADEX)
     for sql in _MIGRATIONS:
         try:
             con.execute(sql)
@@ -245,6 +261,38 @@ def set_behind_override(folder: Path, value: Optional[str]) -> None:
             "UPDATE mu_cache SET behind_override = ? WHERE folder = ?",
             (value, str(folder)),
         )
+
+
+# load_mangadex_id: never searched, or a miss old enough to search again.
+UNKNOWN = object()
+
+
+def load_mangadex_id(mu_id: int, now: Optional[float] = None) -> Any:
+    """The cached MangaDex UUID of ``mu_id``; None when it was searched and not found recently; ``UNKNOWN`` when it
+    was never searched or the miss is older than ``MANGADEX_RETRY_DAYS``."""
+    con = _connect()
+    try:
+        row = con.execute("SELECT mangadex_id, checked_at FROM mangadex_link WHERE mu_id = ?", (int(mu_id),)).fetchone()
+    finally:
+        con.close()
+    if row is None:
+        return UNKNOWN
+    if row["mangadex_id"]:
+        return row["mangadex_id"]
+    age = (time.time() if now is None else now) - row["checked_at"]
+    return None if age < MANGADEX_RETRY_DAYS * 86400 else UNKNOWN
+
+
+def save_mangadex_id(mu_id: int, mangadex_id: Optional[str], now: Optional[float] = None) -> None:
+    """Remembers the MangaDex UUID of ``mu_id`` (or that none was found)."""
+    con = _connect()
+    try:
+        con.execute("INSERT OR REPLACE INTO mangadex_link (mu_id, mangadex_id, checked_at) VALUES (?, ?, ?)",
+                    (int(mu_id), mangadex_id, time.time() if now is None else now))
+        con.commit()
+    finally:
+        con.close()
+
 
 
 def delete_entry(folder: Path) -> None:

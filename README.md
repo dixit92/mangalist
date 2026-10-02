@@ -63,6 +63,19 @@ The **MU Title** column shows the result:
 A confirmed match (✔) is never re-scored. The golden tests in `tests/golden` replay recorded public
 MangaUpdates responses and check that the results equal MangaPixer's.
 
+## Missing chapters for a downloader
+
+Manga-List does not download anything. For matched series it can hand the missing chapters to a program you
+run: select rows, right-click **Hand off missing chapters**, and choose
+
+- **gallery-dl input file**: run `gallery-dl -i <file>`; each series' line selects the missing chapters by number,
+  in English, from its MangaDex page.
+- **FMD2 import folder** (Windows): in FMD2 open *Import favorites*, choose *Domdomsoft Manga Downloader* and the
+  folder; FMD2 adds the series to its favorites and offers their new chapters.
+
+Series are found on MangaDex through the MangaUpdates link MangaDex stores on each record ([MangaDex
+API](https://api.mangadex.org/docs/), read-only, no login).
+
 ## Build and release
 
 CI (`.github/workflows`) runs the tests on Windows, macOS and Linux and builds every package

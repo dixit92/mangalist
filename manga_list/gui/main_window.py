@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QSplitter,
     QStatusBar,
@@ -49,7 +51,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, mu_cache
+from .. import config, mangadex_client, mu_cache
+from ..handoff.exports import gallery_dl_input, write_fmd2_import
+from ..handoff.resolve import resolve_all
+from ..handoff.wanted import CHAPTERS, wanted_list
 from .._version import __version__
 from ..models import MangaEntry
 from ..scanner import scan_root
@@ -742,6 +747,13 @@ class MainWindow(QMainWindow):
         )
         act_clear_mu.setEnabled(n_with_mu > 0)
 
+        # Download hand-off: Manga-List lists what is missing; another program downloads it.
+        n_chapters = sum(1 for w in wanted_list(entries) if w.of_kind(CHAPTERS))
+        handoff = menu.addMenu("Hand off missing chapters" if n_chapters == 0 else f"Hand off missing chapters ({n_chapters})")
+        act_gallery_dl = handoff.addAction("gallery-dl input file…")
+        act_fmd2 = handoff.addAction("FMD2 import folder…")
+        handoff.setEnabled(n_chapters > 0)
+
         menu.addSeparator()
         act_mark_behind_done = menu.addAction(
             "Mark Behind as up to date" if n == 1 else f"Mark Behind as up to date ({n_overridable})"
@@ -768,7 +780,11 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if chosen is act_open and entries:
+        if chosen is act_gallery_dl:
+            self._hand_off_chapters(entries, "gallery-dl")
+        elif chosen is act_fmd2:
+            self._hand_off_chapters(entries, "fmd2")
+        elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)
@@ -829,6 +845,53 @@ class MainWindow(QMainWindow):
                 if e is not None:
                     self._model.set_examined(r, not e.examined)
             self._persist_examined()
+
+    def _hand_off_chapters(self, entries: List[MangaEntry], target: str) -> None:
+        """Writes a gallery-dl input file or an FMD2 import folder for the missing chapters of ``entries``."""
+        items = [w for w in wanted_list(entries) if w.of_kind(CHAPTERS)]
+        if not items:
+            return
+        if target == "gallery-dl":
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save gallery-dl input file", str(Path.home() / "manga-list-missing-chapters.txt"),
+                "Text files (*.txt);;All files (*)")
+        else:
+            path = QFileDialog.getExistingDirectory(self, "Folder for the FMD2 import (a Config folder is created in it)")
+        if not path:
+            return
+
+        dialog = QProgressDialog("Finding the series on MangaDex…", "Cancel", 0, len(items), self)
+        dialog.setWindowTitle("Hand off missing chapters")
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setMinimumDuration(0)
+
+        def progress(done: int, total: int, title: str) -> bool:
+            dialog.setValue(done)
+            if title:
+                dialog.setLabelText(f"Finding on MangaDex ({done + 1} of {total}): {title}")
+            QApplication.processEvents()
+            return not dialog.wasCanceled()
+
+        try:
+            resolved = resolve_all(items, mangadex_client.get_json, progress)
+        finally:
+            dialog.close()
+        found = sum(1 for _, uuid in resolved if uuid is not None)
+
+        if target == "gallery-dl":
+            Path(path).write_text(gallery_dl_input(resolved), encoding="utf-8")
+            how = f'Run:  gallery-dl -i "{path}"'
+            written = path
+        else:
+            written = str(write_fmd2_import(Path(path), resolved))
+            how = (f"In FMD2 open Import favorites, choose \"Domdomsoft Manga Downloader\" and the folder\n{path}\n"
+                   "FMD2 adds the series to its favorites and offers their new chapters.")
+        missing = len(resolved) - found
+        note = f"\n{missing} series were not found on MangaDex and are not included." if missing else ""
+        QMessageBox.information(
+            self, "Hand off missing chapters",
+            f"Wrote {written}\n{found} of {len(resolved)} series found on MangaDex.{note}\n\n{how}")
+        self._status_label.setText(f"Hand-off written: {written} ({found} series)")
 
     def _on_fix_mu_match(self, src_row: int, entry: MangaEntry) -> None:
         """Open the MU picker so the user can manually select the correct series."""

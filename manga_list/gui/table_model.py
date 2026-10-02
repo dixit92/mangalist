@@ -9,6 +9,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
 from ..models import MangaEntry
+from ..handoff.wanted import is_omnibus_complete
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 
@@ -337,11 +338,7 @@ def _is_mixed_layout(e: MangaEntry) -> bool:
 
 def _is_omnibus_complete(e: MangaEntry) -> bool:
     """True when disk files signal omnibus/compilation AND the translation is done."""
-    if not e.has_compilation_files:
-        return False
-    pub_done = (e.publisher_status or "").strip().lower() in ("completed", "complete")
-    origin_done = e.completed_in_origin is True
-    return pub_done or origin_done
+    return is_omnibus_complete(e)
 
 
 def _behind_text(e: MangaEntry) -> str:
