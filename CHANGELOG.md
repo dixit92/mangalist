@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.1] - 2026-10-02
+
 - AniList lookups (the Behind column's chapters-per-volume estimate) work again under AniList's current
   limit of 30 requests a minute: requests are spaced to fit, a rate-limit answer is retried once after the
   wait AniList asks for, and the log shows the real HTTP status and reason (it used to say "HTTP 0"). AniList
