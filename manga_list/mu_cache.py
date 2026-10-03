@@ -1,6 +1,10 @@
-"""Persistent cache for MangaUpdates lookups — backed by SQLite.
+"""Persistent cache for MangaUpdates lookups — a facade over the library database.
 
-Database: ``mu_cache.db`` in the per-user data folder (``paths.data_dir()``).
+The rows live in the ``links_cache`` table of ``mangalist.db`` (:mod:`manga_list.store`) in the
+per-user data folder (``paths.data_dir()``). The ``mu_cache.db`` of older builds is imported into it
+once and left in place; ``_DDL`` / ``_MIGRATIONS`` below describe that old file. Every change is also
+copied onto the series row of the folder (MangaUpdates identity + confirmed), when the folder lies in a
+root.
 
 Caching rules
 -------------
@@ -34,7 +38,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import paths
+from . import paths, store
 
 _log = logging.getLogger(__name__)
 
@@ -93,18 +97,24 @@ MU_SCORE_VERSION = 5
 
 
 def _connect() -> sqlite3.Connection:
-    paths.ensure_data_dir()
-    con = sqlite3.connect(paths.cache_file())
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute(_DDL)
-    for sql in _MIGRATIONS:
-        try:
-            con.execute(sql)
-        except sqlite3.OperationalError:
-            pass  # column already exists
-    con.commit()
-    return con
+    """A connection to the library database (the caller closes it; the functions below use
+    ``_session``)."""
+    st = store.get_store()
+    st.ensure_initialized()
+    return st._raw_connect()
+
+
+def _session():
+    """One transaction on the library database (committed, then closed)."""
+    return store.get_store().connect()
+
+
+def _sync_series(folder: Path) -> None:
+    try:
+        store.get_store().sync_identity(folder)
+    except sqlite3.Error:
+        _log.warning("Could not copy the MangaUpdates identity of %s onto its series row", folder,
+                     exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -140,9 +150,9 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
 
 def load_entry(folder: Path) -> Optional[Dict[str, Any]]:
     """Return cached data for *folder*, or None if not cached."""
-    with _connect() as con:
+    with _session() as con:
         row = con.execute(
-            "SELECT * FROM mu_cache WHERE folder = ?", (str(folder),)
+            "SELECT * FROM links_cache WHERE folder = ?", (str(folder),)
         ).fetchone()
     return _row_to_dict(row) if row else None
 
@@ -171,20 +181,18 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
     when re-saving a row without re-scoring it (e.g. refreshing a confirmed match).
     """
     key = str(folder)
-    # Never silently downgrade a confirmed match.
-    if not mu_confirmed:
-        with _connect() as con:
-            existing = con.execute(
-                "SELECT mu_confirmed FROM mu_cache WHERE folder = ?", (key,)
-            ).fetchone()
-        if existing and existing["mu_confirmed"]:
-            mu_confirmed = True
-
     assoc_json = json.dumps(mu_associated or [], ensure_ascii=False)
     reasons_json = json.dumps(list(mu_reasons or []), ensure_ascii=False)
-    with _connect() as con:
+    with _session() as con:
+        # Never silently downgrade a confirmed match.
+        if not mu_confirmed:
+            existing = con.execute(
+                "SELECT mu_confirmed FROM links_cache WHERE folder = ?", (key,)
+            ).fetchone()
+            if existing and existing["mu_confirmed"]:
+                mu_confirmed = True
         con.execute("""
-            INSERT INTO mu_cache
+            INSERT INTO links_cache
                 (folder, mu_id, mu_title, mu_url, licensed, mu_confirmed,
                  mu_associated, mu_score, scan_latest_chapter,
                  publisher_name, publisher_chapters, publisher_volumes, publisher_status,
@@ -210,7 +218,7 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
                 anilist_chapters   = excluded.anilist_chapters,
                 anilist_volumes    = excluded.anilist_volumes,
                 completed_in_origin= excluded.completed_in_origin,
-                behind_override    = COALESCE(mu_cache.behind_override, excluded.behind_override),
+                behind_override    = COALESCE(links_cache.behind_override, excluded.behind_override),
                 mu_score_version   = excluded.mu_score_version,
                 mu_band            = excluded.mu_band,
                 mu_reasons         = excluded.mu_reasons
@@ -223,6 +231,7 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
             _bool_to_int(completed_in_origin), behind_override,
             int(mu_score_version), mu_band, reasons_json,
         ))
+    _sync_series(folder)
 
 
 def set_mu_confirmed(folder: Path, confirmed: bool) -> None:
@@ -231,33 +240,35 @@ def set_mu_confirmed(folder: Path, confirmed: bool) -> None:
     Unlike ``save_entry``, this never silently overrides the caller's intent
     and only touches the single column.
     """
-    with _connect() as con:
+    with _session() as con:
         con.execute(
-            "UPDATE mu_cache SET mu_confirmed = ? WHERE folder = ?",
+            "UPDATE links_cache SET mu_confirmed = ? WHERE folder = ?",
             (1 if confirmed else 0, str(folder)),
         )
+    _sync_series(folder)
 
 
 def set_behind_override(folder: Path, value: Optional[str]) -> None:
     """Set or clear the behind_override for *folder* ('done' or None)."""
-    with _connect() as con:
+    with _session() as con:
         con.execute(
-            "UPDATE mu_cache SET behind_override = ? WHERE folder = ?",
+            "UPDATE links_cache SET behind_override = ? WHERE folder = ?",
             (value, str(folder)),
         )
 
 
 def delete_entry(folder: Path) -> None:
     """Remove the cached MU match for *folder*, allowing a fresh lookup."""
-    with _connect() as con:
-        con.execute("DELETE FROM mu_cache WHERE folder = ?", (str(folder),))
+    with _session() as con:
+        con.execute("DELETE FROM links_cache WHERE folder = ?", (str(folder),))
+    _sync_series(folder)
 
 
 def update_licensed(folder: Path, licensed: bool) -> None:
     """Update only the licensed flag for an already-matched entry."""
-    with _connect() as con:
+    with _session() as con:
         con.execute(
-            "UPDATE mu_cache SET licensed = ? WHERE folder = ?",
+            "UPDATE links_cache SET licensed = ? WHERE folder = ?",
             (_bool_to_int(licensed), str(folder)),
         )
 
@@ -272,8 +283,8 @@ def should_recheck_licensed(folder: Path) -> bool:
 
 def load_all() -> Dict[str, Any]:
     """Return all cache entries as a folder→dict mapping."""
-    with _connect() as con:
-        rows = con.execute("SELECT * FROM mu_cache").fetchall()
+    with _session() as con:
+        rows = con.execute("SELECT * FROM links_cache").fetchall()
     return {row["folder"]: _row_to_dict(row) for row in rows}
 
 

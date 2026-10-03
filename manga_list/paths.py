@@ -4,7 +4,8 @@ Installed apps cannot write next to their executable (Program Files, a macOS ``.
 AppImage are read-only), so settings, the MangaUpdates cache and logs live in per-user folders:
 
 =========  ================================================  ==========================================
-Platform   Data (``config.json``, ``mu_cache.db``)            Logs
+Platform   Data (``mangalist.db``, older ``config.json`` /    Logs
+           ``mu_cache.db``)
 =========  ================================================  ==========================================
 Windows    ``%LOCALAPPDATA%\\MangaList``                      ``%LOCALAPPDATA%\\MangaList\\Logs``
 macOS      ``~/Library/Application Support/MangaList``        ``~/Library/Logs/MangaList``
@@ -16,6 +17,9 @@ Two exceptions, checked in this order:
 - ``MANGA_LIST_DATA_DIR`` (environment): data in that folder, logs in its ``logs`` subfolder.
 - Portable mode: a file named ``portable`` (or ``portable.txt``) next to the executable keeps
   ``data/`` and ``logs/`` beside it, as before. The Windows zip ships with the marker.
+
+The library database is ``mangalist.db`` (:mod:`manga_list.store`). It imports the older
+``config.json`` and ``mu_cache.db`` once and leaves both files in place.
 
 Versions before this change always wrote ``data/`` next to the executable (or the source tree).
 :func:`migrate_legacy_data` copies that folder into the per-user location once, on first start,
@@ -43,6 +47,7 @@ ENV_DATA_DIR = "MANGA_LIST_DATA_DIR"
 PORTABLE_MARKERS = ("portable", "portable.txt")
 CONFIG_NAME = "config.json"
 CACHE_NAME = "mu_cache.db"
+DB_NAME = "mangalist.db"
 MIGRATION_NOTE = "migrated-from.txt"
 
 
@@ -92,7 +97,13 @@ def config_file() -> Path:
 
 
 def cache_file() -> Path:
+    """The MangaUpdates cache of versions before the library database (imported once, kept)."""
     return data_dir() / CACHE_NAME
+
+
+def db_file() -> Path:
+    """The library database (roots, series, links cache, journal, settings)."""
+    return data_dir() / DB_NAME
 
 
 def ensure_data_dir() -> Path:
@@ -120,7 +131,7 @@ def migrate_legacy_data(target: Optional[Path] = None,
         if _env_dir() is not None or is_portable():
             return None
         target = data_dir()
-    if any((target / name).exists() for name in (CONFIG_NAME, CACHE_NAME, MIGRATION_NOTE)):
+    if any((target / name).exists() for name in (CONFIG_NAME, CACHE_NAME, DB_NAME, MIGRATION_NOTE)):
         return None
     for source in (legacy_data_dirs() if sources is None else sources):
         source = Path(source)
@@ -131,13 +142,16 @@ def migrate_legacy_data(target: Optional[Path] = None,
             continue
         has_config = (source / CONFIG_NAME).is_file()
         has_cache = (source / CACHE_NAME).is_file()
-        if not (has_config or has_cache):
+        has_db = (source / DB_NAME).is_file()
+        if not (has_config or has_cache or has_db):
             continue
         target.mkdir(parents=True, exist_ok=True)
         if has_config:
             shutil.copy2(source / CONFIG_NAME, target / CONFIG_NAME)
         if has_cache:
             _copy_sqlite(source / CACHE_NAME, target / CACHE_NAME)
+        if has_db:
+            _copy_sqlite(source / DB_NAME, target / DB_NAME)
         (target / MIGRATION_NOTE).write_text(
             f"Settings and cache copied from {source} on {datetime.now():%Y-%m-%d %H:%M}.\n"
             "The old folder was left in place; delete it once this version works for you.\n",

@@ -1,14 +1,20 @@
-"""Tiny JSON config persistence (last folder, window size).
+"""Tiny settings persistence (last folder, window size, ...).
 
-Stored as ``config.json`` in the per-user data folder (``paths.data_dir()``).
+Stored in the ``settings`` table of the library database (:mod:`manga_list.store`) in the per-user data
+folder (``paths.data_dir()``), one JSON value per top-level key. The ``config.json`` of older builds is
+imported once (its Manga Root becoming root #1) and left in place. Asking for the settings never creates
+the data folder: with neither the database nor an old ``config.json`` there, the defaults are returned.
 """
 
 from __future__ import annotations
 
-import json
+import logging
+import sqlite3
 from typing import Any, Dict
 
-from . import paths
+from . import paths, store
+
+_log = logging.getLogger(__name__)
 
 _DEFAULTS: Dict[str, Any] = {
     "last_root": "",
@@ -26,19 +32,24 @@ _DEFAULTS: Dict[str, Any] = {
 }
 
 
-def load() -> Dict[str, Any]:
-    path = paths.config_file()
-    if not path.exists():
-        return dict(_DEFAULTS)
+def _stored() -> Dict[str, Any]:
+    """The saved settings, or {} when nothing was ever saved (nothing is created then)."""
+    if not (paths.db_file().exists() or paths.config_file().exists() or paths.cache_file().exists()):
+        return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return dict(_DEFAULTS)
+        return store.get_store().all_settings()
+    except (OSError, sqlite3.Error):
+        _log.warning("Could not read the settings; using the defaults", exc_info=True)
+        return {}
+
+
+def load() -> Dict[str, Any]:
+    data = _stored()
     merged = dict(_DEFAULTS)
     merged.update(data or {})
     # Ensure nested defaults
     win = dict(_DEFAULTS["window"])
-    win.update(merged.get("window") or {})
+    win.update(merged.get("window") if isinstance(merged.get("window"), dict) else {})
     merged["window"] = win
     if not isinstance(merged.get("examined"), list):
         merged["examined"] = []
@@ -49,9 +60,6 @@ def load() -> Dict[str, Any]:
 
 def save(cfg: Dict[str, Any]) -> None:
     try:
-        paths.ensure_data_dir()
-        paths.config_file().write_text(
-            json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-    except OSError:
-        pass
+        store.get_store().set_settings(dict(cfg))
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        _log.warning("Could not save the settings", exc_info=True)
