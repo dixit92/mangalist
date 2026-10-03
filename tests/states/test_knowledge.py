@@ -9,7 +9,7 @@ from pathlib import Path
 from mangalist import knowledge as kn
 from mangalist.models import MangaEntry
 
-from .helpers import TODAY, item, vol
+from .helpers import TODAY, item
 
 
 def test_exact_numbers():

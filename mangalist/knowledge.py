@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -233,7 +233,6 @@ class SeriesKnowledge:
     # freshness
     fetched_at: Optional[str] = None
     next_due_at: Optional[str] = None
-    notes: Tuple[str, ...] = field(default=())
 
     def __post_init__(self):
         # Numbers are exact: whatever a caller passes (int, float, str) becomes a Decimal.
@@ -506,7 +505,7 @@ def from_own_matcher(entry: Any, mu_series_data: Optional[Mapping[str, Any]] = N
     )
 
 
-def latest_announced(volumes: Sequence[VolumeInfo], today: _dt.date) -> Optional[VolumeInfo]:
+def next_announced(volumes: Sequence[VolumeInfo], today: _dt.date) -> Optional[VolumeInfo]:
     """The first English volume announced for after *today* (the next one coming), or None."""
     upcoming = [v for v in volumes if v.released(today) is False]
     if not upcoming:

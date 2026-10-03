@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Collection, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, runtime_checkable
@@ -54,7 +54,7 @@ from .knowledge import (
     SeriesKnowledge,
     VolumeInfo,
     fmt_num,
-    latest_announced,
+    next_announced,
     released_volumes,
     to_decimal,
 )
@@ -478,7 +478,7 @@ def compute_state(
     if needs_kind or (held.n_unknown > 0 and not folder_empty):
         attention.append(ATTENTION_KIND)
 
-    upcoming_vol = latest_announced(k.volumes, today) if k is not None else None
+    upcoming_vol = next_announced(k.volumes, today) if k is not None else None
     common = dict(
         upcoming=upcoming_vol is not None,
         upcoming_date=upcoming_vol.english_date if upcoming_vol else None,
