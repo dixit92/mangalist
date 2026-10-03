@@ -223,7 +223,9 @@ class MainWindow(QMainWindow):
         # MangaPixer source: a folder MangaPixer knows takes its knowledge from the export; the others
         # fall back to the own matcher (knowledge_for returns None).
         self._mp_resolver = None
-        self._model.set_state_providers(knowledge_for=self._knowledge_for)
+        self._mp_items: dict = {}   # folder -> the resolved MangaPixer item (or None), per scan
+        self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
+                                        needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)))
 
         self._build_ui()
 
@@ -531,32 +533,52 @@ class MainWindow(QMainWindow):
         open_mangapixer_dialog(self, open_cache(self._db))
         # The connection, the mappings or the synced items may have changed.
         self._mp_resolver = None
+        self._mp_items = {}
         self._model.refresh_states()
+
+    def _mp_item_for(self, entry: MangaEntry):
+        """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
+        None; resolved once per scan / sync."""
+        key = str(entry.folder)
+        if key in self._mp_items:
+            return self._mp_items[key]
+        item = None
+        if entry.root_id is not None:
+            try:
+                if self._mp_resolver is None:
+                    from ..services.mangapixer import open_cache
+                    from ..services.mangapixer.resolve import Resolver
+
+                    self._mp_resolver = Resolver(open_cache(self._db))
+                root = self._db.get_root(entry.root_id)
+                if root is not None:
+                    rel = Path(entry.folder).resolve().relative_to(Path(root.path).resolve()).as_posix()
+                    res = self._mp_resolver.resolve(entry.root_id, rel)
+                    item = res.item if res is not None else None
+            except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
+                _log.warning("MangaPixer data for %s unavailable", entry.folder, exc_info=True)
+        self._mp_items[key] = item
+        return item
 
     def _knowledge_for(self, entry: MangaEntry):
         """MangaPixer's knowledge for *entry* when its folder (or an ancestor) has an exported link,
         else None (the table then uses the own matcher's)."""
-        if entry.root_id is None:
+        item = self._mp_item_for(entry)
+        if item is None:
             return None
-        try:
-            if self._mp_resolver is None:
-                from ..services.mangapixer import open_cache
-                from ..services.mangapixer.resolve import Resolver
+        from ..knowledge import from_mangapixer_item
 
-                self._mp_resolver = Resolver(open_cache(self._db))
-            root = self._db.get_root(entry.root_id)
-            if root is None:
-                return None
-            rel = Path(entry.folder).resolve().relative_to(Path(root.path).resolve()).as_posix()
-            res = self._mp_resolver.resolve(entry.root_id, rel)
-            if res is None:
-                return None
-            from ..knowledge import from_mangapixer_item
+        return from_mangapixer_item(item)
 
-            return from_mangapixer_item(res.item)
-        except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
-            _log.warning("MangaPixer knowledge for %s unavailable", entry.folder, exc_info=True)
-            return None
+    def _inventory_for(self, entry: MangaEntry):
+        """The series' held units for the state columns, merged with MangaPixer's volume list (which
+        chapters each volume collects) when MangaPixer knows the series."""
+        from ..inventory import as_state_inventory
+
+        item = self._mp_item_for(entry) or {}
+        volumes = item.get("volumes") if isinstance(item.get("volumes"), dict) else None
+        volume_list = volumes.get("items") if volumes else None
+        return as_state_inventory(entry.inventory(volume_list or None))
 
     def _after_roots_changed(self) -> None:
         self._show_roots()
@@ -635,6 +657,7 @@ class MainWindow(QMainWindow):
                 _apply_cache(e, cached)
 
         self._mp_resolver = None  # folders may have been renamed or added
+        self._mp_items = {}
         self._model.set_entries(entries)
         # Only auto-size columns when the user has no saved column state.
         if not self._cfg.get("column_state"):
@@ -696,6 +719,15 @@ class MainWindow(QMainWindow):
 
         if not entries:
             return
+        # Owner decision (MangaPixer Data Source, 2026-10-02): for folders MangaPixer knows, MangaList
+        # fetches nothing itself - their knowledge comes from the MangaPixer export.
+        known = [e for e in entries if self._mp_item_for(e) is not None]
+        if known:
+            entries = [e for e in entries if self._mp_item_for(e) is None]
+            self._status_label.setText(
+                f"{len(known)} folder(s) skipped: MangaPixer knows them (sync MangaPixer to refresh)")
+            if not entries:
+                return
 
         # Build (source_row, entry) pairs — find the row of each entry in the model.
         folder_to_row = {
@@ -962,8 +994,13 @@ class MainWindow(QMainWindow):
         n_overridden = sum(1 for e in entries if e.behind_override == "done")
 
         menu = QMenu(self._table)
+        act_kind = None
 
         if n == 1:
+            if getattr(entries[0], "needs_kind", False):
+                act_kind = menu.addAction("Volumes or chapters?…")
+                act_kind.setToolTip("Its files are bare numbers: say once whether they are volumes or chapters")
+                menu.addSeparator()
             act_open = menu.addAction("Open folder in Explorer")
             menu.addSeparator()
             act_copy_path = menu.addAction("Copy folder path")
@@ -1029,7 +1066,12 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if chosen in link_actions and link_actions[chosen]:
+        if act_kind is not None and chosen is act_kind:
+            from .kind_dialog import ask_series_kind
+
+            if ask_series_kind(self, entries[0], db=self._db):
+                self._model.refresh_states()
+        elif chosen in link_actions and link_actions[chosen]:
             self._open_url(link_actions[chosen])
         elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)

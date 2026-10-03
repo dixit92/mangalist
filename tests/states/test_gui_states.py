@@ -231,3 +231,17 @@ def test_default_column_order_puts_state_next_to_the_match(window):
     names = [COLUMNS[i] for i in order]
     assert names[:7] == ["✓", "Dupe", "Title", "MU Title", "State", "Gaps", "Behind"]
     assert names.index("Official source") == names.index("Completed") + 1
+
+
+def test_main_window_uses_mangapixer_for_known_folders_and_skips_their_mu_lookup(window):
+    # A folder MangaPixer knows: its state knowledge comes from the export item, and "Check MU" fetches
+    # nothing for it (owner decision, MangaPixer Data Source 2026-10-02).
+    win, _ = window
+    entry = win._model.entry_at(0)
+    win._mp_items[str(entry.folder)] = item()
+    win._model.refresh_states()
+    assert win._knowledge_for(entry).source == "mangapixer"
+    win._mu_thread = None
+    win._start_mu_lookup([entry])
+    assert win._mu_thread is None  # no worker started: nothing to fetch
+    assert "MangaPixer knows them" in win._status_label.text()

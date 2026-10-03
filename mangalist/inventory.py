@@ -447,8 +447,25 @@ def inventory_of_parsed(names: Sequence[Tuple[str, Any]],
     return compute_inventory((u for rel, p in names for u in units_from_parsed(rel, p)), volume_list)
 
 
+def as_state_inventory(inv: Inventory) -> Any:
+    """*inv* in the shape the rescan states read (:class:`mangalist.states.InventoryLike`): held volume
+    and chapter numbers, the chapters held volumes collect as ``(from, to)`` pairs, extras, the highest
+    numbers and the files whose kind is not known yet."""
+    from .states import InventorySnapshot  # states does not import this module; no cycle
+
+    return InventorySnapshot(
+        held_volumes=tuple(inv.volumes),
+        held_chapters=tuple(inv.chapters),
+        chapters_covered_by_volumes=tuple((s.start, s.end) for s in inv.covered),
+        extras=tuple(inv.extras),
+        highest_volume=inv.highest_volume,
+        highest_chapter=inv.highest_chapter,
+        unknown_kind_files=tuple(inv.unknown),
+    )
+
+
 __all__ = [
-    "Inventory", "Span", "UnitKey", "compute_inventory", "expand", "format_spans", "inventory_of_entry",
+    "as_state_inventory", "Inventory", "Span", "UnitKey", "compute_inventory", "expand", "format_spans", "inventory_of_entry",
     "inventory_of_parsed", "ranges", "read_volume_list", "to_number", "units_from_parsed", "units_of_entry",
     "MAX_RANGE_SPAN",
 ]
