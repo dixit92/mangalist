@@ -24,6 +24,9 @@ from typing import Dict, Optional
 from .. import paths
 from .db import StoreBase, utcnow
 from .exclusions import ExclusionSet, InvalidPattern, normalize_pattern
+from .journal import ContentAndPathChange, Journal, JournalError, Move, Plan, PlanStateError, StepRefused
+from .lock import LOCK_NAME, LockBusy, LockError, LockLost, RootLock
+from .names import windows_name_problem, windows_safe_name
 from .roots import Root, RootError, RootsMixin
 from .schema import SCHEMA_VERSION
 from .series import ScanRecord, Series, SeriesMixin, SeriesSeen, folder_fingerprint, seen_from_entries
@@ -35,7 +38,9 @@ _log = logging.getLogger(__name__)
 __all__ = [
     "Store", "get_store", "reset_stores", "Root", "RootError", "Series", "SeriesSeen", "ScanRecord",
     "Unit", "UnitError", "ExclusionSet", "InvalidPattern", "normalize_pattern", "folder_fingerprint",
-    "seen_from_entries", "SCHEMA_VERSION", "utcnow",
+    "seen_from_entries", "SCHEMA_VERSION", "utcnow", "Journal", "JournalError", "Move", "Plan", "PlanStateError",
+    "StepRefused", "ContentAndPathChange", "RootLock", "LockBusy", "LockError", "LockLost", "LOCK_NAME",
+    "windows_name_problem", "windows_safe_name",
 ]
 
 

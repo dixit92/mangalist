@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 
 from manga_list import paths, store
@@ -26,3 +29,14 @@ def library(tmp_path):
 def make_archive(path, size: int = 10) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x" * size)
+
+
+@pytest.fixture
+def live_pid():
+    """The pid of another live process on this host."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait()
