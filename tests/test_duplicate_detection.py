@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from manga_list.models import MangaEntry
-from manga_list.gui.table_model import MangaTableModel
+from mangalist.models import MangaEntry
+from mangalist.gui.table_model import MangaTableModel
 
 
 def test_duplicate_detection_basic():

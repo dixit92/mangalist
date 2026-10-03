@@ -7,12 +7,12 @@ from typing import List, Tuple
 
 import pytest
 
-from manga_list.classifier import (
+from mangalist.classifier import (
     classify,
     detect_tokens,
     parse_folder_name,
 )
-from manga_list.models import FileHit, MangaEntry, Verdict
+from mangalist.models import FileHit, MangaEntry, Verdict
 
 
 # ---------------------------------------------------------------------------

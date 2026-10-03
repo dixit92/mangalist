@@ -6,8 +6,8 @@ from typing import Optional, Sequence, Tuple
 
 import pytest
 
-from manga_list.matcher import detector
-from manga_list.matcher.contracts import (
+from mangalist.matcher import detector
+from mangalist.matcher.contracts import (
     ChildFolderShape,
     ContentSuggestion,
     FolderShape,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # macOS package from the PyInstaller bundle (dist/MangaList.app):
-#   package/MangaList-v<version>-macos-<arch>.dmg  (drag Manga List to Applications)
+#   package/MangaList-v<version>-macos-<arch>.dmg  (drag MangaList to Applications)
 # Usage: packaging/macos/build_dmg.sh <version> <arm64|x64>
 # The bundle is only ad-hoc signed (PyInstaller does that); releases rely on SHA256SUMS.
 set -euo pipefail
@@ -21,7 +21,7 @@ have="$(lipo -archs "$APP/Contents/MacOS/MangaList")"
 
 STAGE="build/dmg"
 rm -rf "$STAGE" && mkdir -p "$STAGE" package
-cp -R "$APP" "$STAGE/Manga List.app"
+cp -R "$APP" "$STAGE/MangaList.app"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "Manga List" -srcfolder "$STAGE" -ov -format UDZO "package/$NAME.dmg"
+hdiutil create -volname "MangaList" -srcfolder "$STAGE" -ov -format UDZO "package/$NAME.dmg"
 ls -l "package/$NAME.dmg"

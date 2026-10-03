@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Manga List (all platforms).
+"""PyInstaller spec for MangaList (all platforms).
 
     python packaging/make_icon.py      # optional: build/icons/* (the build works without them)
     pyinstaller MangaList.spec --clean --noconfirm
@@ -8,7 +8,7 @@ Output (onedir - an installer around a one-file exe would unpack it to a temp fo
     Windows / Linux:  dist/MangaList/MangaList[.exe] plus dist/MangaList/_internal/
     macOS:            dist/MangaList.app (windowed bundle) and dist/MangaList/
 
-The version comes from manga_list/_version.py (stamped by packaging/stamp_version.py in CI).
+The version comes from mangalist/_version.py (stamped by packaging/stamp_version.py in CI).
 Not code-signed; releases publish SHA256SUMS instead.
 """
 
@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(SPECPATH).resolve()
 
 VERSION = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]",
-                    (ROOT / "manga_list" / "_version.py").read_text(encoding="utf-8")).group(1)
+                    (ROOT / "mangalist" / "_version.py").read_text(encoding="utf-8")).group(1)
 _numeric = re.match(r"\d+(\.\d+){0,2}", VERSION)
 NUMERIC = ".".join(((_numeric.group(0) if _numeric else "0.0.0").split(".") + ["0", "0"])[:3])
 
@@ -33,27 +33,27 @@ else:
 ICON = str(ICON) if ICON is not None and ICON.exists() else None
 
 a = Analysis(
-    ["manga_list/__main__.py"],
+    ["mangalist/__main__.py"],
     pathex=[str(ROOT)],
     binaries=[],
     datas=[],
     hiddenimports=[
-        "manga_list.gui.main_window",
-        "manga_list.gui.table_model",
-        "manga_list.gui.mu_worker",
-        "manga_list.gui.detail_panel",
-        "manga_list.gui.mu_picker",
-        "manga_list.matcher",
-        "manga_list.mu_cache",
-        "manga_list.mu_client",
-        "manga_list.mu_match",
-        "manga_list.mu_progress",
-        "manga_list.models",
-        "manga_list.config",
-        "manga_list.paths",
-        "manga_list._version",
-        "manga_list.scanner",
-        "manga_list.anilist_client",
+        "mangalist.gui.main_window",
+        "mangalist.gui.table_model",
+        "mangalist.gui.mu_worker",
+        "mangalist.gui.detail_panel",
+        "mangalist.gui.mu_picker",
+        "mangalist.matcher",
+        "mangalist.mu_cache",
+        "mangalist.mu_client",
+        "mangalist.mu_match",
+        "mangalist.mu_progress",
+        "mangalist.models",
+        "mangalist.config",
+        "mangalist.paths",
+        "mangalist._version",
+        "mangalist.scanner",
+        "mangalist.anilist_client",
     ],
     hookspath=[],
     hooksconfig={},
@@ -128,11 +128,11 @@ if sys.platform == "darwin":
         coll,
         name="MangaList.app",
         icon=ICON,
-        bundle_identifier="io.github.dixit92.mangalist",
+        bundle_identifier="com.lifepixer.MangaList",
         version=NUMERIC,
         info_plist={
-            "CFBundleName": "Manga List",
-            "CFBundleDisplayName": "Manga List",
+            "CFBundleName": "MangaList",
+            "CFBundleDisplayName": "MangaList",
             "CFBundleShortVersionString": NUMERIC,
             "CFBundleVersion": NUMERIC,
             "NSHighResolutionCapable": True,

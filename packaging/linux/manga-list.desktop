@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Manga List
-GenericName=Manga library classifier
-Comment=Classify manga folders and match them to MangaUpdates
-Exec=MangaList
-Icon=manga-list
-Terminal=false
-Categories=Utility;Graphics;

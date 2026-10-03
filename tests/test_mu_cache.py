@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_list import mu_cache, paths
+from mangalist import mu_cache, paths
 
 # The schema as shipped before the stage-2 matcher (no mu_score_version / mu_band / mu_reasons).
 _LEGACY_DDL = """
@@ -24,7 +24,7 @@ CREATE TABLE mu_cache (
 
 @pytest.fixture
 def cache_db() -> Path:
-    # The per-test data folder (conftest.py sets MANGA_LIST_DATA_DIR).
+    # The per-test data folder (conftest.py sets MANGALIST_DATA_DIR).
     return paths.cache_file()
 
 
@@ -49,7 +49,7 @@ def test_new_scores_are_written_as_the_current_version(cache_db):
     mu_cache.save_entry(folder, 2, "Title", "", None, mu_confirmed=False, mu_score=0.93,
                         mu_band="review", mu_reasons=["CloseSecond"])
     row = mu_cache.load_entry(folder)
-    assert mu_cache.MU_SCORE_VERSION == 4  # MangaPixer 1.31.1 port
+    assert mu_cache.MU_SCORE_VERSION == 5  # MangaPixer 1.32.0 port
     assert row["mu_score_version"] == mu_cache.MU_SCORE_VERSION
     assert row["mu_band"] == "review"
     assert row["mu_reasons"] == ["CloseSecond"]

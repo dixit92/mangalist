@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from manga_list.matcher import anatomy
+from mangalist.matcher import anatomy
 
 
 def test_parse_full_doujin_anatomy():

@@ -1,6 +1,6 @@
 """Port of the matcher-relevant part of MangaPixer 1.31.1 ``MangaUpdatesProviderTests.cs`` (status line, publisher
 notes, webtoon vote, provider text flattening, the record -> candidate mapping) and of its golden harness's
-recorded-mapping check. The publication status words are not ported (Manga-List reads them elsewhere), so
+recorded-mapping check. The publication status words are not ported (MangaList reads them elsewhere), so
 only the totals are asserted. Synthetic records, plus one recorded public fixture."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_list.matcher import mangaupdates as mu
+from mangalist.matcher import mangaupdates as mu
 
 FIXTURES = Path(__file__).resolve().parents[1] / "golden" / "fixtures"
 

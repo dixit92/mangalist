@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.matcher.similarity import (
+from mangalist.matcher.similarity import (
     POSSIBLE_THRESHOLD,
     STRONG_THRESHOLD,
     MatchStrength,

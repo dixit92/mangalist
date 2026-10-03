@@ -1,0 +1,8 @@
+# Docker build context for packaging/docker/Dockerfile: only requirements.txt, mangalist/ and
+# packaging/docker/ are needed.
+**
+!requirements.txt
+!mangalist/
+!packaging/docker/
+**/__pycache__
+**/*.py[cod]

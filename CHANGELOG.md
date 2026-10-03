@@ -7,6 +7,26 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+The first MangaList release (the foundations of the redesign; testing build).
+
+- **Renamed to MangaList** (was Manga List / Manga-List; repository `dixit92/MangaList`). Settings and the
+  MangaUpdates cache stay where they are; the Windows installer upgrades the old version in place and
+  replaces its "Manga List" shortcuts. `MANGA_LIST_DATA_DIR` still works; the new name is `MANGALIST_DATA_DIR`.
+- **Several library roots, with exclusions:** a Roots manager lists every root, and per-root patterns (e.g.
+  `@Oneshots`, `*.txt`) are never scanned - with a live preview of what a pattern hides. The configured
+  Manga Root becomes the first root. Archives lying directly in a root are reported, not matched.
+- **One database** (`mangalist.db`) holds roots, exclusions, series and the MangaUpdates links; the old
+  `mu_cache.db` and `config.json` are imported once and kept. A renamed series folder keeps its link.
+- **Headless runner and Docker / Unraid image:** `python -m mangalist --headless` rescans the roots on a
+  schedule; the Docker image runs the app in the browser over HTTPS (with clipboard sync) next to the runner.
+  The image is not published yet - see the README. It is for local use only: there is no login, so never
+  expose it to the internet (use a VPN or Tailscale).
+- **MangaUpdates matching follows MangaPixer 1.32.0** (was 1.31.1), e.g. `Webtoon` / `Webtoons` folders count
+  as webtoon evidence again, and `No. N` titles and `Library Edition` releases are read correctly.
+  Older matches are re-checked on the next Check MU.
+- Groundwork for later versions, not visible yet: a file-name parser that reads FMD2 names and release names
+  exactly, and an undo journal for renames.
+
 ## [2026.10.1] - 2026-10-02
 
 - AniList lookups (the Behind column's chapters-per-volume estimate) work again under AniList's current

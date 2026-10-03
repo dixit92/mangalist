@@ -1,0 +1,8 @@
+#!/bin/sh
+# Prints the service's "disabled" value: MANGALIST_HEADLESS=0 turns the headless runner off.
+set -u
+if is-bool-val-false "${MANGALIST_HEADLESS:-1}"; then
+    echo "true"
+else
+    echo "false"
+fi

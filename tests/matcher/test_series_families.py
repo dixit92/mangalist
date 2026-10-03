@@ -4,8 +4,8 @@ page only and are not ported, so each case is asserted pairwise with :func:`are_
 
 from __future__ import annotations
 
-from manga_list.matcher.contracts import CandidateRelation, MatchCandidate, MetadataFormat
-from manga_list.matcher.series_families import are_family, is_family_relation
+from mangalist.matcher.contracts import CandidateRelation, MatchCandidate, MetadataFormat
+from mangalist.matcher.series_families import are_family, is_family_relation
 
 
 def rec(id, title, alt=(), year=None, authors=(), related=(), provider="mangaupdates") -> MatchCandidate:

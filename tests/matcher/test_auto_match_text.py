@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.matcher.auto_match_text import creator_hints, disambiguator_tag
+from mangalist.matcher.auto_match_text import creator_hints, disambiguator_tag
 
 
 @pytest.mark.parametrize(
@@ -46,7 +46,7 @@ def test_disambiguator_tag_is_the_provider_author_suffix(title, tag):
 
 from decimal import Decimal  # noqa: E402
 
-from manga_list.matcher import auto_match_text as amt  # noqa: E402
+from mangalist.matcher import auto_match_text as amt  # noqa: E402
 
 
 @pytest.mark.parametrize(("name", "expected"), [
