@@ -194,6 +194,23 @@ def normalize_base_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), parts.netloc, path, "", ""))
 
 
+class _Secret:
+    """Holds the token; prints as ``***`` (so a ``repr`` / ``vars()`` dump or a traceback never shows it)."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: Optional[str]):
+        self._value = value
+
+    def reveal(self) -> Optional[str]:
+        return self._value
+
+    def __repr__(self) -> str:
+        return "***"
+
+    __str__ = __repr__
+
+
 def _check_token(token: Optional[str]) -> str:
     value = str(token or "").strip()
     if not value:
@@ -235,7 +252,7 @@ class MangaPixerClient:
                  max_retry_after: float = DEFAULT_MAX_RETRY_AFTER,
                  sleep: Callable[[float], None] = time.sleep, session: Optional[requests.Session] = None):
         self.base_url = normalize_base_url(base_url)
-        self.__token = token  # name-mangled: kept out of vars() dumps and repr
+        self._token = _Secret(token)
         self.verify: Verify = verify if isinstance(verify, str) and verify else bool(verify)
         self.timeout = timeout
         self.max_retries = max(0, int(max_retries))
@@ -271,7 +288,7 @@ class MangaPixerClient:
         return f"{self.base_url}/api/v1/export/{endpoint}"
 
     def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        token = _check_token(self.__token)
+        token = _check_token(self._token.reveal())
         url = self._url(endpoint)
         attempts = 0
         while True:
