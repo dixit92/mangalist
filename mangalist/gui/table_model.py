@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import datetime
-from typing import List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
+from ..knowledge import OfficialLink, SeriesKnowledge, from_own_matcher
 from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
+from ..official_sources import KIND_SEARCH, official_links, primary_label
+from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, compute_state, \
+    fallback_inventory_from_entry
 
 COLUMNS = [
     "✓",
@@ -28,6 +32,9 @@ COLUMNS = [
     "Licensed",
     "Behind",
     "Completed",
+    "State",
+    "Gaps",
+    "Official source",
 ]
 
 COL_EXAMINED = 0
@@ -45,6 +52,34 @@ COL_MU_TITLE = 11
 COL_LICENSED = 12
 COL_BEHIND = 13
 COL_COMPLETED = 14
+COL_STATE = 15
+COL_GAPS = 16
+COL_OFFICIAL = 17
+STATE_COLUMNS = (COL_STATE, COL_GAPS, COL_OFFICIAL)
+
+# State filters (key -> label), in the order the toolbar lists them; None = every row.
+STATE_FILTERS: List[Tuple[Optional[str], str]] = (
+    [(None, "All states"), ("wanted", "Wanted (any)"), ("missing", "Missing (volumes or chapters)")]
+    + [(st.value, st.value) for st in STATE_ORDER]
+    + [("upcoming", "Upcoming"), ("attention", "Needs attention")]
+)
+
+
+def state_matches(state: Optional[SeriesState], key: Optional[str]) -> bool:
+    """Does a row's *state* pass the state filter *key* (see STATE_FILTERS)?"""
+    if key is None:
+        return True
+    if state is None:
+        return False
+    if key == "wanted":
+        return state.state in WANTED_STATES
+    if key == "missing":
+        return state.state in MISSING_STATES
+    if key == "upcoming":
+        return state.upcoming
+    if key == "attention":
+        return bool(state.needs_attention)
+    return state.state.value == key
 
 # Saturated dark green for examined rows — contrasts strongly with white text
 # on dark themes, distinct from the table's alternating rows and selection highlight.
@@ -62,6 +97,18 @@ class MangaTableModel(QAbstractTableModel):
         self._mu_processing_row: Optional[int] = None
         # Map of mu_title -> list of row indices (for duplicate detection)
         self._dupe_map: dict[str, List[int]] = {}
+        # Rescan state + official sources per row, computed on first use and dropped when the row changes.
+        self._state_cache: Dict[int, Tuple[SeriesState, List[OfficialLink]]] = {}
+        self._today: Optional[datetime.date] = None
+        # Where a row's inventory and knowledge come from. FALLBACK defaults: the inventory read from the
+        # entry's file names (states.fallback_inventory_from_entry) and the own matcher's knowledge; the
+        # integrator swaps in the inventory lane's Inventory and the MangaPixer source via
+        # set_state_providers().
+        self._inventory_for: Callable[[MangaEntry], Any] = fallback_inventory_from_entry
+        self._knowledge_for: Callable[[MangaEntry], Optional[SeriesKnowledge]] = from_own_matcher
+        self._needs_kind_for: Callable[[MangaEntry], bool] = lambda e: False
+        self.dataChanged.connect(self._on_data_changed)
+        self.modelReset.connect(self._state_cache.clear)
         # Build initial dupe map if entries provided
         if self._entries:
             self._rebuild_dupe_map()
@@ -74,6 +121,68 @@ class MangaTableModel(QAbstractTableModel):
         self._mu_processing_row = None
         self._rebuild_dupe_map()
         self.endResetModel()
+
+    # --- rescan state ----------------------------------------------------------
+
+    def set_state_providers(self, *, inventory_for: Optional[Callable[[MangaEntry], Any]] = None,
+                            knowledge_for: Optional[Callable[[MangaEntry], Optional[SeriesKnowledge]]] = None,
+                            needs_kind_for: Optional[Callable[[MangaEntry], bool]] = None,
+                            today: Optional[datetime.date] = None) -> None:
+        """Swap where the State / Gaps / Official source columns read from (None keeps the current
+        provider). *inventory_for(entry)* returns an InventoryLike (or None for the fallback),
+        *knowledge_for(entry)* a SeriesKnowledge (or None for the own matcher's)."""
+        if inventory_for is not None:
+            self._inventory_for = inventory_for
+        if knowledge_for is not None:
+            self._knowledge_for = knowledge_for
+        if needs_kind_for is not None:
+            self._needs_kind_for = needs_kind_for
+        if today is not None:
+            self._today = today
+        self.refresh_states()
+
+    def refresh_states(self) -> None:
+        """Recompute every row's state (e.g. after new knowledge arrived)."""
+        self._state_cache.clear()
+        if self._entries:
+            self.dataChanged.emit(self.index(0, COL_STATE), self.index(len(self._entries) - 1, COL_OFFICIAL),
+                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def _on_data_changed(self, top_left, bottom_right, roles=()) -> None:
+        rows = range(top_left.row(), bottom_right.row() + 1)
+        if not any(r in self._state_cache for r in rows):
+            return
+        for r in rows:
+            self._state_cache.pop(r, None)
+        if top_left.column() > COL_STATE or bottom_right.column() < COL_OFFICIAL:
+            # The row changed elsewhere (MU match, override): repaint its state cells too.
+            self.dataChanged.emit(self.index(top_left.row(), COL_STATE), self.index(bottom_right.row(), COL_OFFICIAL),
+                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def _evaluate(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink]]]:
+        cached = self._state_cache.get(row)
+        if cached is not None:
+            return cached
+        e = self.entry_at(row)
+        if e is None:
+            return None
+        knowledge = self._knowledge_for(e) or from_own_matcher(e)
+        inventory = self._inventory_for(e)
+        if inventory is None:
+            inventory = fallback_inventory_from_entry(e)
+        st = compute_state(inventory, knowledge, folder_empty=e.n_files == 0, needs_kind=self._needs_kind_for(e),
+                           behind_override=e.behind_override, today=self._today)
+        links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
+        self._state_cache[row] = (st, links)
+        return st, links
+
+    def state_at(self, row: int) -> Optional[SeriesState]:
+        got = self._evaluate(row)
+        return got[0] if got else None
+
+    def links_at(self, row: int) -> List[OfficialLink]:
+        got = self._evaluate(row)
+        return list(got[1]) if got else []
 
     def _rebuild_dupe_map(self) -> None:
         """Build a map of mu_title -> list of row indices with that MU title."""
@@ -240,6 +349,14 @@ class MangaTableModel(QAbstractTableModel):
                 return _behind_text(e)
             if col == COL_COMPLETED:
                 return _completed_text(e)
+            if col == COL_STATE:
+                st = self.state_at(index.row())
+                return _state_text(st) if st else ""
+            if col == COL_GAPS:
+                st = self.state_at(index.row())
+                return st.gaps_text if st else ""
+            if col == COL_OFFICIAL:
+                return _official_text(self.links_at(index.row()))
 
         if role == Qt.TextAlignmentRole:
             if col in (COL_FILES, COL_SUBS, COL_VOL, COL_CH, COL_BOTH, COL_MTIME):
@@ -274,6 +391,14 @@ class MangaTableModel(QAbstractTableModel):
                 return _behind_tooltip(e) or str(e.folder)
             if col == COL_COMPLETED:
                 return _completed_tooltip(e)
+            if col == COL_STATE:
+                st = self.state_at(index.row())
+                return st.tooltip() if st else None
+            if col == COL_GAPS:
+                st = self.state_at(index.row())
+                return (st.gaps_tooltip() or "No gaps") if st else None
+            if col == COL_OFFICIAL:
+                return _official_tooltip(self.links_at(index.row())) or None
             # Default tooltip: folder path, with franchise info if applicable
             if e.parent_folder is not None:
                 return f"Subseries of: {e.parent_folder.name}\n{e.folder}"
@@ -321,8 +446,40 @@ class MangaTableModel(QAbstractTableModel):
                 return _behind_sort(e)
             if col == COL_COMPLETED:
                 return _completed_sort(e)
+            if col == COL_STATE:
+                st = self.state_at(index.row())
+                # STATE_ORDER rank first, then more missing units first (one number: Qt sorts it).
+                rank, neg_missing = st.sort_key if st else (len(STATE_ORDER), 0)
+                return rank * 1_000_000 + neg_missing
+            if col == COL_GAPS:
+                st = self.state_at(index.row())
+                return st.n_missing if st else -1
+            if col == COL_OFFICIAL:
+                return _official_text(self.links_at(index.row())).lower()
 
         return None
+
+
+# --- State / Gaps / Official source helpers -------------------------------------
+
+
+def _state_text(st: SeriesState) -> str:
+    """The state, with its flags: ``Up to date · Upcoming``."""
+    return "  ·  ".join((st.state.value,) + st.flags)
+
+
+def _official_text(links: List[OfficialLink]) -> str:
+    label = primary_label(links)
+    more = sum(1 for link in links if link.kind != KIND_SEARCH) - 1
+    return f"{label} (+{more})" if more > 0 else label
+
+
+def _official_tooltip(links: List[OfficialLink]) -> str:
+    lines = []
+    for link in links:
+        where = link.url or "(no page known)"
+        lines.append(f"{link.label} [{link.kind}, {link.source}]: {where}")
+    return "\n".join(lines)
 
 
 def _is_mixed_layout(e: MangaEntry) -> bool:

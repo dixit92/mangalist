@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Optional
+import html
+from typing import List, Optional, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -18,7 +19,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..classifier import _human  # internal helper, fine to reuse
+from ..knowledge import OfficialLink
 from ..models import MangaEntry
+from ..states import ATTENTION_LABELS, SeriesState
 
 _KIND_COLORS = {
     "volume": QColor("#1565c0"),
@@ -76,6 +79,34 @@ class DetailPanel(QWidget):
         self._stats_form.addRow("Verdict:", self._lbl_verdict)
         root.addWidget(self._stats_box)
 
+        # Rescan state: state, flags, gaps, MangaPixer's answer
+        self._state_box = QGroupBox("State")
+        self._state_form = QFormLayout(self._state_box)
+        self._state_form.setLabelAlignment(Qt.AlignRight)
+        self._lbl_state = QLabel("-")
+        self._lbl_flags = QLabel("-")
+        self._lbl_gaps = QLabel("-")
+        self._lbl_mangapixer = QLabel("-")
+        for lbl in (self._lbl_state, self._lbl_flags, self._lbl_gaps, self._lbl_mangapixer):
+            lbl.setWordWrap(True)
+            lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._state_form.addRow("State:", self._lbl_state)
+        self._state_form.addRow("Flags:", self._lbl_flags)
+        self._state_form.addRow("Gaps:", self._lbl_gaps)
+        self._state_form.addRow("MangaPixer:", self._lbl_mangapixer)
+        root.addWidget(self._state_box)
+
+        # Official sources (A12): links open in the browser
+        self._links_box = QGroupBox("Official sources")
+        lb_layout = QVBoxLayout(self._links_box)
+        self._links_label = QLabel("-")
+        self._links_label.setWordWrap(True)
+        self._links_label.setTextFormat(Qt.RichText)
+        self._links_label.setOpenExternalLinks(True)
+        self._links_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        lb_layout.addWidget(self._links_label)
+        root.addWidget(self._links_box)
+
         # Reasons
         self._reasons_box = QGroupBox("Heuristic hits")
         rb_layout = QVBoxLayout(self._reasons_box)
@@ -97,7 +128,9 @@ class DetailPanel(QWidget):
 
     # ------------------------------------------------------------------
 
-    def show_entry(self, entry: Optional[MangaEntry]) -> None:
+    def show_entry(self, entry: Optional[MangaEntry], state: Optional[SeriesState] = None,
+                   links: Optional[Sequence[OfficialLink]] = None) -> None:
+        self._show_state(state if entry is not None else None, links if entry is not None else None)
         if entry is None:
             self._title_label.setText("Select a row to see details")
             self._eng_label.setText("")
@@ -147,3 +180,42 @@ class DetailPanel(QWidget):
         if len(entry.files) > MAX_SAMPLE_FILES:
             extra = len(entry.files) - MAX_SAMPLE_FILES
             self._files_list.addItem(QListWidgetItem(f"… and {extra} more"))
+
+    # ------------------------------------------------------------------
+
+    def _show_state(self, state: Optional[SeriesState], links: Optional[Sequence[OfficialLink]]) -> None:
+        if state is None:
+            for lbl in (self._lbl_state, self._lbl_flags, self._lbl_gaps, self._lbl_mangapixer):
+                lbl.setText("-")
+                lbl.setToolTip("")
+        else:
+            self._lbl_state.setText(state.state.value)
+            self._lbl_state.setToolTip("\n".join(state.reasons))
+            flags: List[str] = []
+            if state.upcoming:
+                vol = f"vol. {state.upcoming_volume} " if state.upcoming_volume else ""
+                flags.append(f"Upcoming (English {vol}{state.upcoming_date or 'date not known'})")
+            if state.requested:
+                flags.append("Requested")
+            flags += [f"Needs attention: {ATTENTION_LABELS.get(a, a)}" for a in state.needs_attention]
+            if state.rename_pending:
+                flags.append("Rename pending")
+            self._lbl_flags.setText("\n".join(flags) or "-")
+            self._lbl_gaps.setText(state.gaps_tooltip() or "No gaps")
+            mp = state.mangapixer_text()
+            if mp and state.mangapixer_disagrees:
+                mp += " - differs; MangaList's own count is shown"
+            self._lbl_mangapixer.setText(mp[len("MangaPixer: "):] if mp else "-")
+        self._links_label.setText(links_html(links or []) or "-")
+
+
+def links_html(links: Sequence[OfficialLink]) -> str:
+    """Official sources as rich text: one line each, a link when the page is known."""
+    lines = []
+    for link in links:
+        label = html.escape(link.label)
+        if link.url:
+            lines.append(f'<a href="{html.escape(link.url, quote=True)}">{label}</a>')
+        else:
+            lines.append(label)
+    return "<br>".join(lines)

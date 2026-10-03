@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import webbrowser
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -33,6 +34,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDockWidget,
     QFileDialog,
     QHeaderView,
     QLabel,
@@ -60,9 +62,10 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .roots_dialog import RootsDialog
 from .table_model import (
-    COLUMNS, COL_BEHIND, COL_DUPE, COL_EXAMINED, COL_LICENSED,
-    COL_MU_TITLE, COL_TITLE, MangaTableModel,
+    COLUMNS, COL_BEHIND, COL_DUPE, COL_EXAMINED, COL_GAPS, COL_LICENSED,
+    COL_MU_TITLE, COL_OFFICIAL, COL_STATE, COL_TITLE, STATE_FILTERS, MangaTableModel, state_matches,
 )
+from .wanted_panel import WantedPanel
 
 
 # ---------------------------------------------------------------------------
@@ -129,10 +132,16 @@ class _SortProxy(QSortFilterProxyModel):
         self.setFilterCaseSensitivity(Qt.CaseInsensitive)
         self.setFilterKeyColumn(-1)  # filter across all columns
         self._dupes_only = False
+        self._state_filter: Optional[str] = None
 
     def set_dupes_only(self, enabled: bool) -> None:
         """Filter to show only duplicate MU matches."""
         self._dupes_only = enabled
+        self.invalidateFilter()
+
+    def set_state_filter(self, key: Optional[str]) -> None:
+        """Show only rows whose rescan state passes *key* (table_model.STATE_FILTERS; None = all)."""
+        self._state_filter = key
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
@@ -141,9 +150,13 @@ class _SortProxy(QSortFilterProxyModel):
         if not super().filterAcceptsRow(source_row, source_parent):
             return False
 
+        source_model = self.sourceModel()
+        if self._state_filter is not None and source_model is not None:
+            if not state_matches(source_model.state_at(source_row), self._state_filter):
+                return False
+
         # Then apply duplicates-only filter if enabled
         if self._dupes_only:
-            source_model = self.sourceModel()
             if source_model is not None:
                 return source_model.is_duplicate(source_row)
 
@@ -297,6 +310,15 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._dupes_checkbox)
 
         toolbar.addSeparator()
+        toolbar.addWidget(QLabel("State: "))
+        self._state_combo = QComboBox()
+        self._state_combo.setToolTip("Show only series in this rescan state")
+        for key, label in STATE_FILTERS:
+            self._state_combo.addItem(label, key)
+        self._state_combo.currentIndexChanged.connect(self._on_state_filter_changed)
+        toolbar.addWidget(self._state_combo)
+
+        toolbar.addSeparator()
         toolbar.addWidget(QLabel("Filter: "))
         self._filter_edit = QLineEdit()
         self._filter_edit.setPlaceholderText("Type to filter title / english / verdict…")
@@ -374,6 +396,31 @@ class MainWindow(QMainWindow):
 
         splitter.splitterMoved.connect(self._on_splitter_moved)
         self.setCentralWidget(splitter)
+
+        # Wanted panel (dock): wanted / missing / upgrade series with their official sources.
+        self._wanted = WantedPanel(open_url=self._open_url)
+        self._wanted.series_activated.connect(self._select_source_row)
+        dock = QDockWidget("Wanted", self)
+        dock.setObjectName("wanted_dock")
+        dock.setWidget(self._wanted)
+        dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
+                         | QDockWidget.DockWidgetFloatable)
+        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+        dock.setVisible(bool(self._cfg.get("wanted_panel", False)))
+        dock.visibilityChanged.connect(self._on_wanted_visibility)
+        self._wanted_dock = dock
+        toggle = dock.toggleViewAction()
+        toggle.setText("Wanted panel")
+        toggle.setToolTip("Show the series that are wanted, missing units or have an upgrade, with their official sources")
+        toolbar.addSeparator()
+        toolbar.addAction(toggle)
+        self._wanted_toggle = toggle
+        self._wanted_timer = QTimer(self)
+        self._wanted_timer.setSingleShot(True)
+        self._wanted_timer.setInterval(300)
+        self._wanted_timer.timeout.connect(self._rebuild_wanted)
+        for sig in (self._model.modelReset, self._model.dataChanged, self._model.layoutChanged):
+            sig.connect(lambda *_a: self._wanted_timer.start())
 
         # Status bar
         sb = QStatusBar()
@@ -647,7 +694,7 @@ class MainWindow(QMainWindow):
 
     def _resize_mu_columns(self) -> None:
         """Resize MU-populated columns to fit content, leaving Title/Examined alone."""
-        for col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND):
+        for col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_STATE, COL_GAPS, COL_OFFICIAL):
             self._table.resizeColumnToContents(col)
 
     def _on_mu_thread_finished(self) -> None:
@@ -684,13 +731,51 @@ class MainWindow(QMainWindow):
         else:
             self._status_label.setText("Showing all entries")
 
+    # --- Rescan state: filter, Wanted panel ---------------------------------
+
+    def _on_state_filter_changed(self, _index: int) -> None:
+        key = self._state_combo.currentData()
+        self._proxy.set_state_filter(key)
+        if key is None:
+            self._status_label.setText("Showing all entries")
+        else:
+            self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {self._state_combo.currentText()}")
+
+    def _on_wanted_visibility(self, visible: bool) -> None:
+        shown = not self._wanted_dock.isHidden()   # the owner's choice, not the window being minimised
+        if bool(self._cfg.get("wanted_panel", False)) != shown:
+            self._cfg["wanted_panel"] = shown
+            config.save(self._cfg)
+        if visible:
+            self._rebuild_wanted()
+
+    def _rebuild_wanted(self) -> None:
+        if self._wanted_dock.isVisible():
+            self._wanted.rebuild(self._model)
+
+    def _select_source_row(self, src_row: int) -> None:
+        """Select a series in the table (clearing the filters that hide it)."""
+        src = self._model.index(src_row, COL_TITLE)
+        idx = self._proxy.mapFromSource(src)
+        if not idx.isValid():
+            self._state_combo.setCurrentIndex(0)
+            self._filter_edit.clear()
+            self._dupes_checkbox.setChecked(False)
+            idx = self._proxy.mapFromSource(src)
+        if idx.isValid():
+            self._table.selectRow(idx.row())
+            self._table.scrollTo(idx)
+
+    def _open_url(self, url: str) -> None:
+        webbrowser.open(url)
+
     # --- Column order & state --------------------------------------------
 
     # Desired logical order: ✓ Title MU-Title Behind Licensed Verdict
     #                        Last-Modified Alt-Title Files Subfolders Vol% Ch% Both%
     _DEFAULT_COL_ORDER = [
-        "✓", "Dupe", "Title", "MU Title", "Behind", "Licensed", "Completed", "Verdict",
-        "Last Modified", "Alternative Title", "Files", "Subfolders",
+        "✓", "Dupe", "Title", "MU Title", "State", "Gaps", "Behind", "Licensed", "Completed",
+        "Official source", "Verdict", "Last Modified", "Alternative Title", "Files", "Subfolders",
         "Vol %", "Ch %", "Both %",
     ]
 
@@ -778,8 +863,9 @@ class MainWindow(QMainWindow):
             self._detail.show_entry(None)
             return
         src_index: QModelIndex = self._proxy.mapToSource(idx)
-        entry = self._model.entry_at(src_index.row())
-        self._detail.show_entry(entry)
+        row = src_index.row()
+        entry = self._model.entry_at(row)
+        self._detail.show_entry(entry, self._model.state_at(row), self._model.links_at(row))
 
     # --- Context menu ----------------------------------------------------
 
@@ -840,9 +926,17 @@ class MainWindow(QMainWindow):
             act_open_mu = menu.addAction("Open MangaUpdates page")
             act_open_mu.setEnabled(bool(entry0.mu_url))
             act_check_mu = menu.addAction("Check MU for this entry")
+            links_menu = menu.addMenu("Official sources")
+            link_actions = {}
+            for link in self._model.links_at(rows[0]):
+                act = links_menu.addAction(link.label if link.url else f"{link.label} (no page known)")
+                act.setEnabled(bool(link.url))
+                link_actions[act] = link.url
+            links_menu.setEnabled(bool(link_actions))
             menu.addSeparator()
         else:
             act_open = act_copy_path = act_copy_title = act_fix_mu = act_open_mu = None
+            link_actions = {}
             menu.addAction(f"{n} folders selected").setEnabled(False)
             menu.addSeparator()
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
@@ -887,7 +981,9 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if chosen is act_open and entries:
+        if chosen in link_actions and link_actions[chosen]:
+            self._open_url(link_actions[chosen])
+        elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)
