@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.2] - 2026-10-03
+
 The first MangaList release (the foundations of the redesign; testing build).
 
 - **Renamed to MangaList** (was Manga List / Manga-List; repository `dixit92/MangaList`). Settings and the
