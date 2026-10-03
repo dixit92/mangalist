@@ -4,6 +4,8 @@ Options (for packaging checks and CI):
   --version      print the version and exit (no Qt import, no window)
   --smoke-test   build the main window, run the event loop once and exit 0
                  (use with QT_QPA_PLATFORM=offscreen on a headless machine)
+  --headless     run the scheduled batch jobs without a window (no Qt import);
+                 see manga_list/headless/runner.py for its own options
 """
 
 from __future__ import annotations
@@ -19,6 +21,10 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"Manga List {__version__}")
         return 0
+    if "--headless" in args:
+        from manga_list.headless.runner import main as headless_main
+
+        return headless_main(args)
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication

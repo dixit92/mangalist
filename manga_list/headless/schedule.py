@@ -1,0 +1,126 @@
+"""Batch windows for the headless runner: "daily at HH:MM" and "every N hours".
+
+All instants are timezone-aware. Persisted times are UTC; daily times are wall-clock times in the
+runner's time zone (the container's ``TZ``), so a daily 03:30 job stays at 03:30 local time across
+daylight-saving changes:
+
+- spring forward (03:30 does not exist that night, e.g. 02:30 in a 02:00 -> 03:00 gap): the job runs
+  at the first instant after the gap that the same offset arithmetic gives (02:30 -> 03:30);
+- fall back (the time exists twice): the job runs once, at the first occurrence.
+
+"Every N hours" counts elapsed time (UTC), so it is not affected by daylight saving at all.
+
+Text forms (environment variables, settings):
+
+    daily@03:30   daily 03:30   03:30      -> DailyAt(3, 30)
+    every 12h     every:12h     12h        -> EveryHours(12)
+    off           none          disabled   -> None (job not scheduled)
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from typing import Optional, Union
+
+UTC = timezone.utc
+
+
+def _require_aware(dt: datetime, name: str = "after") -> None:
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        raise ValueError(f"{name} must be timezone-aware")
+
+
+def resolve_local(day: date, at: time, tz: tzinfo) -> datetime:
+    """The UTC instant of wall-clock ``day`` + ``at`` in ``tz``.
+
+    Ambiguous times (fall back) resolve to the first occurrence; non-existent times (spring
+    forward) resolve forward past the gap.
+    """
+    local = datetime.combine(day, at).replace(tzinfo=tz, fold=0)
+    # In a gap, fold=0 applies the offset in force BEFORE the transition, which lands on the
+    # wall-clock time just after the gap (02:30 -> 03:30 for a one-hour gap): what we want.
+    return local.astimezone(UTC)
+
+
+@dataclass(frozen=True)
+class DailyAt:
+    """Once a day at ``hour:minute`` local (wall-clock) time."""
+
+    hour: int
+    minute: int = 0
+
+    def __post_init__(self) -> None:
+        if not (0 <= self.hour <= 23 and 0 <= self.minute <= 59):
+            raise ValueError(f"invalid time of day {self.hour}:{self.minute}")
+
+    def next_after(self, after: datetime, tz: tzinfo) -> datetime:
+        """The first run strictly after ``after`` (UTC)."""
+        _require_aware(after)
+        at = time(self.hour, self.minute)
+        day = after.astimezone(tz).date() - timedelta(days=1)
+        # Yesterday's slot can still be after ``after`` around a DST change; try three days.
+        for _ in range(4):
+            candidate = resolve_local(day, at, tz)
+            if candidate > after:
+                return candidate
+            day += timedelta(days=1)
+        raise AssertionError("unreachable: a daily slot exists within three days")
+
+    def describe(self) -> str:
+        return f"daily@{self.hour:02d}:{self.minute:02d}"
+
+
+@dataclass(frozen=True)
+class EveryHours:
+    """Every ``hours`` hours of elapsed time, counted from the previous run."""
+
+    hours: float
+
+    def __post_init__(self) -> None:
+        if not (self.hours > 0):
+            raise ValueError("interval must be positive")
+
+    @property
+    def interval(self) -> timedelta:
+        return timedelta(hours=self.hours)
+
+    def next_after(self, after: datetime, tz: tzinfo) -> datetime:  # noqa: ARG002 - same interface
+        _require_aware(after)
+        return after.astimezone(UTC) + self.interval
+
+    def describe(self) -> str:
+        h = int(self.hours) if float(self.hours).is_integer() else self.hours
+        return f"every {h}h"
+
+
+Schedule = Union[DailyAt, EveryHours]
+
+_OFF = {"", "off", "none", "never", "disabled", "disable", "0", "false", "no"}
+_DAILY = re.compile(r"^(?:daily\s*[@: ]\s*)?(\d{1,2}):(\d{2})$")
+_EVERY = re.compile(r"^(?:every\s*[: ]?\s*)?(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours)$")
+
+
+def parse_schedule(text: Optional[str]) -> Optional[Schedule]:
+    """Parse a schedule string (see the module docstring). ``None`` means "not scheduled".
+
+    Raises ValueError for anything else, so a typo in a container variable is reported instead of
+    silently running at a surprising time.
+    """
+    value = (text or "").strip().lower()
+    if value in _OFF:
+        return None
+    m = _DAILY.match(value)
+    if m:
+        return DailyAt(int(m.group(1)), int(m.group(2)))
+    m = _EVERY.match(value)
+    if m:
+        return EveryHours(float(m.group(1)))
+    raise ValueError(
+        f"unrecognised schedule {text!r}; use e.g. 'daily@03:30', 'every 12h' or 'off'")
+
+
+def is_missed(next_run: Optional[datetime], now: datetime) -> bool:
+    """A persisted due time that has already passed when the runner (re)starts."""
+    return next_run is not None and next_run <= now
