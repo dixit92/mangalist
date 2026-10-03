@@ -502,6 +502,10 @@ def from_own_matcher(entry: Any, mu_series_data: Optional[Mapping[str, Any]] = N
         anilist_chapters=to_decimal(anilist.get("chapters") if anilist else getattr(entry, "anilist_chapters", None)),
         anilist_volumes=to_decimal(anilist.get("volumes") if anilist else getattr(entry, "anilist_volumes", None)),
         anilist_links=_anilist_links(anilist),
+        # The series' total, so a finished series can be Complete (owner rule c): AniList states chapter
+        # totals only for finished series, which is exactly when a total is needed.
+        total_chapters=(to_decimal(anilist.get("chapters") if anilist else getattr(entry, "anilist_chapters", None))
+                        if completed else None),
     )
 
 

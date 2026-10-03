@@ -292,8 +292,21 @@ class SeriesState:
         return sum(g.size for g in self.gaps if g.kind != GAP_UPGRADE)
 
     @property
+    def upgrade_available(self) -> bool:
+        """Some official volume is out that the folder holds only as chapters (or not mapped yet)."""
+        return any(g.kind == GAP_UPGRADE for g in self.gaps)
+
+    @property
+    def complete_with_upgrade(self) -> bool:
+        """Owner rule (c), 2026-10-03: a Complete series whose official volumes are (being) released is
+        "Complete + Upgrade available"."""
+        return self.state == State.COMPLETE and self.upgrade_available
+
+    @property
     def flags(self) -> Tuple[str, ...]:
         out = []
+        if self.complete_with_upgrade:
+            out.append("Upgrade available")
         if self.upcoming:
             out.append("Upcoming")
         if self.requested:
@@ -532,6 +545,9 @@ def compute_state(
 
     # 2. Volumes.
     volume_collector = held.has_volumes or not held.has_chapters
+    mixed = held.has_volumes and held.has_chapters
+    top_volume = max(held.volumes) if held.volumes else None
+    unmapped_for_chapters: List[VolumeInfo] = []   # rule (b): upgrades once every chapter is held
     if k.licensed and out_vols:
         compared = True
         for v in out_vols:
@@ -540,8 +556,14 @@ def compute_state(
                 continue
             if v.has_chapters and _range_held(held, to_decimal(v.chapters_from), to_decimal(v.chapters_to)):
                 gaps.append(Gap(GAP_UPGRADE, v.volume, note=f"chapters {v.chapters_from}-{v.chapters_to} held"))
+            elif mixed and not v.has_chapters and top_volume is not None and vd > top_volume:
+                # Owner rule (a), 2026-10-03: a newer volume whose chapters are not mapped yet is out
+                # now - Upgrade available (the mapping may come later), not Missing volumes.
+                gaps.append(Gap(GAP_UPGRADE, v.volume, note="volume out; its chapters are not mapped yet"))
             elif volume_collector:
                 gaps.append(Gap(GAP_VOLUME, v.volume, note=_date_note(v)))
+            elif not v.has_chapters:
+                unmapped_for_chapters.append(v)
         reasons.append(f"{len(out_vols)} English volume(s) out")
     elif not k.licensed and held.has_volumes and k.scan_latest_volume:
         compared = True
@@ -559,6 +581,7 @@ def compute_state(
                 gaps.append(Gap(GAP_UPGRADE, fmt_num(vd), note="MangaPixer"))
 
     # 3. Chapters.
+    chapters_checked = False
     target = _chapter_target(k)
     if target is not None and (held.has_chapters or not k.licensed or not held.has_volumes):
         if held.has_chapters or not held.has_volumes or held.covered:
@@ -571,9 +594,15 @@ def compute_state(
             if target != target.to_integral_value() and not held.holds_chapter(target):
                 missing.append(target)
             gaps += _chapter_gaps(missing)
+            chapters_checked = True
             reasons.append(f"Latest chapter {fmt_num(target)}")
     elif target is not None and held.has_volumes and k.licensed and not out_vols:
         reasons.append("No English volume list to compare with")
+
+    # Owner rule (b), 2026-10-03: a chapter-only folder of a licensed series never shows Missing
+    # volumes; a released volume is an upgrade - provided every chapter is present.
+    if unmapped_for_chapters and chapters_checked and not any(g.kind == GAP_CHAPTER for g in gaps):
+        gaps += [Gap(GAP_UPGRADE, v.volume, note="every chapter held; the volume is out") for v in unmapped_for_chapters]
 
     if not compared:
         return finish(State.CANT_TELL, reasons=["No volume or chapter numbers to compare with"])
@@ -590,10 +619,12 @@ def compute_state(
         return finish(State.MISSING_VOLUMES, gaps, reasons)
     if missing_ch:
         return finish(State.MISSING_CHAPTERS, gaps, reasons)
+    if complete:
+        # Owner rule (c), 2026-10-03: finished in origin and every chapter held = Complete, also when
+        # official volumes are (being) released - then "Complete + Upgrade available" (a flag).
+        return finish(State.COMPLETE, gaps, reasons + ["Finished, and held whole"])
     if upgrade:
         return finish(State.UPGRADE, gaps, reasons)
-    if complete:
-        return finish(State.COMPLETE, gaps, reasons + ["Finished, and held whole"])
     return finish(State.UP_TO_DATE, gaps, reasons)
 
 

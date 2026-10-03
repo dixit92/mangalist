@@ -13,7 +13,7 @@ from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 from ..official_sources import KIND_SEARCH, official_links, primary_label
-from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, compute_state, \
+from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, State, compute_state, \
     fallback_inventory_from_entry
 
 COLUMNS = [
@@ -79,6 +79,8 @@ def state_matches(state: Optional[SeriesState], key: Optional[str]) -> bool:
         return state.upcoming
     if key == "attention":
         return bool(state.needs_attention)
+    if key == State.UPGRADE.value:  # incl. Complete + Upgrade available (owner rule c)
+        return state.state == State.UPGRADE or state.complete_with_upgrade
     return state.state.value == key
 
 # Saturated dark green for examined rows — contrasts strongly with white text

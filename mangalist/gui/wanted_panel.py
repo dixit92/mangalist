@@ -81,8 +81,8 @@ class WantedPanel(QWidget):
             st = model.state_at(row)
             if st is None:
                 continue
-            for i, (_, states) in enumerate(GROUPS):
-                if st.state in states:
+            for i, (name, states) in enumerate(GROUPS):
+                if st.state in states or (name == "Upgrade available" and st.complete_with_upgrade):
                     buckets[i].append((row, st))
                     break
         counts = []

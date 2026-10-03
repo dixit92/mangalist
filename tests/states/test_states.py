@@ -171,9 +171,63 @@ def test_unlicensed_scanlation_volumes():
 def test_missing_volumes_outrank_missing_chapters():
     k = own(licensed_en=True, english_publishers=(EnglishPublisher("Example Press", volumes=3, chapters=40),),
             latest_chapter="40")
-    s = state(inv(held_volumes=["1"], held_chapters=["30", "32"]), k)
+    # An EARLIER volume missing in a mixed folder is a missing volume, and outranks missing chapters.
+    s = state(inv(held_volumes=["2"], held_chapters=["30", "32"]), k)
     assert s.state == State.MISSING_VOLUMES
-    assert s.missing_volumes == ("2", "3") and s.missing_chapters == (("31", None), ("33", "40"))
+    assert s.missing_volumes == ("1",) and s.missing_chapters == (("31", None), ("33", "40"))
+
+
+# --- owner rules, 2026-10-03 ------------------------------------------------------------------------
+
+def test_rule_a_newer_unmapped_volumes_in_a_mixed_folder_are_upgrades():
+    # Volumes 2-3 are out but their chapters are not mapped: "the volume is available now".
+    k = own(licensed_en=True, english_publishers=(EnglishPublisher("Example Press", volumes=3, chapters=40),),
+            latest_chapter="40")
+    s = state(inv(held_volumes=["1"], held_chapters=[str(n) for n in range(9, 41)]), k)
+    assert s.state == State.UPGRADE
+    assert s.upgrade_volumes == ("2", "3") and s.missing_volumes == ()
+    # With chapter holes as well, the holes decide the state; the upgrades stay listed.
+    s = state(inv(held_volumes=["1"], held_chapters=["30", "32"]), k)
+    assert s.state == State.MISSING_CHAPTERS and s.upgrade_volumes == ("2", "3")
+
+
+def test_rule_b_chapter_only_folder_upgrades_only_with_every_chapter():
+    k = own(licensed_en=True, english_publishers=(EnglishPublisher("Example Press", volumes=2),),
+            latest_chapter="20")
+    every = state(inv(held_chapters=[str(n) for n in range(1, 21)]), k)
+    assert every.state == State.UPGRADE and every.upgrade_volumes == ("1", "2")
+    assert every.missing_volumes == ()
+    holes = state(inv(held_chapters=[str(n) for n in range(1, 21) if n != 7]), k)
+    assert holes.state == State.MISSING_CHAPTERS
+    assert holes.missing_volumes == () and holes.upgrade_volumes == ()
+
+
+def test_rule_c_complete_plus_upgrade_available():
+    # Finished in origin, every chapter of the series held -> Complete; official volumes out -> + Upgrade.
+    k = own(licensed_en=True, completed_in_origin=True, latest_chapter="20", total_chapters=20,
+            english_publishers=(EnglishPublisher("Example Press", volumes=2, status="Ongoing"),))
+    s = state(inv(held_chapters=[str(n) for n in range(1, 21)]), k)
+    assert s.state == State.COMPLETE and s.complete_with_upgrade
+    assert "Upgrade available" in s.flags and s.upgrade_volumes == ("1", "2")
+    # Unlicensed and finished with the whole run held: plain Complete, no flag.
+    plain = own(licensed_en=False, completed_in_origin=True, latest_chapter="20", total_chapters=20)
+    p = state(inv(held_chapters=[str(n) for n in range(1, 21)]), plain)
+    assert p.state == State.COMPLETE and not p.complete_with_upgrade
+    # A hole is never Complete.
+    assert state(inv(held_chapters=[str(n) for n in range(1, 20)]), plain).state == State.MISSING_CHAPTERS
+
+
+def test_rule_c_own_matcher_total_comes_from_anilist_for_finished_series():
+    from mangalist.knowledge import from_own_matcher
+
+    entry = MangaEntry(folder=Path("/library/Example"), title="Example", english_title=None)
+    entry.mu_id, entry.mu_title, entry.licensed = 1, "Example", False
+    entry.completed_in_origin = True
+    k = from_own_matcher(entry, anilist={"id": 5, "chapters": 20, "volumes": 2, "external_links": []})
+    assert k.total_chapters == 20
+    entry.completed_in_origin = False
+    running = from_own_matcher(entry, anilist={"id": 5, "chapters": 20, "volumes": 2, "external_links": []})
+    assert running.total_chapters is None
 
 
 # --- up to date / complete ---------------------------------------------------------------------
