@@ -136,6 +136,10 @@ class EnglishPublisher:
     omnibus: bool = False
     publisher_id: Optional[int] = None
 
+    def __post_init__(self):
+        for name in ("volumes", "chapters"):
+            object.__setattr__(self, name, to_decimal(getattr(self, name)))
+
     @property
     def finished(self) -> bool:
         return (self.status or "").strip().lower() in ("completed", "complete", "finished")
@@ -231,6 +235,12 @@ class SeriesKnowledge:
     next_due_at: Optional[str] = None
     notes: Tuple[str, ...] = field(default=())
 
+    def __post_init__(self):
+        # Numbers are exact: whatever a caller passes (int, float, str) becomes a Decimal.
+        for name in _DECIMAL_FIELDS:
+            object.__setattr__(self, name, to_decimal(getattr(self, name)))
+        object.__setattr__(self, "latest_chapter", exact_str(self.latest_chapter))
+
     # -- derived -------------------------------------------------------------------------------
 
     @property
@@ -274,6 +284,9 @@ class SeriesKnowledge:
     @property
     def search_title(self) -> Optional[str]:
         return self.english_title or self.title
+
+
+_DECIMAL_FIELDS = ("origin_volumes", "total_chapters", "scan_latest_volume", "anilist_chapters", "anilist_volumes")
 
 
 # --- MangaPixer export item -> knowledge -------------------------------------------------------
