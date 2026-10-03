@@ -23,6 +23,7 @@ ENFORCE_NAMING = ("off", "ask", "automatic")
 ENFORCE_NAMING_DEFAULT = "ask"  # Design Decisions C2 (owner: ask by default)
 SERIES_STATUS = ("present", "missing")
 UNIT_KINDS = ("volume", "chapter", "extra", "oneshot", "unknown")
+SERIES_KIND_HINTS = ("volumes", "chapters")  # or None: not answered yet (C12)
 LEDGER_STATUS = ("queued", "dispatched", "completed", "failed", "cancelled")
 PLAN_STATUS = ("planned", "applying", "applied", "failed", "interrupted", "undoing", "undone", "undo_failed")
 STEP_STATE = ("planned", "intent", "done", "failed", "undo_intent", "undone")
@@ -175,9 +176,18 @@ CREATE TABLE IF NOT EXISTS journal_steps (
 );
 """
 
+# Phase 1, inventory lane: the per-series "volumes or chapters?" answer (Design Decisions C12) and the
+# number of a unit whose kind the name does not state (a bare ``01.cbz`` before that answer).
+_V2_INVENTORY = """
+ALTER TABLE series ADD COLUMN kind_hint TEXT;          -- NULL | volumes | chapters (asked once, C12)
+ALTER TABLE units  ADD COLUMN num_from  TEXT;          -- kind 'unknown': the bare number (exact decimal)
+ALTER TABLE units  ADD COLUMN num_to    TEXT;
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
+    (2, _V2_INVENTORY),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

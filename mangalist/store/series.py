@@ -12,6 +12,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from .db import utcnow
 from .exclusions import rel_posix
+from .schema import SERIES_KIND_HINTS
 
 FINGERPRINT_VERSION = "v1"
 
@@ -42,6 +43,7 @@ class Series:
     status: str
     first_seen_at: str
     last_seen_at: str
+    kind_hint: Optional[str] = None   # the owner's "volumes or chapters?" answer (C12): volumes | chapters
 
 
 @dataclass
@@ -63,7 +65,23 @@ class ScanRecord:
 def _row(r: sqlite3.Row) -> Series:
     return Series(id=r["id"], root_id=r["root_id"], rel_path=r["rel_path"], fingerprint=r["fingerprint"],
                   n_archives=r["n_archives"], mu_id=r["mu_id"], mu_confirmed=bool(r["mu_confirmed"]),
-                  status=r["status"], first_seen_at=r["first_seen_at"], last_seen_at=r["last_seen_at"])
+                  status=r["status"], first_seen_at=r["first_seen_at"], last_seen_at=r["last_seen_at"],
+                  kind_hint=r["kind_hint"] if "kind_hint" in r.keys() else None)
+
+
+class SeriesKindError(ValueError):
+    pass
+
+
+def normalize_kind_hint(kind: Optional[str]) -> Optional[str]:
+    """``"volumes"`` / ``"chapters"`` (singular and any case accepted), or None (forget the answer)."""
+    if kind is None or (isinstance(kind, str) and not kind.strip()):
+        return None
+    k = str(getattr(kind, "value", kind)).strip().lower()
+    k = {"volume": "volumes", "chapter": "chapters"}.get(k, k)
+    if k not in SERIES_KIND_HINTS:
+        raise SeriesKindError(f"a series' kind is one of {', '.join(SERIES_KIND_HINTS)}, not {kind!r}")
+    return k
 
 
 def link_key(root_dir: Path, rel_path: str) -> str:
@@ -150,6 +168,35 @@ class SeriesMixin:
                 con.execute("UPDATE series SET mu_id=?, mu_confirmed=? WHERE root_id=? AND rel_path=?",
                             (mu_id, 1 if conf else 0, root_id, rel))
         return rec
+
+    # --- the "volumes or chapters?" answer (Design Decisions C12) -----------------------------------
+
+    def set_series_kind(self, root_id: int, rel_path: str, kind: Optional[str]) -> bool:
+        """Store the owner's answer for one series (``"volumes"`` / ``"chapters"``; None forgets it).
+        It stays with the series row, so a renamed folder keeps it. False when there is no such row."""
+        k = normalize_kind_hint(kind)
+        with self.connect() as con:
+            cur = con.execute("UPDATE series SET kind_hint=? WHERE root_id=? AND rel_path=?", (k, root_id, rel_path))
+        return cur.rowcount > 0
+
+    def set_series_kind_for_folder(self, folder, kind: Optional[str]) -> bool:
+        """:meth:`set_series_kind` for an absolute series *folder* (as the scanner gives it)."""
+        located = self._locate(folder)
+        if located is None:
+            normalize_kind_hint(kind)   # still refuse a bad value
+            return False
+        return self.set_series_kind(located[0], located[1], kind)
+
+    def series_kind(self, root_id: int, rel_path: str) -> Optional[str]:
+        s = self.get_series(root_id, rel_path)
+        return s.kind_hint if s else None
+
+    def series_kind_hints(self, root_id: int) -> Dict[str, str]:
+        """``{root-relative path: "volumes" | "chapters"}`` of the root's series that have an answer."""
+        with self.connect() as con:
+            rows = con.execute("SELECT rel_path, kind_hint FROM series WHERE root_id = ? AND kind_hint IS NOT NULL",
+                               (root_id,)).fetchall()
+        return {r["rel_path"]: r["kind_hint"] for r in rows}
 
     def sync_identity(self, folder) -> None:
         """Copy the links-cache identity of the absolute *folder* onto its series row (if any)."""

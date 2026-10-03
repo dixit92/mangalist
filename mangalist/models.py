@@ -6,7 +6,12 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, List, Optional
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional
+
+if TYPE_CHECKING:  # the parser imports this module; import it lazily at run time
+    from .inventory import Inventory
+    from .parsing import ParsedName
 
 # Capture the numeric component of a vol/ch token. Mirrors classifier's regexes
 # but exposes the number (incl. decimals like "Ch.12.5") for max-token extraction.
@@ -26,6 +31,7 @@ _RE_COMPILATION = re.compile(r"(?:compilation|omnibus|bundle|collection|box[ _]?
 
 
 def _max_volume(files: "Iterable[FileHit]") -> Optional[float]:
+    """Largest volume number across filenames (today's regex; see :meth:`MangaEntry.max_disk_volume`)."""
     best: Optional[float] = None
     for f in files:
         stem = f.path.name.rsplit(".", 1)[0] if "." in f.path.name else f.path.name
@@ -60,6 +66,36 @@ def _max_chapter(files: "Iterable[FileHit]") -> Optional[float]:
     return best
 
 
+def _max_parsed(files: "Iterable[FileHit]", what: str) -> Optional[Decimal]:
+    """Largest volume / chapter number over *files*: the parse's ``.end`` where a file was parsed,
+    today's regex otherwise."""
+    best: Optional[Decimal] = None
+    legacy = []
+    for f in files:
+        p = f.parsed
+        if p is None:
+            legacy.append(f)
+            continue
+        r = p.volume if what == "volume" else p.chapter
+        if r is not None and (best is None or r.end > best):
+            best = r.end
+    if legacy:
+        old = _max_volume(legacy) if what == "volume" else _max_chapter(legacy)
+        if old is not None:
+            d = Decimal(repr(old))
+            if best is None or d > best:
+                best = d
+    return best
+
+
+def _is_under(path: Path, folder: Path) -> bool:
+    try:
+        Path(path).relative_to(folder)
+        return True
+    except ValueError:
+        return False
+
+
 class Verdict(str, Enum):
     VOLUMES = "Volumes"
     CHAPTERS = "Chapters"
@@ -69,22 +105,58 @@ class Verdict(str, Enum):
 
 @dataclass
 class FileHit:
-    """A single archive file inside a manga folder."""
+    """A single archive file inside a manga folder.
+
+    ``parsed`` is the layered parser's reading of the name (:func:`mangalist.parsing.parse_name`, with
+    the series' kind hint), set by the scanner; ``has_volume`` / ``has_chapter`` then say whether the
+    parse found a volume / chapter number. A hit built without ``parsed`` (older callers, tests) keeps
+    the token flags it is given.
+    """
 
     path: Path
     size: int
     depth: int  # 0 == directly under manga folder, >=1 == inside a subfolder
     has_volume: bool = False
     has_chapter: bool = False
+    parsed: Optional["ParsedName"] = field(default=None, compare=False)
 
     @property
     def kind(self) -> str:
-        # "Vol. X Ch. Y" -> chapter wins.
+        """``"volume"`` / ``"chapter"`` / ``"ambiguous"`` (the classifier's vocabulary).
+
+        From the parse when there is one: a chapter (``Vol. X Ch. Y`` is a chapter of volume X) and an
+        extra are ``"chapter"``; a volume archive that also carries loose chapters
+        (``Title v10 + 085-086``, parser kind ``both``) is ``"volume"``; a bare number the series has
+        no answer for yet is ``"ambiguous"``. Without a parse: chapter token wins, as before.
+        """
+        p = self.parsed
+        if p is not None:
+            k = getattr(p.kind, "value", p.kind)
+            if k == "chapter":
+                return "chapter"
+            if k in ("volume", "both"):
+                return "volume"
+            return "ambiguous"
         if self.has_chapter:
             return "chapter"
         if self.has_volume:
             return "volume"
         return "ambiguous"
+
+    @property
+    def unit_kind(self) -> str:
+        """The parser's kind: ``"volume"`` / ``"chapter"`` / ``"both"`` / ``"unknown"`` (no parse: from
+        :attr:`kind`, ``"ambiguous"`` -> ``"unknown"``)."""
+        if self.parsed is not None:
+            return str(getattr(self.parsed.kind, "value", self.parsed.kind))
+        k = self.kind
+        return "unknown" if k == "ambiguous" else k
+
+    @property
+    def needs_kind(self) -> bool:
+        """A bare number (``01.cbz``) whose kind neither the name nor the series' answer gives."""
+        p = self.parsed
+        return p is not None and getattr(p.kind, "value", p.kind) == "unknown" and p.number is not None
 
 
 @dataclass
@@ -142,6 +214,12 @@ class MangaEntry:
     parent_folder: Optional[Path] = None
     # The library root (store.Root id) the folder was found in; None for a scan without the database.
     root_id: Optional[int] = None
+    # The series' stored "volumes or chapters?" answer the files were parsed with (C12): None | volumes | chapters.
+    kind_hint: Optional[str] = None
+    # Series folders inside this one that are entries of their own (a franchise parent with direct
+    # files): their archives stay in ``files`` (counts as before) but not in the inventory / units.
+    nested_series: List[Path] = field(default_factory=list)
+    _inventory_cache: Any = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def n_files(self) -> int:
@@ -169,16 +247,66 @@ class MangaEntry:
 
     @property
     def max_disk_chapter(self) -> Optional[float]:
-        """Highest chapter number found in any filename, or None if no chapter tokens.
+        """Highest chapter number in any file, or None (a float for the Behind column; exact:
+        :attr:`highest_chapter`).
 
-        Chapter *ranges* like ``Ch.10-15`` count as their upper bound (useful for
-        volume-compilation archives that bundle multiple chapters)."""
-        return _max_chapter(self.files)
+        From the layered parser where a file was parsed (FMD2 names: the bracket head only, so a title
+        like "Episode 3" is not read; a bare number counts once the series' answer is "chapters"),
+        else today's regex. Chapter *ranges* like ``Ch.10-15`` count as their upper bound."""
+        best = _max_parsed(self.files, "chapter")
+        return None if best is None else float(best)
 
     @property
     def max_disk_volume(self) -> Optional[float]:
-        """Highest volume number found in any filename, or None if no volume tokens."""
-        return _max_volume(self.files)
+        """Highest volume number in any file, or None - including the volume a chapter belongs to
+        (``Vol. 3 Ch. 12`` -> 3), as before. Parsed files as in :attr:`max_disk_chapter`."""
+        best = _max_parsed(self.files, "volume")
+        return None if best is None else float(best)
+
+    @property
+    def inventory_files(self) -> List[FileHit]:
+        """The archives that belong to this series (``files`` minus those of :attr:`nested_series`)."""
+        if not self.nested_series:
+            return list(self.files)
+        nested = [Path(p) for p in self.nested_series]
+        return [f for f in self.files if not any(_is_under(f.path, n) for n in nested)]
+
+    def inventory(self, volume_list: Optional[Iterable[Any]] = None) -> "Inventory":
+        """The series' held units (:class:`mangalist.inventory.Inventory`), optionally merged with a
+        volume list (MangaPixer's ``volumes.items``). Cached while the files and their parses are the
+        same (without a volume list)."""
+        from .inventory import inventory_of_entry
+
+        if volume_list is not None:
+            return inventory_of_entry(self, volume_list)
+        sig = tuple((id(f), id(f.parsed)) for f in self.files) + (tuple(map(str, self.nested_series)),)
+        cached = self._inventory_cache
+        if cached is not None and cached[0] == sig:
+            return cached[1]
+        inv = inventory_of_entry(self)
+        self._inventory_cache = (sig, inv)
+        return inv
+
+    @property
+    def highest_volume(self) -> Optional[Decimal]:
+        """Highest whole volume held (exact; a chapter's volume number does not count)."""
+        return self.inventory().highest_volume
+
+    @property
+    def highest_chapter(self) -> Optional[Decimal]:
+        """Highest chapter held as a chapter file (exact; no volume list merged here)."""
+        return self.inventory().highest_chapter
+
+    @property
+    def needs_kind(self) -> bool:
+        """Needs attention: bare-number files whose kind is unknown - ask "volumes or chapters?" once
+        (Design Decisions C12) and store the answer (``store.set_series_kind``)."""
+        return any(f.needs_kind for f in self.inventory_files)
+
+    @property
+    def unknown_kind_files(self) -> List[FileHit]:
+        """The files :attr:`needs_kind` is about."""
+        return [f for f in self.inventory_files if f.needs_kind]
 
     @property
     def has_compilation_files(self) -> bool:

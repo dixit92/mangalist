@@ -5,18 +5,26 @@ before). A root's exclusions (root-relative patterns, :mod:`mangalist.store.excl
 while walking: an excluded folder is never entered, an excluded file never read. An archive lying
 directly in a root is not a series: it is reported as "not in a series folder" (``loose``) and never
 matched. Scans only read; they never take the root lock, and files other tools add are simply seen.
+
+Every archive is parsed by the layered parser (:mod:`mangalist.parsing`) with its series' context: the
+folder title, the root's naming scheme (when set) and the series' stored "volumes or chapters?" answer
+(Design Decisions C12). :func:`record_library_scan` stores each archive's units per series in the
+database (``units`` table) and applies stored answers; :func:`answer_series_kind` records a new answer.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Sequence, Union
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .classifier import annotate_file, classify, parse_folder_name
 from .models import FileHit, MangaEntry
-from .store.exclusions import ExclusionSet
+from .store.exclusions import ExclusionSet, rel_posix
+
+_log = logging.getLogger(__name__)
 
 ARCHIVE_EXTS = {".cbz", ".zip", ".cbr", ".rar", ".7z", ".cb7"}
 
@@ -44,8 +52,24 @@ class _Excl:
 _NO_EXCL = _Excl(None, "")
 
 
-def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _NO_EXCL) -> List[FileHit]:
-    """Return archive FileHits inside ``folder`` up to ``max_depth`` levels (excluded paths skipped)."""
+def _parse_context(title: Optional[str], kind_hint: Optional[str] = None, schemes: Sequence = ()):
+    """The series' :class:`~mangalist.parsing.ParseContext`; a bad hint or scheme is left out (logged)."""
+    from .parsing import ParseContext
+
+    try:
+        return ParseContext(schemes=tuple(schemes or ()), kind_hint=kind_hint, series_title=title)
+    except Exception:  # noqa: BLE001 - a broken stored scheme / hint must not stop the scan
+        _log.warning("Ignoring an unusable naming scheme / kind hint for %r", title, exc_info=True)
+        try:
+            return ParseContext(kind_hint=kind_hint, series_title=title)
+        except Exception:  # noqa: BLE001
+            return ParseContext(series_title=title)
+
+
+def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _NO_EXCL,
+                       context=None, annotate: bool = True) -> List[FileHit]:
+    """Return archive FileHits inside ``folder`` up to ``max_depth`` levels (excluded paths skipped),
+    each parsed with *context* (the series' ParseContext) unless *annotate* is False."""
     hits: List[FileHit] = []
     folder = folder.resolve()
 
@@ -73,7 +97,8 @@ def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _N
             except OSError:
                 size = 0
             hit = FileHit(path=p, size=size, depth=rel_depth)
-            annotate_file(hit)
+            if annotate:
+                annotate_file(hit, context)
             hits.append(hit)
     return hits
 
@@ -103,8 +128,8 @@ def _get_subdirs_with_archives(folder: Path, _ex: _Excl = _NO_EXCL) -> List[Path
         for subdir in folder.iterdir():
             if not subdir.is_dir() or _ex.hides(subdir.name, True):
                 continue
-            # Check if this subdir has any archives (using existing walk)
-            if _walk_manga_folder(subdir, _ex=_ex.child(subdir.name)):
+            # Check if this subdir has any archives (using existing walk; nothing parsed)
+            if _walk_manga_folder(subdir, _ex=_ex.child(subdir.name), annotate=False):
                 result.append(subdir)
     except OSError:
         pass
@@ -116,12 +141,14 @@ _SKIP_SUBDIR_NAMES = {"chapters", "extras", "bonus", "specials", "omake"}
 
 
 def _extract_subseries(
-    parent: Path, parent_title: str, parent_mtime: float, _ex: _Excl = _NO_EXCL
+    parent: Path, parent_title: str, parent_mtime: float, _ex: _Excl = _NO_EXCL,
+    hint_for: Optional[Callable[[Path], Optional[str]]] = None, schemes: Sequence = (),
 ) -> List[MangaEntry]:
     """Create MangaEntry objects for each subseries in a franchise parent.
 
     Skips subdirectories named exactly 'Chapters' or other non-series folders.
-    Each subseries gets parent_folder set to the parent Path.
+    Each subseries gets parent_folder set to the parent Path. *hint_for(folder)* gives a subseries'
+    stored kind hint.
     """
     entries: List[MangaEntry] = []
     subdirs = _get_subdirs_with_archives(parent, _ex)
@@ -148,11 +175,29 @@ def _extract_subseries(
             last_modified=mtime,
             parent_folder=parent,  # Mark as subseries
         )
-        entry.files = _walk_manga_folder(subdir, _ex=_ex.child(subdir.name))
-        classify(entry)
+        _fill(entry, _ex.child(subdir.name), hint_for(subdir) if hint_for else None, schemes)
         entries.append(entry)
 
     return entries
+
+
+def _fill(entry: MangaEntry, ex: _Excl, kind_hint: Optional[str], schemes: Sequence) -> None:
+    """Walk, parse and classify one series entry."""
+    entry.kind_hint = kind_hint
+    ctx = _parse_context(entry.title, kind_hint, schemes)
+    entry.files = _walk_manga_folder(entry.folder, _ex=ex, context=ctx)
+    classify(entry)
+
+
+def apply_kind_hint(entry: MangaEntry, kind_hint: Optional[str], schemes: Sequence = ()) -> MangaEntry:
+    """Re-parse *entry*'s files with a new "volumes or chapters?" answer (None = no answer) and
+    re-classify it, in place (no disk access)."""
+    ctx = _parse_context(entry.title, kind_hint, schemes)
+    entry.kind_hint = kind_hint
+    for hit in entry.files:
+        annotate_file(hit, ctx)
+    classify(entry)
+    return entry
 
 
 Exclusions = Union[ExclusionSet, Iterable[str], None]
@@ -171,15 +216,24 @@ def scan_root(
     exclusions: Exclusions = None,
     loose: Optional[List[Path]] = None,
     root_id: Optional[int] = None,
+    kind_hints: Optional[Mapping[str, str]] = None,
+    schemes: Sequence = (),
 ) -> List[MangaEntry]:
     """Scan a Manga Root and return classified MangaEntry objects.
 
     ``progress(done, total, current_name)`` is called as folders are processed. *exclusions* (patterns
     relative to the root) are never scanned. Archives lying directly in the root are appended to
     *loose* when given ("not in a series folder"); they never become entries. *root_id* is copied onto
-    every entry.
+    every entry. Every archive is parsed by the layered parser; *kind_hints* (``{root-relative series
+    path: "volumes" | "chapters"}``, the stored answers) decide bare numbers, *schemes* are the root's
+    naming template(s).
     """
     root = Path(root).resolve()
+    hints = dict(kind_hints or {})
+
+    def hint_for(folder: Path) -> Optional[str]:
+        return hints.get(rel_posix(folder, root)) if hints else None
+
     if not root.is_dir():
         raise NotADirectoryError(f"Not a directory: {root}")
     top = _Excl(_as_exclusion_set(exclusions), "")
@@ -214,7 +268,7 @@ def scan_root(
             mtime = 0.0
 
         has_direct = _has_direct_archives(folder, ex)
-        subseries = _extract_subseries(folder, title, mtime, ex)
+        subseries = _extract_subseries(folder, title, mtime, ex, hint_for, schemes)
 
         if not has_direct and subseries:
             # Parent is a franchise container - only add subseries, not parent
@@ -229,8 +283,9 @@ def scan_root(
                 n_subfolders=_count_subfolders(folder, ex),
                 last_modified=mtime,
             )
-            parent_entry.files = _walk_manga_folder(folder, _ex=ex)
-            classify(parent_entry)
+            # The subseries' archives stay in its file counts (as before) but not in its inventory.
+            parent_entry.nested_series = [s.folder for s in subseries]
+            _fill(parent_entry, ex, hint_for(folder), schemes)
             entries.append(parent_entry)
             # Also add subseries
             entries.extend(subseries)
@@ -243,8 +298,7 @@ def scan_root(
                 n_subfolders=_count_subfolders(folder, ex),
                 last_modified=mtime,
             )
-            entry.files = _walk_manga_folder(folder, _ex=ex)
-            classify(entry)
+            _fill(entry, ex, hint_for(folder), schemes)
             entries.append(entry)
 
     if root_id is not None:
@@ -287,12 +341,21 @@ class LibraryScan:
         return [f"{r.root_name}: {r.error}" for r in self.roots if r.error]
 
 
+def _root_schemes(root) -> Tuple[str, ...]:
+    scheme = getattr(root, "naming_scheme", None)
+    return (scheme,) if isinstance(scheme, str) and scheme.strip() else ()
+
+
 def scan_library(
     roots: Sequence,
     progress: Optional[Callable[[int, int, str], None]] = None,
+    *,
+    db=None,
 ) -> LibraryScan:
-    """Scan every root (``store.Root``-like: ``id``, ``name``, ``path``, ``exclusions``). A root that
-    cannot be read is reported in :attr:`LibraryScan.errors`; the others are still scanned."""
+    """Scan every root (``store.Root``-like: ``id``, ``name``, ``path``, ``exclusions``,
+    ``naming_scheme``). A root that cannot be read is reported in :attr:`LibraryScan.errors`; the others
+    are still scanned. With *db*, the series' stored "volumes or chapters?" answers are used while
+    parsing (without it, :func:`record_library_scan` applies them afterwards)."""
     result = LibraryScan()
     many = len(roots) > 1
     for root in roots:
@@ -308,9 +371,16 @@ def scan_library(
         if progress and many:
             def prog(d, t, n, _name=name):  # noqa: E306 - label the folder with its root
                 progress(d, t, f"{_name}: {n}" if n else "")
+        hints: Dict[str, str] = {}
+        if db is not None and rs.root_id is not None:
+            try:
+                hints = db.series_kind_hints(rs.root_id)
+            except Exception:  # noqa: BLE001 - the scan works without the answers
+                _log.warning("Reading the stored series kinds failed", exc_info=True)
         try:
             rs.entries = scan_root(folder, prog, exclusions=list(getattr(root, "exclusions", []) or []),
-                                   loose=loose, root_id=rs.root_id)
+                                   loose=loose, root_id=rs.root_id, kind_hints=hints,
+                                   schemes=_root_schemes(root))
         except (OSError, NotADirectoryError) as exc:
             rs.error = str(exc)
         result.roots.append(rs)
@@ -319,7 +389,13 @@ def scan_library(
 
 
 def record_library_scan(db, result: LibraryScan) -> List[tuple]:
-    """Write a :class:`LibraryScan` into the database's series rows (see ``Store.record_scan``).
+    """Write a :class:`LibraryScan` into the database: series rows (see ``Store.record_scan``) and every
+    archive's units (``units`` table, see ``Store.sync_units``).
+
+    Each series' stored "volumes or chapters?" answer is applied to its entry first (its files are
+    re-parsed in place when the scan used another answer, e.g. a folder renamed since the answer was
+    given), so the entries shown and the units stored agree. Units of archives that are gone are
+    deleted, as are the units of series folders that disappeared.
 
     Returns ``(old folder, new folder)`` for every series folder recognised as renamed (its row and
     MangaUpdates link moved with it). Roots that failed to scan are left untouched (their series are
@@ -333,4 +409,53 @@ def record_library_scan(db, result: LibraryScan) -> List[tuple]:
             continue
         rec = db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries))
         renamed.extend((Path(link_key(rs.folder, old)), Path(link_key(rs.folder, new))) for old, new in rec.relinked)
+        try:
+            _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None))
+        except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
+            _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
     return renamed
+
+
+def _root_of(db, root_id: int):
+    try:
+        return db.get_root(root_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _record_units(db, rs: RootScan, scheme: Optional[str] = None) -> None:
+    from .inventory import units_of_entry
+
+    schemes = (scheme,) if isinstance(scheme, str) and scheme.strip() else ()
+    rows = {s.rel_path: s for s in db.list_series(rs.root_id)}
+    by_series: Dict[int, Dict[str, list]] = {}
+    for entry in rs.entries:
+        row = rows.get(rel_posix(Path(entry.folder), rs.folder))
+        if row is None:
+            continue
+        if (row.kind_hint or None) != (entry.kind_hint or None):
+            apply_kind_hint(entry, row.kind_hint, schemes)
+        by_series[row.id] = units_of_entry(entry)
+    for row in rows.values():
+        if row.status == "missing" and row.id not in by_series:
+            by_series[row.id] = {}
+    db.sync_units(by_series)
+
+
+def answer_series_kind(db, entry: MangaEntry, kind: Optional[str]) -> bool:
+    """Record the owner's "volumes or chapters?" answer for *entry*'s series (C12): store it on the
+    series row, re-parse the entry in place and store its units. ``kind`` is ``"volumes"`` /
+    ``"chapters"`` (None forgets the answer). False when the folder is not a known series of a root
+    (the entry is still re-parsed)."""
+    from .inventory import units_of_entry
+    from .store.series import normalize_kind_hint
+
+    k = normalize_kind_hint(kind)
+    located = db._locate(entry.folder)
+    root = _root_of(db, located[0]) if located else None
+    apply_kind_hint(entry, k, _root_schemes(root) if root is not None else ())
+    if located is None or not db.set_series_kind(located[0], located[1], k):
+        return False
+    row = db.get_series(*located)
+    db.sync_units({row.id: units_of_entry(entry)})
+    return True
