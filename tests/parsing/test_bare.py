@@ -25,7 +25,7 @@ def test_bare(name, series, num):
 
 
 def test_series_title_context():
-    assert parse_bare("86.cbz", series_title="86") is None
+    assert parse_bare("42.cbz", series_title="42") is None
     r = parse_bare("Series 2 03.cbz", series_title="Series 2")
     assert (r.series, str(r.number)) == ("Series 2", "3")
     r = parse_bare("Series 2.cbz", series_title="Series")

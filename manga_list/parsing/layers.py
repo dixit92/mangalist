@@ -46,7 +46,7 @@ def parse_scheme(name: str, scheme: Union[str, Template]) -> Optional[ParsedName
 _FMD2 = re.compile(r"^(?:(?P<series>.+?) - )?(?P<index>\d+) \[(?P<body>.*)\]$", re.DOTALL)
 
 # The bracket head: "Vol. V", "Ch. C", "Vol. V Ch. C" (any decimals; a range without spaces: "Ch. 10-12").
-_END = r"(?=$|[\s\-–—:：_\[\]])"
+_END = r"(?=$|[\s\-\u2013\u2014:\uff1a_\[\]])"
 _HEAD = re.compile(
     rf"^\s*(?:vol(?:ume)?\.?\s*(?P<v>{UNIT})(?:-(?P<v2>{UNIT}))?{_END})?"
     rf"\s*(?:ch(?:apter)?\.?\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?{_END})?",
@@ -223,7 +223,7 @@ _BARE = re.compile(
 def parse_bare(name: str, series_title: Optional[str] = None) -> Optional[ParsedName]:
     """Layer 5: ``01.cbz``, ``Title 01.cbz``, ``Title - 01.cbz``: a number whose kind the name does not
     state (``kind`` UNKNOWN, ``number`` set). With ``series_title``, a name that is just the series title
-    (``86.cbz`` in the folder ``86``) has no number."""
+    (``42.cbz`` in the folder ``42``) has no number."""
     stem, _ = split_extension(name)
     text = stem.strip()
     if series_title and series_title.strip():

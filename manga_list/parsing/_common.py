@@ -54,7 +54,7 @@ def encloses_whole(body: str) -> bool:
     return depth == 0
 
 
-_LEADING_SEPARATOR = re.compile(r"^\s*(?:-|–|—|:|：|_)?\s*")
+_LEADING_SEPARATOR = re.compile(r"^\s*(?:-|\u2013|\u2014|:|\uff1a|_)?\s*")
 
 
 def clean_title(text: str) -> Optional[str]:

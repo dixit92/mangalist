@@ -75,7 +75,7 @@ def test_groups_with_numbers_or_brackets(group):
     ("0008 [Ch. 8 - A/B \\ C [G]].cbz", "A/B \\ C"),
     ('0008 [Ch. 8 - "Quoted" <x> | y* [G]].cbz', '"Quoted" <x> | y*'),
     ("0008 [Ch. 8 - Who_ Me! [G]].cbz", "Who_ Me!"),
-    ("0008 [Ch. 8 - Part 1： Start？ [G]].cbz", "Part 1： Start？"),
+    ("0008 [Ch. 8 - Part 1\uff1a Start\uff1f [G]].cbz", "Part 1\uff1a Start\uff1f"),
 ])
 def test_windows_unsafe_characters_in_titles(name, title):
     r = parse_fmd2(name)

@@ -39,7 +39,7 @@ class ParseContext:
     - ``kind_hint``: the stored per-series answer to "volumes or chapters?" (``"volumes"`` /
       ``"chapters"``); it decides only names whose kind is unknown from the name itself (bare numbers).
       Asking the owner and storing the answer are the caller's job.
-    - ``series_title``: the series folder's title; a bare name that equals it (``86.cbz`` in ``86``) has
+    - ``series_title``: the series folder's title; a bare name that equals it (``42.cbz`` in ``42``) has
       no number, and ``<series title> 01`` reads 01 even when the title ends in a number.
     """
 
