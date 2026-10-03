@@ -13,8 +13,6 @@
 ARG BASEIMAGE=jlesage/baseimage-gui:debian-12-v4.14.0
 FROM ${BASEIMAGE}
 
-ARG DOCKER_IMAGE_VERSION=dev
-
 # Python, the Qt xcb platform plugin's libraries, and a font (the base image ships none for Qt).
 RUN add-pkg \
         python3 python3-venv \
@@ -33,6 +31,9 @@ RUN python3 -m venv /opt/mangalist/venv \
         -r /tmp/requirements-image.txt \
     && rm /tmp/requirements-image.txt \
     && find /opt/mangalist/venv -name '__pycache__' -prune -exec rm -rf {} +
+
+# Declared here, not at the top: a changing version stamp must not invalidate the layers above.
+ARG DOCKER_IMAGE_VERSION=dev
 
 COPY manga_list /opt/mangalist/app/manga_list
 COPY packaging/docker/startapp.sh /startapp.sh
