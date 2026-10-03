@@ -89,7 +89,7 @@ class FileHit:
 
 @dataclass
 class MangaEntry:
-    """One immediate subfolder of the Manga Root."""
+    """One series folder: an immediate subfolder of a root (or a franchise parent's subseries)."""
 
     folder: Path
     title: str
@@ -140,6 +140,8 @@ class MangaEntry:
     # For franchise subseries: the parent folder that contains this series.
     # None for normal entries, Path for subseries extracted from franchise parent.
     parent_folder: Optional[Path] = None
+    # The library root (store.Root id) the folder was found in; None for a scan without the database.
+    root_id: Optional[int] = None
 
     @property
     def n_files(self) -> int:

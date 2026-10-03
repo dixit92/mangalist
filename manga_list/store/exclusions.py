@@ -178,6 +178,8 @@ def list_tree(root: Path, max_depth: int = 4, max_entries: int = 20000) -> TreeL
                 listing.error = str(exc)
             return True
         for item in items:
+            if depth == 1 and item.name.startswith(".mangalist.lock"):
+                continue  # MangaList's own root lock
             if len(listing.entries) >= max_entries:
                 listing.truncated = True
                 return False
