@@ -66,6 +66,10 @@ def _parse_context(title: Optional[str], kind_hint: Optional[str] = None, scheme
             return ParseContext(series_title=title)
 
 
+def _name_order(name: str):
+    return (name.casefold(), name)
+
+
 def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _NO_EXCL,
                        context=None, annotate: bool = True) -> List[FileHit]:
     """Return archive FileHits inside ``folder`` up to ``max_depth`` levels (excluded paths skipped),
@@ -86,7 +90,10 @@ def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _N
             continue
         if _ex.ex is not None:
             dirnames[:] = [d for d in dirnames if not _ex.hides(rel_dir + d, True)]
-        for name in filenames:
+        # A fixed order (os.walk lists in the filesystem's order, which differs between ext4, btrfs,
+        # NTFS and SMB), so every list built from the files reads the same everywhere.
+        dirnames.sort(key=_name_order)
+        for name in sorted(filenames, key=_name_order):
             p = Path(dirpath) / name
             if not _is_archive(p):
                 continue

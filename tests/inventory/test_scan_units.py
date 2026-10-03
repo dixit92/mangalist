@@ -281,3 +281,24 @@ def test_hits_without_a_parse_keep_todays_reading():
     assert hit.kind == "chapter" and hit.unit_kind == "chapter" and not hit.needs_kind
     assert e.max_disk_chapter == 3.0 and e.max_disk_volume == 1.0
     assert e.inventory().chapters == (D("3"),)                          # parsed on demand
+
+
+def test_file_order_does_not_depend_on_the_filesystem(tmp_path, monkeypatch):
+    # os.walk lists in the filesystem's order (ext4 hashes names); the scan must not pass it on.
+    import os
+
+    import mangalist.scanner as scanner_mod
+
+    for n in ("02", "10", "01", "Extra"):
+        make_archive(tmp_path / "lib" / "Series R" / f"{n}.cbz")
+    real_walk = os.walk
+
+    def reversed_walk(top, *a, **k):
+        for d, dirnames, filenames in real_walk(top, *a, **k):
+            dirnames.reverse()
+            filenames.sort(reverse=True)
+            yield d, dirnames, filenames
+
+    monkeypatch.setattr(scanner_mod.os, "walk", reversed_walk)
+    (entry,) = scan_root(tmp_path / "lib")
+    assert [f.path.name for f in entry.files] == ["01.cbz", "02.cbz", "10.cbz", "Extra.cbz"]
