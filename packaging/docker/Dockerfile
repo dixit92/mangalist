@@ -5,6 +5,9 @@
 #   docker run -d -p 5800:5800 -v <appdata>:/config -v <library share>:/data mangalist
 #   -> https://<host>:5800/   (self-signed certificate unless you put your own in /config/certs)
 #
+# Local use only: a personal, single-user app, not a server. The web GUI has no login (by design) and
+# can rename / move files under /data - never expose the port to the internet; use a VPN or Tailscale.
+#
 # Volumes: /config = MangaList's data folder (settings, MangaUpdates cache, logs, scheduler state)
 #          plus the base image's own files (certs/, xdg/, log/); /data = the media, read-write.
 #

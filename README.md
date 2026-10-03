@@ -24,6 +24,29 @@ The builds are not code-signed. Check a download against `SHA256SUMS` (`sha256su
 - **macOS** Gatekeeper: right-click the app > **Open**, or on macOS 15+ **System Settings > Privacy &
   Security > Open Anyway**.
 
+### Docker / Unraid
+
+The image runs the same desktop app in the browser (on
+[jlesage/baseimage-gui](https://github.com/jlesage/docker-baseimage-gui)), plus a headless runner that
+rescans the library on a schedule. It is not published to a registry yet; build it from a checkout:
+
+```sh
+docker build -f packaging/docker/Dockerfile -t mangalist .
+docker run -d --name mangalist -p 5800:5800 \
+  -v /mnt/user/appdata/mangalist:/config -v /mnt/user/<library share>:/data mangalist
+```
+
+Then open `https://<host>:5800/`. The certificate is self-signed unless you put your own in
+`/config/certs`. HTTPS is on because browsers only allow clipboard sync with the host over HTTPS.
+`USER_ID` / `GROUP_ID` default to Unraid's `99` / `100`. The scheduled rescan is `MANGALIST_RESCAN_SCHEDULE`
+(default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1`.
+
+> **Local use only - do not expose it to the internet.** MangaList is a personal, single-user desktop
+> app, not a server: the web GUI has **no login**, and whoever opens it can rename and move files in
+> the library mounted at `/data`. Keep port 5800 on your home network and reach it from outside
+> through a VPN or [Tailscale](https://tailscale.com/), never through a port forward or a public
+> reverse proxy.
+
 ## Your data
 
 Settings, the MangaUpdates cache and logs live per user, so upgrades and uninstalls keep them:
