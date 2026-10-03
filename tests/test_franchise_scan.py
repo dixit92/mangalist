@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_list.scanner import (
+from mangalist.scanner import (
     _extract_subseries,
     _get_subdirs_with_archives,
     _has_direct_archives,

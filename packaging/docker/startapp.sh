@@ -3,4 +3,4 @@
 set -u
 export QT_QPA_PLATFORM=xcb
 cd /config || exit 1
-exec /opt/mangalist/venv/bin/python -m manga_list "$@"
+exec /opt/mangalist/venv/bin/python -m mangalist "$@"

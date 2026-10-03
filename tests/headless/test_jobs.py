@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from manga_list.headless.jobs import (
+from mangalist.headless.jobs import (
     Cancelled, ConfigRootsProvider, Job, JobContext, JobRegistry, RootsProvider, StoreRootsProvider,
     build_registry, make_dispatch, make_rescan)
-from manga_list.store.roots import Root
-from manga_list.headless.schedule import DailyAt, EveryHours
-from manga_list.headless.settings import HeadlessSettings, parse_bool
+from mangalist.store.roots import Root
+from mangalist.headless.schedule import DailyAt, EveryHours
+from mangalist.headless.settings import HeadlessSettings, parse_bool
 
 
 class ListRoots:
@@ -59,24 +59,24 @@ def test_default_settings_rescan_on_downloads_off():
 
 
 def test_downloads_are_opt_in():
-    s = HeadlessSettings.from_env({"MANGA_LIST_DOWNLOADS": "1",
-                                   "MANGA_LIST_DISPATCH_SCHEDULE": "every 12h"})
+    s = HeadlessSettings.from_env({"MANGALIST_DOWNLOADS": "1",
+                                   "MANGALIST_DISPATCH_SCHEDULE": "every 12h"})
     reg = build_registry(s, ListRoots())
     assert reg.get("dispatch-batch").active
     assert reg.get("dispatch-batch").schedule == EveryHours(12)
 
 
 def test_rescan_can_be_turned_off():
-    reg = build_registry(HeadlessSettings.from_env({"MANGA_LIST_RESCAN_SCHEDULE": "off"}),
+    reg = build_registry(HeadlessSettings.from_env({"MANGALIST_RESCAN_SCHEDULE": "off"}),
                          ListRoots())
     assert reg.active() == []
 
 
 def test_bad_settings_are_errors_not_surprises():
     with pytest.raises(ValueError):
-        HeadlessSettings.from_env({"MANGA_LIST_RESCAN_SCHEDULE": "nightly"})
+        HeadlessSettings.from_env({"MANGALIST_RESCAN_SCHEDULE": "nightly"})
     with pytest.raises(ValueError):
-        HeadlessSettings.from_env({"MANGA_LIST_DOWNLOADS": "maybe"})
+        HeadlessSettings.from_env({"MANGALIST_DOWNLOADS": "maybe"})
     assert parse_bool(None, True) is True and parse_bool("off", True) is False
 
 
@@ -109,14 +109,14 @@ def test_dispatch_on_is_still_a_placeholder(caplog):
 
 def test_config_roots_provider_reads_env_and_last_root(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
-    provider = ConfigRootsProvider(env={"MANGA_LIST_ROOTS": os.pathsep.join([str(a), str(b), ""])},
+    provider = ConfigRootsProvider(env={"MANGALIST_ROOTS": os.pathsep.join([str(a), str(b), ""])},
                                    load_config=lambda: {"last_root": str(a)})
     assert isinstance(provider, RootsProvider)
     assert provider.roots() == [a, b], "deduplicated, env order first"
 
 
 def test_config_roots_provider_uses_the_real_config(tmp_path):
-    from manga_list import config
+    from mangalist import config
 
     cfg = config.load()
     cfg["last_root"] = str(tmp_path)
@@ -189,7 +189,7 @@ def test_rescan_stops_on_shutdown(tmp_path):
 def test_store_provider_lists_database_roots_then_environment_roots(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     stored = Root(id=1, name="A", path=str(a), exclusions=["@Oneshots"])
-    provider = StoreRootsProvider(env={"MANGA_LIST_ROOTS": os.pathsep.join([str(a), str(b)])},
+    provider = StoreRootsProvider(env={"MANGALIST_ROOTS": os.pathsep.join([str(a), str(b)])},
                                   load_roots=lambda: [stored])
     roots = provider.roots()
     # The database root wins over the same path from the environment (it carries the exclusions).
@@ -201,7 +201,7 @@ def test_store_provider_survives_a_broken_database(tmp_path):
     def broken():
         raise RuntimeError("database locked")
 
-    provider = StoreRootsProvider(env={"MANGA_LIST_ROOTS": str(tmp_path)}, load_roots=broken)
+    provider = StoreRootsProvider(env={"MANGALIST_ROOTS": str(tmp_path)}, load_roots=broken)
     assert provider.roots() == [tmp_path]
 
 

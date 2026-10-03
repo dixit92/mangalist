@@ -1,10 +1,10 @@
 #!/bin/sh
 # The MangaList headless runner (scheduled rescans; downloads opt-in), next to the GUI.
-# Runs as USER_ID / GROUP_ID; respawned if it exits. MANGA_LIST_HEADLESS=0 disables it.
+# Runs as USER_ID / GROUP_ID; respawned if it exits. MANGALIST_HEADLESS=0 disables it.
 set -u
 cd /config || exit 1
 
-/opt/mangalist/venv/bin/python -m manga_list --headless &
+/opt/mangalist/venv/bin/python -m mangalist --headless &
 pid=$!
 stopping=0
 trap 'stopping=1; kill -TERM "$pid" 2>/dev/null' TERM INT

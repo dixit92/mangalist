@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from manga_list import scanner
-from manga_list.scanner import scan_library, scan_root
+from mangalist import scanner
+from mangalist.scanner import scan_library, scan_root
 
 from .conftest import make_archive
 
@@ -84,8 +84,8 @@ def test_scan_library_over_several_roots(db, tmp_path):
 
 
 def test_record_library_scan_relinks_a_folder_renamed_by_hand(db, library):
-    from manga_list import mu_cache
-    from manga_list.scanner import record_library_scan
+    from mangalist import mu_cache
+    from mangalist.scanner import record_library_scan
 
     make_archive(library / "Old Title" / "v01.cbz", 101)
     make_archive(library / "Old Title" / "v02.cbz", 102)
@@ -104,7 +104,7 @@ def test_record_library_scan_relinks_a_folder_renamed_by_hand(db, library):
 
 
 def test_an_offline_root_keeps_its_series(db, library):
-    from manga_list.scanner import record_library_scan
+    from mangalist.scanner import record_library_scan
 
     make_archive(library / "Series A" / "a.cbz")
     root = db.add_root(str(library))

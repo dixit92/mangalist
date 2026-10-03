@@ -1,7 +1,7 @@
 """Filesystem scanner: walk the roots -> MangaEntry list.
 
 A root's direct child folders are its series folders (franchise parents split into their subseries, as
-before). A root's exclusions (root-relative patterns, :mod:`manga_list.store.exclusions`) are applied
+before). A root's exclusions (root-relative patterns, :mod:`mangalist.store.exclusions`) are applied
 while walking: an excluded folder is never entered, an excluded file never read. An archive lying
 directly in a root is not a series: it is reported as "not in a series folder" (``loose``) and never
 matched. Scans only read; they never take the root lock, and files other tools add are simply seen.

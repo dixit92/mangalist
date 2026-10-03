@@ -1,7 +1,7 @@
 """The stage-2 golden set (port of MangaPixer 1.31.1 ``GoldenSetTests.cs``).
 
 Every case runs the real detector, planner, scorer AND the production retrieval loop
-(``manga_list.matcher.retrieval``) and provider mapping (``manga_list.matcher.mangaupdates``) over RECORDED
+(``mangalist.matcher.retrieval``) and provider mapping (``mangalist.matcher.mangaupdates``) over RECORDED
 MangaUpdates responses - no network. Asserts the class, band and chosen id per case, then compares every
 case (class, band, chosen id, scores, reasons, and the searches and GETs sent) and the aggregate numbers
 with MangaPixer's own run of the same cases (``mangapixer_report.txt``), so any divergence between the port
@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pytest
 
-from manga_list.matcher import (
+from mangalist.matcher import (
     DEFAULT_THRESHOLDS,
     MatchBand,
     MatchOutcome,
@@ -27,10 +27,10 @@ from manga_list.matcher import (
     WorkClassification,
     reasons_text,
 )
-from manga_list.matcher import detector, planner, scorer
-from manga_list.matcher._text import format_fixed
-from manga_list.matcher.mangaupdates import SearchPage, map_search_page, map_series
-from manga_list.matcher.retrieval import retrieve_and_score
+from mangalist.matcher import detector, planner, scorer
+from mangalist.matcher._text import format_fixed
+from mangalist.matcher.mangaupdates import SearchPage, map_search_page, map_series
+from mangalist.matcher.retrieval import retrieve_and_score
 
 from .golden_cases import ALL, GoldenCase
 

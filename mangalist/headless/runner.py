@@ -1,12 +1,12 @@
-"""``python -m manga_list --headless``: the scheduler without a window (no Qt import).
+"""``python -m mangalist --headless``: the scheduler without a window (no Qt import).
 
-    python -m manga_list --headless              run the scheduler until SIGTERM / SIGINT
-    python -m manga_list --headless --status     print each job's schedule, last and next run
-    python -m manga_list --headless --run rescan run one job now and exit (keeps its schedule)
-    python -m manga_list --headless --once       run whatever is due (incl. missed runs) and exit
+    python -m mangalist --headless              run the scheduler until SIGTERM / SIGINT
+    python -m mangalist --headless --status     print each job's schedule, last and next run
+    python -m mangalist --headless --run rescan run one job now and exit (keeps its schedule)
+    python -m mangalist --headless --once       run whatever is due (incl. missed runs) and exit
 
 Logs go to ``headless.log`` in the normal log folder (a separate file from the GUI's
-``manga_list.log``, so the two processes in the container never rotate the same file) and, from
+``mangalist.log``, so the two processes in the container never rotate the same file) and, from
 INFO up, to standard output (the container log).
 """
 
@@ -22,7 +22,7 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-_log = logging.getLogger("manga_list.headless")
+_log = logging.getLogger("mangalist.headless")
 
 LOG_NAME = "headless.log"
 LOCK_NAME = "headless.lock"
@@ -36,7 +36,7 @@ def setup_logging() -> None:
     root = logging.getLogger()
     for h in list(root.handlers):
         if isinstance(h, logging.handlers.RotatingFileHandler) \
-                and Path(h.baseFilename).name == "manga_list.log":
+                and Path(h.baseFilename).name == "mangalist.log":
             root.removeHandler(h)
             h.close()
             fh = logging.handlers.RotatingFileHandler(
@@ -102,7 +102,7 @@ class InstanceLock:
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="python -m manga_list --headless",
+    p = argparse.ArgumentParser(prog="python -m mangalist --headless",
                                 description="MangaList headless runner (scheduled batch jobs).")
     p.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
     g = p.add_mutually_exclusive_group()

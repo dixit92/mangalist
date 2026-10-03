@@ -3,7 +3,7 @@
 ``score = 0.45 * tokenSortRatio + 0.35 * tokenSetRatio' + 0.20 * trigramDice``, where
 ``tokenSetRatio'`` is the classic token-set ratio multiplied by ``(1 - 0.5 * unmatchedTokenMass)``.
 The penalty is what keeps "Berserk" from scoring as a perfect match for "Berserk of Gluttony" (a
-pure token-set ratio - and the old Manga-List subset rule - treats a subset as identical). Inputs go
+pure token-set ratio - and the old MangaList subset rule - treats a subset as identical). Inputs go
 through :func:`scoring_form` first. No package: Levenshtein, token ratios and trigram Dice are small
 enough to own, and owning them keeps the arithmetic identical to the reference.
 """

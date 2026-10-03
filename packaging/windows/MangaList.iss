@@ -1,4 +1,4 @@
-; Inno Setup script for Manga List (Windows x64, per-user, no administrator rights).
+; Inno Setup script for MangaList (Windows x64, per-user, no administrator rights).
 ;
 ;   iscc /DAppVersion=1.2.3 /DAppVersionNumeric=1.2.3 packaging\windows\MangaList.iss
 ;
@@ -11,7 +11,7 @@
 ;   is removed first so no stale libraries remain), running copies are closed first.
 ; - User data lives in %LOCALAPPDATA%\MangaList (settings, MangaUpdates cache, logs) - outside {app},
 ;   so neither an upgrade nor an uninstall touches it.
-; - Never change AppId: it is how Windows recognises an installed Manga List.
+; - Never change AppId: it is how Windows recognises an installed MangaList.
 ; - Not code-signed; releases publish SHA256SUMS.
 
 #ifndef AppVersion
@@ -25,18 +25,18 @@
 
 [Setup]
 AppId={{A386EF83-639E-48AE-A584-1863DF572F7B}
-AppName=Manga List
+AppName=MangaList
 AppVersion={#AppVersion}
-AppVerName=Manga List {#AppVersion}
+AppVerName=MangaList {#AppVersion}
 AppPublisher=dixit92
-AppPublisherURL=https://github.com/dixit92/manga-list
-AppSupportURL=https://github.com/dixit92/manga-list/issues
-AppUpdatesURL=https://github.com/dixit92/manga-list/releases
+AppPublisherURL=https://github.com/dixit92/MangaList
+AppSupportURL=https://github.com/dixit92/MangaList/issues
+AppUpdatesURL=https://github.com/dixit92/MangaList/releases
 VersionInfoVersion={#AppVersionNumeric}
 VersionInfoProductVersion={#AppVersionNumeric}
-VersionInfoDescription=Manga List setup
+VersionInfoDescription=MangaList setup
 DefaultDirName={autopf}\MangaList
-DefaultGroupName=Manga List
+DefaultGroupName=MangaList
 DisableProgramGroupPage=yes
 DisableDirPage=auto
 PrivilegesRequired=lowest
@@ -48,7 +48,7 @@ OutputBaseFilename=MangaList-v{#AppVersion}-windows-x64-setup
 SetupIconFile={#IconFile}
 #endif
 UninstallDisplayIcon={app}\MangaList.exe
-UninstallDisplayName=Manga List
+UninstallDisplayName=MangaList
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -64,6 +64,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [InstallDelete]
 ; An upgrade replaces the bundled libraries wholesale.
 Type: filesandordirs; Name: "{app}\_internal"
+; Shortcuts of versions before the MangaList rename (named "Manga List").
+Type: files; Name: "{autoprograms}\Manga List.lnk"
+Type: files; Name: "{autodesktop}\Manga List.lnk"
 
 [Files]
 Source: "{#RootDir}\dist\MangaList\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -72,8 +75,8 @@ Source: "{#RootDir}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: 
 
 [Icons]
 ; AppUserModelID matches the one the app sets, so the taskbar groups its windows under this shortcut.
-Name: "{autoprograms}\Manga List"; Filename: "{app}\MangaList.exe"; AppUserModelID: "manga_list.classifier.1"
-Name: "{autodesktop}\Manga List"; Filename: "{app}\MangaList.exe"; AppUserModelID: "manga_list.classifier.1"; Tasks: desktopicon
+Name: "{autoprograms}\MangaList"; Filename: "{app}\MangaList.exe"; AppUserModelID: "com.lifepixer.MangaList"
+Name: "{autodesktop}\MangaList"; Filename: "{app}\MangaList.exe"; AppUserModelID: "com.lifepixer.MangaList"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\MangaList.exe"; Description: "{cm:LaunchProgram,Manga List}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\MangaList.exe"; Description: "{cm:LaunchProgram,MangaList}"; Flags: nowait postinstall skipifsilent

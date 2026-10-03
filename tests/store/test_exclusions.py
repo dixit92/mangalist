@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.store.exclusions import ExclusionSet, InvalidPattern, list_tree, normalize_pattern, preview
+from mangalist.store.exclusions import ExclusionSet, InvalidPattern, list_tree, normalize_pattern, preview
 
 from .conftest import make_archive
 

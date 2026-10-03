@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from manga_list.headless.schedule import UTC
-from manga_list.headless.state import JobState, StateStore
+from mangalist.headless.schedule import UTC
+from mangalist.headless.state import JobState, StateStore
 
 
 def test_round_trip(tmp_path):

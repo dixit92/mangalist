@@ -25,7 +25,7 @@ def main() -> int:
     from PySide6.QtCore import QBuffer, QIODevice
     from PySide6.QtWidgets import QApplication
 
-    from manga_list.gui.main_window import render_app_icon
+    from mangalist.gui.main_window import render_app_icon
 
     app = QApplication.instance() or QApplication([])  # noqa: F841 - fonts need an application
     OUT.mkdir(parents=True, exist_ok=True)

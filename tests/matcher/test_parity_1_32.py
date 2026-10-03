@@ -11,11 +11,11 @@ from decimal import Decimal
 
 import pytest
 
-from manga_list import models, mu_cache
-from manga_list.matcher import auto_match_text as amt
-from manga_list.matcher import detector, planner, scorer
-from manga_list.matcher.anatomy import is_release_tag, parse
-from manga_list.matcher.contracts import (
+from mangalist import models, mu_cache
+from mangalist.matcher import auto_match_text as amt
+from mangalist.matcher import detector, planner, scorer
+from mangalist.matcher.anatomy import is_release_tag, parse
+from mangalist.matcher.contracts import (
     DEFAULT_THRESHOLDS,
     FolderShape,
     MatchCandidate,
@@ -27,7 +27,7 @@ from manga_list.matcher.contracts import (
     QueryVariantKind,
     WorkClass,
 )
-from manga_list.matcher.normalizer import normalize
+from mangalist.matcher.normalizer import normalize
 
 D = Decimal
 

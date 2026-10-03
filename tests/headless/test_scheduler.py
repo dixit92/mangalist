@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
-from manga_list.headless.jobs import Job, JobContext, JobRegistry, JobResult
-from manga_list.headless.schedule import UTC, DailyAt, EveryHours
-from manga_list.headless.scheduler import Scheduler
-from manga_list.headless.state import StateStore
+from mangalist.headless.jobs import Job, JobContext, JobRegistry, JobResult
+from mangalist.headless.schedule import UTC, DailyAt, EveryHours
+from mangalist.headless.scheduler import Scheduler
+from mangalist.headless.state import StateStore
 
 
 def _counting_job(name="rescan", schedule=EveryHours(12), **kw):

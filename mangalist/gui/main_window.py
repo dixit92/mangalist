@@ -193,7 +193,7 @@ def _build_app_icon() -> QIcon:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Manga List Classifier {__version__}")
+        self.setWindowTitle(f"MangaList {__version__}")
         self._app_icon = _build_app_icon()
         self.setWindowIcon(self._app_icon)
         QGuiApplication.setWindowIcon(self._app_icon)

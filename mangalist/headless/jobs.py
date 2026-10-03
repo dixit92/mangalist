@@ -8,7 +8,7 @@
 
 Roots come from a :class:`RootsProvider`. The default, :class:`StoreRootsProvider`, reads the
 roots database (each root with its exclusions, which the rescan never scans) plus an optional
-``MANGA_LIST_ROOTS`` list; :class:`ConfigRootsProvider` (``MANGA_LIST_ROOTS`` plus the GUI's last
+``MANGALIST_ROOTS`` list; :class:`ConfigRootsProvider` (``MANGALIST_ROOTS`` plus the GUI's last
 root) remains for callers without a database.
 """
 
@@ -26,7 +26,7 @@ from .schedule import Schedule
 
 _log = logging.getLogger(__name__)
 
-ENV_ROOTS = "MANGA_LIST_ROOTS"
+ENV_ROOTS = "MANGALIST_ROOTS"
 
 
 class Cancelled(Exception):
@@ -136,7 +136,7 @@ def _unique(roots: Iterable[Any]) -> List[Any]:
 
 
 class StoreRootsProvider:
-    """The roots database (with each root's exclusions) plus ``MANGA_LIST_ROOTS``.
+    """The roots database (with each root's exclusions) plus ``MANGALIST_ROOTS``.
 
     Read on every call, so a root added in the GUI's Roots manager is used by the next scheduled
     rescan. A database root wins over the same path given in the environment (it carries the
@@ -164,7 +164,7 @@ class StoreRootsProvider:
 
 
 class ConfigRootsProvider:
-    """Today's roots: ``MANGA_LIST_ROOTS`` (``os.pathsep``-separated) plus the GUI's last root.
+    """Today's roots: ``MANGALIST_ROOTS`` (``os.pathsep``-separated) plus the GUI's last root.
 
     Read on every call, so a root picked in the GUI is used by the next scheduled rescan.
     """
@@ -196,7 +196,7 @@ class ConfigRootsProvider:
 
 def make_rescan(provider: RootsProvider,
                 scan: Optional[Callable[..., list]] = None) -> JobFunc:
-    """A rescan over ``provider.roots()``; ``scan`` defaults to :func:`manga_list.scanner.scan_root`."""
+    """A rescan over ``provider.roots()``; ``scan`` defaults to :func:`mangalist.scanner.scan_root`."""
 
     def rescan(ctx: JobContext) -> JobResult:
         scan_root = scan
@@ -262,7 +262,7 @@ def make_dispatch(downloads_enabled: bool) -> JobFunc:
 
 
 def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) -> JobRegistry:
-    """The runner's jobs from :class:`~manga_list.headless.settings.HeadlessSettings`."""
+    """The runner's jobs from :class:`~mangalist.headless.settings.HeadlessSettings`."""
     provider = provider or StoreRootsProvider()
     return JobRegistry([
         Job("rescan", make_rescan(provider), settings.rescan_schedule,

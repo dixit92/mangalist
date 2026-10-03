@@ -6,8 +6,8 @@ import json
 import sqlite3
 from pathlib import Path
 
-from manga_list import config, mu_cache, paths, store
-from manga_list.store import migrate
+from mangalist import config, mu_cache, paths, store
+from mangalist.store import migrate
 
 _LEGACY_DDL = """
 CREATE TABLE mu_cache (

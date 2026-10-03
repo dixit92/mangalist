@@ -5,7 +5,7 @@ anything from a real library) and the expected detector class, band and chosen M
 ``group_title`` selects an archive group (archive-level cases); ``band`` None makes it a
 detector-only case. ``vetoes``, when set, is the exact set of auto-vetoing reasons of the top.
 
-Every MangaPixer case is here except the ones whose input Manga-List cannot have: the cover cases
+Every MangaPixer case is here except the ones whose input MangaList cannot have: the cover cases
 C01-C05 (a local cover thumbnail) and the declared-fact cases H01-H03, H06, H08-H10 (a type or creator an
 admin declared). H04 declares a creator no record has, which changes nothing, so it runs undeclared.
 """
@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence, Tuple
 
-from manga_list.matcher import (
+from mangalist.matcher import (
     ChildFolderShape,
     ContentSuggestion,
     FolderShape,

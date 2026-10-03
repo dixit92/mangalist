@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from manga_list.matcher import retrieval
-from manga_list.matcher.contracts import (
+from mangalist.matcher import retrieval
+from mangalist.matcher.contracts import (
     DEFAULT_THRESHOLDS,
     MatchCandidate,
     MatchContext,
@@ -15,7 +15,7 @@ from manga_list.matcher.contracts import (
     QueryVariantKind,
     WorkClass,
 )
-from manga_list.matcher.mangaupdates import SearchPage
+from mangalist.matcher.mangaupdates import SearchPage
 
 
 def rec(id, title, alt=(), authors=()) -> MatchCandidate:

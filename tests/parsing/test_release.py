@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.parsing import Kind, Layer, parse_release
+from mangalist.parsing import Kind, Layer, parse_release
 
 
 def _u(r):

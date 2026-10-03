@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.matcher.normalizer import (
+from mangalist.matcher.normalizer import (
     DerivedTitle,
     DerivedTitleKind,
     archive_base_title,
@@ -323,7 +323,7 @@ def test_normalize_english_title_survives_a_trailing_creator_group_but_not_a_rel
 
 # --- 1.27.0 / 1.30.0 (ported from MangaPixer 1.31.1 TitleNormalizerTests) ----------------------
 
-from manga_list.matcher.normalizer import contains_number, name_subtitle, subtitle_head, subtitle_tail  # noqa: E402
+from mangalist.matcher.normalizer import contains_number, name_subtitle, subtitle_head, subtitle_tail  # noqa: E402
 
 
 @pytest.mark.parametrize(("title", "expected"), [

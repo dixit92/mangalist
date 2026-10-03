@@ -3,13 +3,13 @@
 Tables: roots + exclusions, series (root-relative path + folder fingerprint + MangaUpdates identity),
 units (the parser's output), links_cache (the old ``mu_cache.db`` rows), ledger (dispatch requests),
 journal (filesystem plans), settings (the old ``config.json``), meta. Schema and migration rules:
-:mod:`manga_list.store.schema`; the one-time import of the old files: :mod:`manga_list.store.migrate`.
+:mod:`mangalist.store.schema`; the one-time import of the old files: :mod:`mangalist.store.migrate`.
 
 No Qt here: the headless runner and the no-Qt CI job import this package.
 
 Usage::
 
-    from manga_list import store
+    from mangalist import store
     db = store.get_store()          # the data folder's database (created on first use)
     db.add_root("/data/manga", "Manga", exclusions=["@Oneshots/**"])
 """

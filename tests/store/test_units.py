@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.store import SeriesSeen, Unit, UnitError
-from manga_list.store.units import exact_number
+from mangalist.store import SeriesSeen, Unit, UnitError
+from mangalist.store.units import exact_number
 
 
 @pytest.mark.parametrize("value, expected", [("12", "12"), ("0003", "3"), ("3.99", "3.99"), ("0.5", "0.5"),

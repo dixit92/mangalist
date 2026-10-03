@@ -1,4 +1,4 @@
-"""``python -m manga_list --headless``: no Qt on that path, CLI options, SIGTERM shutdown."""
+"""``python -m mangalist --headless``: no Qt on that path, CLI options, SIGTERM shutdown."""
 
 from __future__ import annotations
 
@@ -28,9 +28,9 @@ _NO_QT = (
 
 def _env(tmp_path: Path, **extra) -> dict:
     env = dict(os.environ)
-    env.update({"MANGA_LIST_DATA_DIR": str(tmp_path / "data"), "PYTHONDONTWRITEBYTECODE": "1",
+    env.update({"MANGALIST_DATA_DIR": str(tmp_path / "data"), "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTHONPATH": str(REPO)})
-    env.pop("MANGA_LIST_ROOTS", None)
+    env.pop("MANGALIST_ROOTS", None)
     env.update(extra)
     return env
 
@@ -41,13 +41,13 @@ def _run(code: str, tmp_path: Path, **extra) -> subprocess.CompletedProcess:
 
 
 def test_import_loads_no_qt(tmp_path):
-    p = _run("import manga_list.headless, manga_list.headless.runner, manga_list.__main__\n"
+    p = _run("import mangalist.headless, mangalist.headless.runner, mangalist.__main__\n"
              "assert not any(m.startswith('PySide6') for m in sys.modules)\n", tmp_path)
     assert p.returncode == 0, p.stderr
 
 
 def test_headless_status_runs_without_qt(tmp_path):
-    p = _run("from manga_list.__main__ import main\n"
+    p = _run("from mangalist.__main__ import main\n"
              "rc = main(['--headless', '--status'])\n"
              "assert not any(m.startswith('PySide6') for m in sys.modules)\n"
              "sys.exit(rc)\n", tmp_path)
@@ -59,33 +59,33 @@ def test_headless_run_rescan_once(tmp_path):
     lib = tmp_path / "lib" / "Series A"
     lib.mkdir(parents=True)
     (lib / "Series A v01.cbz").write_bytes(b"PK")
-    p = _run("from manga_list.__main__ import main\n"
+    p = _run("from mangalist.__main__ import main\n"
              "sys.exit(main(['--headless', '--run', 'rescan']))\n", tmp_path,
-             MANGA_LIST_ROOTS=str(tmp_path / "lib"))
+             MANGALIST_ROOTS=str(tmp_path / "lib"))
     assert p.returncode == 0, p.stderr
     state = json.loads((tmp_path / "data" / "headless-state.json").read_text(encoding="utf-8"))
     assert state["jobs"]["rescan"]["last_status"] == "ok"
     assert state["jobs"]["rescan"]["extra"]["roots"][0]["series"] == 1
     assert "1 series, 1 archives" in p.stdout
     assert (tmp_path / "data" / "logs" / "headless.log").is_file()
-    assert not (tmp_path / "data" / "logs" / "manga_list.log").exists(), \
+    assert not (tmp_path / "data" / "logs" / "mangalist.log").exists(), \
         "the runner never writes the GUI's log file"
 
 
 def test_headless_unknown_job_and_bad_setting_fail_cleanly(tmp_path):
-    p = _run("from manga_list.__main__ import main\n"
+    p = _run("from mangalist.__main__ import main\n"
              "sys.exit(main(['--headless', '--run', 'nope']))\n", tmp_path)
     assert p.returncode == 2 and "unknown job" in p.stdout + p.stderr
-    p = _run("from manga_list.__main__ import main\n"
+    p = _run("from mangalist.__main__ import main\n"
              "sys.exit(main(['--headless']))\n", tmp_path,
-             MANGA_LIST_RESCAN_SCHEDULE="sometimes")
+             MANGALIST_RESCAN_SCHEDULE="sometimes")
     assert p.returncode == 2 and "unrecognised schedule" in p.stdout + p.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals")
 def test_sigterm_stops_the_runner_cleanly(tmp_path):
     proc = subprocess.Popen(
-        [sys.executable, "-c", _NO_QT + "from manga_list.__main__ import main\n"
+        [sys.executable, "-c", _NO_QT + "from mangalist.__main__ import main\n"
                                         "sys.exit(main(['--headless']))\n"],
         cwd=str(REPO), env=_env(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True)
@@ -106,12 +106,12 @@ def test_sigterm_stops_the_runner_cleanly(tmp_path):
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file locks")
 def test_second_runner_on_the_same_data_folder_refuses(tmp_path):
-    from manga_list.headless.runner import InstanceLock
+    from mangalist.headless.runner import InstanceLock
 
     lock = InstanceLock(tmp_path / "data" / "headless.lock")
     assert lock.acquire()
     try:
-        p = _run("from manga_list.__main__ import main\n"
+        p = _run("from mangalist.__main__ import main\n"
                  "sys.exit(main(['--headless', '--once']))\n", tmp_path)
         assert p.returncode == 3, p.stdout + p.stderr
     finally:

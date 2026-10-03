@@ -21,7 +21,7 @@
   plus, always, a record of the top's series family that only the folder's subtitle set apart.
 
 Not ported (MangaPixer-only inputs): the cover tie-break (``CoverMatches``, +0.05) and the admin-declared
-type (``DeclaredType``, +/-0.05). Manga-List has no cover images and no declared facts, so for its inputs
+type (``DeclaredType``, +/-0.05). MangaList has no cover images and no declared facts, so for its inputs
 the scorer is the reference's.
 """
 

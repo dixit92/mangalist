@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
 
-from manga_list.matcher import detector, planner
-from manga_list.matcher.contracts import (
+from mangalist.matcher import detector, planner
+from mangalist.matcher.contracts import (
     ChildFolderShape,
     FolderShape,
     MatchQuery,

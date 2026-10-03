@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.parsing import Kind, Layer, ParseContext, parse_bare, parse_name
+from mangalist.parsing import Kind, Layer, ParseContext, parse_bare, parse_name
 
 
 @pytest.mark.parametrize("name, series, num", [

@@ -110,7 +110,7 @@ class MatchReason(IntFlag):
     AUTHOR_CONFLICT = 1 << 6
     NUMBER_MISMATCH = 1 << 7
     REVIEW_ONLY_CLASS = 1 << 8
-    # The flags below keep the reference's bit values. Manga-List's scorer raises only SUBTITLE_FAMILY and
+    # The flags below keep the reference's bit values. MangaList's scorer raises only SUBTITLE_FAMILY and
     # SERIES_FAMILY of them; the others need MangaPixer-only inputs (cover images, admin-declared facts,
     # stored volume data) and are listed so a stored reason name always means the same in both projects.
     COVER_MATCH = 1 << 9              # 1.28.0: the candidate's cover equals the local cover (positive)
@@ -218,7 +218,7 @@ class MatchContext:
     ``local_volumes`` / ``local_chapters`` (1.27.0): the highest unit number the archive names state (the
     count rule compares numbers, not file counts). ``units`` (1.29.0): the count rule's local side
     (``count_evidence.local_of``); when None the rule reads the fields above. MangaPixer's ``CoverMatches``
-    and ``DeclaredType`` are not ported (no cover images, no declared facts in Manga-List).
+    and ``DeclaredType`` are not ported (no cover images, no declared facts in MangaList).
     """
 
     cls: WorkClass

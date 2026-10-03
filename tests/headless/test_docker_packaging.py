@@ -41,14 +41,14 @@ def test_unraid_and_clipboard_defaults():
     assert env["USER_ID"] == "99" and env["GROUP_ID"] == "100"
     assert env["SECURE_CONNECTION"] == "1", "clipboard sync needs HTTPS"
     assert env["WEB_HOST_CLIPBOARD_SYNC"] == "1"
-    assert env["MANGA_LIST_DATA_DIR"] == "/config"
-    assert env["MANGA_LIST_HEADLESS"] == "1"
-    assert env["MANGA_LIST_DOWNLOADS"] == "0", "downloads are opt-in"
+    assert env["MANGALIST_DATA_DIR"] == "/config"
+    assert env["MANGALIST_HEADLESS"] == "1"
+    assert env["MANGALIST_DOWNLOADS"] == "0", "downloads are opt-in"
 
 
 def test_env_defaults_match_the_runner_defaults():
-    from manga_list import paths
-    from manga_list.headless import settings
+    from mangalist import paths
+    from mangalist.headless import settings
 
     env = _env()
     assert paths.ENV_DATA_DIR in env
@@ -68,12 +68,12 @@ def test_volumes_port_and_name():
 
 def test_startapp_and_service_scripts():
     start = (DOCKER / "startapp.sh").read_text(encoding="utf-8")
-    assert start.startswith("#!/bin/sh") and "exec /opt/mangalist/venv/bin/python -m manga_list" in start
+    assert start.startswith("#!/bin/sh") and "exec /opt/mangalist/venv/bin/python -m mangalist" in start
     run = (SERVICE / "run").read_text(encoding="utf-8")
-    assert run.startswith("#!/bin/sh") and "-m manga_list --headless" in run
+    assert run.startswith("#!/bin/sh") and "-m mangalist --headless" in run
     assert "trap " in run, "SIGTERM is forwarded to the runner"
     disabled = (SERVICE / "disabled").read_text(encoding="utf-8")
-    assert "MANGA_LIST_HEADLESS" in disabled
+    assert "MANGALIST_HEADLESS" in disabled
     assert (SERVICE / "respawn").exists()
     assert (DOCKER / "rootfs" / "etc" / "services.d" / "default" / "headless.dep").exists()
     for f in (DOCKER / "startapp.sh", SERVICE / "run", SERVICE / "disabled"):
@@ -97,4 +97,4 @@ def test_scripts_are_executable_in_git():
 def test_dockerignore_keeps_the_context_small():
     lines = (REPO / ".dockerignore").read_text(encoding="utf-8").splitlines()
     assert "**" in lines
-    assert {"!requirements.txt", "!manga_list/", "!packaging/docker/"} <= set(lines)
+    assert {"!requirements.txt", "!mangalist/", "!packaging/docker/"} <= set(lines)

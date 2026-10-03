@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from manga_list.parsing import Kind, Layer, parse_fmd2
+from mangalist.parsing import Kind, Layer, parse_fmd2
 
 
 def _u(r):

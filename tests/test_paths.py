@@ -1,4 +1,4 @@
-"""``manga_list.paths``: per-user data location, overrides, portable mode and the one-time
+"""``mangalist.paths``: per-user data location, overrides, portable mode and the one-time
 migration from the old ``data/`` folder next to the program."""
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 import platformdirs
 import pytest
 
-from manga_list import config, mu_cache, paths
+from mangalist import config, mu_cache, paths
 
 
 def _legacy_folder(root: Path) -> Path:
@@ -35,6 +35,7 @@ def _legacy_folder(root: Path) -> Path:
 def per_user(tmp_path, monkeypatch) -> Path:
     """No override: the platform default, redirected into tmp_path."""
     monkeypatch.delenv(paths.ENV_DATA_DIR, raising=False)
+    monkeypatch.delenv(paths.LEGACY_ENV_DATA_DIR, raising=False)
     target = tmp_path / "user" / "MangaList"
     monkeypatch.setattr(platformdirs, "user_data_dir", lambda *a, **k: str(target))
     monkeypatch.setattr(platformdirs, "user_log_dir", lambda *a, **k: str(target / "Logs"))
@@ -48,15 +49,25 @@ def _frozen(monkeypatch, exe_dir: Path) -> None:
 
 
 def test_environment_override(tmp_path):
-    # conftest.py sets MANGA_LIST_DATA_DIR for every test.
+    # conftest.py sets MANGALIST_DATA_DIR for every test.
     assert paths.data_dir() == tmp_path / "data"
     assert paths.log_dir() == tmp_path / "data" / "logs"
     assert paths.config_file() == tmp_path / "data" / "config.json"
     assert paths.cache_file() == tmp_path / "data" / "mu_cache.db"
 
 
+def test_legacy_environment_name_is_still_honoured(tmp_path, monkeypatch):
+    # Releases before the MangaList rename read MANGA_LIST_DATA_DIR; the new name wins when both are set.
+    monkeypatch.delenv(paths.ENV_DATA_DIR, raising=False)
+    monkeypatch.setenv(paths.LEGACY_ENV_DATA_DIR, str(tmp_path / "old"))
+    assert paths.data_dir() == tmp_path / "old"
+    monkeypatch.setenv(paths.ENV_DATA_DIR, str(tmp_path / "new"))
+    assert paths.data_dir() == tmp_path / "new"
+
+
 def test_default_is_the_platform_user_folder(monkeypatch):
     monkeypatch.delenv(paths.ENV_DATA_DIR, raising=False)
+    monkeypatch.delenv(paths.LEGACY_ENV_DATA_DIR, raising=False)
     assert paths.data_dir() == Path(platformdirs.user_data_dir("MangaList", appauthor=False, roaming=False))
     assert paths.log_dir() == Path(platformdirs.user_log_dir("MangaList", appauthor=False))
     assert not paths.is_portable()

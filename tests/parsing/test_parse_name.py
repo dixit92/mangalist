@@ -9,7 +9,7 @@ from pathlib import Path, PureWindowsPath
 
 import pytest
 
-from manga_list.parsing import (
+from mangalist.parsing import (
     FMD2_CHAPTER_SCHEME,
     Kind,
     Layer,
@@ -131,6 +131,6 @@ def test_never_raises(name):
 
 
 def test_importing_the_parser_does_not_load_qt():
-    code = "import sys, manga_list.parsing; assert 'PySide6' not in sys.modules, 'PySide6 loaded'"
+    code = "import sys, mangalist.parsing; assert 'PySide6' not in sys.modules, 'PySide6 loaded'"
     root = Path(__file__).resolve().parents[2]
     subprocess.run([sys.executable, "-c", code], check=True, cwd=root)

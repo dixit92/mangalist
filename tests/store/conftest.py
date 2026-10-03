@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from manga_list import paths, store
+from mangalist import paths, store
 
 
 @pytest.fixture

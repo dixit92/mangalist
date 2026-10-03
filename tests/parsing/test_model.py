@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from manga_list.parsing import Kind, ParsedName, UnitRange, to_decimal
+from mangalist.parsing import Kind, ParsedName, UnitRange, to_decimal
 
 
 @pytest.mark.parametrize("text, expected", [

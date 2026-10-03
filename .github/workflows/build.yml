@@ -58,10 +58,10 @@ jobs:
 
       - name: Smoke-test the build
         run: |
-          $env:MANGA_LIST_DATA_DIR = "$env:RUNNER_TEMP\ml-smoke"
+          $env:MANGALIST_DATA_DIR = "$env:RUNNER_TEMP\ml-smoke"
           $p = Start-Process -FilePath dist\MangaList\MangaList.exe -ArgumentList '--smoke-test' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "smoke test exit code $($p.ExitCode)" }
-          if (-not (Test-Path "$env:MANGA_LIST_DATA_DIR\config.json")) { throw "no config.json written" }
+          if (-not (Test-Path "$env:MANGALIST_DATA_DIR\config.json")) { throw "no config.json written" }
 
       - name: Portable zip
         run: |
@@ -72,7 +72,7 @@ jobs:
           Copy-Item README.md $stage
           Copy-Item LICENSE "$stage\LICENSE.txt"
           # The marker keeps settings, cache and logs in data\ and logs\ next to MangaList.exe.
-          Set-Content -Path "$stage\portable" -Encoding ascii -Value 'Portable mode: Manga List keeps its settings, cache and logs next to MangaList.exe. Delete this file to use %LOCALAPPDATA%\MangaList instead.'
+          Set-Content -Path "$stage\portable" -Encoding ascii -Value 'Portable mode: MangaList keeps its settings, cache and logs next to MangaList.exe. Delete this file to use %LOCALAPPDATA%\MangaList instead.'
           Compress-Archive -Path $stage -DestinationPath "package\$name.zip"
           Remove-Item -Recurse -Force package\stage
 
@@ -92,7 +92,7 @@ jobs:
           $setup = (Get-Item 'package\*-setup.exe').FullName
           $app = "$env:LOCALAPPDATA\Programs\MangaList"
           $data = "$env:LOCALAPPDATA\MangaList"
-          $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Manga List.lnk"
+          $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\MangaList.lnk"
           function Invoke-Setup($exe) {
             $p = Start-Process -FilePath $exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "$exe exit code $($p.ExitCode)" }
@@ -156,7 +156,7 @@ jobs:
 
       - name: Smoke-test the app bundle
         run: |
-          MANGA_LIST_DATA_DIR="$RUNNER_TEMP/ml-smoke" dist/MangaList.app/Contents/MacOS/MangaList --smoke-test
+          MANGALIST_DATA_DIR="$RUNNER_TEMP/ml-smoke" dist/MangaList.app/Contents/MacOS/MangaList --smoke-test
           test -f "$RUNNER_TEMP/ml-smoke/config.json"
 
       - name: Disk image
@@ -167,7 +167,7 @@ jobs:
           dmg=$(ls package/*.dmg)
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
           test -L "$RUNNER_TEMP/dmg/Applications"
-          "$RUNNER_TEMP/dmg/Manga List.app/Contents/MacOS/MangaList" --version
+          "$RUNNER_TEMP/dmg/MangaList.app/Contents/MacOS/MangaList" --version
           hdiutil detach "$RUNNER_TEMP/dmg"
 
       - uses: actions/upload-artifact@v7
@@ -209,7 +209,7 @@ jobs:
 
       - name: Smoke-test the build
         run: |
-          MANGA_LIST_DATA_DIR="$RUNNER_TEMP/ml-smoke" dist/MangaList/MangaList --smoke-test
+          MANGALIST_DATA_DIR="$RUNNER_TEMP/ml-smoke" dist/MangaList/MangaList --smoke-test
           test -f "$RUNNER_TEMP/ml-smoke/config.json"
 
       - name: AppImage and tar.gz
@@ -217,7 +217,7 @@ jobs:
 
       - name: Check the packages
         run: |
-          MANGA_LIST_DATA_DIR="$RUNNER_TEMP/ml-smoke-appimage" ./package/*.AppImage --appimage-extract-and-run --smoke-test
+          MANGALIST_DATA_DIR="$RUNNER_TEMP/ml-smoke-appimage" ./package/*.AppImage --appimage-extract-and-run --smoke-test
           test -f "$RUNNER_TEMP/ml-smoke-appimage/config.json"
           tar -tzf package/*.tar.gz | grep -q '/MangaList$'
 

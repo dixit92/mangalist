@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from manga_list import mu_cache
-from manga_list.store import SeriesSeen, folder_fingerprint
-from manga_list.store.series import link_key
+from mangalist import mu_cache
+from mangalist.store import SeriesSeen, folder_fingerprint
+from mangalist.store.series import link_key
 
 
 def test_fingerprint_ignores_names_and_order():

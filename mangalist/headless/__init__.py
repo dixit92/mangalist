@@ -1,4 +1,4 @@
-"""Headless runner: scheduled batch jobs without a window (``python -m manga_list --headless``).
+"""Headless runner: scheduled batch jobs without a window (``python -m mangalist --headless``).
 
 Qt-free by design - nothing in this package imports PySide6, so the runner works in a container
 service, on a server without a display, and in the no-Qt test job.

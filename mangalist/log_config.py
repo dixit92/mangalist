@@ -1,4 +1,4 @@
-"""Centralised logging configuration for manga-list.
+"""Centralised logging configuration for MangaList.
 
 Writes rotating log files to the per-user log folder (``paths.log_dir()``).  Call ``setup()`` once at
 application startup (from ``__main__.py``).  All other modules obtain loggers
@@ -43,7 +43,7 @@ def setup(level: int = logging.DEBUG) -> None:
 
     # --- Rotating file handler (DEBUG and above) ---
     fh = logging.handlers.RotatingFileHandler(
-        log_dir / "manga_list.log",
+        log_dir / "mangalist.log",
         maxBytes=2 * 1024 * 1024,   # 2 MB per file
         backupCount=5,
         encoding="utf-8",

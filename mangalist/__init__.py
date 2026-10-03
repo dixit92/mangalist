@@ -1,4 +1,4 @@
-"""Manga List Classifier package."""
+"""MangaList package."""
 
 from ._version import __version__
 

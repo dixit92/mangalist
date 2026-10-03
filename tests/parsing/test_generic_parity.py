@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from manga_list.classifier import TINY_FILE_BYTES, detect_tokens
-from manga_list.models import FileHit, _max_chapter, _max_volume
-from manga_list.parsing import Layer, parse_generic, parse_name
+from mangalist.classifier import TINY_FILE_BYTES, detect_tokens
+from mangalist.models import FileHit, _max_chapter, _max_volume
+from mangalist.parsing import Layer, parse_generic, parse_name
 
 MB = 1024 * 1024
 

@@ -1,6 +1,6 @@
 """Persistent cache for MangaUpdates lookups — a facade over the library database.
 
-The rows live in the ``links_cache`` table of ``mangalist.db`` (:mod:`manga_list.store`) in the
+The rows live in the ``links_cache`` table of ``mangalist.db`` (:mod:`mangalist.store`) in the
 per-user data folder (``paths.data_dir()``). The ``mu_cache.db`` of older builds is imported into it
 once and left in place; ``_DDL`` / ``_MIGRATIONS`` below describe that old file. Every change is also
 copied onto the series row of the folder (MangaUpdates identity + confirmed), when the folder lies in a

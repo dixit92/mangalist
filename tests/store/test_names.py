@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.store import windows_name_problem, windows_safe_name
+from mangalist.store import windows_name_problem, windows_safe_name
 
 
 @pytest.mark.parametrize("name", ["Series A v01 (2020) (Digital) (Group).cbz", "Ch. 0002.1.cbz", "[Group] Title",

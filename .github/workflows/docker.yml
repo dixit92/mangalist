@@ -43,7 +43,7 @@ jobs:
           : > "$RUNNER_TEMP/data/library/Series A/Series A v01.cbz"
           docker run -d --name ml-ci -p 127.0.0.1:5800:5800 \
             -e USER_ID="$(id -u)" -e GROUP_ID="$(id -g)" \
-            -e MANGA_LIST_ROOTS=/data/library \
+            -e MANGALIST_ROOTS=/data/library \
             -v "$RUNNER_TEMP/config:/config" -v "$RUNNER_TEMP/data:/data" "$IMAGE"
           for _ in $(seq 1 60); do
             if curl -skf -o /dev/null https://127.0.0.1:5800/; then break; fi
@@ -61,11 +61,11 @@ jobs:
           test -f "$RUNNER_TEMP/config/headless-state.json"
           # The GUI process is up as the app user.
           docker exec ml-ci sh -c 'for p in /proc/[0-9]*; do tr "\0" " " < "$p/cmdline"; echo; done' \
-            | grep -qx '/opt/mangalist/venv/bin/python -m manga_list '
+            | grep -qx '/opt/mangalist/venv/bin/python -m mangalist '
           # A one-off rescan through the runner's CLI, as the app user (the service holds the
           # scheduler lock, so use a separate data folder).
-          docker exec -u "$(id -u):$(id -g)" -e MANGA_LIST_DATA_DIR=/tmp/ci-data ml-ci \
-            /opt/mangalist/venv/bin/python -m manga_list --headless --run rescan \
+          docker exec -u "$(id -u):$(id -g)" -e MANGALIST_DATA_DIR=/tmp/ci-data ml-ci \
+            /opt/mangalist/venv/bin/python -m mangalist --headless --run rescan \
             | tee "$RUNNER_TEMP/rescan.txt"
           grep -q '1 series, 1 archives' "$RUNNER_TEMP/rescan.txt"
           # Graceful stop: the runner logs its shutdown.

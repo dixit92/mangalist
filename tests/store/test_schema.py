@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from manga_list import paths, store
-from manga_list.store import schema
+from mangalist import paths, store
+from mangalist.store import schema
 
 
 def _tables(path):

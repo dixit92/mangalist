@@ -1,4 +1,4 @@
-"""Work out the build version and stamp ``manga_list/_version.py`` (CI and local builds).
+"""Work out the build version and stamp ``mangalist/_version.py`` (CI and local builds).
 
 Versions are calendar versions ``YEAR.MONTH.N`` (``2026.9.0``, then ``2026.9.1`` or ``2026.10.0``): the
 year and month of the release plus a counter that restarts each month. No leading zeros.
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION_FILE = ROOT / "manga_list" / "_version.py"
+VERSION_FILE = ROOT / "mangalist" / "_version.py"
 CHANGELOG = ROOT / "CHANGELOG.md"
 CALVER = re.compile(r"^20\d{2}\.(?:[1-9]|1[0-2])\.(?:0|[1-9]\d*)$")
 

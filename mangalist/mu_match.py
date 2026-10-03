@@ -1,12 +1,12 @@
-"""Bridge between Manga-List's scan results and the stage-2 matcher (``manga_list.matcher``).
+"""Bridge between MangaList's scan results and the stage-2 matcher (``mangalist.matcher``).
 
-The matcher decides the tier; Manga-List keeps its own flow and UI:
+The matcher decides the tier; MangaList keeps its own flow and UI:
 
 - ``auto``: shown as a normal (unconfirmed) match.
 - ``review``: the top candidate is shown with the amber "needs review" highlight and the reasons.
 - ``unmatched``: no confident candidate; an unconfirmed older match is cleared.
 - ``not_a_work``: the folder is not one work (a collection of separate works, a container, a unit
-  subfolder), so it is not matched at folder level. Manga-List shows one row per folder and cannot
+  subfolder), so it is not matched at folder level. MangaList shows one row per folder and cannot
   link each archive of a collection separately.
 
 Confirmed matches are the user's decision and are never re-scored.
@@ -220,7 +220,7 @@ def match_tooltip(entry: MangaEntry) -> Optional[str]:
     if entry.mu_confirmed:
         parts.append("(confirmed - right-click or double-click to un-confirm)")
     elif is_legacy_score(entry):
-        parts.append("(matched by an older Manga-List version - its score is not comparable; "
+        parts.append("(matched by an older MangaList version - its score is not comparable; "
                      "use Check MU to re-match, or right-click / double-click to confirm)")
     else:
         pct = f"{entry.mu_score * 100:.0f}%"

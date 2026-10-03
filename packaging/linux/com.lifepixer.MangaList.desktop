@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Manga List
+Name=MangaList
 GenericName=Manga library classifier
 Comment=Classify manga folders and match them to MangaUpdates
 Exec=MangaList
-Icon=manga-list
+Icon=com.lifepixer.MangaList
 Terminal=false
 Categories=Utility;Graphics;

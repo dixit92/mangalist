@@ -1,6 +1,6 @@
 """Tiny settings persistence (last folder, window size, ...).
 
-Stored in the ``settings`` table of the library database (:mod:`manga_list.store`) in the per-user data
+Stored in the ``settings`` table of the library database (:mod:`mangalist.store`) in the per-user data
 folder (``paths.data_dir()``), one JSON value per top-level key. The ``config.json`` of older builds is
 imported once (its Manga Root becoming root #1) and left in place. Asking for the settings never creates
 the data folder: with neither the database nor an old ``config.json`` there, the defaults are returned.

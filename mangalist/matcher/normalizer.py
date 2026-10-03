@@ -6,7 +6,7 @@ deterministic; it only ever sees a display name, never the filesystem.
 Pipeline for :func:`normalize`: NFKC (full-width to ASCII) -> strip a known archive extension ->
 ``_`` and ``.`` become spaces when the name has no spaces -> bracketed tags ``[...]``, ``(...)``,
 ``{...}`` are removed, EXCEPT a non-leading, trailing ``[English Title]`` of at least two words (a
-second query variant, the Manga-List folder convention) and a ``(19xx|20xx)`` year (a year hint) ->
+second query variant, the MangaList folder convention) and a ``(19xx|20xx)`` year (a year hint) ->
 volume and chapter tokens are removed, edition words and phrases ("Master Edition", "Kanzenban")
 are removed but kept as hints -> whitespace collapsed, edge punctuation trimmed.
 

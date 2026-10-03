@@ -1,4 +1,4 @@
-"""Where Manga-List keeps its runtime files.
+"""Where MangaList keeps its runtime files.
 
 Installed apps cannot write next to their executable (Program Files, a macOS ``.app`` bundle, an
 AppImage are read-only), so settings, the MangaUpdates cache and logs live in per-user folders:
@@ -14,11 +14,11 @@ Linux      ``$XDG_DATA_HOME/MangaList`` (``~/.local/share``)  ``$XDG_STATE_HOME/
 
 Two exceptions, checked in this order:
 
-- ``MANGA_LIST_DATA_DIR`` (environment): data in that folder, logs in its ``logs`` subfolder.
+- ``MANGALIST_DATA_DIR`` (environment): data in that folder, logs in its ``logs`` subfolder.
 - Portable mode: a file named ``portable`` (or ``portable.txt``) next to the executable keeps
   ``data/`` and ``logs/`` beside it, as before. The Windows zip ships with the marker.
 
-The library database is ``mangalist.db`` (:mod:`manga_list.store`). It imports the older
+The library database is ``mangalist.db`` (:mod:`mangalist.store`). It imports the older
 ``config.json`` and ``mu_cache.db`` once and leaves both files in place.
 
 Versions before this change always wrote ``data/`` next to the executable (or the source tree).
@@ -43,7 +43,8 @@ import platformdirs
 _log = logging.getLogger(__name__)
 
 APP_NAME = "MangaList"
-ENV_DATA_DIR = "MANGA_LIST_DATA_DIR"
+ENV_DATA_DIR = "MANGALIST_DATA_DIR"
+LEGACY_ENV_DATA_DIR = "MANGA_LIST_DATA_DIR"  # name before the MangaList rename; still honoured
 PORTABLE_MARKERS = ("portable", "portable.txt")
 CONFIG_NAME = "config.json"
 CACHE_NAME = "mu_cache.db"
@@ -56,7 +57,7 @@ def is_frozen() -> bool:
 
 
 def app_dir() -> Path:
-    """The folder of the executable (frozen build) or the source checkout (``python -m manga_list``)."""
+    """The folder of the executable (frozen build) or the source checkout (``python -m mangalist``)."""
     if is_frozen():
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
@@ -68,7 +69,8 @@ def is_portable() -> bool:
 
 
 def _env_dir() -> Optional[Path]:
-    value = os.environ.get(ENV_DATA_DIR, "").strip()
+    value = (os.environ.get(ENV_DATA_DIR, "").strip()
+             or os.environ.get(LEGACY_ENV_DATA_DIR, "").strip())
     return Path(value).expanduser() if value else None
 
 

@@ -26,8 +26,8 @@ STAGE="build/tar/$NAME"
 rm -rf build/tar && mkdir -p "$STAGE"
 cp -a "$DIST/." "$STAGE/"
 cp README.md LICENSE "$STAGE/"
-cp packaging/linux/manga-list.desktop "$STAGE/"
-cp "$ICON" "$STAGE/manga-list.png"
+cp packaging/linux/com.lifepixer.MangaList.desktop "$STAGE/"
+cp "$ICON" "$STAGE/com.lifepixer.MangaList.png"
 tar -C build/tar -czf "$OUT/$NAME.tar.gz" "$NAME"
 
 # --- AppImage ------------------------------------------------------------------------------
@@ -37,10 +37,10 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/i
 cp -a "$DIST/." "$APPDIR/usr/bin/"
 cp packaging/linux/AppRun "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
-cp packaging/linux/manga-list.desktop "$APPDIR/manga-list.desktop"
-cp packaging/linux/manga-list.desktop "$APPDIR/usr/share/applications/"
-cp "$ICON" "$APPDIR/manga-list.png"
-cp "$ICON" "$APPDIR/usr/share/icons/hicolor/256x256/apps/manga-list.png"
+cp packaging/linux/com.lifepixer.MangaList.desktop "$APPDIR/com.lifepixer.MangaList.desktop"
+cp packaging/linux/com.lifepixer.MangaList.desktop "$APPDIR/usr/share/applications/"
+cp "$ICON" "$APPDIR/com.lifepixer.MangaList.png"
+cp "$ICON" "$APPDIR/usr/share/icons/hicolor/256x256/apps/com.lifepixer.MangaList.png"
 
 TOOL="${APPIMAGETOOL:-build/appimagetool-x86_64.AppImage}"
 if [ ! -x "$TOOL" ]; then

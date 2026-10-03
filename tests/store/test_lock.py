@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from manga_list.store import LOCK_NAME, LockBusy, LockError, LockLost, RootLock
+from mangalist.store import LOCK_NAME, LockBusy, LockError, LockLost, RootLock
 
 
 class Clock:

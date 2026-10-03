@@ -1,4 +1,4 @@
-# Manga List Classifier
+# MangaList
 
 A PySide6 desktop tool that scans a "Manga Root" folder, classifies each manga subfolder as
 **Volume-based**, **Chapter-based** or **Both** from its archive file names (`.cbz`, `.zip`, `.cbr`,
@@ -14,7 +14,7 @@ Download from the [Releases](../../releases) page:
 | System | File |
 | --- | --- |
 | Windows x64 | `MangaList-vX.Y.Z-windows-x64-setup.exe` (per-user install, no admin rights; upgrades in place) or the portable `-windows-x64.zip` |
-| macOS | `MangaList-vX.Y.Z-macos-arm64.dmg` (Apple silicon) or `-macos-x64.dmg` (Intel): drag Manga List to Applications |
+| macOS | `MangaList-vX.Y.Z-macos-arm64.dmg` (Apple silicon) or `-macos-x64.dmg` (Intel): drag MangaList to Applications |
 | Linux x64 | `MangaList-vX.Y.Z-linux-x64.AppImage` (`chmod +x`, then run; glibc 2.35+) or the `-linux-x64.tar.gz` folder |
 
 The builds are not code-signed. Check a download against `SHA256SUMS` (`sha256sum -c SHA256SUMS
@@ -30,13 +30,13 @@ Settings, the MangaUpdates cache and logs live per user, so upgrades and uninsta
 `%LOCALAPPDATA%\MangaList` (Windows), `~/Library/Application Support/MangaList` (macOS),
 `~/.local/share/MangaList` (Linux). The portable zip keeps them in `data\` next to `MangaList.exe`.
 Older versions kept `data\` next to the program; the first start copies it over once.
-`MANGA_LIST_DATA_DIR` points it elsewhere.
+`MANGALIST_DATA_DIR` points it elsewhere.
 
 ## Run from source
 
 ```sh
 pip install -r requirements-dev.txt
-python -m manga_list          # --version, or --smoke-test for a headless start check
+python -m mangalist          # --version, or --smoke-test for a headless start check
 python -m pytest -q
 ```
 
@@ -44,7 +44,7 @@ Folder names may be `Title`, `English Title` or `Romanized Title [English Title]
 
 ## MangaUpdates matching
 
-**Check MU** uses `manga_list/matcher/`, a Python port of the
+**Check MU** uses `mangalist/matcher/`, a Python port of the
 [MangaPixer](https://github.com/dixit92/mangapixer) 1.31.1 matcher with the same rules and
 thresholds. It first decides whether a folder is one work (a series, a series with `Volumes/` /
 `Chapters/` / `Season N/` subfolders, or a one-shot) and matches only those. It searches a few title
@@ -52,7 +52,7 @@ variants (and a second results page on a tie), then scores candidates by title s
 numbers count) and local evidence: the highest volume / chapter numbers against the record's
 totals, years, the category folder, author names in brackets or after `by`, and related records
 (a spin-off named only by the folder's subtitle always needs review). MangaPixer's cover comparison
-and admin-declared types are not ported: Manga-List has neither covers nor declarations.
+and admin-declared types are not ported: MangaList has neither covers nor declarations.
 
 The **MU Title** column shows the result:
 
@@ -79,7 +79,7 @@ Not affiliated with, endorsed by, or sponsored by either service.
 
 - **[MangaUpdates](https://www.mangaupdates.com)**: series matching, licensing and progress via the
   [MangaUpdates API](https://api.mangaupdates.com/), rate-limited (`REQUEST_DELAY` in
-  `manga_list/mu_client.py`), with matches cached locally. The golden-test fixtures are recorded
+  `mangalist/mu_client.py`), with matches cached locally. The golden-test fixtures are recorded
   public MangaUpdates data (series data © MangaUpdates).
 - **[AniList](https://anilist.co)**: supplementary volume / chapter counts via the
   [AniList GraphQL API](https://docs.anilist.co/).

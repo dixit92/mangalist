@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from manga_list import mu_cache
-from manga_list.store import (LOCK_NAME, ContentAndPathChange, Journal, LockBusy, Move, PlanStateError,
+from mangalist import mu_cache
+from mangalist.store import (LOCK_NAME, ContentAndPathChange, Journal, LockBusy, Move, PlanStateError,
                               RootLock, SeriesSeen, StepRefused)
-from manga_list.store import journal as journal_mod
+from mangalist.store import journal as journal_mod
 
 from .conftest import make_archive
 

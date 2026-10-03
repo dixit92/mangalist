@@ -1,5 +1,5 @@
 """``anilist_client`` on synthetic HTTP answers (no network): the real status reaches the log, a rate limit
-is retried once after its Retry-After, a 404 is "no match", and every request carries Manga-List's
+is retried once after its Retry-After, a 404 is "no match", and every request carries MangaList's
 User-Agent (AniList's Cloudflare front blocks generic client signatures)."""
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ import logging
 import pytest
 import requests
 
-from manga_list import anilist_client, mu_client
-from manga_list.http_identity import USER_AGENT
+from mangalist import anilist_client, mu_client
+from mangalist.http_identity import USER_AGENT
 
 BERSERK = {"data": {"Media": {"id": 30002, "title": {"romaji": "Berserk", "english": "Berserk"},
                               "chapters": None, "volumes": None}}}
@@ -43,8 +43,8 @@ def answers(monkeypatch):
     return queue, sent, sleeps
 
 
-def test_both_clients_send_the_manga_list_user_agent():
-    assert USER_AGENT.startswith("MangaList/") and "github.com/dixit92/manga-list" in USER_AGENT
+def test_both_clients_send_the_mangalist_user_agent():
+    assert USER_AGENT.startswith("MangaList/") and "github.com/dixit92/MangaList" in USER_AGENT
     assert anilist_client._SESSION.headers["User-Agent"] == USER_AGENT
     assert mu_client._SESSION.headers["User-Agent"] == USER_AGENT
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list import paths
+from mangalist import paths
 
 
 @pytest.fixture(autouse=True)

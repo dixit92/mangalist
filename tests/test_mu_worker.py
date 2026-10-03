@@ -10,9 +10,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from manga_list import mu_cache, mu_client  # noqa: E402
-from manga_list.gui import mu_worker  # noqa: E402
-from manga_list.models import FileHit, MangaEntry  # noqa: E402
+from mangalist import mu_cache, mu_client  # noqa: E402
+from mangalist.gui import mu_worker  # noqa: E402
+from mangalist.models import FileHit, MangaEntry  # noqa: E402
 
 from .fixture_mu import FakeMangaUpdates  # noqa: E402
 
@@ -21,7 +21,7 @@ ROOT = Path("/library/Manga")
 
 @pytest.fixture
 def fake(monkeypatch) -> FakeMangaUpdates:
-    # The cache lives in the per-test data folder (conftest.py sets MANGA_LIST_DATA_DIR).
+    # The cache lives in the per-test data folder (conftest.py sets MANGALIST_DATA_DIR).
     f = FakeMangaUpdates()
     monkeypatch.setattr(mu_client, "search_series_page", f.search_series_page)
     monkeypatch.setattr(mu_client, "get_series", f.get_series)

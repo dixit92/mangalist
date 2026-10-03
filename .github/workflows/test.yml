@@ -65,7 +65,7 @@ jobs:
         run: pip install pytest regex platformdirs requests
 
       - name: Import check
-        run: python -c "import sys, manga_list.matcher, manga_list.mu_match, manga_list.paths, manga_list.parsing, manga_list.headless, manga_list.store; assert 'PySide6' not in sys.modules"
+        run: python -c "import sys, mangalist.matcher, mangalist.mu_match, mangalist.paths, mangalist.parsing, mangalist.headless, mangalist.store; assert 'PySide6' not in sys.modules"
 
       - name: Run tests
         run: >

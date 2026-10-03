@@ -86,7 +86,7 @@ def validate_root(root: Root, others: Sequence[Root]) -> Root:
 
 
 class RootsMixin:
-    """Roots and exclusions on the :class:`~manga_list.store.Store`."""
+    """Roots and exclusions on the :class:`~mangalist.store.Store`."""
 
     def list_roots(self) -> List[Root]:
         with self.connect() as con:

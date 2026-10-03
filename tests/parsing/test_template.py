@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from manga_list.parsing import (
+from mangalist.parsing import (
     FMD2_CHAPTER_SCHEME,
     FMD2_VOLUME_SCHEME,
     ParseContext,

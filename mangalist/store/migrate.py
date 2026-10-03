@@ -8,7 +8,7 @@
   root yet, the configured Manga Root (``last_root``) becomes root #1.
 
 Each import runs once (recorded in ``meta``: when, and how many rows); a file that does not exist yet is
-not recorded, so a later copy (e.g. :func:`manga_list.paths.migrate_legacy_data`) is still imported.
+not recorded, so a later copy (e.g. :func:`mangalist.paths.migrate_legacy_data`) is still imported.
 Both old files are opened read-only and left in place.
 """
 

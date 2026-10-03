@@ -35,13 +35,13 @@ RUN python3 -m venv /opt/mangalist/venv \
 # Declared here, not at the top: a changing version stamp must not invalidate the layers above.
 ARG DOCKER_IMAGE_VERSION=dev
 
-COPY manga_list /opt/mangalist/app/manga_list
+COPY mangalist /opt/mangalist/app/mangalist
 COPY packaging/docker/startapp.sh /startapp.sh
 COPY packaging/docker/rootfs/ /
 
 RUN chmod 755 /startapp.sh /etc/services.d/headless/run /etc/services.d/headless/disabled \
     && /opt/mangalist/venv/bin/python -m compileall -q /opt/mangalist/app \
-    && APP_VERSION="$(cd /opt/mangalist/app && /opt/mangalist/venv/bin/python -m manga_list --version | sed 's/^Manga List //')" \
+    && APP_VERSION="$(cd /opt/mangalist/app && /opt/mangalist/venv/bin/python -m mangalist --version | sed 's/^MangaList //')" \
     && set-cont-env APP_NAME "MangaList" \
     && set-cont-env APP_VERSION "$APP_VERSION" \
     && set-cont-env DOCKER_IMAGE_VERSION "$DOCKER_IMAGE_VERSION" \
@@ -58,14 +58,14 @@ ENV \
     SECURE_CONNECTION=1 \
     WEB_HOST_CLIPBOARD_SYNC=1 \
     KEEP_APP_RUNNING=1 \
-    # MangaList's data folder (manga_list/paths.py) = the /config volume.
-    MANGA_LIST_DATA_DIR=/config \
-    # Headless runner service: 0 turns it off. Downloads stay off unless MANGA_LIST_DOWNLOADS=1.
-    MANGA_LIST_HEADLESS=1 \
-    MANGA_LIST_RESCAN_SCHEDULE=daily@03:30 \
-    MANGA_LIST_DOWNLOADS=0 \
-    MANGA_LIST_DISPATCH_SCHEDULE=daily@04:30 \
-    MANGA_LIST_CATCH_UP=1 \
+    # MangaList's data folder (mangalist/paths.py) = the /config volume.
+    MANGALIST_DATA_DIR=/config \
+    # Headless runner service: 0 turns it off. Downloads stay off unless MANGALIST_DOWNLOADS=1.
+    MANGALIST_HEADLESS=1 \
+    MANGALIST_RESCAN_SCHEDULE=daily@03:30 \
+    MANGALIST_DOWNLOADS=0 \
+    MANGALIST_DISPATCH_SCHEDULE=daily@04:30 \
+    MANGALIST_CATCH_UP=1 \
     PYTHONPATH=/opt/mangalist/app \
     PYTHONDONTWRITEBYTECODE=1
 
@@ -75,7 +75,7 @@ EXPOSE 5800
 LABEL \
     org.opencontainers.image.title="MangaList" \
     org.opencontainers.image.description="Scan a manga library, link it with MangaUpdates and see how far behind each series is - in the browser, with scheduled rescans." \
-    org.opencontainers.image.source="https://github.com/dixit92/manga-list" \
+    org.opencontainers.image.source="https://github.com/dixit92/MangaList" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.version="${DOCKER_IMAGE_VERSION}" \
     net.unraid.docker.webui="https://[IP]:[PORT:5800]/" \

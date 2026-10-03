@@ -7,10 +7,10 @@ from typing import Optional, Sequence, Tuple
 
 import pytest
 
-from manga_list.matcher import auto_match_text as amt
-from manga_list.matcher import detector, planner, scorer, similarity
-from manga_list.matcher.count_evidence import LocalUnitCounts
-from manga_list.matcher.contracts import (
+from mangalist.matcher import auto_match_text as amt
+from mangalist.matcher import detector, planner, scorer, similarity
+from mangalist.matcher.count_evidence import LocalUnitCounts
+from mangalist.matcher.contracts import (
     DEFAULT_THRESHOLDS,
     CandidateRelation,
     FolderShape,

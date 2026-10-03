@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_list import mu_cache, paths
+from mangalist import mu_cache, paths
 
 # The schema as shipped before the stage-2 matcher (no mu_score_version / mu_band / mu_reasons).
 _LEGACY_DDL = """
@@ -24,7 +24,7 @@ CREATE TABLE mu_cache (
 
 @pytest.fixture
 def cache_db() -> Path:
-    # The per-test data folder (conftest.py sets MANGA_LIST_DATA_DIR).
+    # The per-test data folder (conftest.py sets MANGALIST_DATA_DIR).
     return paths.cache_file()
 
 

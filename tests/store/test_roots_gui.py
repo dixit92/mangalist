@@ -8,8 +8,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
-from manga_list import config  # noqa: E402
-from manga_list.gui.roots_dialog import RootsDialog  # noqa: E402
+from mangalist import config  # noqa: E402
+from mangalist.gui.roots_dialog import RootsDialog  # noqa: E402
 
 from .conftest import make_archive  # noqa: E402
 
@@ -86,7 +86,7 @@ def test_an_unreachable_root_has_no_preview(qapp, db, tmp_path):
 
 
 def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib, tmp_path):
-    from manga_list.gui.main_window import MainWindow
+    from mangalist.gui.main_window import MainWindow
 
     second = tmp_path / "library" / "Manhwa"
     make_archive(second / "Series K" / "k c001.cbz")
@@ -100,7 +100,7 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
         win._after_roots_changed()
         assert win._path_edit.text().startswith("2 roots:")
 
-        from manga_list.gui.main_window import ScanWorker
+        from mangalist.gui.main_window import ScanWorker
         worker = ScanWorker(db.list_roots(), db)
         got = []
         worker.finished.connect(got.append)
@@ -119,8 +119,8 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
 def test_legacy_config_root_becomes_root_1_in_the_window(qapp, lib):
     import json
 
-    from manga_list import paths, store
-    from manga_list.gui.main_window import MainWindow
+    from mangalist import paths, store
+    from mangalist.gui.main_window import MainWindow
 
     store.reset_stores()
     paths.ensure_data_dir()

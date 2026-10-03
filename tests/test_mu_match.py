@@ -1,4 +1,4 @@
-"""Manga-List <-> stage-2 matcher bridge (``manga_list.mu_match``): folder shapes from scanned
+"""MangaList <-> stage-2 matcher bridge (``mangalist.mu_match``): folder shapes from scanned
 entries, tiers on recorded MangaUpdates responses, and the display helpers. No Qt, no network;
 titles are public ones from the golden-set fixtures, paths are synthetic."""
 
@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from manga_list import mu_match
-from manga_list.matcher import MatchBand, WorkClass
-from manga_list import mu_client
-from manga_list.matcher.mangaupdates import AUTO_SEARCH_FILTER, map_search_page, map_series
-from manga_list.models import FileHit, MangaEntry
+from mangalist import mu_match
+from mangalist.matcher import MatchBand, WorkClass
+from mangalist import mu_client
+from mangalist.matcher.mangaupdates import AUTO_SEARCH_FILTER, map_search_page, map_series
+from mangalist.models import FileHit, MangaEntry
 
 from .fixture_mu import FakeMangaUpdates
 
@@ -189,7 +189,7 @@ def test_legacy_score_tooltip_does_not_quote_the_old_score():
     e = _matched(mu_score=0.1, mu_score_version=1)
     assert mu_match.is_legacy_score(e)
     tip = mu_match.match_tooltip(e)
-    assert "older Manga-List version" in tip and "10%" not in tip
+    assert "older MangaList version" in tip and "10%" not in tip
 
 
 def test_review_tooltip_lists_reasons():

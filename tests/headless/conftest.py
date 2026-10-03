@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from manga_list.headless.schedule import UTC
+from mangalist.headless.schedule import UTC
 
 
 def zone(name: str):

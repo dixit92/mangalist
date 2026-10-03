@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from manga_list.headless.schedule import UTC, DailyAt, EveryHours, is_missed, parse_schedule
+from mangalist.headless.schedule import UTC, DailyAt, EveryHours, is_missed, parse_schedule
 
 from .conftest import zone
 

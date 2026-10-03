@@ -7,9 +7,9 @@ from dataclasses import replace
 
 import pytest
 
-from manga_list.matcher import count_evidence as ce
-from manga_list.matcher.contracts import ChildFolderShape, MatchContext, WorkClass
-from manga_list.matcher.count_evidence import CountSignal, LocalUnitCounts, PublishedUnitCounts
+from mangalist.matcher import count_evidence as ce
+from mangalist.matcher.contracts import ChildFolderShape, MatchContext, WorkClass
+from mangalist.matcher.count_evidence import CountSignal, LocalUnitCounts, PublishedUnitCounts
 
 
 def published(volumes=None, english_volumes=None, status_chapters=None, english_chapters=None, latest=None):

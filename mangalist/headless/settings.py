@@ -4,11 +4,11 @@ set them; a desktop user can export them too).
 =============================  ==================  ====================================================
 Variable                       Default             Meaning
 =============================  ==================  ====================================================
-``MANGA_LIST_RESCAN_SCHEDULE``  ``daily@03:30``     When to rescan the library roots (``off`` to stop).
-``MANGA_LIST_DOWNLOADS``        ``0``               Opt-in: allow the batched download dispatch.
-``MANGA_LIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the download batch runs (only with downloads on).
-``MANGA_LIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
-``MANGA_LIST_ROOTS``            (empty)             Extra library roots, ``os.pathsep``-separated.
+``MANGALIST_RESCAN_SCHEDULE``  ``daily@03:30``     When to rescan the library roots (``off`` to stop).
+``MANGALIST_DOWNLOADS``        ``0``               Opt-in: allow the batched download dispatch.
+``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the download batch runs (only with downloads on).
+``MANGALIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
+``MANGALIST_ROOTS``            (empty)             Extra library roots, ``os.pathsep``-separated.
 ``TZ``                          (system)            Time zone of the daily times.
 =============================  ==================  ====================================================
 
@@ -28,10 +28,10 @@ from .schedule import Schedule, parse_schedule
 
 _log = logging.getLogger(__name__)
 
-ENV_RESCAN = "MANGA_LIST_RESCAN_SCHEDULE"
-ENV_DOWNLOADS = "MANGA_LIST_DOWNLOADS"
-ENV_DISPATCH = "MANGA_LIST_DISPATCH_SCHEDULE"
-ENV_CATCH_UP = "MANGA_LIST_CATCH_UP"
+ENV_RESCAN = "MANGALIST_RESCAN_SCHEDULE"
+ENV_DOWNLOADS = "MANGALIST_DOWNLOADS"
+ENV_DISPATCH = "MANGALIST_DISPATCH_SCHEDULE"
+ENV_CATCH_UP = "MANGALIST_CATCH_UP"
 
 DEFAULT_RESCAN = "daily@03:30"
 DEFAULT_DISPATCH = "daily@04:30"

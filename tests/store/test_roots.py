@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from manga_list.store import RootError
+from mangalist.store import RootError
 
 
 def test_add_root_defaults(db, library):
@@ -59,7 +59,7 @@ def test_duplicate_and_nested_roots_are_refused(db, library):
 
 def test_remove_root_forgets_its_series_only(db, library):
     root = db.add_root(str(library))
-    from manga_list.store import SeriesSeen
+    from mangalist.store import SeriesSeen
     db.record_scan(root.id, library, [SeriesSeen("Series A", "v1:1:x", 1)])
     assert len(db.list_series(root.id)) == 1
     db.remove_root(root.id)
