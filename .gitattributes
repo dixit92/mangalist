@@ -1,0 +1,4 @@
+# Shell scripts and the Docker image's service files run inside a Linux container: always LF, also in a
+# Windows checkout (a CRLF "#!/bin/sh" fails there).
+*.sh                                   text eol=lf
+packaging/docker/rootfs/**             text eol=lf

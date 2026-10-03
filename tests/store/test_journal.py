@@ -81,6 +81,20 @@ def test_refused_destinations(journal, lib, dst, message):
     assert journal.list_plans() == []
 
 
+def test_a_trailing_dot_is_refused_even_when_abspath_strips_it(journal, lib, monkeypatch):
+    # Windows' abspath (GetFullPathNameW) drops trailing dots and spaces from every name; the check must
+    # still see the name as given. Simulate that here so the rule is tested on every platform.
+    real_abspath = os.path.abspath
+
+    def windows_like_abspath(p):
+        return os.sep.join(part.rstrip(". ") or part for part in real_abspath(p).split(os.sep))
+
+    monkeypatch.setattr(os.path, "abspath", windows_like_abspath)
+    with pytest.raises(StepRefused, match="dot or a space"):
+        journal.plan("x", [(lib / "Series A" / "Series A v01.cbz", lib / "Series A" / "trailing dot." / "x.cbz")],
+                     root_path=lib)
+
+
 def test_refused_shapes(journal, lib, tmp_path):
     src = lib / "Series A" / "Series A v01.cbz"
     with pytest.raises(ContentAndPathChange):

@@ -102,6 +102,15 @@ class Plan:
 # --- filesystem helpers --------------------------------------------------------------------------------
 
 
+def _lexical(p) -> str:
+    """*p* made absolute without asking the OS: unlike ``abspath`` on Windows, it keeps a name's
+    trailing dots and spaces."""
+    s = os.fspath(p)
+    if not os.path.isabs(s):
+        s = os.path.join(os.getcwd(), s)
+    return os.path.normpath(s)
+
+
 def _norm(p) -> str:
     return os.path.normpath(os.path.abspath(os.fspath(p)))
 
@@ -257,12 +266,19 @@ class Journal:
             case_only = _is_case_only(on_disk_src, sim.disk_path(dst) or dst)
             if sim.exists(dst) and not case_only:
                 raise StepRefused(f"{where}: the destination exists (a move never replaces anything)")
-            # Every name this step creates must be valid on Windows.
-            new_parts = [os.path.basename(dst)]
+            # Every name this step creates must be valid on Windows. Count the new components on the
+            # normalized path, but read their names from the lexical one: Windows' abspath strips trailing
+            # dots and spaces, which would hide exactly the names this check must refuse.
+            count = 1
             parent = os.path.dirname(dst)
             while parent and not sim.exists(parent) and os.path.dirname(parent) != parent:
-                new_parts.append(os.path.basename(parent))
+                count += 1
                 parent = os.path.dirname(parent)
+            new_parts = []
+            lex = _lexical(mv.dst)
+            for _ in range(count):
+                new_parts.append(os.path.basename(lex))
+                lex = os.path.dirname(lex)
             for part in new_parts:
                 problem = windows_name_problem(part)
                 if problem:
