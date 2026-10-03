@@ -215,7 +215,7 @@ def test_detail_panel_shows_state_gaps_and_links(window):
     win._table.selectRow(win._proxy.mapFromSource(win._model.index(1, 0)).row())
     d = win._detail
     assert d._lbl_state.text() == "Missing chapters"
-    assert "Ch. 3" in d._lbl_gaps.text() and "Ch. 5" in d._lbl_gaps.text()
+    assert d._lbl_gaps.text() == "Ch. 3, 5" and "Missing chapters:" in d._lbl_gaps.toolTip()
     assert d._lbl_mangapixer.text() == "-"
     assert '<a href="https://www.amazon.com/s?k=Bravo+Chapters&amp;i=stripbooks">Amazon (search)</a>' in \
         d._links_label.text()

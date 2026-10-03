@@ -53,6 +53,7 @@ class WantedPanel(QWidget):
         self.tree.setColumnWidth(1, 190)
         self.tree.itemDoubleClicked.connect(self._on_double_clicked)
         self.tree.currentItemChanged.connect(self._update_buttons)
+        self.tree.setMinimumHeight(140)
         layout.addWidget(self.tree, 1)
 
         buttons = QHBoxLayout()

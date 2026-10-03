@@ -201,7 +201,8 @@ class DetailPanel(QWidget):
             if state.rename_pending:
                 flags.append("Rename pending")
             self._lbl_flags.setText("\n".join(flags) or "-")
-            self._lbl_gaps.setText(state.gaps_tooltip() or "No gaps")
+            self._lbl_gaps.setText(state.gaps_text.replace("  ·  ", "\n") or "No gaps")
+            self._lbl_gaps.setToolTip(state.gaps_tooltip())
             mp = state.mangapixer_text()
             if mp and state.mangapixer_disagrees:
                 mp += " - differs; MangaList's own count is shown"

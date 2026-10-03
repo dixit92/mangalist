@@ -315,10 +315,12 @@ class MainWindow(QMainWindow):
         self._state_combo.setToolTip("Show only series in this rescan state")
         for key, label in STATE_FILTERS:
             self._state_combo.addItem(label, key)
+        self._state_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self._state_combo.setMinimumContentsLength(16)
         self._state_combo.currentIndexChanged.connect(self._on_state_filter_changed)
         toolbar.addWidget(self._state_combo)
-
-        toolbar.addSeparator()
+        self._toolbar = toolbar
+        self._wanted_toolbar_slot = toolbar.addSeparator()   # the Wanted panel toggle goes before it
         toolbar.addWidget(QLabel("Filter: "))
         self._filter_edit = QLineEdit()
         self._filter_edit.setPlaceholderText("Type to filter title / english / verdict…")
@@ -412,8 +414,7 @@ class MainWindow(QMainWindow):
         toggle = dock.toggleViewAction()
         toggle.setText("Wanted panel")
         toggle.setToolTip("Show the series that are wanted, missing units or have an upgrade, with their official sources")
-        toolbar.addSeparator()
-        toolbar.addAction(toggle)
+        self._toolbar.insertAction(self._wanted_toolbar_slot, toggle)   # next to the State filter
         self._wanted_toggle = toggle
         self._wanted_timer = QTimer(self)
         self._wanted_timer.setSingleShot(True)
