@@ -175,9 +175,78 @@ CREATE TABLE IF NOT EXISTS journal_steps (
 );
 """
 
+# MangaPixer source (phase 1): the connection, the libraries, the cached export items, the per-library
+# sync state and the root -> library mapping. New tables only (mangalist.store.mangapixer).
+_V2_MANGAPIXER = """
+-- One row (id = 1): the MangaPixer server. The token lives here, not in ``settings``: config.load() /
+-- config.save() copy every settings key around, and the token must never travel with them.
+CREATE TABLE IF NOT EXISTS mangapixer_connection (
+    id                INTEGER PRIMARY KEY,
+    base_url          TEXT,
+    token             TEXT,                           -- never logged, never shown again after entry
+    verify_tls        INTEGER NOT NULL DEFAULT 1,     -- 0 = accept any certificate (opt-in)
+    ca_file           TEXT,                           -- a CA bundle for a self-signed MangaPixer certificate
+    token_rejected_at TEXT,                           -- set on HTTP 401; nothing syncs until a new token / a manual retry
+    updated_at        TEXT    NOT NULL
+);
+
+-- MangaPixer's libraries as /api/v1/export/libraries lists them.
+CREATE TABLE IF NOT EXISTS mangapixer_libraries (
+    id            TEXT PRIMARY KEY,                   -- MangaPixer's library id
+    display_name  TEXT    NOT NULL,
+    kind          TEXT,                               -- manga | manhwa | ... | NULL
+    folder_count  INTEGER,
+    item_count    INTEGER,
+    last_scan_at  TEXT,
+    present       INTEGER NOT NULL DEFAULT 1,         -- 0 once MangaPixer no longer lists it
+    position      INTEGER NOT NULL DEFAULT 0,
+    seen_at       TEXT    NOT NULL
+);
+
+-- The export's items (folders only), keyed by (library, nodeId); the item JSON as MangaPixer sent it.
+CREATE TABLE IF NOT EXISTS mangapixer_items (
+    library_id  TEXT    NOT NULL,
+    node_id     TEXT    NOT NULL,
+    trail       TEXT    NOT NULL,                     -- JSON array of on-disk names below the library root
+    trail_key   TEXT    NOT NULL,                     -- NFC names joined with '/'
+    trail_fold  TEXT    NOT NULL,                     -- trail_key casefolded (the fallback lookup)
+    link_state  TEXT,
+    updated_at  TEXT,                                 -- the item's updatedAt (MangaPixer's clock)
+    item        TEXT    NOT NULL,
+    synced_at   TEXT    NOT NULL,
+    PRIMARY KEY (library_id, node_id)
+);
+CREATE INDEX IF NOT EXISTS mangapixer_items_by_trail ON mangapixer_items (library_id, trail_key);
+CREATE INDEX IF NOT EXISTS mangapixer_items_by_fold ON mangapixer_items (library_id, trail_fold);
+
+-- Per library: the FIRST page's serverTime of the last complete sync (the next updatedSince).
+CREATE TABLE IF NOT EXISTS mangapixer_sync (
+    library_id    TEXT PRIMARY KEY,
+    server_time   TEXT,                               -- NULL = the next sync is a full one
+    last_full_at  TEXT,                               -- MangaList's clock, for display
+    last_sync_at  TEXT,
+    last_status   TEXT,                               -- ok | error
+    last_error    TEXT,
+    last_mode     TEXT                                -- full | incremental
+);
+
+-- Root -> MangaPixer library (+ trail prefix). manual = 1: the owner's override, never re-computed.
+CREATE TABLE IF NOT EXISTS mangapixer_mappings (
+    root_id     INTEGER PRIMARY KEY REFERENCES roots(id) ON DELETE CASCADE,
+    library_id  TEXT,                                 -- NULL = not mapped (manual: "do not use MangaPixer")
+    prefix      TEXT    NOT NULL DEFAULT '[]',        -- JSON array: the root's trail inside the library
+    manual      INTEGER NOT NULL DEFAULT 0,
+    any_kind    INTEGER NOT NULL DEFAULT 0,           -- 1 = use it although the library's kind is skipped by default
+    matched     INTEGER,
+    unmatched   INTEGER,
+    updated_at  TEXT    NOT NULL
+);
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
+    (2, _V2_MANGAPIXER),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
