@@ -45,3 +45,19 @@ def test_naive_timestamps_are_read_as_utc(tmp_path):
     p = tmp_path / "s.json"
     p.write_text('{"jobs": {"rescan": {"next_run": "2026-06-02T03:30:00"}}}', encoding="utf-8")
     assert StateStore(p).load().get("rescan").next_run == datetime(2026, 6, 2, 3, 30, tzinfo=UTC)
+
+
+def test_saved_file_gets_the_normal_file_mode(tmp_path):
+    import os
+    import stat
+
+    if os.name == "nt":
+        return
+    store = StateStore(tmp_path / "s.json")
+    store.get("rescan")
+    old = os.umask(0o022)
+    try:
+        store.save()
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE((tmp_path / "s.json").stat().st_mode) == 0o644

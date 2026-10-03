@@ -75,6 +75,12 @@ class JobState:
         )
 
 
+def _umask() -> int:
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return mask
+
+
 class StateStore:
     """Load / save :class:`JobState` per job name."""
 
@@ -114,6 +120,8 @@ class StateStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix=self.path.name + ".", suffix=".tmp", dir=self.path.parent)
         try:
+            # mkstemp creates the file 0600; give it the mode a plain open() would (umask applied).
+            os.chmod(tmp, 0o666 & ~_umask())
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
                 f.write("\n")

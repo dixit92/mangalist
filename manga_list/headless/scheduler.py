@@ -87,7 +87,10 @@ class Scheduler:
                           "disabled" if not job.enabled else "no schedule")
         self.store.save()
         for name, when in planned.items():
-            _log.info("%s: next run %s", name, self._fmt(when))
+            if when <= now:
+                _log.info("%s: due now", name)
+            else:
+                _log.info("%s: next run %s", name, self._fmt(when))
         return planned
 
     def due_jobs(self, now: Optional[datetime] = None) -> List[Job]:
