@@ -69,7 +69,7 @@ def validate_root(root: Root, others: Sequence[Root]) -> Root:
         if root.staging_folder is not None:
             root.staging_folder = normalize_root_path(root.staging_folder)
     for other in others:
-        if other.id is not None and other.id == root.id:
+        if other is root or (other.id is not None and other.id == root.id):
             continue
         if _same_or_inside(root.path, other.path) or _same_or_inside(other.path, root.path):
             raise RootError(f"{root.path} overlaps the root {other.name!r} ({other.path})")

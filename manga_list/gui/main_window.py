@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Sequence
 
 from PySide6.QtCore import (
     QByteArray,
@@ -49,13 +50,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, mu_cache
+from .. import config, mu_cache, store
 from .._version import __version__
 from ..models import MangaEntry
-from ..scanner import scan_root
+from ..scanner import LibraryScan, record_library_scan, scan_library
+from ..store import Journal, Root, RootError
 from .detail_panel import DetailPanel
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
+from .roots_dialog import RootsDialog
 from .table_model import (
     COLUMNS, COL_BEHIND, COL_DUPE, COL_EXAMINED, COL_LICENSED,
     COL_MU_TITLE, COL_TITLE, MangaTableModel,
@@ -67,25 +70,40 @@ from .table_model import (
 # ---------------------------------------------------------------------------
 
 
+_log = logging.getLogger(__name__)
+
+
 class ScanWorker(QObject):
+    """Scans every root, then records the series rows (a renamed series folder keeps its link)."""
+
     progress = Signal(int, int, str)
-    finished = Signal(list)
+    finished = Signal(object)  # LibraryScan, with .renamed = [(old folder, new folder)]
     failed = Signal(str)
 
-    def __init__(self, root: Path):
+    def __init__(self, roots: Sequence[Root], db=None):
         super().__init__()
-        self._root = root
+        self._roots = list(roots)
+        self._db = db
 
     def run(self) -> None:
         try:
-            entries = scan_root(
-                self._root,
+            result = scan_library(
+                self._roots,
                 progress=lambda d, t, name: self.progress.emit(d, t, name),
             )
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
             return
-        self.finished.emit(entries)
+        if not result.entries and result.errors and len(result.errors) == len(self._roots):
+            self.failed.emit("\n".join(result.errors))
+            return
+        result.renamed = []
+        if self._db is not None:
+            try:
+                result.renamed = record_library_scan(self._db, result)
+            except Exception:  # noqa: BLE001 - the scan itself is still shown
+                _log.warning("Recording the scan in the library database failed", exc_info=True)
+        self.finished.emit(result)
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +199,8 @@ class MainWindow(QMainWindow):
         QGuiApplication.setWindowIcon(self._app_icon)
 
         self._cfg = config.load()
+        self._db = store.get_store()
+        self._recover_journal()
         win = self._cfg.get("window") or {}
         self.resize(int(win.get("w", 1200)), int(win.get("h", 720)))
 
@@ -202,9 +222,7 @@ class MainWindow(QMainWindow):
         self._col_resize_timer.setInterval(400)
         self._col_resize_timer.timeout.connect(self._save_column_state)
 
-        last_root = self._cfg.get("last_root") or ""
-        if last_root and Path(last_root).is_dir():
-            self._path_edit.setText(last_root)
+        self._show_roots()
 
     # --- UI construction -------------------------------------------------
 
@@ -243,8 +261,17 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         btn_choose = self._make_button("Choose Manga Root…")
+        btn_choose.setToolTip("Add a folder of series folders as a root and scan")
         btn_choose.clicked.connect(self._on_choose_root)
         toolbar.addWidget(btn_choose)
+
+        toolbar.addWidget(_toolbar_spacer(6))
+
+        btn_roots = self._make_button("Roots…")
+        btn_roots.setToolTip("Manage roots and their exclusions")
+        btn_roots.clicked.connect(self._on_roots)
+        toolbar.addWidget(btn_roots)
+        self._btn_roots = btn_roots
 
         toolbar.addWidget(_toolbar_spacer(6))
 
@@ -371,37 +398,102 @@ class MainWindow(QMainWindow):
 
     # --- Slots -----------------------------------------------------------
 
+    # --- Roots -----------------------------------------------------------
+
+    def _recover_journal(self) -> None:
+        """Settle any rename plan a crash interrupted (write-ahead records)."""
+        try:
+            for plan in Journal(self._db).recover():
+                _log.warning("Rename plan %d (%s) was interrupted; it can be resumed or undone",
+                             plan.id, plan.reason)
+        except Exception:  # noqa: BLE001 - never block start-up
+            _log.warning("Journal recovery failed", exc_info=True)
+
+    def _roots(self) -> List[Root]:
+        try:
+            return self._db.list_roots()
+        except Exception:  # noqa: BLE001
+            _log.warning("Could not read the roots", exc_info=True)
+            return []
+
+    def _show_roots(self) -> None:
+        roots = self._roots()
+        if not roots:
+            self._path_edit.setText("")
+            self._path_edit.setToolTip("No root yet: choose a Manga Root")
+        elif len(roots) == 1:
+            self._path_edit.setText(roots[0].path)
+            self._path_edit.setToolTip(f"{roots[0].name}: {roots[0].path}")
+        else:
+            self._path_edit.setText(f"{len(roots)} roots: " + ", ".join(r.name for r in roots))
+            self._path_edit.setToolTip("\n".join(f"{r.name}: {r.path}" for r in roots))
+
+    def _add_root_path(self, d: str) -> bool:
+        """Make *d* a root (if it is not one already). False when it cannot be one."""
+        try:
+            norm = store.roots.normalize_root_path(d)
+        except RootError:
+            return False
+        if any(r.path == norm for r in self._roots()):
+            return True
+        try:
+            self._db.add_root(d)
+        except RootError as exc:
+            QMessageBox.warning(self, "Cannot add root", str(exc))
+            return False
+        return True
+
     def _on_choose_root(self) -> None:
-        start = self._path_edit.text() or str(Path.home())
+        roots = self._roots()
+        start = (roots[-1].path if roots else "") or str(Path.home())
         d = QFileDialog.getExistingDirectory(self, "Choose Manga Root", start)
         if not d:
             return
-        self._path_edit.setText(d)
+        if not self._add_root_path(d):
+            return
         self._cfg["last_root"] = d
         config.save(self._cfg)
-        self._start_scan(Path(d))
+        self._show_roots()
+        self._start_scan()
+
+    def _make_roots_dialog(self) -> RootsDialog:
+        return RootsDialog(self._db, self, button_style=self._BUTTON_STYLE)
+
+    def _on_roots(self) -> None:
+        dlg = self._make_roots_dialog()
+        if dlg.exec() == RootsDialog.Accepted:
+            self._after_roots_changed()
+
+    def _after_roots_changed(self) -> None:
+        self._show_roots()
+        if self._roots() and self._model.rowCount():
+            self._status_label.setText("Roots changed - Rescan to apply")
 
     def _on_rescan(self) -> None:
-        path = self._path_edit.text().strip()
-        if not path:
+        if not self._roots():
             QMessageBox.information(self, "No folder", "Choose a Manga Root first.")
             return
-        self._start_scan(Path(path))
+        self._start_scan()
 
-    def _start_scan(self, root: Path) -> None:
+    def _start_scan(self, roots: Optional[Sequence[Root]] = None) -> None:
         if self._thread is not None:
             return  # scan already running
-        if not root.is_dir():
-            QMessageBox.warning(self, "Invalid folder", f"Not a directory:\n{root}")
+        roots = list(roots) if roots is not None else self._roots()
+        if not roots:
+            return
+        if not any(Path(r.path).is_dir() for r in roots):
+            QMessageBox.warning(self, "Invalid folder",
+                                "Not a directory:\n" + "\n".join(r.path for r in roots))
             return
 
         self._btn_rescan.setEnabled(False)
-        self._status_label.setText(f"Scanning {root}…")
+        label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
+        self._status_label.setText(f"Scanning {label}…")
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)  # busy until first progress update
 
         thread = QThread(self)
-        worker = ScanWorker(root)
+        worker = ScanWorker(roots, self._db)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_progress)
@@ -423,7 +515,19 @@ class MainWindow(QMainWindow):
         if name:
             self._status_label.setText(f"Scanning ({done}/{total}): {name}")
 
-    def _on_scan_finished(self, entries: List[MangaEntry]) -> None:
+    def _on_scan_finished(self, result) -> None:
+        if isinstance(result, LibraryScan):
+            entries: List[MangaEntry] = result.entries
+            loose = result.loose
+            errors = result.errors
+            renamed = getattr(result, "renamed", [])
+        else:  # a plain list of entries
+            entries, loose, errors, renamed = list(result), [], [], []
+        if renamed:
+            # A renamed series folder keeps its "examined" mark, like its MangaUpdates link.
+            moved = {str(old): str(new) for old, new in renamed}
+            self._cfg["examined"] = [moved.get(str(p), str(p)) for p in self._cfg.get("examined", [])]
+            config.save(self._cfg)
         # Re-apply examined flags from config before showing.
         examined_set = {str(p) for p in self._cfg.get("examined", [])}
         for e in entries:
@@ -452,9 +556,24 @@ class MainWindow(QMainWindow):
         n_ch = sum(1 for e in entries if e.verdict.value == "Chapters")
         n_both = sum(1 for e in entries if e.verdict.value == "Both")
         n_unk = n - n_vol - n_ch - n_both
-        self._status_label.setText(
-            f"{n} folder(s)  —  Volumes: {n_vol}, Chapters: {n_ch}, Both: {n_both}, Unknown: {n_unk}"
-        )
+        text = f"{n} folder(s)  —  Volumes: {n_vol}, Chapters: {n_ch}, Both: {n_both}, Unknown: {n_unk}"
+        tips = []
+        if loose:
+            text += f"  —  {len(loose)} archive(s) not in a series folder"
+            tips.append("Not in a series folder (never matched):")
+            tips += [f"  {la.root_name}: {la.path.name}" for la in loose[:50]]
+            if len(loose) > 50:
+                tips.append(f"  … and {len(loose) - 50} more")
+            for la in loose:
+                _log.info("Not in a series folder: %s", la.path)
+        if renamed:
+            text += f"  —  {len(renamed)} renamed folder(s) kept their link"
+        if errors:
+            text += f"  —  {len(errors)} root(s) not reachable"
+            tips.append("Not reachable:")
+            tips += [f"  {e}" for e in errors]
+        self._status_label.setText(text)
+        self._status_label.setToolTip("\n".join(tips))
         self._progress.setVisible(False)
         self._mu_entries = list(entries)
 
