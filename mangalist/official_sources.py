@@ -77,13 +77,26 @@ def _url_key(url: str) -> str:
     return f"{host}{path}{query}"
 
 
+def is_web_url(url: str) -> bool:
+    """True for an ``http://`` or ``https://`` URL with a host - the only links MangaList opens."""
+    try:
+        parts = urlsplit(str(url).strip())
+    except ValueError:
+        return False
+    return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
+
+
 def order_and_dedup(links: Iterable[OfficialLink]) -> List[OfficialLink]:
     """Kind order (publisher, reader, store, search, then any other kind), stable within a kind; the
-    first of two links to the same page (or two URL-less links with the same label) is kept."""
+    first of two links to the same page (or two URL-less links with the same label) is kept. A link whose
+    URL is not ``http(s)://`` with a host is dropped: the URLs come from AniList / MangaPixer data and are
+    opened in the browser, so ``javascript:``, ``file:`` and the like never get that far."""
     seen = set()
     unique: List[OfficialLink] = []
     for link in links:
-        key = ("url", _url_key(link.url)) if link.url else ("label", link.kind, link.label.strip().lower())
+        if link.url and not is_web_url(link.url):
+            continue
+        key =("url", _url_key(link.url)) if link.url else ("label", link.kind, link.label.strip().lower())
         if key in seen:
             continue
         seen.add(key)

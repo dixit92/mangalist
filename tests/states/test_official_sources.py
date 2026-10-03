@@ -11,6 +11,7 @@ from mangalist import anilist_client
 from mangalist.knowledge import EnglishPublisher, OfficialLink, from_mangapixer_item
 from mangalist.official_sources import (
     anilist_links,
+    is_web_url,
     official_links,
     order_and_dedup,
     primary_label,
@@ -146,3 +147,17 @@ def test_the_query_asks_for_external_links_and_parses_them(monkeypatch):
 def test_media_without_external_links():
     assert anilist_client.parse_external_links({}) == []
     assert anilist_client.parse_external_links({"externalLinks": None}) == []
+
+
+def test_only_web_links_survive():
+    # The URLs come from AniList / MangaPixer data and are opened in the browser.
+    links = [
+        OfficialLink("publisher", "Script", "javascript:alert(1)", "anilist"),
+        OfficialLink("reader", "Local", "file:///etc/passwd", "mangapixer"),
+        OfficialLink("store", "No host", "https://", "anilist"),
+        OfficialLink("store", "Shop", "https://shop.example/series", "anilist"),
+        OfficialLink("publisher", "Name only", None, "mangaupdates"),
+    ]
+    kept = order_and_dedup(links)
+    assert [link.label for link in kept] == ["Name only", "Shop"]
+    assert is_web_url("HTTP://Example.com/x") and not is_web_url("mailto:a@b.c")

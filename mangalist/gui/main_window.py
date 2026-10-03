@@ -220,6 +220,10 @@ class MainWindow(QMainWindow):
         self._model = MangaTableModel()
         self._proxy = _SortProxy(self)
         self._proxy.setSourceModel(self._model)
+        # MangaPixer source: a folder MangaPixer knows takes its knowledge from the export; the others
+        # fall back to the own matcher (knowledge_for returns None).
+        self._mp_resolver = None
+        self._model.set_state_providers(knowledge_for=self._knowledge_for)
 
         self._build_ui()
 
@@ -285,6 +289,14 @@ class MainWindow(QMainWindow):
         btn_roots.clicked.connect(self._on_roots)
         toolbar.addWidget(btn_roots)
         self._btn_roots = btn_roots
+
+        toolbar.addWidget(_toolbar_spacer(6))
+
+        btn_mangapixer = self._make_button("MangaPixer…")
+        btn_mangapixer.setToolTip("Use a MangaPixer server's links and series data (API token)")
+        btn_mangapixer.clicked.connect(self._on_mangapixer)
+        toolbar.addWidget(btn_mangapixer)
+        self._btn_mangapixer = btn_mangapixer
 
         toolbar.addWidget(_toolbar_spacer(6))
 
@@ -512,6 +524,40 @@ class MainWindow(QMainWindow):
         if dlg.exec() == RootsDialog.Accepted:
             self._after_roots_changed()
 
+    def _on_mangapixer(self) -> None:
+        from ..services.mangapixer import open_cache
+        from .mangapixer_dialog import open_mangapixer_dialog
+
+        open_mangapixer_dialog(self, open_cache(self._db))
+        # The connection, the mappings or the synced items may have changed.
+        self._mp_resolver = None
+        self._model.refresh_states()
+
+    def _knowledge_for(self, entry: MangaEntry):
+        """MangaPixer's knowledge for *entry* when its folder (or an ancestor) has an exported link,
+        else None (the table then uses the own matcher's)."""
+        if entry.root_id is None:
+            return None
+        try:
+            if self._mp_resolver is None:
+                from ..services.mangapixer import open_cache
+                from ..services.mangapixer.resolve import Resolver
+
+                self._mp_resolver = Resolver(open_cache(self._db))
+            root = self._db.get_root(entry.root_id)
+            if root is None:
+                return None
+            rel = Path(entry.folder).resolve().relative_to(Path(root.path).resolve()).as_posix()
+            res = self._mp_resolver.resolve(entry.root_id, rel)
+            if res is None:
+                return None
+            from ..knowledge import from_mangapixer_item
+
+            return from_mangapixer_item(res.item)
+        except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
+            _log.warning("MangaPixer knowledge for %s unavailable", entry.folder, exc_info=True)
+            return None
+
     def _after_roots_changed(self) -> None:
         self._show_roots()
         if self._roots() and self._model.rowCount():
@@ -588,6 +634,7 @@ class MainWindow(QMainWindow):
             if cached:
                 _apply_cache(e, cached)
 
+        self._mp_resolver = None  # folders may have been renamed or added
         self._model.set_entries(entries)
         # Only auto-size columns when the user has no saved column state.
         if not self._cfg.get("column_state"):
