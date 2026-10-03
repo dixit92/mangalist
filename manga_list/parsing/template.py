@@ -6,7 +6,8 @@ Grammar (Gap Filling Design, renaming section):
 - ``%XX`` is a token from :data:`TOKENS` (longest name wins: ``%CT`` before ``%C``); a numeric token takes an
   optional one-digit minimum width (``%C4`` -> ``0012``, ``%V2`` -> ``03``);
 - ``{...}`` is an optional group, dropped when a token inside renders empty; groups nest;
-- ``{{`` ``}}`` ``%%`` are a literal ``{`` ``}`` ``%``.
+- ``{{`` and ``%%`` are a literal ``{`` and ``%``; ``}}`` is a literal ``}`` outside groups, while inside a
+  group ``}`` always closes (so ``{a{b}}`` nests, and a group cannot open with a nested group).
 
 The parse-back is exact for names the same template rendered: a width-``n`` number is either exactly ``n``
 digits or more digits without a leading zero, text tokens never start or end with a space, and a group
@@ -129,7 +130,7 @@ def _text_renderer(key: str) -> Callable[[Values, Optional[int]], str]:
     return render
 
 
-_TEXT = r"\S(?:.*?\S)?"                                  # no leading / trailing space
+_TEXT = r"\S(?:.*?\S)??"                                 # no leading / trailing space
 _GROUP_TEXT = r"(?:[^\[\]]|\[[^\[\]]*\])+?"              # balanced brackets, one level deep
 
 for _spec in (
@@ -144,7 +145,7 @@ for _spec in (
     TokenSpec("TE", "series_english", lambda w: _TEXT, _text_renderer("series_english")),
     TokenSpec("TM", "series_mu", lambda w: _TEXT, _text_renderer("series_mu")),
     TokenSpec("Y", "year", lambda w: r"\d{4}", _text_renderer("year"), numeric=True),
-    TokenSpec("ED", "edition", lambda w: r"[^\s()\[\]](?:[^()\[\]]*?[^\s()\[\]])?", _text_renderer("edition")),
+    TokenSpec("ED", "edition", lambda w: r"[^\s()\[\]](?:[^()\[\]]*?[^\s()\[\]])??", _text_renderer("edition")),
     TokenSpec("FX", "fix", lambda w: r"f\d*", _text_renderer("fix")),
     TokenSpec("O", "original", lambda w: r".+", _text_renderer("original"), invertible=False),
 ):
@@ -186,7 +187,7 @@ def _lex(source: str) -> Tuple[Any, ...]:
         while pos < len(source):
             ch = source[pos]
             two = source[pos:pos + 2]
-            if two in ("{{", "}}", "%%"):
+            if two in ("{{", "%%") or (two == "}}" and depth == 0):
                 lit.append(ch)
                 pos += 2
             elif ch == "{":

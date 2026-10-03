@@ -118,6 +118,7 @@ _TAG = re.compile(r"\(([^()]*)\)|\[([^\[\]]*)\]")
 _YEAR = re.compile(r"^((?:19|20)\d{2})(?:\s*-\s*(?:19|20)?\d{2})?$")
 _EDITION = re.compile(r"^digital(?:\b.*)?$", re.IGNORECASE)
 _FIX = re.compile(r"^f\d*$", re.IGNORECASE)
+_VOL_TAG = re.compile(rf"^{_VP}(?P<v>{UNIT})$", re.IGNORECASE)    # "(v01)" after a chapter
 # The series part must not itself end in a unit token ("Title Vol. 1 Ch 3" is not a release name).
 _SERIES_ENDS_IN_UNIT = re.compile(r"(?<![A-Za-z])(?:v|vol(?:ume)?\.?|ch(?:apter)?\.?|c)\s*\d+(?:\.\d+)?\s*$",
                                   re.IGNORECASE)
@@ -136,7 +137,7 @@ def parse_release(name: str) -> Optional[ParsedName]:
         return None
 
     tags: List[str] = []
-    year = edition = fix = None
+    year = edition = fix = tag_volume = None
     candidates: List[Tuple[int, str]] = []
     edition_pos = -1
     for i, t in enumerate(_TAG.finditer(m.group("tags"))):
@@ -151,6 +152,8 @@ def parse_release(name: str) -> Optional[ParsedName]:
             edition, edition_pos = text, i
         elif _FIX.match(text) and fix is None:
             fix = text
+        elif _VOL_TAG.match(text) and tag_volume is None:
+            tag_volume = UnitRange.of(_VOL_TAG.match(text).group("v"))
         else:
             candidates.append((i, text))
     after_edition = [c for c in candidates if c[0] > edition_pos] if edition_pos >= 0 else []
@@ -166,6 +169,7 @@ def parse_release(name: str) -> Optional[ParsedName]:
         if plus is not None:
             return None
         chapter = UnitRange.maybe(m.group("c"), m.group("c2"))
+        volume = tag_volume
         kind = Kind.CHAPTER
     else:
         if plus is not None or (year is None and edition is None):

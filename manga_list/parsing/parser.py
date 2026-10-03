@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, replace
+from pathlib import PurePath
 from typing import Iterable, Optional, Tuple, Union
 
 from .layers import parse_bare, parse_fmd2, parse_generic, parse_release, parse_scheme
@@ -66,7 +67,9 @@ def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseCont
     ``file_size`` (bytes) feeds the generic layer exactly as today's classifier uses it. Never raises
     on any name; a name no layer recognises yields kind UNKNOWN, layer NONE.
     """
-    if not isinstance(name, str):
+    if isinstance(name, PurePath):
+        name = name.name
+    elif not isinstance(name, str):
         name = os.path.basename(os.fspath(name))
     ctx = context or _NO_CONTEXT
     result = _first(name, ctx, file_size)
