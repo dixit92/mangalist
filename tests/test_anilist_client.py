@@ -52,7 +52,8 @@ def test_both_clients_send_the_mangalist_user_agent():
 def test_lookup_by_id(answers):
     queue, sent, _ = answers
     queue.append(response(200, BERSERK))
-    assert anilist_client.get_manga(30002) == {"id": 30002, "title": "Berserk", "chapters": None, "volumes": None}
+    assert anilist_client.get_manga(30002) == {"id": 30002, "title": "Berserk", "english_title": "Berserk",
+                                               "chapters": None, "volumes": None, "external_links": []}
     assert sent[0]["variables"] == {"id": 30002}
 
 
