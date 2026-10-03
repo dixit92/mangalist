@@ -45,11 +45,12 @@ def parse_scheme(name: str, scheme: Union[str, Template]) -> Optional[ParsedName
 # "NNNN [ ... ]" or "Title - NNNN [ ... ]": the leading number is FMD2's numbering index.
 _FMD2 = re.compile(r"^(?:(?P<series>.+?) - )?(?P<index>\d+) \[(?P<body>.*)\]$", re.DOTALL)
 
-# The bracket head: "Vol. V", "Ch. C", "Vol. V Ch. C" (any decimals; a range without spaces: "Ch. 10-12").
+# The bracket head: "Vol. V", "Ch. C" (also "Chapter", "Chap", "Chp"), "Vol. V Ch. C" (any decimals; a range
+# without spaces: "Ch. 10-12").
 _END = r"(?=$|[\s\-\u2013\u2014:\uff1a_\[\]])"
 _HEAD = re.compile(
     rf"^\s*(?:vol(?:ume)?\.?\s*(?P<v>{UNIT})(?:-(?P<v2>{UNIT}))?{_END})?"
-    rf"\s*(?:ch(?:apter)?\.?\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?{_END})?",
+    rf"\s*(?:ch(?:apter|ap|p)?\.?\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?{_END})?",
     re.IGNORECASE)
 
 # "Ch. Extra", "Chapter Special": a chapter word followed by an extra word, no number.
