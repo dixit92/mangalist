@@ -22,10 +22,12 @@ _CIRCLE_ARTIST = regex.compile(r"^(?P<circle>.+?)\s*\((?P<artist>[^()]+)\)\s*$")
 _PAREN_GROUP = regex.compile(r"\(([^()]{1,120})\)")
 
 # Parenthesized release tags that are never a parody: years, languages, quality, edition and unit
-# markers, scan notes.
+# markers, scan notes; 1.32.0 comics scan tags: (c2c) cover-to-cover, (Zone-Empire) / (<Group>-Empire)
+# scanners, (Webrip), and collected-format words (TPB, HC, GN, OGN).
 _RELEASE_TAG = regex.compile(
-    r"^(?:(?:19|20)\d{2}.*|\d+(?:\s*-\s*\d+)?|digital|english|eng|en|japanese|jp|raw|decensored|uncensored"
-    r"|censored|colou?r(?:ed|ized)?|full\s*colou?r|hd|hq|lq|web|webrip|scan(?:ned)?|translated|complete"
+    r"^(?:(?:19|20)\d{2}.*|\d+(?:\s*-\s*\d+)?|c2c|[\p{L}\p{N} ]{1,40}-empire|tpb|hc|gn|ogn"
+    r"|digital|english|eng|en|japanese|jp|raw|decensored|uncensored|censored|colou?r(?:ed|ized)?|full\s*colou?r"
+    r"|hd|hq|lq|web|webrip|scan(?:ned)?|translated|complete"
     r"|ongoing|one-?shot|x\d+|\d{3,4}p|v\d+|(?:ch|vol)\.?\s*\d+.*)$", _I)
 
 def is_release_tag(text: Optional[str]) -> bool:

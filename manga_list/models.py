@@ -116,7 +116,7 @@ class MangaEntry:
     mu_confirmed: bool = False           # user has manually confirmed the match
     mu_associated: List[str] = field(default_factory=list)  # all alt titles from MU
     mu_score: float = 0.0               # raw title score of the match (meaning depends on the version)
-    mu_score_version: int = 4           # see mu_cache.MU_SCORE_VERSION (1 = legacy Jaccard)
+    mu_score_version: int = 5           # see mu_cache.MU_SCORE_VERSION (1 = legacy Jaccard)
     mu_band: Optional[str] = None       # "auto" | "review" | "unmatched" | "not_a_work" (mu_match.BAND_*)
     mu_reasons: List[str] = field(default_factory=list)  # matcher reason names of the match
     mu_work_class: Optional[str] = None  # detector class name (in memory only)

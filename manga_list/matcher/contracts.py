@@ -1,4 +1,4 @@
-"""The stage-2 matcher contract (port of MangaPixer 1.31.1 ``AutoMatchContracts.cs``).
+"""The stage-2 matcher contract (port of MangaPixer 1.32.0 ``AutoMatchContracts.cs``).
 
 Rules carried over unchanged (MangaPixer owner decisions, 2026-09-26): only folders the detector
 classes as series-like are matched at folder level; archive-level matching only inside collection
@@ -79,6 +79,8 @@ class MetadataOrigin(IntEnum):
     Spanish = 11
     German = 12
     Other = 13
+    Italian = 14   # 1.32.0: Italian-language comics (fumetti) - by language, like French (which covers Belgium)
+    Dutch = 15     # 1.32.0: Dutch-language comics (Netherlands and Flanders) - by language
 
 
 class MetadataFormat(IntEnum):

@@ -1,4 +1,4 @@
-"""Query planning (port of MangaPixer 1.31.1 ``MatchQueryPlanner.cs``).
+"""Query planning (port of MangaPixer 1.32.0 ``MatchQueryPlanner.cs``).
 
 Builds the provider queries for one work: ordered, de-duplicated query variants plus the local
 corroboration context. Pure; the variants come from display names only and nothing here is sent
@@ -97,8 +97,11 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
     if parent is not None and amt.is_author_like(parent, require_two_tokens=True):
         _add_distinct(author_tags, normalize(parent).primary)
 
-    volume_like = sum(1 for a in archives if amt.is_volume_like(a))
-    chapter_like = sum(1 for a in archives if amt.is_chapter_like(a))
+    # Units are read with the folder's own "No. N" masked (1.32.0): in "Robot No. 9", "Robot No. 9.cbz" is not
+    # issue 9.
+    unit_names = [amt.mask_folder_title_number(a, folder.display_name) for a in archives]
+    volume_like = sum(1 for a in unit_names if amt.is_volume_like(a))
+    chapter_like = sum(1 for a in unit_names if amt.is_chapter_like(a))
     archive_count = len(archives)
     for sub in folder.subfolders or ():
         if sub.descendant_archive_count <= 0 or not amt.is_unit_folder_name(sub.display_name):
@@ -110,7 +113,7 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
             chapter_like += sub.descendant_archive_count
     # The count rule compares unit NUMBERS (1.27.0), and since 1.29.0 unit subfolders add the numbers their
     # archive names state, never their archive count (count_evidence.local_of).
-    units = count_evidence.local_of(archives, folder.subfolders)
+    units = count_evidence.local_of(unit_names, folder.subfolders)
 
     years = []
     archive_year = amt.earliest_year(archives)

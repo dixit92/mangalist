@@ -89,7 +89,7 @@ _MIGRATIONS = [
 #   3 = MangaPixer 1.26.1 port (a "Title: Subtitle" head match is capped at 0.80)
 #   4 = MangaPixer 1.31.1 port (count by unit numbers and English totals, positive-only category hint,
 #       page-2 search, series-family veto / chip, author-tagged aliases; see CHANGELOG 2026.10.0)
-MU_SCORE_VERSION = 4
+MU_SCORE_VERSION = 5
 
 
 def _connect() -> sqlite3.Connection:
