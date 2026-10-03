@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import webbrowser
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -33,6 +34,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDockWidget,
     QFileDialog,
     QHeaderView,
     QLabel,
@@ -60,9 +62,10 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .roots_dialog import RootsDialog
 from .table_model import (
-    COLUMNS, COL_BEHIND, COL_DUPE, COL_EXAMINED, COL_LICENSED,
-    COL_MU_TITLE, COL_TITLE, MangaTableModel,
+    COLUMNS, COL_BEHIND, COL_DUPE, COL_EXAMINED, COL_GAPS, COL_LICENSED,
+    COL_MU_TITLE, COL_OFFICIAL, COL_STATE, COL_TITLE, STATE_FILTERS, MangaTableModel, state_matches,
 )
+from .wanted_panel import WantedPanel
 
 
 # ---------------------------------------------------------------------------
@@ -129,10 +132,16 @@ class _SortProxy(QSortFilterProxyModel):
         self.setFilterCaseSensitivity(Qt.CaseInsensitive)
         self.setFilterKeyColumn(-1)  # filter across all columns
         self._dupes_only = False
+        self._state_filter: Optional[str] = None
 
     def set_dupes_only(self, enabled: bool) -> None:
         """Filter to show only duplicate MU matches."""
         self._dupes_only = enabled
+        self.invalidateFilter()
+
+    def set_state_filter(self, key: Optional[str]) -> None:
+        """Show only rows whose rescan state passes *key* (table_model.STATE_FILTERS; None = all)."""
+        self._state_filter = key
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
@@ -141,9 +150,13 @@ class _SortProxy(QSortFilterProxyModel):
         if not super().filterAcceptsRow(source_row, source_parent):
             return False
 
+        source_model = self.sourceModel()
+        if self._state_filter is not None and source_model is not None:
+            if not state_matches(source_model.state_at(source_row), self._state_filter):
+                return False
+
         # Then apply duplicates-only filter if enabled
         if self._dupes_only:
-            source_model = self.sourceModel()
             if source_model is not None:
                 return source_model.is_duplicate(source_row)
 
@@ -207,6 +220,12 @@ class MainWindow(QMainWindow):
         self._model = MangaTableModel()
         self._proxy = _SortProxy(self)
         self._proxy.setSourceModel(self._model)
+        # MangaPixer source: a folder MangaPixer knows takes its knowledge from the export; the others
+        # fall back to the own matcher (knowledge_for returns None).
+        self._mp_resolver = None
+        self._mp_items: dict = {}   # folder -> the resolved MangaPixer item (or None), per scan
+        self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
+                                        needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)))
 
         self._build_ui()
 
@@ -275,6 +294,14 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(_toolbar_spacer(6))
 
+        btn_mangapixer = self._make_button("MangaPixer…")
+        btn_mangapixer.setToolTip("Use a MangaPixer server's links and series data (API token)")
+        btn_mangapixer.clicked.connect(self._on_mangapixer)
+        toolbar.addWidget(btn_mangapixer)
+        self._btn_mangapixer = btn_mangapixer
+
+        toolbar.addWidget(_toolbar_spacer(6))
+
         btn_rescan = self._make_button("Rescan")
         btn_rescan.clicked.connect(self._on_rescan)
         toolbar.addWidget(btn_rescan)
@@ -297,6 +324,17 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._dupes_checkbox)
 
         toolbar.addSeparator()
+        toolbar.addWidget(QLabel("State: "))
+        self._state_combo = QComboBox()
+        self._state_combo.setToolTip("Show only series in this rescan state")
+        for key, label in STATE_FILTERS:
+            self._state_combo.addItem(label, key)
+        self._state_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self._state_combo.setMinimumContentsLength(16)
+        self._state_combo.currentIndexChanged.connect(self._on_state_filter_changed)
+        toolbar.addWidget(self._state_combo)
+        self._toolbar = toolbar
+        self._wanted_toolbar_slot = toolbar.addSeparator()   # the Wanted panel toggle goes before it
         toolbar.addWidget(QLabel("Filter: "))
         self._filter_edit = QLineEdit()
         self._filter_edit.setPlaceholderText("Type to filter title / english / verdict…")
@@ -374,6 +412,30 @@ class MainWindow(QMainWindow):
 
         splitter.splitterMoved.connect(self._on_splitter_moved)
         self.setCentralWidget(splitter)
+
+        # Wanted panel (dock): wanted / missing / upgrade series with their official sources.
+        self._wanted = WantedPanel(open_url=self._open_url)
+        self._wanted.series_activated.connect(self._select_source_row)
+        dock = QDockWidget("Wanted", self)
+        dock.setObjectName("wanted_dock")
+        dock.setWidget(self._wanted)
+        dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
+                         | QDockWidget.DockWidgetFloatable)
+        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+        dock.setVisible(bool(self._cfg.get("wanted_panel", False)))
+        dock.visibilityChanged.connect(self._on_wanted_visibility)
+        self._wanted_dock = dock
+        toggle = dock.toggleViewAction()
+        toggle.setText("Wanted panel")
+        toggle.setToolTip("Show the series that are wanted, missing units or have an upgrade, with their official sources")
+        self._toolbar.insertAction(self._wanted_toolbar_slot, toggle)   # next to the State filter
+        self._wanted_toggle = toggle
+        self._wanted_timer = QTimer(self)
+        self._wanted_timer.setSingleShot(True)
+        self._wanted_timer.setInterval(300)
+        self._wanted_timer.timeout.connect(self._rebuild_wanted)
+        for sig in (self._model.modelReset, self._model.dataChanged, self._model.layoutChanged):
+            sig.connect(lambda *_a: self._wanted_timer.start())
 
         # Status bar
         sb = QStatusBar()
@@ -464,6 +526,60 @@ class MainWindow(QMainWindow):
         if dlg.exec() == RootsDialog.Accepted:
             self._after_roots_changed()
 
+    def _on_mangapixer(self) -> None:
+        from ..services.mangapixer import open_cache
+        from .mangapixer_dialog import open_mangapixer_dialog
+
+        open_mangapixer_dialog(self, open_cache(self._db))
+        # The connection, the mappings or the synced items may have changed.
+        self._mp_resolver = None
+        self._mp_items = {}
+        self._model.refresh_states()
+
+    def _mp_item_for(self, entry: MangaEntry):
+        """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
+        None; resolved once per scan / sync."""
+        key = str(entry.folder)
+        if key in self._mp_items:
+            return self._mp_items[key]
+        item = None
+        if entry.root_id is not None:
+            try:
+                if self._mp_resolver is None:
+                    from ..services.mangapixer import open_cache
+                    from ..services.mangapixer.resolve import Resolver
+
+                    self._mp_resolver = Resolver(open_cache(self._db))
+                root = self._db.get_root(entry.root_id)
+                if root is not None:
+                    rel = Path(entry.folder).resolve().relative_to(Path(root.path).resolve()).as_posix()
+                    res = self._mp_resolver.resolve(entry.root_id, rel)
+                    item = res.item if res is not None else None
+            except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
+                _log.warning("MangaPixer data for %s unavailable", entry.folder, exc_info=True)
+        self._mp_items[key] = item
+        return item
+
+    def _knowledge_for(self, entry: MangaEntry):
+        """MangaPixer's knowledge for *entry* when its folder (or an ancestor) has an exported link,
+        else None (the table then uses the own matcher's)."""
+        item = self._mp_item_for(entry)
+        if item is None:
+            return None
+        from ..knowledge import from_mangapixer_item
+
+        return from_mangapixer_item(item)
+
+    def _inventory_for(self, entry: MangaEntry):
+        """The series' held units for the state columns, merged with MangaPixer's volume list (which
+        chapters each volume collects) when MangaPixer knows the series."""
+        from ..inventory import as_state_inventory
+
+        item = self._mp_item_for(entry) or {}
+        volumes = item.get("volumes") if isinstance(item.get("volumes"), dict) else None
+        volume_list = volumes.get("items") if volumes else None
+        return as_state_inventory(entry.inventory(volume_list or None))
+
     def _after_roots_changed(self) -> None:
         self._show_roots()
         if self._roots() and self._model.rowCount():
@@ -540,6 +656,8 @@ class MainWindow(QMainWindow):
             if cached:
                 _apply_cache(e, cached)
 
+        self._mp_resolver = None  # folders may have been renamed or added
+        self._mp_items = {}
         self._model.set_entries(entries)
         # Only auto-size columns when the user has no saved column state.
         if not self._cfg.get("column_state"):
@@ -601,6 +719,15 @@ class MainWindow(QMainWindow):
 
         if not entries:
             return
+        # Owner decision (MangaPixer Data Source, 2026-10-02): for folders MangaPixer knows, MangaList
+        # fetches nothing itself - their knowledge comes from the MangaPixer export.
+        known = [e for e in entries if self._mp_item_for(e) is not None]
+        if known:
+            entries = [e for e in entries if self._mp_item_for(e) is None]
+            self._status_label.setText(
+                f"{len(known)} folder(s) skipped: MangaPixer knows them (sync MangaPixer to refresh)")
+            if not entries:
+                return
 
         # Build (source_row, entry) pairs — find the row of each entry in the model.
         folder_to_row = {
@@ -647,7 +774,7 @@ class MainWindow(QMainWindow):
 
     def _resize_mu_columns(self) -> None:
         """Resize MU-populated columns to fit content, leaving Title/Examined alone."""
-        for col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND):
+        for col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_STATE, COL_GAPS, COL_OFFICIAL):
             self._table.resizeColumnToContents(col)
 
     def _on_mu_thread_finished(self) -> None:
@@ -684,13 +811,51 @@ class MainWindow(QMainWindow):
         else:
             self._status_label.setText("Showing all entries")
 
+    # --- Rescan state: filter, Wanted panel ---------------------------------
+
+    def _on_state_filter_changed(self, _index: int) -> None:
+        key = self._state_combo.currentData()
+        self._proxy.set_state_filter(key)
+        if key is None:
+            self._status_label.setText("Showing all entries")
+        else:
+            self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {self._state_combo.currentText()}")
+
+    def _on_wanted_visibility(self, visible: bool) -> None:
+        shown = not self._wanted_dock.isHidden()   # the owner's choice, not the window being minimised
+        if bool(self._cfg.get("wanted_panel", False)) != shown:
+            self._cfg["wanted_panel"] = shown
+            config.save(self._cfg)
+        if visible:
+            self._rebuild_wanted()
+
+    def _rebuild_wanted(self) -> None:
+        if self._wanted_dock.isVisible():
+            self._wanted.rebuild(self._model)
+
+    def _select_source_row(self, src_row: int) -> None:
+        """Select a series in the table (clearing the filters that hide it)."""
+        src = self._model.index(src_row, COL_TITLE)
+        idx = self._proxy.mapFromSource(src)
+        if not idx.isValid():
+            self._state_combo.setCurrentIndex(0)
+            self._filter_edit.clear()
+            self._dupes_checkbox.setChecked(False)
+            idx = self._proxy.mapFromSource(src)
+        if idx.isValid():
+            self._table.selectRow(idx.row())
+            self._table.scrollTo(idx)
+
+    def _open_url(self, url: str) -> None:
+        webbrowser.open(url)
+
     # --- Column order & state --------------------------------------------
 
     # Desired logical order: ✓ Title MU-Title Behind Licensed Verdict
     #                        Last-Modified Alt-Title Files Subfolders Vol% Ch% Both%
     _DEFAULT_COL_ORDER = [
-        "✓", "Dupe", "Title", "MU Title", "Behind", "Licensed", "Completed", "Verdict",
-        "Last Modified", "Alternative Title", "Files", "Subfolders",
+        "✓", "Dupe", "Title", "MU Title", "State", "Gaps", "Behind", "Licensed", "Completed",
+        "Official source", "Verdict", "Last Modified", "Alternative Title", "Files", "Subfolders",
         "Vol %", "Ch %", "Both %",
     ]
 
@@ -778,8 +943,9 @@ class MainWindow(QMainWindow):
             self._detail.show_entry(None)
             return
         src_index: QModelIndex = self._proxy.mapToSource(idx)
-        entry = self._model.entry_at(src_index.row())
-        self._detail.show_entry(entry)
+        row = src_index.row()
+        entry = self._model.entry_at(row)
+        self._detail.show_entry(entry, self._model.state_at(row), self._model.links_at(row))
 
     # --- Context menu ----------------------------------------------------
 
@@ -828,8 +994,13 @@ class MainWindow(QMainWindow):
         n_overridden = sum(1 for e in entries if e.behind_override == "done")
 
         menu = QMenu(self._table)
+        act_kind = None
 
         if n == 1:
+            if getattr(entries[0], "needs_kind", False):
+                act_kind = menu.addAction("Volumes or chapters?…")
+                act_kind.setToolTip("Its files are bare numbers: say once whether they are volumes or chapters")
+                menu.addSeparator()
             act_open = menu.addAction("Open folder in Explorer")
             menu.addSeparator()
             act_copy_path = menu.addAction("Copy folder path")
@@ -840,9 +1011,17 @@ class MainWindow(QMainWindow):
             act_open_mu = menu.addAction("Open MangaUpdates page")
             act_open_mu.setEnabled(bool(entry0.mu_url))
             act_check_mu = menu.addAction("Check MU for this entry")
+            links_menu = menu.addMenu("Official sources")
+            link_actions = {}
+            for link in self._model.links_at(rows[0]):
+                act = links_menu.addAction(link.label if link.url else f"{link.label} (no page known)")
+                act.setEnabled(bool(link.url))
+                link_actions[act] = link.url
+            links_menu.setEnabled(bool(link_actions))
             menu.addSeparator()
         else:
             act_open = act_copy_path = act_copy_title = act_fix_mu = act_open_mu = None
+            link_actions = {}
             menu.addAction(f"{n} folders selected").setEnabled(False)
             menu.addSeparator()
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
@@ -887,7 +1066,14 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if chosen is act_open and entries:
+        if act_kind is not None and chosen is act_kind:
+            from .kind_dialog import ask_series_kind
+
+            if ask_series_kind(self, entries[0], db=self._db):
+                self._model.refresh_states()
+        elif chosen in link_actions and link_actions[chosen]:
+            self._open_url(link_actions[chosen])
+        elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)

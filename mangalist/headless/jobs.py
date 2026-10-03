@@ -264,7 +264,14 @@ def make_dispatch(downloads_enabled: bool) -> JobFunc:
 def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) -> JobRegistry:
     """The runner's jobs from :class:`~mangalist.headless.settings.HeadlessSettings`."""
     provider = provider or StoreRootsProvider()
+    from .mangapixer_job import DESCRIPTION as MP_DESCRIPTION, JOB_NAME as MP_JOB, make_mangapixer_sync
+
+    mp_schedule = getattr(settings, "mangapixer_schedule", None)
     return JobRegistry([
+        # First, so the rescan after it already sees MangaPixer's latest links; skipped while no
+        # MangaPixer server is set up.
+        Job(MP_JOB, make_mangapixer_sync(), mp_schedule, enabled=mp_schedule is not None,
+            description=MP_DESCRIPTION, catch_up=settings.catch_up),
         Job("rescan", make_rescan(provider), settings.rescan_schedule,
             enabled=settings.rescan_schedule is not None,
             description="Rescan the library roots", catch_up=settings.catch_up),

@@ -7,6 +7,25 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **MangaPixer as a source** (MangaPixer 1.33.0 or later): toolbar **MangaPixer...** - the server
+  address and an API token (MangaPixer Administration > API tokens), a connection test, and each root
+  mapped to a MangaPixer library automatically by its folder names (with a manual override). A folder
+  MangaPixer knows takes MangaPixer's link, record, volume list and Completion answer, and MangaList
+  no longer looks it up on MangaUpdates itself. The token is never logged; certificate checks are on
+  unless you turn them off for a self-signed MangaPixer. The headless runner syncs it daily at 03:15
+  (`MANGALIST_MANGAPIXER_SYNC_SCHEDULE`), before the rescan.
+- **Rescan states:** new **State**, **Gaps** and **Official source** columns and a state filter - Wanted
+  (empty folder: official available / awaiting release / scanlation only), Missing volumes, Missing
+  chapters, Upgrade available, Up to date, Complete (and "Complete + Upgrade available"). A **Wanted**
+  panel lists what is wanted, missing or upgradable with its official links.
+- **Official sources** for every series: MangaPixer's official links, AniList's English links, the
+  English publisher, and store searches (Amazon, BookWalker Global, Kobo). Only web links are opened.
+- **File names read exactly:** FMD2 names take their numbers from the bracket only (a chapter title such
+  as "Episode 3" is no longer read as a number), release names (`v05 (+ c041-045)`, `(Digital)`, `(f2)`)
+  are understood, and decimals stay exact (`291.999`). Folders of bare-number files (`01.cbz`) ask once
+  "Volumes or chapters?" (row menu) and remember the answer.
+- A series' files are listed in the same order on every file system.
+
 ## [2026.10.2] - 2026-10-03
 
 The first MangaList release (the foundations of the redesign; testing build).

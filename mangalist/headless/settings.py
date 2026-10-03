@@ -8,6 +8,8 @@ Variable                       Default             Meaning
 ``MANGALIST_DOWNLOADS``        ``0``               Opt-in: allow the batched download dispatch.
 ``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the download batch runs (only with downloads on).
 ``MANGALIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
+``MANGALIST_MANGAPIXER_SYNC_SCHEDULE`` ``daily@03:15`` When to sync the MangaPixer source (before the rescan;
+                                                   skipped while no MangaPixer server is set up).
 ``MANGALIST_ROOTS``            (empty)             Extra library roots, ``os.pathsep``-separated.
 ``TZ``                          (system)            Time zone of the daily times.
 =============================  ==================  ====================================================
@@ -32,9 +34,11 @@ ENV_RESCAN = "MANGALIST_RESCAN_SCHEDULE"
 ENV_DOWNLOADS = "MANGALIST_DOWNLOADS"
 ENV_DISPATCH = "MANGALIST_DISPATCH_SCHEDULE"
 ENV_CATCH_UP = "MANGALIST_CATCH_UP"
+ENV_MANGAPIXER = "MANGALIST_MANGAPIXER_SYNC_SCHEDULE"
 
 DEFAULT_RESCAN = "daily@03:30"
 DEFAULT_DISPATCH = "daily@04:30"
+DEFAULT_MANGAPIXER = "daily@03:15"
 
 _TRUE = {"1", "true", "yes", "y", "on", "enable", "enabled"}
 _FALSE = {"0", "false", "no", "n", "off", "disable", "disabled", ""}
@@ -91,6 +95,7 @@ class HeadlessSettings:
     dispatch_schedule: Optional[Schedule]
     catch_up: bool
     tz: tzinfo
+    mangapixer_schedule: Optional[Schedule] = None
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "HeadlessSettings":
@@ -106,4 +111,5 @@ class HeadlessSettings:
             dispatch_schedule=parse_schedule(get(ENV_DISPATCH, DEFAULT_DISPATCH)),
             catch_up=parse_bool(env.get(ENV_CATCH_UP), True),
             tz=local_timezone(env),
+            mangapixer_schedule=parse_schedule(get(ENV_MANGAPIXER, DEFAULT_MANGAPIXER)),
         )

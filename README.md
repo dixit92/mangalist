@@ -24,6 +24,15 @@ The builds are not code-signed. Check a download against `SHA256SUMS` (`sha256su
 - **macOS** Gatekeeper: right-click the app > **Open**, or on macOS 15+ **System Settings > Privacy &
   Security > Open Anyway**.
 
+### MangaPixer as a source
+
+If you run [MangaPixer](https://github.com/dixit92/mangapixer) 1.33.0 or later on the same library,
+MangaList can use what MangaPixer already knows instead of looking everything up again: in MangaPixer,
+**Administration > API tokens > Create token**, then in MangaList **MangaPixer...** enter the server
+address and paste the token. MangaList maps each root to a MangaPixer library by its folder names and
+syncs MangaPixer's links, volume lists and Completion answers (read-only - it never changes anything
+in MangaPixer). Folders MangaPixer does not know still use MangaList's own matcher.
+
 ### Docker / Unraid
 
 The image runs the same desktop app in the browser (on

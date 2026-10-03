@@ -1,15 +1,17 @@
 """Thin wrapper around the AniList GraphQL API (no authentication required).
 
-Only the manga search and direct-ID lookup are implemented, returning just
-the fields needed for chapter/volume cross-unit estimation in the Behind
-column.
+Only the manga search and direct-ID lookup are implemented, returning the
+fields needed for chapter/volume cross-unit estimation in the Behind column
+and the series' external links (official sources: publisher pages, official
+readers - ``externalLinks { url site type language }``, read in the same
+request, so no extra calls).
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import requests
 
@@ -33,6 +35,7 @@ query ($search: String) {
     title { romaji english }
     chapters
     volumes
+    externalLinks { url site type language }
   }
 }
 """
@@ -44,6 +47,7 @@ query ($id: Int) {
     title { romaji english }
     chapters
     volumes
+    externalLinks { url site type language }
   }
 }
 """
@@ -129,15 +133,37 @@ def _reason(resp: requests.Response) -> str:
     return "no details"
 
 
+def parse_external_links(media: Dict[str, Any]) -> List[Dict[str, Optional[str]]]:
+    """The ``externalLinks`` rows of a Media answer as ``{url, site, type, language}`` dicts: rows
+    without a URL or of another shape are dropped, the order is AniList's."""
+    out: List[Dict[str, Optional[str]]] = []
+    for row in media.get("externalLinks") or ():
+        if not isinstance(row, dict):
+            continue
+        url = row.get("url")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        out.append({
+            "url": url.strip(),
+            "site": row.get("site") if isinstance(row.get("site"), str) else None,
+            "type": row.get("type") if isinstance(row.get("type"), str) else None,
+            "language": row.get("language") if isinstance(row.get("language"), str) else None,
+        })
+    return out
+
+
 def _normalise(media: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a flat dict with id, title, chapters, volumes (all optional)."""
+    """Return a flat dict with id, title, english_title, chapters, volumes and external_links
+    (all optional; external_links a list)."""
     titles = media.get("title") or {}
     title = titles.get("english") or titles.get("romaji") or ""
     return {
         "id": media.get("id"),
         "title": title,
+        "english_title": titles.get("english") or None,
         "chapters": media.get("chapters"),   # int | None
         "volumes": media.get("volumes"),     # int | None
+        "external_links": parse_external_links(media),
     }
 
 

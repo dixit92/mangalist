@@ -1,4 +1,10 @@
-"""Filename heuristics + per-folder scoring."""
+"""Filename heuristics + per-folder scoring.
+
+Each file's kind comes from the layered parser (:mod:`mangalist.parsing`, set by :func:`annotate_file`):
+an FMD2 name is read from its bracket head only, a release name by its own rules, a bare number by the
+series' "volumes or chapters?" answer; the generic layer is today's token heuristics
+(:func:`detect_tokens`). The per-folder scoring below is unchanged: it counts the files' kinds.
+"""
 
 from __future__ import annotations
 
@@ -97,11 +103,16 @@ def detect_tokens(filename: str, file_size: int = 0) -> Tuple[bool, bool]:
     return has_vol, has_ch
 
 
-def annotate_file(hit: FileHit) -> None:
-    """Populate has_volume / has_chapter on a FileHit in place."""
-    has_vol, has_ch = detect_tokens(hit.path.name, file_size=hit.size)
-    hit.has_volume = has_vol
-    hit.has_chapter = has_ch
+def annotate_file(hit: FileHit, context=None) -> None:
+    """Parse the hit's name with the layered parser (``context``: the series'
+    :class:`~mangalist.parsing.ParseContext`) and set ``parsed`` / ``has_volume`` / ``has_chapter``
+    in place."""
+    from .parsing import parse_name  # the parser imports this module: import it lazily
+
+    parsed = parse_name(hit.path.name, context, file_size=hit.size)
+    hit.parsed = parsed
+    hit.has_volume = parsed.volume is not None
+    hit.has_chapter = parsed.chapter is not None
 
 
 def classify(entry: MangaEntry) -> MangaEntry:
@@ -121,8 +132,15 @@ def classify(entry: MangaEntry) -> MangaEntry:
         reasons.append(f"{n_vol} volume-tagged file(s)")
     if n_ch:
         reasons.append(f"{n_ch} chapter-tagged file(s)")
-    if entry.n_ambiguous:
-        reasons.append(f"{entry.n_ambiguous} file(s) without vol/chapter tokens")
+    n_bare = sum(1 for f in entry.files if f.needs_kind)
+    if entry.n_ambiguous - n_bare > 0:
+        reasons.append(f"{entry.n_ambiguous - n_bare} file(s) without vol/chapter tokens")
+    if n_bare:
+        reasons.append(f"{n_bare} bare-number file(s): volumes or chapters?")
+    n_hinted = sum(1 for f in entry.files
+                   if f.parsed is not None and any("series hint" in n for n in f.parsed.notes))
+    if n_hinted:
+        reasons.append(f"{n_hinted} bare-number file(s) read as {entry.kind_hint or 'answered'} (your answer)")
 
     # Size-based nudges
     if n_files and median >= LARGE_FILE_BYTES:
