@@ -1,0 +1,103 @@
+"""``parse_name``: run the layers in order and apply the caller's per-series context."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, replace
+from typing import Iterable, Optional, Tuple, Union
+
+from .layers import parse_bare, parse_fmd2, parse_generic, parse_release, parse_scheme
+from .model import Kind, Layer, ParsedName
+from .template import Template, compile_template
+
+KindHint = Union[Kind, str, None]
+
+_HINTS = {
+    "volume": Kind.VOLUME, "volumes": Kind.VOLUME,
+    "chapter": Kind.CHAPTER, "chapters": Kind.CHAPTER,
+}
+
+
+def _kind_hint(hint: KindHint) -> Optional[Kind]:
+    if hint is None or hint == "":
+        return None
+    if isinstance(hint, Kind):
+        if hint in (Kind.VOLUME, Kind.CHAPTER):
+            return hint
+    elif isinstance(hint, str) and hint.strip().lower() in _HINTS:
+        return _HINTS[hint.strip().lower()]
+    raise ValueError(f"kind hint must be 'volumes' or 'chapters', not {hint!r}")
+
+
+@dataclass(frozen=True)
+class ParseContext:
+    """Per-series context for :func:`parse_name` (all optional).
+
+    - ``schemes``: the root's naming scheme(s) - template strings or :class:`Template` - tried first
+      (layer 1); a non-invertible scheme such as ``%O`` is skipped.
+    - ``kind_hint``: the stored per-series answer to "volumes or chapters?" (``"volumes"`` /
+      ``"chapters"``); it decides only names whose kind is unknown from the name itself (bare numbers).
+      Asking the owner and storing the answer are the caller's job.
+    - ``series_title``: the series folder's title; a bare name that equals it (``86.cbz`` in ``86``) has
+      no number, and ``<series title> 01`` reads 01 even when the title ends in a number.
+    """
+
+    schemes: Tuple[Template, ...] = ()
+    kind_hint: Optional[Kind] = None
+    series_title: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        schemes = self.schemes
+        if isinstance(schemes, (str, Template)):
+            schemes = (schemes,)
+        object.__setattr__(self, "schemes", tuple(compile_template(s) for s in (schemes or ())))
+        object.__setattr__(self, "kind_hint", _kind_hint(self.kind_hint))
+
+
+_NO_CONTEXT = ParseContext()
+
+
+def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseContext] = None, *,
+               file_size: int = 0) -> ParsedName:
+    """Units of one archive file name (e.g. ``"0012 [Vol. 3 Ch. 12.5 - Title [Group]].cbz"``).
+
+    ``name`` is the file name only (a path-like object contributes its last component; a string is
+    taken as is, so a backslash or colon inside a name from a Linux share stays part of the name).
+    ``file_size`` (bytes) feeds the generic layer exactly as today's classifier uses it. Never raises
+    on any name; a name no layer recognises yields kind UNKNOWN, layer NONE.
+    """
+    if not isinstance(name, str):
+        name = os.path.basename(os.fspath(name))
+    ctx = context or _NO_CONTEXT
+    result = _first(name, ctx, file_size)
+    if result is None:
+        return ParsedName(name=name, notes=("no layer recognised the name",))
+    return _apply_hint(result, ctx.kind_hint)
+
+
+def _first(name: str, ctx: ParseContext, file_size: int) -> Optional[ParsedName]:
+    for scheme in ctx.schemes:
+        r = parse_scheme(name, scheme)
+        if r is not None:
+            return r
+    return (parse_fmd2(name) or parse_release(name) or parse_generic(name, file_size)
+            or parse_bare(name, ctx.series_title))
+
+
+def _apply_hint(result: ParsedName, hint: Optional[Kind]) -> ParsedName:
+    if hint is None or result.kind is not Kind.UNKNOWN or result.number is None:
+        return result
+    if hint is Kind.VOLUME:
+        return replace(result, kind=Kind.VOLUME, volume=result.number,
+                       notes=result.notes + ("kind from the series hint: volumes",))
+    return replace(result, kind=Kind.CHAPTER, chapter=result.number,
+                   notes=result.notes + ("kind from the series hint: chapters",))
+
+
+def parse_names(names: Iterable[Union[str, "os.PathLike[str]"]],
+                context: Optional[ParseContext] = None) -> Tuple[ParsedName, ...]:
+    """:func:`parse_name` for every name with one context."""
+    return tuple(parse_name(n, context) for n in names)
+
+
+__all__ = ["KindHint", "Layer", "ParseContext", "parse_name", "parse_names"]
