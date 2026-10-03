@@ -23,5 +23,14 @@ STAGE="build/dmg"
 rm -rf "$STAGE" && mkdir -p "$STAGE" package
 cp -R "$APP" "$STAGE/MangaList.app"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "MangaList" -srcfolder "$STAGE" -ov -format UDZO "package/$NAME.dmg"
+# hdiutil fails now and then on CI runners with "Resource busy" / "Resource temporarily unavailable"
+# (it attaches a temporary image while it builds); retry a few times before giving up.
+for attempt in 1 2 3 4; do
+  if hdiutil create -volname "MangaList" -srcfolder "$STAGE" -ov -format UDZO "package/$NAME.dmg"; then
+    break
+  fi
+  [ "$attempt" -lt 4 ] || { echo "hdiutil failed $attempt times" >&2; exit 1; }
+  echo "hdiutil failed (attempt $attempt); retrying in $((attempt * 10)) s" >&2
+  sleep $((attempt * 10))
+done
 ls -l "package/$NAME.dmg"
