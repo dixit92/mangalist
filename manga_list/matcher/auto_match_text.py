@@ -1,4 +1,4 @@
-"""Small name helpers shared by the detector, planner and scorer (port of MangaPixer 1.31.1
+"""Small name helpers shared by the detector, planner and scorer (port of MangaPixer 1.32.0
 ``AutoMatchText.cs``)."""
 
 from __future__ import annotations
@@ -6,7 +6,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import FrozenSet, Iterable, List, Optional, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 import regex
 
@@ -42,18 +42,41 @@ _PART_WITH_SUBTITLE = regex.compile(
 
 _BRACKET_GROUP = regex.compile(r"\[[^\[\]]*\]|\([^()]*\)|\{[^{}]*\}")
 _YEAR_GROUP = regex.compile(r"[\(\[](19\d{2}|20\d{2})[\)\]]")
-_VOLUME_TOKEN = regex.compile(r"(?<![\p{L}\p{N}])(?:v|vol|vols|volume|volumes)\.?\s*\d+", _I)
+# 1.32.0: BD / European album tokens are volumes too (Tome / Tomo / Band / Deel / Album / Livre N, an upper-case T
+# glued to the number).
+_VOLUME_TOKEN = regex.compile(
+    r"(?<![\p{L}\p{N}])(?:(?:v|vol|vols|volume|volumes|tome|tomo|band|deel|album|livre)\.?\s*\d+"
+    r"|(?-i:T)\d{1,3}(?![\p{L}\p{N}]))", _I)
+# 1.32.0: "Issue 12" is a chapter too (like #12); "No. 12" is one only when nothing unit-like follows it
+# (issue_number_of).
 _CHAPTER_TOKEN = regex.compile(
-    r"(?<![\p{L}\p{N}])(?:(?:ch|chap|chapter|chapters|ep|episode)\.?\s*\d+|c\d+|#\s*\d+)", _I)
+    r"(?<![\p{L}\p{N}])(?:(?:ch|chap|chapter|chapters|ep|episode)\.?\s*\d+|c\d+|#\s*\d+|issue\s*#?\s*\d+)", _I)
+
+# "No. 12" / "N°12" after some title text ("No. 6" alone is a title) - an issue number only per issue_number_of.
+_ISSUE_NO = regex.compile(
+    r"(?<![\p{L}\p{N}])(?<=[\p{L}\p{N}][\s\-_.,]*)(?:no\.|n°)\s*(?P<n>\d{1,4}(?:\.\d{1,2})?)(?![\p{N}])", _I)
+
+# "No. N" anywhere in a name (the folder rule: a folder's own "No. N" is part of its title).
+_ANY_NO = regex.compile(r"(?<![\p{L}\p{N}])(?:no\.|n°)\s*(?P<n>\d{1,4})(?![\p{N}])", _I)
+
+# A unit-like token after "No. N": a volume / chapter / episode / album token, c12, #12, T12, or a bare number.
+_UNIT_LIKE_AFTER = regex.compile(
+    r"(?<![\p{L}\p{N}.])(?:(?:v|vol|vols|volume|volumes|ch|chap|chapter|chapters|ep|episode|issue|tome|tomo|band"
+    r"|deel|album|livre)\.?\s*#?\s*\d|c\d|#\s*\d|(?-i:T)\d|\d)", _I)
 
 # A trailing "(disambiguator)" of a provider title: "Look Back (FUJIMOTO Tatsuki)", "Beyond (GYARO)".
 _TRAILING_DISAMBIGUATOR = regex.compile(r"^(?P<head>.*\S)\s*\((?P<tag>[^()]{1,80})\)\s*$")
 
 # Category folder words (1.27.0: the ONE category list): a folder named exactly one of these (whole name,
 # case-insensitive) is the category hint of the folders below it. manga / manhwa / manhua / webtoon(s)
-# also name an origin (origins_for_category); the hint only ever ADDS evidence.
+# also name an origin (origins_for_category); the hint only ever ADDS evidence. 1.32.0: the comics words
+# (comic books, graphic novel(s), BD, bande(s) dessinee(s), fumetti, tebeos, historietas, stripboeken, US
+# comics, European comics, eurocomics) - accents do not matter ("Bandes dessinées"). Not words on purpose
+# (too ambiguous): strips, albums, webcomics.
 CATEGORY_FOLDER_WORDS: Tuple[str, ...] = (
     "manga", "manhwa", "manhua", "webtoon", "webtoons", "comic", "comics", "doujin", "doujinshi",
+    "comic books", "graphic novel", "graphic novels", "bd", "bande dessinee", "bandes dessinees", "fumetti", "tebeos",
+    "historietas", "stripboeken", "us comics", "european comics", "eurocomics",
 )
 
 # Shelf words: generic sorting folders (status, format, "misc") that name no work and no creator. Never a
@@ -94,8 +117,18 @@ def is_category_word(name: Optional[str]) -> bool:
 
 
 def is_category_folder_name(name: Optional[str]) -> bool:
-    """True when a folder name, whole and trimmed, is a category folder word (1.27.0)."""
-    return name is not None and contains_ignore_case(CATEGORY_FOLDER_WORDS, name.strip())
+    """True when a folder name, whole and trimmed, is a category folder word (1.27.0; accents ignored since
+    1.32.0)."""
+    if name is None:
+        return False
+    trimmed = name.strip()
+    return (contains_ignore_case(CATEGORY_FOLDER_WORDS, trimmed)
+            or contains_ignore_case(CATEGORY_FOLDER_WORDS, _without_accents(trimmed)))
+
+
+def _without_accents(s: str) -> str:
+    return unicodedata.normalize(
+        "NFC", "".join(ch for ch in unicodedata.normalize("NFD", s) if unicodedata.category(ch) != "Mn"))
 
 
 def is_author_like(name: Optional[str], require_two_tokens: bool) -> bool:
@@ -342,7 +375,7 @@ def earliest_year(names: Iterable[Optional[str]]) -> Optional[int]:
 def is_volume_like(archive_name: Optional[str]) -> bool:
     """An archive name that names a volume (a volume token and no chapter token)."""
     return (archive_name is not None and _VOLUME_TOKEN.search(archive_name) is not None
-            and _CHAPTER_TOKEN.search(archive_name) is None)
+            and _CHAPTER_TOKEN.search(archive_name) is None and issue_number_of(archive_name) is None)
 
 
 def is_chapter_like(archive_name: Optional[str]) -> bool:
@@ -350,7 +383,7 @@ def is_chapter_like(archive_name: Optional[str]) -> bool:
     volume token (``001 [chapter title]``)."""
     if archive_name is None:
         return False
-    if _CHAPTER_TOKEN.search(archive_name):
+    if _CHAPTER_TOKEN.search(archive_name) or issue_number_of(archive_name) is not None:
         return True
     return (_VOLUME_TOKEN.search(archive_name) is None and archive_base_title(archive_name) == ""
             and any(is_digit(c) for c in archive_name))
@@ -358,10 +391,11 @@ def is_chapter_like(archive_name: Optional[str]) -> bool:
 
 # Unit numbers (1.27.0 count rule): the number after a volume / chapter token, the upper end of a range.
 _VOLUME_NUMBER = regex.compile(
-    r"(?<![\p{L}\p{N}])(?:v|vol|vols|volume|volumes)\.?\s*(?P<n>\d{1,4})(?:\.\d+)?"
+    r"(?<![\p{L}\p{N}])(?:(?:v|vol|vols|volume|volumes|tome|tomo|band|deel|album|livre)\.?\s*"
+    r"|(?-i:T)(?=\d{1,3}(?![\p{L}\p{N}])))(?P<n>\d{1,4})(?:\.\d+)?"
     r"(?:\s*-\s*(?P<m>\d{1,4})(?:\.\d+)?)?(?![\p{N}])", _I)
 _CHAPTER_NUMBER = regex.compile(
-    r"(?<![\p{L}\p{N}])(?:(?:ch|chap|chapter|chapters|ep|episode)\.?\s*|c|#\s*)(?P<n>\d{1,4})(?:\.\d+)?"
+    r"(?<![\p{L}\p{N}])(?:(?:ch|chap|chapter|chapters|ep|episode)\.?\s*|c|#\s*|issue\s*#?\s*)(?P<n>\d{1,4})(?:\.\d+)?"
     r"(?:\s*-\s*(?P<m>\d{1,4})(?:\.\d+)?)?(?![\p{N}])", _I)
 _LEADING_NUMBER = regex.compile(r"^\s*(?P<n>\d{1,4})(?:\.\d+)?(?![\p{N}])")
 
@@ -382,6 +416,9 @@ def chapter_number_of(archive_name: Optional[str]) -> Optional[int]:
     n = _highest_number(_CHAPTER_NUMBER.finditer(archive_name))
     if n is not None:
         return n
+    issue = issue_number_of(archive_name)
+    if issue is not None:
+        return int(issue.to_integral_value(rounding="ROUND_DOWN"))
     return _leading_number(archive_name)
 
 
@@ -389,7 +426,7 @@ def bare_number_of(archive_name: Optional[str]) -> Optional[int]:
     """The bare leading number of a name without a volume / chapter token and without a title (``01.cbz``,
     ``012 [Title]``) - the unit number of an archive inside a ``Volumes`` / ``Chapters`` subfolder - or None."""
     if (archive_name is None or _VOLUME_TOKEN.search(archive_name) or _CHAPTER_TOKEN.search(archive_name)
-            or not is_chapter_like(archive_name)):
+            or issue_number_of(archive_name) is not None or not is_chapter_like(archive_name)):
         return None
     return _leading_number(archive_name)
 
@@ -432,13 +469,21 @@ class UnitNumbers:
 # Unit numbers v2 (1.29.0): decimals kept, a range as start / end (the end may repeat the token: "v01-v05").
 # <t> is the token, so a bracketed single-letter token ("[v2]", a release revision) can be told apart.
 _VOLUME_UNIT = regex.compile(
-    r"(?<![\p{L}\p{N}])(?P<t>volumes|volume|vols|vol|v)\.?\s*(?P<n>\d{1,4}(?:\.\d{1,2})?)"
-    r"(?:\s*-\s*(?:(?:volumes|volume|vols|vol|v)\.?\s*)?(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])", _I)
+    r"(?<![\p{L}\p{N}])(?:(?P<t>volumes|volume|vols|vol|v|tome|tomo|band|deel|album|livre)\.?\s*"
+    r"|(?P<t>(?-i:T))(?=\d{1,3}(?![\p{N}])))(?P<n>\d{1,4}(?:\.\d{1,2})?)"
+    r"(?:\s*-\s*(?:(?:volumes|volume|vols|vol|v|tome|tomo|band|deel|album|livre)\.?\s*|(?-i:T))?"
+    r"(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])", _I)
 _CHAPTER_UNIT = regex.compile(
-    r"(?<![\p{L}\p{N}])(?:(?P<t>chapters|chapter|chap|ch|episode|ep)\.?\s*|(?P<t>c)|(?P<t>#)\s*)"
+    r"(?<![\p{L}\p{N}])(?:(?P<t>chapters|chapter|chap|ch|episode|ep)\.?\s*|(?P<t>c)|(?P<t>#)\s*|(?P<t>issue)\s*#?\s*)"
     r"(?P<n>\d{1,4}(?:\.\d{1,2})?)(?:\s*-\s*(?:(?:chapters|chapter|chap|ch|episode|ep)\.?\s*|c|#\s*)?"
     r"(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])", _I)
 _LEADING_UNIT = regex.compile(r"^\s*(?P<n>\d{1,4}(?:\.\d{1,2})?)(?:\s*-\s*(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])")
+
+# Comics extras (1.32.0): Annual / FCBD (Free Comic Book Day) with or without a number, Special / One-Shot only with
+# their own number ("Special #1"; "Special Edition" is an edition, a bare "Special" a title word).
+_EXTRA_MARKER = regex.compile(
+    r"(?<![\p{L}\p{N}])(?:(?:annual|fcbd|free\s+comic\s+book\s+day)(?:\s*#?\s*(?P<n>\d{1,4}(?:\.\d{1,2})?))?"
+    r"|(?:specials?|one-?shots?)\s*#?\s*(?P<n>\d{1,4}(?:\.\d{1,2})?))(?![\p{L}\p{N}])", _I)
 
 
 def units_of(archive_name: Optional[str]) -> UnitNumbers:
@@ -446,7 +491,10 @@ def units_of(archive_name: Optional[str]) -> UnitNumbers:
     ``c045.5`` -> chapter 45.5, an extra; ``Vol. 01-05`` -> volumes 1 to 5; ``001 [Chapter Title]`` ->
     chapter 1 (a bare leading number of a name without a title; a leading 19xx / 20xx is a year). Tokens
     inside brackets are read only when the rest of the name states none, and then never a single-letter
-    token (``[v2]`` is a release revision). A range whose end is a year is one number."""
+    token (``[v2]`` is a release revision). A range whose end is a year is one number. 1.32.0 comics grammar:
+    BD / European album tokens (``Tome 3``, ``T03``, ``Band 3``, ``Deel 3``) are volumes, ``Issue 12`` /
+    ``No. 12`` chapters (like ``#12``), and an ``Annual`` / ``FCBD`` / ``Special #N`` / ``One-Shot N`` issue is
+    an extra (``Saga Annual 2`` -> chapter 2, an extra)."""
     if is_null_or_whitespace(archive_name):
         return UnitNumbers()
     name = _ARCHIVE_EXTENSION.sub("", nfkc(archive_name).strip())
@@ -454,6 +502,10 @@ def units_of(archive_name: Optional[str]) -> UnitNumbers:
 
     volume = _range_of(_VOLUME_UNIT.finditer(outside), allow_short_token=True)
     chapter = _range_of(_chapter_units(outside, volume is not None), allow_short_token=True)
+    if chapter is None:
+        issue = issue_number_of(archive_name)
+        if issue is not None:
+            chapter = (issue, None)
     if volume is None and chapter is None:
         # Only brackets name a unit ("Title (Vol. 3)"); a single letter there is a revision, not a unit.
         volume = _range_of(_VOLUME_UNIT.finditer(name), allow_short_token=False)
@@ -467,6 +519,15 @@ def units_of(archive_name: Optional[str]) -> UnitNumbers:
         extra = chapter[0] != chapter[0].to_integral_value(rounding="ROUND_DOWN")
     else:
         extra = volume is not None and volume[0] != volume[0].to_integral_value(rounding="ROUND_DOWN")
+    # A comics extra (1.32.0): "Saga Annual #2", "Saga Annual 2", "Saga Special #1" is chapter-like but never a
+    # numbered issue - like a .5 chapter it is never missing and never fills a whole number. "FCBD 2019" names a
+    # year, not a unit.
+    marker = _EXTRA_MARKER.search(outside)
+    if marker is not None:
+        own = marker.group("n")
+        if chapter is None and own is not None and not _YEAR_ONLY.search(own):
+            chapter = (Decimal(own), None)
+        extra = extra or chapter is not None
     return UnitNumbers(volume[0] if volume else None, volume[1] if volume else None,
                        chapter[0] if chapter else None, chapter[1] if chapter else None, extra)
 
@@ -501,25 +562,72 @@ def _range_of(matches: Iterable, allow_short_token: bool) -> Optional[Tuple[Deci
     return start, (end if end is not None and end > start else None)
 
 
-_JAPAN = frozenset({MetadataOrigin.Japan})
-_KOREA = frozenset({MetadataOrigin.Korea})
-_CHINA = frozenset({MetadataOrigin.ChinaTaiwan})
-_WEBTOON = frozenset({MetadataOrigin.Korea, MetadataOrigin.ChinaTaiwan})
+def issue_number_of(archive_name: Optional[str]) -> Optional[Decimal]:
+    """The issue number a ``No. 12`` / ``N°12`` token states (1.32.0), or None. It is one only after some title
+    text (``No. 6`` alone is a title) and only when nothing unit-like follows it outside brackets - no volume /
+    chapter / episode / album token, no ``#12`` / ``c012``, no bare number: ``Monster No. 8 v01 c003`` and
+    ``Robot No. 9 - Chapter 12`` carry ``No. N`` in their title (well-known manga do). A folder's own ``No. N``
+    is handled by :func:`mask_folder_title_number`."""
+    if is_null_or_whitespace(archive_name):
+        return None
+    outside = _bare(_ARCHIVE_EXTENSION.sub("", nfkc(archive_name).strip()))
+    m = _ISSUE_NO.search(outside)
+    if m is None or _UNIT_LIKE_AFTER.search(outside[m.end():]) is not None:
+        return None
+    return Decimal(m.group("n"))
+
+
+def mask_folder_title_number(archive_name: str, folder_name: Optional[str]) -> str:
+    """The archive name for unit parsing, with the FOLDER's own ``No. N`` masked (1.32.0): in a folder named
+    ``Robot No. 9``, ``Robot No. 9.cbz`` names the work, not issue 9. The same number (leading zeros aside) is
+    rewritten as a glued ``No9``, which no unit rule reads. Unchanged when the folder name has no ``No. N``."""
+    if archive_name is None:
+        raise TypeError("archive_name")
+    if is_null_or_whitespace(folder_name):
+        return archive_name
+    numbers = {int(m.group("n")) for m in _ANY_NO.finditer(nfkc(folder_name))}
+    if not numbers:
+        return archive_name
+
+    def mask(m) -> str:
+        n = int(m.group("n"))
+        return "No" + str(n) if n in numbers else m.group(0)
+
+    return _ANY_NO.sub(mask, nfkc(archive_name))
+
+
+def _build_category_origins() -> Dict[str, FrozenSet[MetadataOrigin]]:
+    """The category words keyed by their SCORING form (1.32.0 fix): the hint is compared in scoring form, which
+    folds long vowels ("webtoon" -> "webton"), so the words must be folded the same way - before 1.32.0 a
+    Webtoon(s) folder never gave its origin."""
+    table: Dict[str, FrozenSet[MetadataOrigin]] = {}
+
+    def add(origins: Tuple[MetadataOrigin, ...], *words: str) -> None:
+        for word in words:
+            table[scoring_form(word)] = frozenset(origins)
+
+    add((MetadataOrigin.Japan,), "manga", "japanese manga")
+    add((MetadataOrigin.Korea,), "manhwa", "korean manhwa")
+    add((MetadataOrigin.ChinaTaiwan,), "manhua", "chinese manhua")
+    add((MetadataOrigin.Korea, MetadataOrigin.ChinaTaiwan), "webtoon", "webtoons")
+    add((MetadataOrigin.French,), "bd", "bande dessinee", "bandes dessinees")
+    add((MetadataOrigin.Spanish,), "tebeos", "historietas")
+    add((MetadataOrigin.Italian,), "fumetti")
+    add((MetadataOrigin.Dutch,), "stripboeken")
+    add((MetadataOrigin.EnglishOriginal,), "us comics")
+    return table
+
+
+_CATEGORY_ORIGINS = _build_category_origins()
 
 
 def origins_for_category(category_hint: Optional[str]) -> Optional[FrozenSet[MetadataOrigin]]:
-    """The origins a category hint allows (``manga`` -> Japan, ``manhwa`` -> Korea, ``manhua`` ->
-    China/Taiwan, ``webtoon(s)`` -> Korea or China/Taiwan); None when it says nothing about origin."""
-    key = scoring_form(category_hint)
-    if key in ("manga", "japanese manga"):
-        return _JAPAN
-    if key in ("manhwa", "korean manhwa"):
-        return _KOREA
-    if key in ("manhua", "chinese manhua"):
-        return _CHINA
-    if key in ("webtoon", "webtoons"):
-        return _WEBTOON
-    return None
+    """The origins a category hint allows: ``manga`` -> Japan, ``manhwa`` -> Korea, ``manhua`` -> China/Taiwan,
+    ``webtoon(s)`` -> Korea or China/Taiwan; 1.32.0 comics words by language: ``bd`` / ``bande(s) dessinee(s)``
+    -> French (which covers Belgium), ``tebeos`` / ``historietas`` -> Spanish, ``fumetti`` -> Italian,
+    ``stripboeken`` -> Dutch, ``us comics`` -> English-original (no US / UK split). None when the hint says
+    nothing about origin (``comics``, ``graphic novels``, ``european comics``...)."""
+    return _CATEGORY_ORIGINS.get(scoring_form(category_hint))
 
 
 _ORIGIN_BY_NAME = {o.name.lower(): o for o in MetadataOrigin}

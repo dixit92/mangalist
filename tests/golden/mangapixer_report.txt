@@ -1,4 +1,4 @@
-# MangaPixer 1.31.1 (release commit 858c7df): its golden harness (production detector, planner, retrieval loop, provider mapping, scorer) over the cases Manga-List runs; per case the class, the default-threshold result and the requests sent, then the aggregates at three threshold settings.
+# MangaPixer 1.32.0 (release commit f727088): its golden harness (production detector, planner, retrieval loop, provider mapping, scorer) over the cases Manga-List runs; per case the class, the default-threshold result and the requests sent, then the aggregates at three threshold settings.
 CLASS F01: Series
 F01 romaji, digital volumes: Auto 51239621230 title 1.000 adj 1.030 [SeriesFamily]
 REQUESTS F01: 1 searches + 1 GETs

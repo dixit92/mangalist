@@ -1,4 +1,4 @@
-"""Title normalization (port of MangaPixer 1.31.1 ``TitleNormalizer.cs``).
+"""Title normalization (port of MangaPixer 1.32.0 ``TitleNormalizer.cs``).
 
 Turns a folder or archive display name into clean title query variants plus hints. Pure and
 deterministic; it only ever sees a display name, never the filesystem.
@@ -55,20 +55,29 @@ _EDITION_WORD_PATTERNS = {
 # Named re-releases, removed before the single words above so "Complete Edition" goes as one phrase.
 _EDITION_PHRASE = regex.compile(
     r"(?<![\p{L}\p{N}])(?:(?:Master|Perfect|Deluxe|Collector'?s|Special|Anniversary|Complete|Definitive"
-    r"|Ultimate|Legendary|Remastered|Full[- ]Colou?r)\s+Edition|Kanzenban|Shinsou?ban|Aizou?ban|Bunkoban"
+    r"|Ultimate|Legendary|Remastered|Library|Full[- ]Colou?r)\s+Edition|Kanzenban|Shinsou?ban|Aizou?ban|Bunkoban"
     r"|Wideban)(?![\p{L}\p{N}])", _I)
+
+# Comics collected-format words (1.32.0): removed from the title and kept as hints, like the edition words. TPB / OGN
+# and the French / German / Dutch "complete edition" words in any case; HC / GN only upper-case (two letters are too
+# common). Absolute / Compendium are not removed: they are title words too ("Absolute Boyfriend").
+_FORMAT_WORD = regex.compile(
+    r"(?<![\p{L}\p{N}])(?:(?i:tpb|ogn|(?:l')?int[eé]grale|gesamtausgabe|integraal)|HC|GN)(?![\p{L}\p{N}])")
 
 _SQUARE_GROUP = regex.compile(r"\[([^\[\]]*)\]")
 _ANY_BRACKET_GROUP = regex.compile(r"\[[^\[\]]*\]|\([^()]*\)|\{[^{}]*\}")
 _YEAR_GROUP = regex.compile(r"\((19\d{2}|20\d{2})\)")
 
-# v01, v.1, vol 3, Vol. 3, Volume 1-5, volumes 2 - 4
+# v01, v.1, vol 3, Vol. 3, Volume 1-5, volumes 2 - 4; 1.32.0 BD / European albums: Tome 3, Tomo 3, Band 3, Deel 3,
+# Album 3, Livre 3, T03 (an upper-case T glued to the number).
 _VOLUME_TOKEN = regex.compile(
-    r"(?<![\p{L}\p{N}])(?:v|vol|vols|volume|volumes)\.?\s*\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?(?![\p{L}\p{N}])", _I)
+    r"(?<![\p{L}\p{N}])(?:(?:v|vol|vols|volume|volumes|tome|tomo|band|deel|album|livre)\.?\s*"
+    r"|(?-i:T)(?=\d{1,3}(?![\p{L}\p{N}])))\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?(?![\p{L}\p{N}])", _I)
 
-# Ch 12, ch.12, chap 3, Chapter 10.5, chapters 1-20, c003 (bare c only when glued to digits)
+# Ch 12, ch.12, chap 3, Chapter 10.5, chapters 1-20, c003 (bare c only when glued to digits); 1.32.0 comic issues:
+# Issue 12. "No. 12" is never removed: titles carry it ("Kaiju No. 8", "No. 6").
 _CHAPTER_TOKEN = regex.compile(
-    r"(?<![\p{L}\p{N}])(?:(?:ch|chap|chapter|chapters)\.?\s*\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?"
+    r"(?<![\p{L}\p{N}])(?:(?:ch|chap|chapter|chapters|issue\s*#?)\.?\s*\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?"
     r"|c\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)?)(?![\p{L}\p{N}])", _I)
 
 _HASH_NUMBER = regex.compile(r"#\s*\d+(?:\.\d+)?")
@@ -434,6 +443,10 @@ def _clean_title(text: str, edition_hints: List[str], keep_exclamation: bool = F
     for m in _EDITION_PHRASE.finditer(s):
         edition_hints.append(m.group(0))
     s = _EDITION_PHRASE.sub(" ", s)
+
+    for m in _FORMAT_WORD.finditer(s):
+        edition_hints.append(m.group(0))
+    s = _FORMAT_WORD.sub(" ", s)
 
     for word in _EDITION_WORDS:
         pattern = _EDITION_WORD_PATTERNS[word]
