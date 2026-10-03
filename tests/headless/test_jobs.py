@@ -9,8 +9,9 @@ from pathlib import Path
 import pytest
 
 from manga_list.headless.jobs import (
-    Cancelled, ConfigRootsProvider, Job, JobContext, JobRegistry, RootsProvider, build_registry,
-    make_dispatch, make_rescan)
+    Cancelled, ConfigRootsProvider, Job, JobContext, JobRegistry, RootsProvider, StoreRootsProvider,
+    build_registry, make_dispatch, make_rescan)
+from manga_list.store.roots import Root
 from manga_list.headless.schedule import DailyAt, EveryHours
 from manga_list.headless.settings import HeadlessSettings, parse_bool
 
@@ -181,3 +182,44 @@ def test_rescan_stops_on_shutdown(tmp_path):
     with pytest.raises(Cancelled):
         rescan(JobContext(should_stop))
     assert seen == [root]
+
+
+# --- the roots database as the provider ---------------------------------------------------------
+
+def test_store_provider_lists_database_roots_then_environment_roots(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    stored = Root(id=1, name="A", path=str(a), exclusions=["@Oneshots"])
+    provider = StoreRootsProvider(env={"MANGA_LIST_ROOTS": os.pathsep.join([str(a), str(b)])},
+                                  load_roots=lambda: [stored])
+    roots = provider.roots()
+    # The database root wins over the same path from the environment (it carries the exclusions).
+    assert roots == [stored, b]
+    assert isinstance(provider, RootsProvider)
+
+
+def test_store_provider_survives_a_broken_database(tmp_path):
+    def broken():
+        raise RuntimeError("database locked")
+
+    provider = StoreRootsProvider(env={"MANGA_LIST_ROOTS": str(tmp_path)}, load_roots=broken)
+    assert provider.roots() == [tmp_path]
+
+
+def test_rescan_never_scans_a_database_roots_exclusions(tmp_path):
+    root = _library(tmp_path)
+    (root / "@Oneshots").mkdir()
+    (root / "@Oneshots" / "One Shot.cbz").write_bytes(b"PK")
+    stored = Root(id=1, name="Library", path=str(root), exclusions=["@Oneshots"])
+    result = make_rescan(StoreRootsProvider(env={}, load_roots=lambda: [stored]))(JobContext())
+    assert result.status == "ok", result
+    (summary,) = result.extra["roots"]
+    assert summary["series"] == 2 and summary["archives"] == 3  # @Oneshots not scanned
+
+    # The same root as a plain path (no database) does scan the folder.
+    plain = make_rescan(ListRoots(root))(JobContext())
+    assert plain.extra["roots"][0]["series"] == 3
+
+
+def test_build_registry_defaults_to_the_roots_database():
+    reg = build_registry(HeadlessSettings.from_env({}))
+    assert reg.get("rescan").active

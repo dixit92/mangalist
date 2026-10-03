@@ -6,9 +6,10 @@
   registered but DISABLED unless downloads are turned on, and even then it only logs for now.
   Nothing is ever dispatched on discovery - only in these scheduled batches.
 
-Roots come from a :class:`RootsProvider`. Today's provider reads the GUI's ``config.json`` (the
-last opened root) plus an optional ``MANGA_LIST_ROOTS`` list; the roots database (another lane)
-plugs in by implementing the same one-method protocol.
+Roots come from a :class:`RootsProvider`. The default, :class:`StoreRootsProvider`, reads the
+roots database (each root with its exclusions, which the rescan never scans) plus an optional
+``MANGA_LIST_ROOTS`` list; :class:`ConfigRootsProvider` (``MANGA_LIST_ROOTS`` plus the GUI's last
+root) remains for callers without a database.
 """
 
 from __future__ import annotations
@@ -107,10 +108,59 @@ class JobRegistry:
 
 @runtime_checkable
 class RootsProvider(Protocol):
-    """Where the library roots come from. The roots database implements this too."""
+    """Where the library roots come from: plain paths, or ``store.Root``-like objects (``path`` plus
+    ``exclusions``, ``name``), whose exclusions the rescan applies."""
 
-    def roots(self) -> List[Path]:
+    def roots(self) -> List[Any]:
         ...
+
+
+def _root_path(root: Any) -> Path:
+    return Path(getattr(root, "path", root))
+
+
+def _env_roots(env: Dict[str, str]) -> List[Path]:
+    return [Path(part.strip()).expanduser()
+            for part in (env.get(ENV_ROOTS) or "").split(os.pathsep) if part.strip()]
+
+
+def _unique(roots: Iterable[Any]) -> List[Any]:
+    unique: List[Any] = []
+    seen = set()
+    for root in roots:
+        key = os.path.normcase(os.path.normpath(str(_root_path(root))))
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    return unique
+
+
+class StoreRootsProvider:
+    """The roots database (with each root's exclusions) plus ``MANGA_LIST_ROOTS``.
+
+    Read on every call, so a root added in the GUI's Roots manager is used by the next scheduled
+    rescan. A database root wins over the same path given in the environment (it carries the
+    exclusions).
+    """
+
+    def __init__(self, env: Optional[Dict[str, str]] = None,
+                 load_roots: Optional[Callable[[], List[Any]]] = None):
+        self._env = env
+        self._load_roots = load_roots
+
+    def roots(self) -> List[Any]:
+        env = os.environ if self._env is None else self._env
+        loader = self._load_roots
+        if loader is None:
+            from ..store import get_store
+
+            loader = lambda: get_store().list_roots()  # noqa: E731
+        try:
+            stored = list(loader())
+        except Exception:  # noqa: BLE001 - a broken database must not stop the runner
+            _log.warning("Could not read the library roots from the database", exc_info=True)
+            stored = []
+        return _unique([*stored, *_env_roots(env)])
 
 
 class ConfigRootsProvider:
@@ -126,10 +176,7 @@ class ConfigRootsProvider:
 
     def roots(self) -> List[Path]:
         env = os.environ if self._env is None else self._env
-        found: List[Path] = []
-        for part in (env.get(ENV_ROOTS) or "").split(os.pathsep):
-            if part.strip():
-                found.append(Path(part.strip()).expanduser())
+        found: List[Path] = _env_roots(env)
         loader = self._load_config
         if loader is None:
             from .. import config  # imported lazily: config is owned by another lane
@@ -142,14 +189,7 @@ class ConfigRootsProvider:
             last = ""
         if last:
             found.append(Path(last).expanduser())
-        unique: List[Path] = []
-        seen = set()
-        for p in found:
-            key = os.path.normcase(os.path.normpath(str(p)))
-            if key not in seen:
-                seen.add(key)
-                unique.append(p)
-        return unique
+        return _unique(found)
 
 
 # --- the jobs -----------------------------------------------------------------------------------
@@ -171,16 +211,20 @@ def make_rescan(provider: RootsProvider,
         def progress(done: int, total: int, name: str) -> None:  # noqa: ARG001
             ctx.check()
 
-        for root in roots:
+        for spec in roots:
             ctx.check()
             started = time.monotonic()
-            if not Path(root).is_dir():
+            root = _root_path(spec)
+            if not root.is_dir():
                 _log.warning("Rescan: root is not a folder (not mounted?): %s", root)
                 per_root.append({"root": str(root), "error": "not a folder"})
                 failed += 1
                 continue
+            # A database root carries exclusions: those paths are never scanned (A5).
+            extra = {} if isinstance(spec, (str, os.PathLike)) else {
+                "exclusions": list(getattr(spec, "exclusions", None) or [])}
             try:
-                entries = scan_root(Path(root), progress=progress)
+                entries = scan_root(root, progress=progress, **extra)
             except Cancelled:
                 raise
             except Exception as exc:  # noqa: BLE001 - one bad root must not stop the others
@@ -219,7 +263,7 @@ def make_dispatch(downloads_enabled: bool) -> JobFunc:
 
 def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) -> JobRegistry:
     """The runner's jobs from :class:`~manga_list.headless.settings.HeadlessSettings`."""
-    provider = provider or ConfigRootsProvider()
+    provider = provider or StoreRootsProvider()
     return JobRegistry([
         Job("rescan", make_rescan(provider), settings.rescan_schedule,
             enabled=settings.rescan_schedule is not None,
