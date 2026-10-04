@@ -63,3 +63,15 @@ def sign(db):
 
 def entry(result, name):
     return next(e for e in result.entries if Path(e.folder).name == name)
+
+
+def record_with(db, *, signer=None, now=None):
+    """Scan + series rows + archive rows with a given signer / clock (no units, no MangaPixer layer)."""
+    from mangalist.identity.moves import record_archives
+    from mangalist.scanner import scan_library
+    from mangalist.store.series import seen_from_entries
+
+    result = scan_library(db.list_roots(), db=db)
+    for rs in result.roots:
+        db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries))
+    return record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in result.roots], signer=signer, now=now)
