@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.3] - 2026-10-04
+
+The second MangaList release (testing build): phase 1 - knowing what is missing - plus series identity and MangaPixer 1.34.0 support.
+
 - **Series keep their identity when folders move:** MangaList now recognises a series folder that was renamed or moved - within
   a root or to another root, also when chapters were added or removed meanwhile - by its archives (MangaPixer's method: each
   archive gets a content signature, and a folder that received at least 80% of a vanished folder's archives is the same series).
