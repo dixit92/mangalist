@@ -145,9 +145,5 @@ def _series_holding(series_rows: List[Tuple[int, str]], rel: str) -> Optional[in
     return best[0] if best else None
 
 
-def series_holding(series_rows: List[Tuple[int, str]], rel: str) -> Optional[int]:
-    return _series_holding(series_rows, rel)
-
-
 def abs_path(root_path: str, rel_path: str) -> Path:
     return Path(root_path).joinpath(*rel_path.split("/"))
