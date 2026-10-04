@@ -56,8 +56,12 @@ def _rel_for(trail: Sequence[str], prefix: Sequence[str]) -> Optional[str]:
     return None
 
 
-def _find_series(con, library_id: str, trail: Sequence[str], mappings: Dict[int, Any]) -> Optional[Any]:
-    """The MangaList series row at *trail* of *library_id* (longest mapping prefix; exact, then casefold)."""
+_UNMAPPED = object()
+
+
+def _find_series(con, library_id: str, trail: Sequence[str], mappings: Dict[int, Any]) -> Any:
+    """The MangaList series row at *trail* of *library_id* (longest mapping prefix; exact, then casefold);
+    None when the mapped root has no series there; ``_UNMAPPED`` when no root maps that trail (now)."""
     best = None
     for m in mappings.values():
         if m.library_id != library_id:
@@ -68,7 +72,7 @@ def _find_series(con, library_id: str, trail: Sequence[str], mappings: Dict[int,
         if best is None or len(m.prefix) > len(best[0].prefix):
             best = (m, rel)
     if best is None:
-        return None
+        return _UNMAPPED
     m, rel = best
     r = con.execute("SELECT * FROM series WHERE root_id = ? AND rel_path = ?", (m.root_id, rel)).fetchone()
     if r is not None:
@@ -109,13 +113,15 @@ def apply_pending(store, now: Optional[datetime] = None) -> List[CarryResult]:
             new_trail = json.loads(item["trail"]) if item is not None else (
                 json.loads(p["new_trail"]) if p["new_trail"] else None)
             old = _find_series(con, p["library_id"], old_trail, mappings)
+            if old is _UNMAPPED:
+                continue                     # no root maps it (now): wait - a mapping may come back
             if old is None:
                 settle("nothing")            # MangaList has no series there (or it was settled another way)
                 continue
             if old["status"] != "missing":
                 continue                     # MangaList has not seen the rename yet: wait for its scan
             new = _find_series(con, p["library_id"], new_trail, mappings) if new_trail else None
-            if new is None or new["status"] != "present" or new["id"] == old["id"]:
+            if new is None or new is _UNMAPPED or new["status"] != "present" or new["id"] == old["id"]:
                 continue                     # the new folder is not a live MangaList series (yet)
             res = carry(con, ctx, old["id"], new["id"], "mangapixer")
             if res is None:
