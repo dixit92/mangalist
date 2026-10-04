@@ -94,6 +94,9 @@ def test_record_library_scan_relinks_a_folder_renamed_by_hand(db, library):
     assert record_library_scan(db, first) == []
     folder = first.entries[0].folder
     mu_cache.save_entry(folder, 11, "Linked", "", None, mu_confirmed=True)
+    from mangalist.identity.backfill import backfill_signatures
+
+    assert backfill_signatures(db, per_file_delay=0).signed == 2       # signed BEFORE the rename (background)
 
     (library / "Old Title").rename(library / "New Title")             # the owner renames it in Explorer
     second = scan_library(db.list_roots())

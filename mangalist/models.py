@@ -119,6 +119,7 @@ class FileHit:
     has_volume: bool = False
     has_chapter: bool = False
     parsed: Optional["ParsedName"] = field(default=None, compare=False)
+    mtime_ns: Optional[int] = field(default=None, compare=False)  # set by the scanner (archive rows)
 
     @property
     def kind(self) -> str:

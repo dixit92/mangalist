@@ -190,6 +190,9 @@ def _default_on_moved(store) -> Callable[[str, str, bool], None]:
     def on_moved(src: str, dst: str, is_dir: bool) -> None:
         if is_dir:
             store.relink_folder(src, dst)
+        follow = getattr(store, "follow_journal_move", None)
+        if follow is not None:      # the archive rows follow directly (no move detection needed)
+            follow(src, dst, is_dir)
     return on_moved
 
 

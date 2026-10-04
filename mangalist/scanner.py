@@ -100,10 +100,11 @@ def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _N
             if _ex.hides(rel_dir + name, False):
                 continue
             try:
-                size = p.stat().st_size
+                st = p.stat()
+                size, mtime_ns = st.st_size, st.st_mtime_ns
             except OSError:
-                size = 0
-            hit = FileHit(path=p, size=size, depth=rel_depth)
+                size, mtime_ns = 0, None
+            hit = FileHit(path=p, size=size, depth=rel_depth, mtime_ns=mtime_ns)
             if annotate:
                 annotate_file(hit, context)
             hits.append(hit)
@@ -338,6 +339,7 @@ class RootScan:
 class LibraryScan:
     roots: List[RootScan] = field(default_factory=list)
     loose: List[LooseArchive] = field(default_factory=list)
+    identity: Optional[object] = None   # set by record_library_scan: mangalist.identity.moves.IdentityReport
 
     @property
     def entries(self) -> List[MangaEntry]:
@@ -396,30 +398,47 @@ def scan_library(
 
 
 def record_library_scan(db, result: LibraryScan) -> List[tuple]:
-    """Write a :class:`LibraryScan` into the database: series rows (see ``Store.record_scan``) and every
-    archive's units (``units`` table, see ``Store.sync_units``).
+    """Write a :class:`LibraryScan` into the database: series rows (see ``Store.record_scan``), the archive rows
+    with move detection and series carry-over across all roots (:mod:`mangalist.identity`), and every
+    archive's units (``units`` table, see ``Store.sync_units``); then MangaPixer's pending ``carriedFrom``
+    pairs (when a MangaPixer source is set up).
 
     Each series' stored "volumes or chapters?" answer is applied to its entry first (its files are
     re-parsed in place when the scan used another answer, e.g. a folder renamed since the answer was
     given), so the entries shown and the units stored agree. Units of archives that are gone are
     deleted, as are the units of series folders that disappeared.
 
-    Returns ``(old folder, new folder)`` for every series folder recognised as renamed (its row and
-    MangaUpdates link moved with it). Roots that failed to scan are left untouched (their series are
-    not marked missing just because a share was offline).
+    Returns ``(old folder, new folder)`` for every series folder recognised as renamed or moved (its row,
+    MangaUpdates link, kind answer and examined mark moved with it); the full report is set as
+    ``result.identity``. Roots that failed to scan are left untouched (their series and archives are not
+    marked missing just because a share was offline).
     """
-    from .store.series import link_key, seen_from_entries
+    from .identity.mangapixer import apply_pending
+    from .identity.moves import record_archives
+    from .store.series import seen_from_entries
 
     renamed: List[tuple] = []
-    for rs in result.roots:
-        if rs.error or rs.root_id is None:
-            continue
-        rec = db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries))
-        renamed.extend((Path(link_key(rs.folder, old)), Path(link_key(rs.folder, new))) for old, new in rec.relinked)
+    scanned = [rs for rs in result.roots if not rs.error and rs.root_id is not None]
+    for rs in scanned:
+        db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries))
+    try:
+        report = record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in scanned])
+        result.identity = report
+        renamed.extend(report.renamed)
+    except Exception:  # noqa: BLE001 - the series rows are recorded; identity is tried again next scan
+        _log.warning("Recording the archives (series identity) failed", exc_info=True)
+    for rs in scanned:
         try:
             _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None))
         except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
             _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
+    try:
+        carried = apply_pending(db)
+        renamed.extend((Path(c.old_folder), Path(c.new_folder)) for c in carried if c.carried)
+        if result.identity is not None:
+            result.identity.carries.extend(carried)
+    except Exception:  # noqa: BLE001
+        _log.warning("Applying MangaPixer's carriedFrom pairs failed", exc_info=True)
     return renamed
 
 
