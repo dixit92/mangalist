@@ -807,7 +807,12 @@ class MainWindow(QMainWindow):
         """Series data moved to *renamed* folders (``(old, new)``) outside a scan (re-attach, background
         carry-over, MangaPixer): reload their MangaUpdates data, examined mark and kind answer in the table."""
         self._reload_examined()
-        targets = {str(new) for _, new in renamed or ()}
+        moved = {str(old): str(new) for old, new in renamed or ()}
+        if any(p in moved for p in self._cfg.get("examined", [])):
+            # A settings save from this window may have raced the database's move: apply it here too.
+            self._cfg["examined"] = sorted({moved.get(p, p) for p in self._cfg.get("examined", [])})
+            config.save(self._cfg)
+        targets = set(moved.values())
         examined = set(self._cfg.get("examined", []))
         entries = [self._model.entry_at(r) for r in range(self._model.rowCount())]
         if not entries:
