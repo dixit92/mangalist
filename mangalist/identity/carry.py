@@ -375,6 +375,25 @@ def forget(db, missing_id: int) -> bool:
     return True
 
 
+def last_carry_id(db) -> int:
+    """The id of the newest ``series_carries`` row (0 = none); pair with :func:`carries_since`."""
+    with db.connect() as con:
+        return int(con.execute("SELECT COALESCE(MAX(id), 0) FROM series_carries").fetchone()[0])
+
+
+def carries_since(db, after_id: int) -> List[tuple]:
+    """``(old folder, new folder)`` of every carry recorded after *after_id* that moved something (e.g. by a
+    MangaPixer sync run from a dialog)."""
+    with db.connect() as con:
+        dirs = root_dirs(con)
+        out = []
+        for r in con.execute("SELECT * FROM series_carries WHERE id > ? ORDER BY id", (after_id,)):
+            if json.loads(r["moved"] or "[]"):
+                out.append((link_key(dirs.get(r["from_root_id"], Path(".")), r["from_path"]),
+                            link_key(dirs.get(r["to_root_id"], Path(".")), r["to_path"])))
+    return out
+
+
 __all__ = ["MIN_MOVED_SHARE", "CarryResult", "MissingSeries", "LiveSeries", "ReattachError", "map_target", "carry",
            "carry_moved_series", "missing_series", "missing_count", "live_series", "reattach", "forget",
-           "root_dirs"]
+           "root_dirs", "last_carry_id", "carries_since"]
