@@ -7,6 +7,18 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Series keep their identity when folders move:** MangaList now recognises a series folder that was renamed or moved - within
+  a root or to another root, also when chapters were added or removed meanwhile - by its archives (MangaPixer's method: each
+  archive gets a content signature, and a folder that received at least 80% of a vanished folder's archives is the same series).
+  The MangaUpdates link, the Behind override, the "volumes or chapters?" answer and the examined mark move with it; a folder's own
+  data is never overwritten. With MangaPixer connected, its own move detection is used too.
+- **Missing series:** a series folder that vanished and could not be recognised (an empty folder, or anything ambiguous) is listed
+  under **Missing (n)**, where you re-attach it to its new folder or forget it. Nothing is deleted on its own.
+- Archive signatures are computed in the background after a scan (at most 128 KiB read per archive, once; afterwards only new or
+  changed files). **On the first scan after the upgrade nothing is signed yet:** a folder renamed before then shows under Missing
+  instead of being recognised.
+- The headless runner now records its rescans like the window does (stored units, your "volumes or chapters?" answers, moves).
+
 - **MangaPixer as a source** (MangaPixer 1.33.0 or later): toolbar **MangaPixer...** - the server
   address and an API token (MangaPixer Administration > API tokens), a connection test, and each root
   mapped to a MangaPixer library automatically by its folder names (with a manual override). A folder

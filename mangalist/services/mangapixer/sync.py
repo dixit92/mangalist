@@ -5,7 +5,8 @@
 - **Incremental sync**: ``updatedSince`` = the FIRST page's ``serverTime`` kept from the last complete
   sync (MangaPixer's clock, never ours). Inclusive, so items may repeat: every item is an upsert.
   ``removed`` (first page) is applied before that page's items. An item with ``carriedFrom`` re-keys the
-  old node's row instead of a remove + add.
+  old node's row instead of a remove + add; the old node's trail is kept first (``mangapixer_carries``) so a
+  missing MangaList series can follow it (:mod:`mangalist.identity.mangapixer`, applied after the sync).
 - The kept ``serverTime`` only moves after the last page arrived, so an interrupted sync simply
   repeats from the previous time.
 - Only ``nodeKind == "folder"`` items are kept (MangaList is series-only, A6); archive items are
@@ -63,13 +64,20 @@ class SyncResult:
     libraries: List[LibrarySync] = field(default_factory=list)
     token_rejected: bool = False
     mappings: Dict[int, Any] = field(default_factory=dict)
+    carried: List[Any] = field(default_factory=list)   # mangalist.identity.carry.CarryResult (carriedFrom)
+
+    @property
+    def renamed(self) -> List[Tuple[Any, Any]]:
+        """``(old folder, new folder)`` of the MangaList series that followed MangaPixer's carriedFrom."""
+        return [(c.old_folder, c.new_folder) for c in self.carried if c.carried]
 
     def summary(self) -> Dict[str, Any]:
         return {"libraries": [{"id": s.library_id, "name": s.name, "mode": s.mode, "items": s.upserted,
                                "removed": s.removed, "pruned": s.pruned, "rekeyed": len(s.rekeyed),
                                "archives_dropped": s.archives_dropped, "error": s.error}
                               for s in self.libraries],
-                "token_rejected": self.token_rejected}
+                "token_rejected": self.token_rejected,
+                "series_carried": sum(1 for c in self.carried if c.carried)}
 
 
 def is_folder(item: Dict[str, Any]) -> bool:
@@ -127,7 +135,10 @@ def _run(cache, client, library, since, out: LibrarySync, include, limit, progre
         folders = [i for i in page.items if is_folder(i)]
         out.archives_dropped += len(page.items) - len(folders)
         removed = [str(r["nodeId"]) for r in page.removed] if since else []
+        carries = _carried_trails(cache, library.id, folders)
         applied = cache.apply_page(library.id, removed, folders)
+        if carries:
+            _record_carries(cache, library.id, carries)
         out.upserted += applied.upserted
         out.removed += applied.removed
         out.rekeyed.extend(applied.rekeyed)
@@ -140,6 +151,40 @@ def _run(cache, client, library, since, out: LibrarySync, include, limit, progre
         out.pruned = cache.keep_only(library.id, seen)
     if not out.server_time:
         raise mpc.ServerError("the export's first page had no serverTime")
+
+
+def _carried_trails(cache: MangaPixerCache, library_id: str, folders) -> List[Tuple[str, str, List[str], List[str]]]:
+    """``(old nodeId, new nodeId, old trail, new trail)`` for every item with ``carriedFrom`` whose old node is
+    still in the cache - read BEFORE the page re-keys the old row away (series identity, :mod:`mangalist.identity`)."""
+    out = []
+    for item in folders:
+        old, new = item.get("carriedFrom"), str(item["nodeId"])
+        if not old or str(old) == new:
+            continue
+        prev = cache.item(library_id, str(old))
+        if prev is not None and isinstance(prev.get("trail"), list):
+            out.append((str(old), new, [str(p) for p in prev["trail"]], [str(p) for p in (item.get("trail") or [])]))
+    return out
+
+
+def _record_carries(cache: MangaPixerCache, library_id: str, carries) -> None:
+    try:
+        from ...identity.mangapixer import record_carries
+
+        record_carries(cache.store, library_id, carries)
+    except Exception:  # noqa: BLE001 - the sync itself must not fail on the identity layer
+        _log.warning("MangaPixer: keeping the carriedFrom pairs failed", exc_info=True)
+
+
+def _apply_carries(cache: MangaPixerCache, result: "SyncResult") -> None:
+    """MangaList series whose folder MangaPixer carried (``carriedFrom``) follow it, when MangaList already
+    sees the old folder missing and the new one live (else the pair waits for MangaList's next scan)."""
+    try:
+        from ...identity.mangapixer import apply_pending
+
+        result.carried = apply_pending(cache.store)
+    except Exception:  # noqa: BLE001
+        _log.warning("MangaPixer: applying the carriedFrom pairs to MangaList's series failed", exc_info=True)
 
 
 def sync_all(cache: MangaPixerCache, client: Optional[mpc.MangaPixerClient] = None, force_full: bool = False,
@@ -218,6 +263,7 @@ def sync_all(cache: MangaPixerCache, client: Optional[mpc.MangaPixerClient] = No
             result.mappings = refresh_auto_mappings(cache, list_series=list_series)
         except Exception:  # noqa: BLE001 - a mapping problem must not lose the synced data
             _log.exception("MangaPixer: automatic mapping failed")
+        _apply_carries(cache, result)
         n = len(result.libraries)
         if failed:
             result.status = "error"

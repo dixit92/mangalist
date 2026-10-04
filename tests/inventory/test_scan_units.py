@@ -190,6 +190,9 @@ def test_the_answer_follows_a_renamed_folder(db, library):
     root = db.add_root(str(library))
     _scan(db)
     db.set_series_kind(root.id, "Old Name", "volumes")
+    from mangalist.identity.backfill import backfill_signatures
+
+    backfill_signatures(db, per_file_delay=0)            # the archives are signed before the rename
     (library / "Old Name").rename(library / "New Name")
     result = _scan(db)
     e = _entry(result, "New Name")

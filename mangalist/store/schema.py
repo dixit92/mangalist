@@ -22,6 +22,9 @@ ORIGIN_HINTS = ("manga", "manhwa", "webcomic")  # or None: no hint
 ENFORCE_NAMING = ("off", "ask", "automatic")
 ENFORCE_NAMING_DEFAULT = "ask"  # Design Decisions C2 (owner: ask by default)
 SERIES_STATUS = ("present", "missing")
+ARCHIVE_STATUS = ("present", "missing")
+ARCHIVE_MOVE_HOW = ("scan", "pairing", "journal")            # how an archive move was recognised
+SERIES_CARRY_HOW = ("archives", "mangapixer", "manual", "fingerprint")
 UNIT_KINDS = ("volume", "chapter", "extra", "oneshot", "unknown")
 SERIES_KIND_HINTS = ("volumes", "chapters")  # or None: not answered yet (C12)
 LEDGER_STATUS = ("queued", "dispatched", "completed", "failed", "cancelled")
@@ -252,11 +255,85 @@ ALTER TABLE units  ADD COLUMN num_from  TEXT;          -- kind 'unknown': the ba
 ALTER TABLE units  ADD COLUMN num_to    TEXT;
 """
 
+# Series identity: one row per archive (MangaPixer's v1 content signature, filled by a background backfill),
+# the archive moves recognised, the series carry-overs, and MangaPixer's carriedFrom pairs
+# (mangalist.store.archives, mangalist.identity). The series fingerprint column stays (legacy re-link only).
+_V4_IDENTITY = """
+CREATE TABLE IF NOT EXISTS archives (
+    id              INTEGER PRIMARY KEY,
+    root_id         INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+    series_id       INTEGER REFERENCES series(id) ON DELETE SET NULL,
+    rel_path        TEXT    NOT NULL,                 -- root-relative, '/' separators
+    size            INTEGER NOT NULL,
+    mtime_ns        INTEGER NOT NULL,
+    signature       TEXT,                             -- v1:<len>:<sha256>; NULL until signed or after a change
+    status          TEXT    NOT NULL DEFAULT 'present', -- present | missing
+    first_seen_at   TEXT    NOT NULL,
+    last_seen_at    TEXT    NOT NULL,
+    missing_since   TEXT,
+    first_seen_scan INTEGER NOT NULL DEFAULT 0,       -- scan revision (meta 'identity.scan') that first saw it
+    last_seen_scan  INTEGER NOT NULL DEFAULT 0,       -- ... and last saw it present
+    UNIQUE (root_id, rel_path)
+);
+CREATE INDEX IF NOT EXISTS archives_by_series ON archives (series_id);
+CREATE INDEX IF NOT EXISTS archives_by_size ON archives (size);
+CREATE INDEX IF NOT EXISTS archives_by_signature ON archives (signature);
+CREATE INDEX IF NOT EXISTS archives_by_status ON archives (status, signature);
+
+-- Archive moves recognised (scan / after-the-fact pairing / journal): the ledger series carry-over reads.
+CREATE TABLE IF NOT EXISTS archive_moves (
+    id              INTEGER PRIMARY KEY,
+    archive_id      INTEGER NOT NULL REFERENCES archives(id) ON DELETE CASCADE,
+    from_series_id  INTEGER,                          -- no foreign key: kept after a series row is gone
+    to_series_id    INTEGER,
+    from_root_id    INTEGER,
+    from_path       TEXT    NOT NULL,
+    to_root_id      INTEGER,
+    to_path         TEXT    NOT NULL,
+    how             TEXT    NOT NULL,                 -- scan | pairing | journal
+    scan            INTEGER,
+    at              TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS archive_moves_by_from ON archive_moves (from_series_id);
+
+-- A vanished series' data carried to a live folder (or re-attached / kept), for the record.
+CREATE TABLE IF NOT EXISTS series_carries (
+    id              INTEGER PRIMARY KEY,
+    from_series_id  INTEGER,
+    to_series_id    INTEGER,
+    from_root_id    INTEGER,
+    from_path       TEXT,
+    to_root_id      INTEGER,
+    to_path         TEXT,
+    how             TEXT    NOT NULL,                 -- archives | mangapixer | manual | fingerprint
+    moved           TEXT    NOT NULL DEFAULT '[]',    -- JSON: what moved (row, link, kind, examined)
+    kept            TEXT    NOT NULL DEFAULT '[]',    -- JSON: what stayed on the old row (the target had its own)
+    at              TEXT    NOT NULL
+);
+
+-- MangaPixer's carriedFrom pairs as a sync saw them. The old node's item row is re-keyed away by the sync,
+-- so its trail is kept here until a MangaList series can be carried (or the window ends).
+CREATE TABLE IF NOT EXISTS mangapixer_carries (
+    library_id   TEXT    NOT NULL,
+    old_node_id  TEXT    NOT NULL,
+    new_node_id  TEXT    NOT NULL,
+    old_trail    TEXT    NOT NULL,                    -- JSON array
+    new_trail    TEXT,                                -- JSON array (the item's trail when seen)
+    seen_at      TEXT    NOT NULL,
+    applied_at   TEXT,
+    outcome      TEXT,                                -- NULL = pending | carried | kept | nothing
+    PRIMARY KEY (library_id, old_node_id)
+);
+
+ALTER TABLE series ADD COLUMN missing_since TEXT;
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
     (2, _V2_MANGAPIXER),
     (3, _V3_INVENTORY),
+    (4, _V4_IDENTITY),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
