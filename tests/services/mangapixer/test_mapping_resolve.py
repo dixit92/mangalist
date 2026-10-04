@@ -158,3 +158,28 @@ def test_resolver_over_the_contract_sample(cache, db, tmp_path):
     assert res["Shonen/Synthetic Quest"].item["volumes"]["items"][2]["chapters"]["to"] == "24.5"
     assert res["Misc/Something"].link_state == "DontMatch" and res["Misc/Something"].inherited
     assert res["Doujin/Synthetic Circle - Short Story"] is None       # archive items never count
+
+
+def test_collection_about_and_unknown_states_stop_inheritance(cache, db, tmp_path):
+    # MangaPixer 1.34.0: a CollectionAbout folder (fan works about a series) stops inheritance like DontMatch; a
+    # state MangaList does not know does too (the contract's Versioning rule).
+    sample = load_fixture()
+    from mangalist.services.mangapixer.sync import is_folder
+
+    cache.save_libraries([_Lib("lib0manga", "Manga")])
+    items = [i for i in sample["items"] if is_folder(i)]
+    future = dict(items[0], nodeId="n0099", trail=["Shonen", "Future"], link={"state": "SomethingNew"})
+    cache.apply_page("lib0manga", [], items + [future])
+    root = add_root_with_series(db, tmp_path, "Manga", ["Shonen/Synthetic Quest", "Doujin/Synthetic Quest Fan Works/Circle A",
+                                                        "Shonen/Future/Part 1", "Misc/Something"])
+    mp_map.refresh_auto_mappings(cache)
+    res = Resolver(cache).resolve_many(root.id, [s.rel_path for s in db.list_series(root.id)])
+    about = res["Doujin/Synthetic Quest Fan Works/Circle A"]
+    assert about.link_state == "CollectionAbout" and about.inherited
+    assert res["Shonen/Future/Part 1"].link_state == "SomethingNew" and res["Shonen/Future/Part 1"].inherited
+
+    from mangalist.knowledge import from_mangapixer_item
+    k = from_mangapixer_item(about.item)
+    assert k.not_a_series and k.not_a_series_reason == "Collection about Synthetic Quest"
+    assert from_mangapixer_item(res["Shonen/Future/Part 1"].item).not_a_series
+    assert not from_mangapixer_item(res["Shonen/Synthetic Quest"].item).not_a_series

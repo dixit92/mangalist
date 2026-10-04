@@ -7,6 +7,14 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **MangaPixer 1.34.0:** a folder MangaPixer marks as a **collection about** a series (fan works such as doujinshi) shows as
+  "Collection about <series>" and is not treated as that series - no Behind, missing or upgrade numbers, never matched by
+  MangaList, and nothing below it inherits the series. A link state MangaList does not know yet is handled the same way
+  ("not a series"), so a future MangaPixer never breaks the sync. Folders set to Don't match in MangaPixer show as "Not a
+  series" too.
+- For a folder MangaPixer knows, the **MU Title, Licensed, Behind and Completed** columns now show MangaPixer's data (they used
+  to show MangaList's own older match, if it had one), and stay empty when MangaPixer says it is not a series.
+
 - **MangaPixer as a source** (MangaPixer 1.33.0 or later): toolbar **MangaPixer...** - the server
   address and an API token (MangaPixer Administration > API tokens), a connection test, and each root
   mapped to a MangaPixer library automatically by its folder names (with a manual override). A folder

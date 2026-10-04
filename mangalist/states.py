@@ -71,6 +71,7 @@ class State(str, Enum):
     UP_TO_DATE = "Up to date"
     COMPLETE = "Complete"
     CANT_TELL = "Can't tell"               # a folder with files, nothing to compare them with
+    NOT_A_SERIES = "Not a series"          # MangaPixer: DontMatch, CollectionAbout or an unknown link state
 
     @property
     def is_wanted(self) -> bool:
@@ -83,7 +84,7 @@ MISSING_STATES = frozenset({State.MISSING_VOLUMES, State.MISSING_CHAPTERS})
 STATE_ORDER: Tuple[State, ...] = (
     State.WANTED_OFFICIAL, State.WANTED_AWAITING, State.WANTED_SCANLATION, State.WANTED,
     State.MISSING_VOLUMES, State.MISSING_CHAPTERS, State.UPGRADE,
-    State.UP_TO_DATE, State.COMPLETE, State.CANT_TELL,
+    State.UP_TO_DATE, State.COMPLETE, State.CANT_TELL, State.NOT_A_SERIES,
 )
 
 # Needs-attention reasons.
@@ -478,6 +479,11 @@ def compute_state(
     """
     today = today or _dt.date.today()
     k = knowledge
+    if k is not None and k.not_a_series:
+        # MangaPixer says this folder is not a series (DontMatch, CollectionAbout, or a link state this build does
+        # not know): no numbers, no gaps, not wanted even when empty, nothing to review.
+        return SeriesState(state=State.NOT_A_SERIES, reasons=(k.not_a_series_reason,), source=k.source,
+                           rename_pending=rename_pending)
     held = _held(inventory, k) if inventory is not None else _held(InventorySnapshot(), k)
 
     attention: List[str] = []

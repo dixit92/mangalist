@@ -185,6 +185,59 @@
       "nodeKind": "folder",
       "carriedFrom": null,
       "trail": [
+        "Doujin",
+        "Synthetic Quest Fan Works"
+      ],
+      "updatedAt": "2026-10-03T12:00:00.000Z",
+      "link": {
+        "state": "CollectionAbout",
+        "method": "search",
+        "score": null,
+        "updatedAt": "2026-09-28T12:00:00.000Z"
+      },
+      "record": {
+        "provider": "mangaupdates",
+        "externalId": "10000000001",
+        "siteUrl": "https://www.mangaupdates.com/series/10000000001/sample",
+        "title": "Synthetic Quest",
+        "altTitles": [
+          "Synthetic Quest: The Journey",
+          "Shinsetsu Kuesuto"
+        ],
+        "type": "Manga",
+        "originStatus": "Ongoing",
+        "originVolumes": 5,
+        "latestChapter": "41",
+        "totalChapters": null,
+        "statusText": "5 Volumes (Ongoing)",
+        "licensedEn": true,
+        "translationComplete": false,
+        "completedInOrigin": false,
+        "englishPublishers": [
+          {
+            "name": "Synthetic Press",
+            "volumes": 3,
+            "chapters": null,
+            "status": "Ongoing",
+            "omnibus": false
+          }
+        ],
+        "fetchedAt": "2026-09-30T12:00:00.000Z"
+      },
+      "companions": {
+        "mangadex": null,
+        "anilist": null
+      },
+      "officialLinks": [],
+      "volumes": null,
+      "completion": null,
+      "refresh": null
+    },
+    {
+      "nodeId": "n0013",
+      "nodeKind": "folder",
+      "carriedFrom": null,
+      "trail": [
         "Misc"
       ],
       "updatedAt": "2026-10-03T12:00:00.000Z",
@@ -205,7 +258,7 @@
       "refresh": null
     },
     {
-      "nodeId": "n0013",
+      "nodeId": "n0015",
       "nodeKind": "folder",
       "carriedFrom": "n0007",
       "trail": [
@@ -260,7 +313,7 @@
   ],
   "removed": [
     {
-      "nodeId": "n0012",
+      "nodeId": "n0014",
       "reason": "linkCleared",
       "at": "2026-10-04T12:00:00.000Z"
     }

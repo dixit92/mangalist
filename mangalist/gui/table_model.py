@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
-from ..knowledge import OfficialLink, SeriesKnowledge, from_own_matcher
+from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, from_own_matcher
 from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
@@ -161,7 +161,7 @@ class MangaTableModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(top_left.row(), COL_STATE), self.index(bottom_right.row(), COL_OFFICIAL),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
-    def _evaluate(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink]]]:
+    def _evaluate(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]:
         cached = self._state_cache.get(row)
         if cached is not None:
             return cached
@@ -175,8 +175,8 @@ class MangaTableModel(QAbstractTableModel):
         st = compute_state(inventory, knowledge, folder_empty=e.n_files == 0, needs_kind=self._needs_kind_for(e),
                            behind_override=e.behind_override, today=self._today)
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
-        self._state_cache[row] = (st, links)
-        return st, links
+        self._state_cache[row] = (st, links, knowledge)
+        return st, links, knowledge
 
     def state_at(self, row: int) -> Optional[SeriesState]:
         got = self._evaluate(row)
@@ -185,6 +185,16 @@ class MangaTableModel(QAbstractTableModel):
     def links_at(self, row: int) -> List[OfficialLink]:
         got = self._evaluate(row)
         return list(got[1]) if got else []
+
+    def mu_view(self, row: int):
+        """What the MU Title / Licensed / Behind / Completed columns read for *row*: the entry itself (own
+        matcher), the entry with MangaPixer's values when MangaPixer knows the folder, or None when MangaPixer
+        says it is not a series (those columns stay empty - no stale own-matcher numbers)."""
+        e = self.entry_at(row)
+        got = self._evaluate(row)
+        if e is None or not got:
+            return e
+        return mangapixer_view(e, got[2])
 
     def _rebuild_dupe_map(self) -> None:
         """Build a map of mu_title -> list of row indices with that MU title."""
@@ -338,19 +348,22 @@ class MangaTableModel(QAbstractTableModel):
                 if e.last_modified:
                     return datetime.datetime.fromtimestamp(e.last_modified).strftime("%Y-%m-%d %H:%M")
                 return ""
-            if col == COL_MU_TITLE:
-                if e.mu_title is None:
+            if col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED):
+                v = self.mu_view(index.row())
+                if v is None:
                     return ""
-                prefix = "✔ " if e.mu_confirmed else ""
-                return prefix + e.mu_title
-            if col == COL_LICENSED:
-                if e.licensed is None:
-                    return "" if e.mu_id is None else "…"
-                return "Yes" if e.licensed else "No"
-            if col == COL_BEHIND:
-                return _behind_text(e)
-            if col == COL_COMPLETED:
-                return _completed_text(e)
+                if col == COL_MU_TITLE:
+                    if v.mu_title is None:
+                        return ""
+                    prefix = "✔ " if v.mu_confirmed else ""
+                    return prefix + v.mu_title
+                if col == COL_LICENSED:
+                    if v.licensed is None:
+                        return "" if v.mu_id is None else "…"
+                    return "Yes" if v.licensed else "No"
+                if col == COL_BEHIND:
+                    return _behind_text(v)
+                return _completed_text(v)
             if col == COL_STATE:
                 st = self.state_at(index.row())
                 return _state_text(st) if st else ""
@@ -387,12 +400,16 @@ class MangaTableModel(QAbstractTableModel):
                 tip = match_tooltip(e)
                 if tip is not None:
                     return tip
-            if col == COL_LICENSED and e.licensed is True:
-                return "Licensed in English"
-            if col == COL_BEHIND:
-                return _behind_tooltip(e) or str(e.folder)
-            if col == COL_COMPLETED:
-                return _completed_tooltip(e)
+            if col in (COL_LICENSED, COL_BEHIND, COL_COMPLETED):
+                v = self.mu_view(index.row())
+                if v is None:
+                    st = self.state_at(index.row())
+                    return (st.reasons[0] if st and st.reasons else None)
+                if col == COL_LICENSED:
+                    return "Licensed in English" if v.licensed is True else None
+                if col == COL_BEHIND:
+                    return _behind_tooltip(v) or str(e.folder)
+                return _completed_tooltip(v)
             if col == COL_STATE:
                 st = self.state_at(index.row())
                 return st.tooltip() if st else None
@@ -434,20 +451,23 @@ class MangaTableModel(QAbstractTableModel):
                 return (e.english_title or "").lower()
             if col == COL_MTIME:
                 return e.last_modified
-            if col == COL_MU_TITLE:
-                # Confirmed entries sort before unconfirmed, then alphabetically.
-                prefix = "0" if e.mu_confirmed else "1"
-                return f"{prefix}{(e.mu_title or '').lower()}"
-            if col == COL_LICENSED:
-                if e.licensed is True:
-                    return 1
-                if e.licensed is False:
-                    return 0
-                return -1
-            if col == COL_BEHIND:
-                return _behind_sort(e)
-            if col == COL_COMPLETED:
-                return _completed_sort(e)
+            if col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED):
+                v = self.mu_view(index.row())   # sort what the cells show (MangaPixer's values when it knows the folder)
+                if col == COL_MU_TITLE:
+                    if v is None:
+                        return "2"
+                    # Confirmed entries sort before unconfirmed, then alphabetically.
+                    prefix = "0" if v.mu_confirmed else "1"
+                    return f"{prefix}{(v.mu_title or '').lower()}"
+                if col == COL_LICENSED:
+                    if v is not None and v.licensed is True:
+                        return 1
+                    if v is not None and v.licensed is False:
+                        return 0
+                    return -1
+                if col == COL_BEHIND:
+                    return _behind_sort(v) if v is not None else -1.0
+                return _completed_sort(v) if v is not None else -1
             if col == COL_STATE:
                 st = self.state_at(index.row())
                 # STATE_ORDER rank first, then more missing units first (one number: Qt sorts it).
@@ -466,8 +486,52 @@ class MangaTableModel(QAbstractTableModel):
 
 
 def _state_text(st: SeriesState) -> str:
-    """The state, with its flags: ``Up to date · Upcoming``."""
+    """The state, with its flags: ``Up to date · Upcoming``; for a folder that is not a series, why (e.g.
+    ``Collection about <series>``)."""
+    if st.state == State.NOT_A_SERIES and st.reasons:
+        return st.reasons[0]
     return "  ·  ".join((st.state.value,) + st.flags)
+
+
+class _MangaPixerView:
+    """A MangaEntry seen through MangaPixer's knowledge: the own-matcher fields the old columns read are
+    replaced by MangaPixer's; everything else (files, disk numbers, override) is the entry's."""
+
+    def __init__(self, entry: MangaEntry, fields: dict):
+        self._entry = entry
+        self._fields = fields
+
+    def __getattr__(self, name):
+        if name in self._fields:
+            return self._fields[name]
+        return getattr(self._entry, name)
+
+
+def _f(d) -> Optional[float]:
+    return float(d) if d is not None else None
+
+
+def mangapixer_view(e: MangaEntry, k: Optional[SeriesKnowledge]):
+    """See :meth:`MangaTableModel.mu_view`."""
+    if k is None or k.source != SOURCE_MANGAPIXER:
+        return e
+    if k.not_a_series:
+        return None
+    pub = next((p for p in k.english_publishers if p.volumes is not None or p.chapters is not None),
+               k.english_publishers[0] if k.english_publishers else None)
+    return _MangaPixerView(e, {
+        "mu_id": k.mu_id, "mu_title": k.title, "mu_url": k.mu_url,
+        "mu_confirmed": k.link_state == LINK_CONFIRMED,
+        "licensed": k.licensed_en if k.licensed_en is not None else (True if k.english_publishers else None),
+        "publisher_name": pub.name if pub else None,
+        "publisher_volumes": _f(pub.volumes) if pub else None,
+        "publisher_chapters": _f(pub.chapters) if pub else None,
+        "publisher_status": pub.status if pub else None,
+        "scan_latest_chapter": _f(k.latest_chapter_decimal),
+        "scan_latest_volume": None,
+        "anilist_chapters": _f(k.anilist_chapters), "anilist_volumes": _f(k.anilist_volumes),
+        "completed_in_origin": k.finished_in_origin,
+    })
 
 
 def _official_text(links: List[OfficialLink]) -> str:

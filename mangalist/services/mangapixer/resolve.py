@@ -22,7 +22,8 @@ the folder nor any ancestor has an item. Otherwise a :class:`Resolution`:
 ``record``         ``item["record"]`` when its provider is ``mangaupdates``, else ``None`` (other providers, e.g.
                    ``gcd``, are ignored). Always ``None`` for NeedsReview / DontMatch. Use this, not
                    ``item["record"]``.
-``link_state``     ``Confirmed`` | ``Auto`` | ``NeedsReview`` | ``DontMatch`` (the effective state of the folder).
+``link_state``     ``Confirmed`` | ``Auto`` | ``NeedsReview`` | ``DontMatch`` | ``CollectionAbout`` (MangaPixer 1.34.0)
+                   or a state this build does not know (the effective state of the folder).
 ``inherited``      ``False``: the folder's own item. ``True``: the nearest ancestor's item (franchise subfolders).
 ``source_trail``   the trail of the folder that carries the item (inside the library).
 ``library_id``     the MangaPixer library; ``node_id``: the item's node.
@@ -35,7 +36,9 @@ inheritance: a folder below a DontMatch folder resolves to that DontMatch item (
 ``link_state="DontMatch"``), never to a link further up. Meaning for MangaList (owner decisions):
 Confirmed / Auto -> use the record and fetch nothing itself; NeedsReview -> "Needs review in
 MangaPixer", no own matching; DontMatch -> not matched, never auto-matched by MangaList; ``None`` ->
-MangaList's own matcher.
+MangaList's own matcher. CollectionAbout (a folder of works about a series) and any state this build does not
+know are "not a series" like DontMatch (MangaPixer's docs, Versioning): the nearest item wins, so a folder
+below such a row resolves to it and never inherits a series link from further up.
 
 Archive items are never in the cache (series only), so they never take part. No Qt here.
 """
