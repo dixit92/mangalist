@@ -1,7 +1,9 @@
 """Jobs the headless runner can schedule, and the registry that names them.
 
 - ``rescan``: re-scans every configured library root with the existing scanner (read-only; the
-  owner and other tools keep adding files, so whatever is on disk is simply the new truth).
+  owner and other tools keep adding files, so whatever is on disk is simply the new truth) and records it in
+  the library database like the GUI (series, units, kind answers, archive rows, moves, series carry-over),
+  then signs new archives in the background order (series identity).
 - ``dispatch-batch``: the batched download dispatch. Downloads are phase 3+ and opt-in: the job is
   registered but DISABLED unless downloads are turned on, and even then it only logs for now.
   Nothing is ever dispatched on discovery - only in these scheduled batches.
@@ -144,17 +146,28 @@ class StoreRootsProvider:
     """
 
     def __init__(self, env: Optional[Dict[str, str]] = None,
-                 load_roots: Optional[Callable[[], List[Any]]] = None):
+                 load_roots: Optional[Callable[[], List[Any]]] = None, db: Any = None):
         self._env = env
         self._load_roots = load_roots
+        self._db = db
+
+    def database(self) -> Any:
+        """The library database the roots come from (the rescan records into it), or None when the roots come
+        from a custom loader without one."""
+        if self._db is not None:
+            return self._db
+        if self._load_roots is not None:
+            return None
+        from ..store import get_store
+
+        return get_store()
 
     def roots(self) -> List[Any]:
         env = os.environ if self._env is None else self._env
         loader = self._load_roots
         if loader is None:
-            from ..store import get_store
-
-            loader = lambda: get_store().list_roots()  # noqa: E731
+            db = self.database()
+            loader = lambda: db.list_roots()  # noqa: E731
         try:
             stored = list(loader())
         except Exception:  # noqa: BLE001 - a broken database must not stop the runner
@@ -195,8 +208,14 @@ class ConfigRootsProvider:
 # --- the jobs -----------------------------------------------------------------------------------
 
 def make_rescan(provider: RootsProvider,
-                scan: Optional[Callable[..., list]] = None) -> JobFunc:
-    """A rescan over ``provider.roots()``; ``scan`` defaults to :func:`mangalist.scanner.scan_root`."""
+                scan: Optional[Callable[..., list]] = None, *, backfill: bool = True,
+                backfill_delay: Optional[float] = None) -> JobFunc:
+    """A rescan over ``provider.roots()``; ``scan`` defaults to :func:`mangalist.scanner.scan_root`.
+
+    Roots of the library database (``provider.database()``) are recorded like the GUI records a scan:
+    series rows, units with the stored kind answers, archive rows, move detection and series carry-over
+    across all roots (:func:`mangalist.scanner.record_library_scan`), then the background signature backfill
+    (*backfill*). Plain paths (``MANGALIST_ROOTS`` without a database row) are only scanned."""
 
     def rescan(ctx: JobContext) -> JobResult:
         scan_root = scan
@@ -205,8 +224,11 @@ def make_rescan(provider: RootsProvider,
         roots = provider.roots()
         if not roots:
             return JobResult("skipped", "no library roots configured")
+        db = _database(provider) if scan is None else None
+        known = _known_root_ids(db)
         per_root: List[Dict[str, Any]] = []
         failed = 0
+        recorded = None
 
         def progress(done: int, total: int, name: str) -> None:  # noqa: ARG001
             ctx.check()
@@ -220,11 +242,23 @@ def make_rescan(provider: RootsProvider,
                 per_root.append({"root": str(root), "error": "not a folder"})
                 failed += 1
                 continue
+            record = getattr(spec, "id", None) in known
             # A database root carries exclusions: those paths are never scanned (A5).
             extra = {} if isinstance(spec, (str, os.PathLike)) else {
                 "exclusions": list(getattr(spec, "exclusions", None) or [])}
             try:
-                entries = scan_root(root, progress=progress, **extra)
+                if record:
+                    from ..scanner import LibraryScan, scan_library
+
+                    one = scan_library([spec], progress=progress, db=db)
+                    if one.roots and one.roots[0].error:
+                        raise OSError(one.roots[0].error)
+                    recorded = recorded or LibraryScan()
+                    recorded.roots.extend(one.roots)
+                    recorded.loose.extend(one.loose)
+                    entries = one.entries
+                else:
+                    entries = scan_root(root, progress=progress, **extra)
             except Cancelled:
                 raise
             except Exception as exc:  # noqa: BLE001 - one bad root must not stop the others
@@ -239,12 +273,70 @@ def make_rescan(provider: RootsProvider,
             _log.info("Rescan: %s - %d series, %d archives in %.1f s", root, len(entries), files,
                       seconds)
             per_root.append({"root": str(root), "series": len(entries), "archives": files,
-                             "verdicts": dict(sorted(verdicts.items())), "seconds": seconds})
+                             "verdicts": dict(sorted(verdicts.items())), "seconds": seconds,
+                             "recorded": record})
         ok = len(roots) - failed
         status = "ok" if failed == 0 else "error"
-        return JobResult(status, f"{ok} of {len(roots)} roots scanned", {"roots": per_root})
+        extra_out: Dict[str, Any] = {"roots": per_root}
+        if recorded is not None and db is not None:
+            extra_out["identity"] = _record(db, recorded, ctx, backfill, backfill_delay)
+        return JobResult(status, f"{ok} of {len(roots)} roots scanned", extra_out)
 
     return rescan
+
+
+def _database(provider: RootsProvider) -> Any:
+    getter = getattr(provider, "database", None)
+    if getter is None:
+        return None
+    try:
+        return getter()
+    except Exception:  # noqa: BLE001 - scan without recording
+        _log.warning("Rescan: the library database is not available; scanning only", exc_info=True)
+        return None
+
+
+def _known_root_ids(db: Any) -> set:
+    if db is None:
+        return set()
+    try:
+        return {r.id for r in db.list_roots()}
+    except Exception:  # noqa: BLE001
+        _log.warning("Rescan: could not read the roots; scanning only", exc_info=True)
+        return set()
+
+
+def _record(db: Any, result: Any, ctx: JobContext, backfill: bool, delay: Optional[float]) -> Dict[str, Any]:
+    """Record the scan like the GUI does, then sign archives in the background order (counts for the log)."""
+    from ..scanner import record_library_scan
+
+    out: Dict[str, Any] = {}
+    try:
+        renamed = record_library_scan(db, result)
+    except Exception as exc:  # noqa: BLE001 - the scan itself succeeded
+        _log.exception("Rescan: recording the scan failed")
+        return {"error": str(exc) or type(exc).__name__}
+    rep = getattr(result, "identity", None)
+    out["renamed"] = len(renamed)
+    if rep is not None:
+        out.update({"archives": rep.archives_seen, "new": rep.archives_new, "missing": rep.archives_missing,
+                    "changed": rep.archives_changed, "moves": len(rep.moves), "ambiguous": rep.ambiguous,
+                    "carried": sum(1 for c in rep.carries if c.carried)})
+    if backfill:
+        ctx.check()
+        from ..identity.backfill import DEFAULT_DELAY, backfill_signatures
+
+        try:
+            bf = backfill_signatures(db, per_file_delay=DEFAULT_DELAY if delay is None else delay,
+                                     should_stop=lambda: ctx.stop_requested)
+            out["signatures"] = {"signed": bf.signed, "skipped": bf.skipped, "remaining": bf.remaining,
+                                 "kib_read": bf.bytes_read // 1024, "seconds": bf.seconds,
+                                 "paired": bf.paired, "carried": sum(1 for c in bf.carries if c.carried)}
+        except Exception as exc:  # noqa: BLE001
+            _log.exception("Rescan: the signature backfill failed")
+            out["signatures"] = {"error": str(exc) or type(exc).__name__}
+    _log.info("Rescan recorded: %s", out)
+    return out
 
 
 def make_dispatch(downloads_enabled: bool) -> JobFunc:
