@@ -1,7 +1,8 @@
 """The library database: ONE SQLite file (``mangalist.db``) in the data folder.
 
 Tables: roots + exclusions, series (root-relative path + folder fingerprint + MangaUpdates identity),
-units (the parser's output), links_cache (the old ``mu_cache.db`` rows), ledger (dispatch requests),
+units (the parser's output), archives (one row per archive: path, size, mtime, content signature - the series
+identity of :mod:`mangalist.identity`), links_cache (the old ``mu_cache.db`` rows), ledger (dispatch requests),
 journal (filesystem plans), settings (the old ``config.json``), meta. Schema and migration rules:
 :mod:`mangalist.store.schema`; the one-time import of the old files: :mod:`mangalist.store.migrate`.
 
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from .. import paths
+from .archives import Archive, ArchivesMixin
 from .db import StoreBase, utcnow
 from .exclusions import ExclusionSet, InvalidPattern, normalize_pattern
 from .journal import ContentAndPathChange, Journal, JournalError, Move, Plan, PlanStateError, StepRefused
@@ -40,11 +42,11 @@ __all__ = [
     "Unit", "UnitError", "ExclusionSet", "InvalidPattern", "normalize_pattern", "folder_fingerprint",
     "seen_from_entries", "SCHEMA_VERSION", "utcnow", "Journal", "JournalError", "Move", "Plan", "PlanStateError",
     "StepRefused", "ContentAndPathChange", "RootLock", "LockBusy", "LockError", "LockLost", "LOCK_NAME",
-    "windows_name_problem", "windows_safe_name",
+    "windows_name_problem", "windows_safe_name", "Archive",
 ]
 
 
-class Store(RootsMixin, SeriesMixin, UnitsMixin, SettingsMixin, StoreBase):
+class Store(RootsMixin, SeriesMixin, UnitsMixin, ArchivesMixin, SettingsMixin, StoreBase):
     """The library database at *path*. Old ``mu_cache.db`` / ``config.json`` files are looked for in
     *legacy_dir* (default: the database's folder) and imported once."""
 

@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import ctypes
 import errno
-import hashlib
 import json
 import logging
 import os
@@ -144,18 +143,15 @@ def _is_case_only(src: str, dst: str) -> bool:
 
 
 def content_signature(path: str, mode: str = "stat") -> str:
-    """``stat:<size>:<mtime_ns>`` (cheap, the default) or ``v1:<size>:<sha256 of size + first and last
-    64 KiB>`` (MangaPixer's content signature, ``mode="hash"``)."""
+    """``stat:<size>:<mtime_ns>`` (cheap, the default) or MangaPixer's v1 content signature (``mode="hash"``,
+    :mod:`mangalist.identity.signature`: size + SHA-256 of the length as int64 LE + first / last 64 KiB)."""
     st = os.stat(path)
     if mode == "stat":
         return f"stat:{st.st_size}:{st.st_mtime_ns}"
-    h = hashlib.sha256(str(st.st_size).encode("ascii"))
+    from ..identity.signature import compute
+
     with open(path, "rb") as f:
-        h.update(f.read(SIGNATURE_CHUNK))
-        if st.st_size > SIGNATURE_CHUNK:
-            f.seek(max(SIGNATURE_CHUNK, st.st_size - SIGNATURE_CHUNK))
-            h.update(f.read(SIGNATURE_CHUNK))
-    return f"v1:{st.st_size}:{h.hexdigest()}"
+        return compute(f, st.st_size)
 
 
 _RENAME_NOREPLACE = 1
@@ -194,6 +190,9 @@ def _default_on_moved(store) -> Callable[[str, str, bool], None]:
     def on_moved(src: str, dst: str, is_dir: bool) -> None:
         if is_dir:
             store.relink_folder(src, dst)
+        follow = getattr(store, "follow_journal_move", None)
+        if follow is not None:      # the archive rows follow directly (no move detection needed)
+            follow(src, dst, is_dir)
     return on_moved
 
 

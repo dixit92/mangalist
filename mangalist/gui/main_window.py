@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 from .. import config, mu_cache, store
 from .._version import __version__
 from ..models import MangaEntry
-from ..scanner import LibraryScan, record_library_scan, scan_library
+from ..scanner import LibraryScan, apply_kind_hint, record_library_scan, scan_library
 from ..store import Journal, Root, RootError
 from .detail_panel import DetailPanel
 from .mu_picker import MuPickerDialog
@@ -107,6 +107,33 @@ class ScanWorker(QObject):
             except Exception:  # noqa: BLE001 - the scan itself is still shown
                 _log.warning("Recording the scan in the library database failed", exc_info=True)
         self.finished.emit(result)
+
+
+class SignatureWorker(QObject):
+    """Signs the archives that have no content signature yet, in the background after a scan (a signature
+    must exist BEFORE a file moves for the move to be recognised; :mod:`mangalist.identity.backfill`)."""
+
+    progress = Signal(int, int)
+    finished = Signal(object)  # BackfillResult or None
+
+    def __init__(self, db):
+        super().__init__()
+        self._db = db
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        from ..identity.backfill import backfill_signatures
+
+        try:
+            res = backfill_signatures(self._db, should_stop=lambda: self._stop,
+                                      progress=lambda d, t: self.progress.emit(d, t))
+        except Exception:  # noqa: BLE001 - signatures are an optimisation for the next rename
+            _log.warning("The content signature backfill failed", exc_info=True)
+            res = None
+        self.finished.emit(res)
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +261,8 @@ class MainWindow(QMainWindow):
         self._mu_thread: QThread | None = None
         self._mu_worker: MuWorker | None = None
         self._mu_entries: List[MangaEntry] = []
+        self._sig_thread: QThread | None = None
+        self._sig_worker: SignatureWorker | None = None
 
         # Debounce timer so rapid column-resize events don't thrash config I/O.
         self._col_resize_timer = QTimer(self)
@@ -242,6 +271,7 @@ class MainWindow(QMainWindow):
         self._col_resize_timer.timeout.connect(self._save_column_state)
 
         self._show_roots()
+        self._update_missing_count()
 
     # --- UI construction -------------------------------------------------
 
@@ -306,6 +336,17 @@ class MainWindow(QMainWindow):
         btn_rescan.clicked.connect(self._on_rescan)
         toolbar.addWidget(btn_rescan)
         self._btn_rescan = btn_rescan
+
+        # Missing series (shown only when there are any): re-attach or forget.
+        self._missing_spacer = toolbar.addWidget(_toolbar_spacer(6))
+        btn_missing = self._make_button("Missing (0)")
+        btn_missing.setToolTip("Series whose folder vanished and could not be recognised elsewhere: "
+                               "re-attach them to their new folder, or forget them")
+        btn_missing.clicked.connect(self._on_missing)
+        self._missing_action = toolbar.addWidget(btn_missing)
+        self._btn_missing = btn_missing
+        self._missing_action.setVisible(False)
+        self._missing_spacer.setVisible(False)
 
         toolbar.addSeparator()
 
@@ -446,6 +487,11 @@ class MainWindow(QMainWindow):
         self._progress.setMaximumWidth(200)
         self._progress.setVisible(False)
         sb.addPermanentWidget(self._progress)
+        self._sig_label = QLabel("")
+        self._sig_label.setToolTip("Content signatures (128 KiB read per archive) let MangaList recognise "
+                                   "renamed or moved series; signed in the background after a scan")
+        self._sig_label.setVisible(False)
+        sb.addPermanentWidget(self._sig_label)
 
         # Connect selection (rebind in case it returned None earlier)
         sel = self._table.selectionModel()
@@ -530,11 +576,17 @@ class MainWindow(QMainWindow):
         from ..services.mangapixer import open_cache
         from .mangapixer_dialog import open_mangapixer_dialog
 
+        from ..identity.carry import carries_since, last_carry_id
+
+        before = last_carry_id(self._db)
         open_mangapixer_dialog(self, open_cache(self._db))
         # The connection, the mappings or the synced items may have changed.
         self._mp_resolver = None
         self._mp_items = {}
         self._model.refresh_states()
+        # A sync may have carried missing series along MangaPixer's carriedFrom.
+        self._apply_identity_changes(carries_since(self._db, before))
+        self._update_missing_count()
 
     def _mp_item_for(self, entry: MangaEntry):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
@@ -639,6 +691,7 @@ class MainWindow(QMainWindow):
             renamed = getattr(result, "renamed", [])
         else:  # a plain list of entries
             entries, loose, errors, renamed = list(result), [], [], []
+        self._reload_examined()                     # the scan may have carried marks with series
         if renamed:
             # A renamed series folder keeps its "examined" mark, like its MangaUpdates link.
             moved = {str(old): str(new) for old, new in renamed}
@@ -685,7 +738,7 @@ class MainWindow(QMainWindow):
             for la in loose:
                 _log.info("Not in a series folder: %s", la.path)
         if renamed:
-            text += f"  —  {len(renamed)} renamed folder(s) kept their link"
+            text += f"  —  {len(renamed)} renamed / moved series kept their data"
         if errors:
             text += f"  —  {len(errors)} root(s) not reachable"
             tips.append("Not reachable:")
@@ -694,6 +747,8 @@ class MainWindow(QMainWindow):
         self._status_label.setToolTip("\n".join(tips))
         self._progress.setVisible(False)
         self._mu_entries = list(entries)
+        self._update_missing_count()
+        self._start_signatures()
 
         if self._cfg.get("mu_autostart"):
             self._start_mu_lookup(self._mu_entries)
@@ -707,6 +762,137 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._btn_rescan.setEnabled(True)
+
+    # --- Series identity: missing series, background signatures ----------
+
+    def _update_missing_count(self) -> int:
+        """Show "Missing (N)" in the toolbar when N > 0."""
+        try:
+            from ..identity.carry import missing_count
+
+            n = missing_count(self._db)
+        except Exception:  # noqa: BLE001
+            _log.warning("Could not count the missing series", exc_info=True)
+            n = 0
+        self._btn_missing.setText(f"Missing ({n})")
+        self._missing_action.setVisible(n > 0)
+        self._missing_spacer.setVisible(n > 0)
+        return n
+
+    def _make_missing_dialog(self):
+        from .missing_series_dialog import MissingSeriesDialog
+
+        return MissingSeriesDialog(self._db, self, button_style=self._BUTTON_STYLE)
+
+    def _on_missing(self) -> None:
+        dlg = self._make_missing_dialog()
+        dlg.exec()
+        self._after_missing_dialog(dlg)
+
+    def _after_missing_dialog(self, dlg) -> None:
+        if dlg.changed:
+            self._apply_identity_changes(dlg.renamed, dropped=dlg.forgotten)
+        self._update_missing_count()
+
+    def _reload_examined(self) -> None:
+        """Take the examined marks from the database (carry-over / re-attach / forget move them there)."""
+        try:
+            stored = self._db.get_setting("examined", None)
+        except Exception:  # noqa: BLE001
+            return
+        if isinstance(stored, list):
+            self._cfg["examined"] = [str(p) for p in stored]
+
+    def _apply_identity_changes(self, renamed, dropped=()) -> None:
+        """Series data moved to *renamed* folders (``(old, new)``) outside a scan (re-attach, background
+        carry-over, MangaPixer): reload their MangaUpdates data, examined mark and kind answer in the table."""
+        self._reload_examined()
+        moved = {str(old): str(new) for old, new in renamed or ()}
+        if any(p in moved for p in self._cfg.get("examined", [])):
+            # A settings save from this window may have raced the database's move: apply it here too.
+            self._cfg["examined"] = sorted({moved.get(p, p) for p in self._cfg.get("examined", [])})
+            config.save(self._cfg)
+        targets = set(moved.values())
+        examined = set(self._cfg.get("examined", []))
+        entries = [self._model.entry_at(r) for r in range(self._model.rowCount())]
+        if not entries:
+            return
+        cached_all = mu_cache.load_all()
+        changed = False
+        for e in entries:
+            key = str(e.folder)
+            if e.examined != (key in examined):
+                e.examined = key in examined
+                changed = True
+            if key not in targets:
+                continue
+            cached = cached_all.get(key)
+            if cached:
+                _apply_cache(e, cached)
+            try:
+                located = self._db._locate(e.folder)
+                row = self._db.get_series(*located) if located else None
+                if row is not None and (row.kind_hint or None) != (e.kind_hint or None):
+                    root = self._db.get_root(located[0])
+                    scheme = getattr(root, "naming_scheme", None)
+                    apply_kind_hint(e, row.kind_hint, (scheme,) if isinstance(scheme, str) and scheme.strip() else ())
+            except Exception:  # noqa: BLE001
+                _log.warning("Refreshing %s after a re-attach failed", e.folder, exc_info=True)
+            changed = True
+        if changed:
+            self._mp_resolver = None
+            self._mp_items = {}
+            self._model.set_entries(entries)
+
+    def _start_signatures(self) -> None:
+        """Sign new archives in the background (never blocks the UI; progress in the status bar)."""
+        if self._sig_thread is not None:
+            return
+        try:
+            if self._db.unsigned_count() == 0:
+                return
+        except Exception:  # noqa: BLE001
+            return
+        thread = QThread(self)
+        worker = SignatureWorker(self._db)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_signature_progress)
+        worker.finished.connect(self._on_signatures_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_signature_thread_finished)
+        self._sig_thread = thread
+        self._sig_worker = worker
+        self._sig_label.setText("Signing archives…")
+        self._sig_label.setVisible(True)
+        thread.start()
+
+    def _on_signature_progress(self, done: int, total: int) -> None:
+        self._sig_label.setText(f"Signing archives {done}/{total}")
+
+    def _on_signatures_finished(self, res) -> None:
+        self._sig_label.setVisible(False)
+        if res is None:
+            return
+        carried = res.renamed
+        if carried:
+            self._apply_identity_changes(carried)
+            self._status_label.setText(self._status_label.text() +
+                                       f"  —  {len(carried)} renamed / moved series recognised after signing")
+        self._update_missing_count()
+
+    def _on_signature_thread_finished(self) -> None:
+        self._sig_thread = None
+        self._sig_worker = None
+
+    def _stop_signatures(self, wait_ms: int = 3000) -> None:
+        if self._sig_worker is not None:
+            self._sig_worker.stop()
+        if self._sig_thread is not None:
+            self._sig_thread.quit()
+            self._sig_thread.wait(wait_ms)
 
     # --- MangaUpdates background lookup ----------------------------------
 
@@ -1266,6 +1452,7 @@ class MainWindow(QMainWindow):
     # --- Lifecycle --------------------------------------------------------
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._stop_signatures()
         self._cfg["window"] = {"w": self.width(), "h": self.height()}
         self._save_column_state()
         super().closeEvent(event)

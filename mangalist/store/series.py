@@ -1,5 +1,5 @@
-"""Series rows: root-relative identity, folder fingerprint, MangaUpdates identity, and the re-link of a
-renamed series folder."""
+"""Series rows: root-relative identity, folder fingerprint, MangaUpdates identity, and the journal re-link of a
+moved series folder. A folder renamed or moved by hand is recognised by its archives (:mod:`mangalist.identity`)."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ class Series:
     first_seen_at: str
     last_seen_at: str
     kind_hint: Optional[str] = None   # the owner's "volumes or chapters?" answer (C12): volumes | chapters
+    missing_since: Optional[str] = None
 
 
 @dataclass
@@ -58,7 +59,7 @@ class SeriesSeen:
 @dataclass
 class ScanRecord:
     added: List[str] = field(default_factory=list)
-    relinked: List[Tuple[str, str]] = field(default_factory=list)  # (old rel, new rel)
+    relinked: List[Tuple[str, str]] = field(default_factory=list)  # (old rel, new rel); always empty since schema 4
     missing: List[str] = field(default_factory=list)
 
 
@@ -66,7 +67,8 @@ def _row(r: sqlite3.Row) -> Series:
     return Series(id=r["id"], root_id=r["root_id"], rel_path=r["rel_path"], fingerprint=r["fingerprint"],
                   n_archives=r["n_archives"], mu_id=r["mu_id"], mu_confirmed=bool(r["mu_confirmed"]),
                   status=r["status"], first_seen_at=r["first_seen_at"], last_seen_at=r["last_seen_at"],
-                  kind_hint=r["kind_hint"] if "kind_hint" in r.keys() else None)
+                  kind_hint=r["kind_hint"] if "kind_hint" in r.keys() else None,
+                  missing_since=r["missing_since"] if "missing_since" in r.keys() else None)
 
 
 class SeriesKindError(ValueError):
@@ -110,10 +112,11 @@ class SeriesMixin:
         walked, resolved).
 
         - A known folder: fingerprint / count / last seen refreshed.
-        - A folder that disappeared while exactly one NEW folder with the same fingerprint appeared (and
-          no other missing folder has it): a rename - the row is re-pointed and its MangaUpdates link
-          (links cache) moves to the new folder path, unless the new path already has one.
-        - Other new folders: new rows. Other vanished folders: kept, marked ``missing``.
+        - New folders: new rows. Vanished folders: kept, marked ``missing`` (``missing_since`` set).
+          Whether a vanished series moved is decided by its archives, across all roots
+          (:mod:`mangalist.identity`), after this.
+        - No re-link here any more: the folder fingerprint (the multiset of archive sizes) is still stored,
+          but sizes alone never pair (schema 4 replaced the fingerprint re-link by the archive identity).
         - Every present row takes its MangaUpdates identity (id + confirmed) from the links cache.
         """
         seen = {s.rel_path: s for s in seen}
@@ -123,43 +126,20 @@ class SeriesMixin:
             rows = {r["rel_path"]: _row(r) for r in
                     con.execute("SELECT * FROM series WHERE root_id = ?", (root_id,))}
             gone = [s for rel, s in rows.items() if rel not in seen]
-            new = [s for rel, s in seen.items() if rel not in rows]
-
-            by_fp_gone: Dict[str, List[Series]] = {}
-            for s in gone:
-                if s.fingerprint:
-                    by_fp_gone.setdefault(s.fingerprint, []).append(s)
-            by_fp_new: Dict[str, List[SeriesSeen]] = {}
-            for s in new:
-                if s.fingerprint:
-                    by_fp_new.setdefault(s.fingerprint, []).append(s)
-
-            relinked_new = set()
-            relinked_old = set()
-            for fp, olds in by_fp_gone.items():
-                news = by_fp_new.get(fp, [])
-                if len(olds) == 1 and len(news) == 1:
-                    old, nw = olds[0], news[0]
-                    con.execute("UPDATE series SET rel_path=?, status='present', last_seen_at=? WHERE id=?",
-                                (nw.rel_path, now, old.id))
-                    _rekey_link(con, link_key(root_dir, old.rel_path), link_key(root_dir, nw.rel_path))
-                    rec.relinked.append((old.rel_path, nw.rel_path))
-                    relinked_new.add(nw.rel_path)
-                    relinked_old.add(old.rel_path)
 
             for s in seen.values():
                 if s.rel_path in rows:
-                    con.execute("UPDATE series SET fingerprint=?, n_archives=?, status='present', last_seen_at=?"
-                                " WHERE id=?", (s.fingerprint, s.n_archives, now, rows[s.rel_path].id))
-                elif s.rel_path not in relinked_new:
+                    con.execute("UPDATE series SET fingerprint=?, n_archives=?, status='present', last_seen_at=?,"
+                                " missing_since=NULL WHERE id=?", (s.fingerprint, s.n_archives, now, rows[s.rel_path].id))
+                else:
                     con.execute("INSERT INTO series (root_id, rel_path, fingerprint, n_archives, status,"
                                 " first_seen_at, last_seen_at) VALUES (?,?,?,?, 'present', ?, ?)",
                                 (root_id, s.rel_path, s.fingerprint, s.n_archives, now, now))
                     rec.added.append(s.rel_path)
             for s in gone:
-                if s.rel_path not in relinked_old:
-                    con.execute("UPDATE series SET status='missing' WHERE id=?", (s.id,))
-                    rec.missing.append(s.rel_path)
+                con.execute("UPDATE series SET status='missing', missing_since=COALESCE(missing_since, ?)"
+                            " WHERE id=?", (now, s.id))
+                rec.missing.append(s.rel_path)
 
             links = {r["folder"]: (r["mu_id"], r["mu_confirmed"]) for r in
                      con.execute("SELECT folder, mu_id, mu_confirmed FROM links_cache")}
@@ -211,15 +191,16 @@ class SeriesMixin:
                         (r["mu_id"] if r else None, (1 if r["mu_confirmed"] else 0) if r else 0, root_id, rel))
 
     def relink_folder(self, old_folder, new_folder) -> bool:
-        """A series folder moved (by the journal): re-point its row and its links-cache entry."""
+        """A series folder moved (by the journal): re-point its row (also into another root) and its
+        links-cache entry. The archive rows follow through :meth:`follow_journal_move`."""
         old_loc, new_loc = self._locate(old_folder), self._locate(new_folder)
         moved = False
         with self.connect() as con:
-            if old_loc is not None and new_loc is not None and old_loc[0] == new_loc[0]:
+            if old_loc is not None and new_loc is not None:
                 exists = con.execute("SELECT 1 FROM series WHERE root_id=? AND rel_path=?", new_loc).fetchone()
                 if not exists:
-                    cur = con.execute("UPDATE series SET rel_path=? WHERE root_id=? AND rel_path=?",
-                                      (new_loc[1], old_loc[0], old_loc[1]))
+                    cur = con.execute("UPDATE series SET root_id=?, rel_path=? WHERE root_id=? AND rel_path=?",
+                                      (new_loc[0], new_loc[1], old_loc[0], old_loc[1]))
                     moved = cur.rowcount > 0
             moved = _rekey_link(con, str(old_folder), str(new_folder)) or moved
         return moved

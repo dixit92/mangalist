@@ -1,4 +1,5 @@
-"""Series rows: fingerprints, a renamed series folder keeps its row and its MangaUpdates link."""
+"""Series rows: fingerprints (stored, never used to pair since schema 4), missing rows, MangaUpdates identity,
+the journal re-link. Recognising a folder renamed by hand is tests/identity."""
 
 from __future__ import annotations
 
@@ -32,7 +33,8 @@ def test_new_known_and_missing(db, library):
     assert rows["Series B"].status == "missing"          # kept, not deleted
 
 
-def test_renamed_folder_keeps_row_and_link(db, library):
+def test_a_same_fingerprint_never_relinks_sizes_alone_are_no_evidence(db, library):
+    """Schema 4: the exact size-multiset re-link is gone; the archive identity decides (tests/identity)."""
     root = db.add_root(str(library))
     _scan(db, root, library, ("Old Name", "fp-1", 4), ("Other", "fp-2", 1))
     old_id = db.get_series(root.id, "Old Name").id
@@ -40,35 +42,29 @@ def test_renamed_folder_keeps_row_and_link(db, library):
     assert db.get_series(root.id, "Old Name").mu_id == 42           # identity copied on save
 
     rec = _scan(db, root, library, ("New Name", "fp-1", 4), ("Other", "fp-2", 1))
-    assert rec.relinked == [("Old Name", "New Name")] and not rec.added and not rec.missing
-    moved = db.get_series(root.id, "New Name")
-    assert moved.id == old_id and moved.mu_id == 42 and moved.mu_confirmed
-    assert mu_cache.load_entry(Path(link_key(library, "New Name")))["mu_title"] == "Linked Title"
-    assert mu_cache.load_entry(Path(link_key(library, "Old Name"))) is None
+    assert rec.relinked == [] and rec.added == ["New Name"] and rec.missing == ["Old Name"]
+    old = db.get_series(root.id, "Old Name")
+    assert old.id == old_id and old.status == "missing" and old.missing_since and old.mu_id == 42
+    assert mu_cache.load_entry(Path(link_key(library, "Old Name")))["mu_id"] == 42   # kept on the missing row
+    assert mu_cache.load_entry(Path(link_key(library, "New Name"))) is None
 
 
-def test_ambiguous_fingerprints_are_not_relinked(db, library):
+def test_a_missing_row_that_comes_back_is_present_again(db, library):
     root = db.add_root(str(library))
-    _scan(db, root, library, ("A", "same", 1), ("B", "same", 1))
-    rec = _scan(db, root, library, ("C", "same", 1))
-    assert rec.relinked == [] and rec.added == ["C"] and sorted(rec.missing) == ["A", "B"]
+    _scan(db, root, library, ("A", "fp", 1))
+    _scan(db, root, library)
+    assert db.get_series(root.id, "A").status == "missing"
+    _scan(db, root, library, ("A", "fp", 1))
+    a = db.get_series(root.id, "A")
+    assert a.status == "present" and a.missing_since is None
 
 
-def test_a_relink_never_overwrites_the_new_paths_own_link(db, library):
-    root = db.add_root(str(library))
-    _scan(db, root, library, ("Old", "fp", 1))
-    mu_cache.save_entry(Path(link_key(library, "Old")), 1, "Old link", "", None, mu_confirmed=False)
-    mu_cache.save_entry(Path(link_key(library, "New")), 2, "Own link", "", None, mu_confirmed=False)
-    _scan(db, root, library, ("New", "fp", 1))
-    assert mu_cache.load_entry(Path(link_key(library, "New")))["mu_id"] == 2
-    assert mu_cache.load_entry(Path(link_key(library, "Old")))["mu_id"] == 1
-
-
-def test_empty_folders_have_no_fingerprint_and_never_relink(db, library):
+def test_empty_folders_have_no_fingerprint(db, library):
     root = db.add_root(str(library))
     _scan(db, root, library, ("Wanted A", None, 0))
     rec = _scan(db, root, library, ("Wanted B", None, 0))
     assert rec.relinked == [] and rec.added == ["Wanted B"]
+    assert db.get_series(root.id, "Wanted B").fingerprint is None
 
 
 def test_identity_follows_confirm_and_delete(db, library):
@@ -90,3 +86,15 @@ def test_relink_folder_after_a_journal_move(db, library):
     assert db.relink_folder(library / "Before", library / "After")
     assert db.get_series(root.id, "After").mu_id == 9
     assert mu_cache.load_entry(library / "After")["mu_id"] == 9
+
+
+def test_relink_folder_into_another_root(db, library, tmp_path):
+    other = tmp_path / "library" / "Other"
+    other.mkdir(parents=True)
+    root = db.add_root(str(library))
+    root2 = db.add_root(str(other))
+    _scan(db, root, library, ("Moving", "fp", 1))
+    sid = db.get_series(root.id, "Moving").id
+    assert db.relink_folder(library / "Moving", other / "Moving")
+    moved = db.get_series(root2.id, "Moving")
+    assert moved is not None and moved.id == sid
