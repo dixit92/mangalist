@@ -22,11 +22,12 @@ def test_full_sync_from_the_contract_sample(connected, fake, client_factory):
     res = _sync(connected, client_factory, fake)
     assert res.status == "ok", res.message
     lib = res.libraries[0]
-    assert (lib.mode, lib.upserted, lib.archives_dropped) == ("full", 3, 1)
+    assert (lib.mode, lib.upserted, lib.archives_dropped) == ("full", 4, 1)
     assert "updatedSince" not in fake.requests[-1]["query"]
     rows = {r.node_id: r for r in connected.items("lib0manga")}
-    assert set(rows) == {"n0002", "n0011", "n0013"}            # the archive n0010 is dropped
-    assert rows["n0011"].link_state == "DontMatch"
+    assert set(rows) == {"n0002", "n0011", "n0013", "n0015"}   # the archive n0010 is dropped
+    assert rows["n0011"].link_state == "CollectionAbout"         # new in MangaPixer 1.34.0: stored as is
+    assert rows["n0013"].link_state == "DontMatch"
     # The item JSON is kept exactly as given.
     assert rows["n0002"].item == sample["items"][0]
     assert connected.sync_state("lib0manga").server_time == sample["serverTime"]

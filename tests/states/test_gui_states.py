@@ -14,6 +14,9 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from mangalist.gui.table_model import (  # noqa: E402
     COL_BEHIND,
+    COL_COMPLETED,
+    COL_LICENSED,
+    COL_MU_TITLE,
     COL_GAPS,
     COL_OFFICIAL,
     COL_STATE,
@@ -245,3 +248,19 @@ def test_main_window_uses_mangapixer_for_known_folders_and_skips_their_mu_lookup
     win._start_mu_lookup([entry])
     assert win._mu_thread is None  # no worker started: nothing to fetch
     assert "MangaPixer knows them" in win._status_label.text()
+
+
+def test_old_columns_follow_mangapixer_and_stay_empty_when_not_a_series(model):
+    # "Bravo Chapters" was matched by the own matcher earlier (cached: licensed No, Behind from ch. 5).
+    assert _cell(model, 1, COL_MU_TITLE) == "Bravo Chapters" and _cell(model, 1, COL_LICENSED) == "No"
+    about = from_mangapixer_item(item(link={"state": "CollectionAbout"}))
+    model.set_state_providers(knowledge_for=lambda e: about if e.title == "Bravo Chapters" else None)
+    # MangaPixer: a collection about a series -> no stale own-matcher numbers, the State cell says why.
+    for col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED, COL_GAPS):
+        assert _cell(model, 1, col) == ""
+    assert _cell(model, 1, COL_STATE) == "Collection about Example Quest"
+    # MangaPixer knows the series: the old columns show MangaPixer's record, not the cached own match.
+    known = from_mangapixer_item(item())
+    model.set_state_providers(knowledge_for=lambda e: known if e.title == "Bravo Chapters" else None)
+    assert _cell(model, 1, COL_MU_TITLE) == "✔ Example Quest"
+    assert _cell(model, 1, COL_LICENSED) == "Yes"

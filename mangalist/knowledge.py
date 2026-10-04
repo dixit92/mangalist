@@ -35,6 +35,13 @@ LINK_CONFIRMED = "Confirmed"
 LINK_AUTO = "Auto"
 LINK_NEEDS_REVIEW = "NeedsReview"
 LINK_DONT_MATCH = "DontMatch"
+LINK_COLLECTION_ABOUT = "CollectionAbout"  # MangaPixer 1.34.0: a folder of works ABOUT a series (fan works)
+
+# MangaPixer link states that make a folder a series. Every other state - DontMatch, CollectionAbout and any
+# state MangaList does not know yet - means "not a series": no own matching, no numbers from the record, and
+# it stops inheritance (MangaPixer's docs/metadata-export.md, Versioning, 1.34.0; agreed 2026-10-03).
+MANGAPIXER_SERIES_STATES = frozenset({LINK_CONFIRMED, LINK_AUTO, LINK_NEEDS_REVIEW})
+MANGAPIXER_KNOWN_STATES = MANGAPIXER_SERIES_STATES | {LINK_DONT_MATCH, LINK_COLLECTION_ABOUT}
 LINK_UNMATCHED = "Unmatched"        # own matcher only: looked up, no confident match
 LINK_NOT_A_WORK = "NotAWork"        # own matcher only: the folder is not one work
 LINK_NOT_LOOKED_UP = "NotLookedUp"  # own matcher only: no MangaUpdates lookup yet
@@ -248,6 +255,22 @@ class SeriesKnowledge:
         return self.link_state in (LINK_CONFIRMED, LINK_AUTO) and (self.mu_id is not None or self.title is not None)
 
     @property
+    def not_a_series(self) -> bool:
+        """MangaPixer says this folder is not a series (DontMatch, CollectionAbout or a state MangaList does
+        not know): nothing is computed for it and MangaList never matches it itself."""
+        return self.source == SOURCE_MANGAPIXER and self.link_state not in MANGAPIXER_SERIES_STATES
+
+    @property
+    def not_a_series_reason(self) -> Optional[str]:
+        if not self.not_a_series:
+            return None
+        if self.link_state == LINK_COLLECTION_ABOUT:
+            return f"Collection about {self.title}" if self.title else "Collection about a series"
+        if self.link_state == LINK_DONT_MATCH:
+            return "Don't match (in MangaPixer)"
+        return f"Unknown MangaPixer link state {self.link_state!r} - treated as not a series"
+
+    @property
     def needs_review(self) -> bool:
         return self.link_state == LINK_NEEDS_REVIEW
 
@@ -373,6 +396,13 @@ def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str
     companions = item.get("companions") if isinstance(item.get("companions"), Mapping) else {}
     anilist = companions.get("anilist") if isinstance(companions.get("anilist"), Mapping) else None
     refresh = item.get("refresh") if isinstance(item.get("refresh"), Mapping) else {}
+    if state not in MANGAPIXER_SERIES_STATES:
+        # Not a series: keep only the label (CollectionAbout's record names the series it is about) - never a
+        # number, volume list, completion or link from it.
+        return SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=state,
+                               mu_id=_s(record.get("externalId")) if record else None,
+                               mu_url=_s(record.get("siteUrl")) if record else None,
+                               title=_s(record.get("title")) if record else None)
     rec = record or {}
     return SeriesKnowledge(
         source=SOURCE_MANGAPIXER,

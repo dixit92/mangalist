@@ -274,7 +274,7 @@ def test_cant_tell_without_knowledge_or_numbers():
     s = state(inv(held_chapters=["1"]), own(licensed_en=False))
     assert s.state == State.CANT_TELL and s.needs_attention == ()
     s = state(inv(held_chapters=["1"]), from_mangapixer_item(item(link={"state": "DontMatch"}, record=None)))
-    assert s.state == State.CANT_TELL and "Don't match" in s.reasons[0] and s.needs_attention == ()
+    assert s.state == State.NOT_A_SERIES and "Don't match" in s.reasons[0] and s.needs_attention == ()
 
 
 def test_only_bare_numbers_cannot_be_told_and_need_the_kind():
@@ -373,7 +373,7 @@ def test_sort_key_follows_the_state_order():
     b = state(inv(held_chapters=["1"]), own(licensed_en=False, latest_chapter="5"))
     c = state(inv(held_chapters=["1"]), own(licensed_en=False, latest_chapter="1"))
     assert sorted([c, b, a], key=lambda s: s.sort_key) == [a, b, c]
-    assert STATE_ORDER[0] == State.WANTED_OFFICIAL and STATE_ORDER[-1] == State.CANT_TELL
+    assert STATE_ORDER[0] == State.WANTED_OFFICIAL and STATE_ORDER[-1] == State.NOT_A_SERIES
 
 
 def _hit(name: str, has_volume=False, has_chapter=False) -> FileHit:
@@ -412,3 +412,26 @@ def test_gap_labels_and_sizes():
     assert Gap(GAP_CHAPTER, "3", "8").label == "Ch. 3-8" and Gap(GAP_CHAPTER, "3", "8").size == 6
     assert Gap(GAP_VOLUME, "2").label == "Vol. 2" and Gap(GAP_UPGRADE, "1").label == "Vol. 1"
     assert VolumeInfo("1", "1", "8").has_chapters
+
+
+# --- MangaPixer 1.34.0: CollectionAbout and unknown link states ------------------------------------
+
+def test_collection_about_is_not_a_series_and_uses_no_numbers():
+    # The record is the series the folder is ABOUT: a label only (MangaPixer 1.34.0).
+    k = from_mangapixer_item(item(link={"state": "CollectionAbout"}, companions={"mangadex": None, "anilist": None},
+                                  volumes=None, completion=None, refresh=None, officialLinks=[]))
+    assert k.not_a_series and k.title == "Example Quest"
+    assert k.latest_chapter is None and k.volumes == () and k.completion is None and not k.english_publishers
+    for empty in (False, True):
+        s = state(inv(held_chapters=["1", "2"]) if not empty else inv(), k, folder_empty=empty)
+        assert s.state == State.NOT_A_SERIES and s.reasons == ("Collection about Example Quest",)
+        assert s.gaps == () and s.needs_attention == () and not s.upcoming and s.mangapixer_answer is None
+
+
+def test_an_unknown_link_state_is_not_a_series_and_never_fails():
+    k = from_mangapixer_item(item(link={"state": "SomethingNew"}))
+    assert k.not_a_series and "SomethingNew" in k.not_a_series_reason
+    s = state(inv(held_chapters=["1"]), k)
+    assert s.state == State.NOT_A_SERIES and s.gaps == ()
+    # An empty folder with an unknown state is not "wanted" either.
+    assert state(inv(), k, folder_empty=True).state == State.NOT_A_SERIES
