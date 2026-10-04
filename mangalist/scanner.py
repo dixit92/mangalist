@@ -427,11 +427,6 @@ def record_library_scan(db, result: LibraryScan) -> List[tuple]:
         renamed.extend(report.renamed)
     except Exception:  # noqa: BLE001 - the series rows are recorded; identity is tried again next scan
         _log.warning("Recording the archives (series identity) failed", exc_info=True)
-    for rs in scanned:
-        try:
-            _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None))
-        except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
-            _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
     try:
         carried = apply_pending(db)
         renamed.extend((Path(c.old_folder), Path(c.new_folder)) for c in carried if c.carried)
@@ -439,6 +434,11 @@ def record_library_scan(db, result: LibraryScan) -> List[tuple]:
             result.identity.carries.extend(carried)
     except Exception:  # noqa: BLE001
         _log.warning("Applying MangaPixer's carriedFrom pairs failed", exc_info=True)
+    for rs in scanned:      # last: a carried kind answer is applied to the units right away
+        try:
+            _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None))
+        except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
+            _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
     return renamed
 
 

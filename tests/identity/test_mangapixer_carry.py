@@ -127,3 +127,14 @@ def test_pending_pairs_expire_after_the_move_window(db, library, fake):
     assert apply_pending(db) == []
     with db.connect() as con:
         assert con.execute("SELECT outcome FROM mangapixer_carries").fetchone()["outcome"] == "expired"
+
+
+def test_a_carried_kind_answer_reaches_the_units_in_the_same_scan(db, library, fake):
+    root, cache, old_folder, old_id = _setup(db, library, fake)
+    (library / "Old Title").rename(library / "New Title")
+    _carry_in_mangapixer(fake)
+    sync_all(cache)                                                  # pair waits for MangaList's scan
+    for i in range(3):                                               # bare numbers: the answer decides
+        (library / "New Title" / f"Old Title v{i + 1:02}.cbz").rename(library / "New Title" / f"{i + 1:02}.cbz")
+    scan(db)
+    assert {u.kind for u in db.list_units(old_id)} == {"chapter"}
