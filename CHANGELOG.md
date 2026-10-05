@@ -7,7 +7,7 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
-## [2026.10.3] - 2026-10-04
+## [2026.10.3] - 2026-10-05
 
 The second MangaList release (testing build): phase 1 - knowing what is missing - plus series identity and MangaPixer 1.34.0 support.
 
