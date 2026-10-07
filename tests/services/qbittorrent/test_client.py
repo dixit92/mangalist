@@ -330,3 +330,29 @@ def test_delete_refuses_when_the_server_returns_a_different_torrent(client, qbt,
     with pytest.raises(TorrentNotFound):
         client.delete(HASH_A, delete_files=True)
     assert qbt.deleted == []
+
+
+# --- qBittorrent 5.x answers (the owner's 5.2.4: an empty 204 on a good login) --------------------------------
+
+
+def test_a_v5_login_is_an_empty_204_with_a_port_named_cookie(qbt, client):
+    qbt.v5 = True
+    assert client.version() == qbt.version
+    assert len(qbt.calls("auth/login")) == 1
+
+
+def test_a_v5_refused_login_is_auth_failed_and_never_retried(qbt, conn):
+    from mangalist.downloads.contracts import QbtConnection
+    from mangalist.services.qbittorrent import QbtClient
+    qbt.v5 = True
+    c = QbtClient(QbtConnection(conn.base_url, conn.username, "wrong", conn.verify_tls))
+    for _ in range(2):
+        with pytest.raises(AuthFailed):
+            c.version()
+    assert len(qbt.calls("auth/login")) == 1
+
+
+def test_a_204_login_without_a_session_cookie_is_unexpected(qbt, client):
+    qbt.login_status_override = 204
+    with pytest.raises(UnexpectedResponse, match="no session cookie"):
+        client.version()

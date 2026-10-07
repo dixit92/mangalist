@@ -7,8 +7,9 @@ and those endpoints and fields are the same in both. ``contracts.STOPPED_COMPLET
 Rules:
 
 - **Login.** ``POST auth/login`` with ``Referer`` / ``Origin`` set to the base URL (qBittorrent's CSRF check); the
-  ``SID`` cookie lives in the session. qBittorrent answers HTTP 200 with the body ``Ok.`` or ``Fails.`` (wrong
-  credentials) and HTTP 403 when the address is banned (after repeated failures: one hour). **Wrong credentials
+  session cookie lives in the session. qBittorrent 4.x answers HTTP 200 with the body ``Ok.`` or ``Fails.`` (wrong
+  credentials); 5.x answers a good login with an empty HTTP 204 (and a refused one with 401 or ``Fails.``); HTTP
+  403 means the address is banned (after repeated failures: one hour). **Wrong credentials
   are never retried** - not here, not by a caller - or the ban comes sooner: once a login has failed, this client
   refuses every further request without sending anything (build a new client with new credentials).
 - A 403 on an API call means the session expired: log in again **once** and repeat the call.
@@ -230,19 +231,19 @@ class QbtClient:
                 "qBittorrent refused the login (403): this address is banned after too many failed logins "
                 "(it lasts an hour); wait, or restart qBittorrent")
             raise self._login_failed
-        if status == 401:
-            self._login_failed = AuthFailed("qBittorrent (or a proxy in front of it) refused the login (401)")
-            raise self._login_failed
-        if status != 200:
-            raise UnexpectedResponse(f"qBittorrent answered the login with HTTP {status}", status)
-        if body == "Ok.":
+        if status == 204 or (status == 200 and body == "Ok."):    # 5.x: 204 No Content; 4.x: 200 "Ok."
+            if not self._session.cookies:
+                raise UnexpectedResponse("qBittorrent accepted the login but set no session cookie - is the address "
+                                         "the Web UI's (not a proxy that strips cookies)?", status)
             self._logged_in = True
             return
-        if body == "Fails.":
+        if status == 401 or body == "Fails.":
             self._login_failed = AuthFailed(
                 "qBittorrent refused the user name or password. MangaList does not try again on its own "
                 "(repeated failures get this address banned).")
             raise self._login_failed
+        if status != 200:
+            raise UnexpectedResponse(f"qBittorrent answered the login with HTTP {status}", status)
         raise UnexpectedResponse("the login answer is not qBittorrent's - is the address the Web UI's?", status)
 
     def _call(self, method: str, path: str, params: Optional[Dict[str, Any]] = None,
@@ -276,7 +277,7 @@ class QbtClient:
             raise UnexpectedResponse(f"qBittorrent's answer to {what} is not JSON", resp.status_code) from None
 
     def _ok(self, resp: requests.Response, what: str) -> None:
-        if resp.status_code != 200:
+        if not 200 <= resp.status_code < 300:              # 5.x answers some actions with an empty 2xx
             raise UnexpectedResponse(f"qBittorrent refused {what} (HTTP {resp.status_code})", resp.status_code)
 
     # --- TorrentClient -------------------------------------------------------------------------------
@@ -317,7 +318,7 @@ class QbtClient:
         if not category:
             raise ValueError("add needs a category")
         resp = self._call("POST", "torrents/add", data={"urls": link, "category": category, "autoTMM": "true"})
-        if resp.status_code == 200 and (resp.text or "").strip() == "Fails.":
+        if resp.status_code == 409 or (resp.text or "").strip() == "Fails.":
             raise TorrentRejected("qBittorrent did not add the torrent: the link is not a valid torrent, or it is "
                                   "already in qBittorrent")
         self._ok(resp, "adding the torrent")

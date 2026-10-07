@@ -41,6 +41,7 @@ class FakeQbt:
         self.login_status_override: Optional[int] = None
         self.login_body_override: Optional[str] = None
         self.check_origin = True
+        self.v5 = False                              # qBittorrent 5.x answers: 204 login, 401 refusal, QBT_SID_<port>
         self.fail_with: Dict[str, int] = {}          # path -> status to answer
         self.lock = threading.Lock()
 
@@ -89,11 +90,13 @@ class FakeQbt:
         if form.get("username") == self.username and form.get("password") == self.password:
             sid = secrets.token_hex(16)
             self.sessions.add(sid)
+            if self.v5:
+                return 204, b"", {"Set-Cookie": f"QBT_SID_8080={sid}; HttpOnly; path=/"}
             return 200, (self.login_body_override or "Ok.").encode(), {"Set-Cookie": f"SID={sid}; HttpOnly; path=/"}
         self.failed_logins += 1
         if self.failed_logins >= self.ban_after:
             self.banned = True
-        return 200, b"Fails.", {}
+        return (401, b"Fails.", {}) if self.v5 else (200, b"Fails.", {})
 
     def _json(self, value: Any):
         return 200, json.dumps(value).encode(), {"Content-Type": "application/json"}
@@ -163,7 +166,7 @@ class _Handler(BaseHTTPRequestHandler):
         headers = {k.lower(): v for k, v in self.headers.items()}
         cookie = headers.get("cookie", "")
         headers["cookie_sid"] = next((c.split("=", 1)[1] for c in (x.strip() for x in cookie.split(";"))
-                                      if c.startswith("SID=")), "")
+                                      if c.startswith(("SID=", "QBT_SID_8080="))), "")
         prefix = "/api/v2/"
         if not parts.path.startswith(prefix):
             status, body, extra = 404, b"", {}
