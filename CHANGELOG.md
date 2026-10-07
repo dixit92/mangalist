@@ -7,6 +7,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Split chapters count as chapters:** files numbered as parts of a chapter (`Ch. 2.1` + `Ch. 2.2`) are chapter 2, as
+  MangaPixer reads them - such a folder no longer shows those chapters as missing. A part missing between two others
+  (`4.1` and `4.3`) is listed; a lone `10.5` is still an extra.
 - **Volumes from nyaa, filed for you (Unraid container, opt-in with `MANGALIST_DOWNLOADS=1`):** for a series
   MangaPixer has matched that is licensed in English, **Find volumes on nyaa...** (Wanted panel, row menu) lists
   nyaa's English-translated releases of that series - releases of other series sharing the name are left out -
