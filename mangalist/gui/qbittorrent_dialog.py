@@ -31,6 +31,8 @@ from .downloads_backend import DEFAULT_SAVE_PATH, BackendError, DownloadsBackend
 
 PASSWORD_STORED_HINT = "A password is stored (hidden). Leave empty to keep it."
 PASSWORD_EMPTY_HINT = "qBittorrent Web UI password"
+DOWNLOAD_FOLDER_HELP = ("qBittorrent's own copy while it downloads and seeds - not your library. MangaList links the "
+                        "volumes into the series folder; Remove Completed deletes this copy.")
 REMOVE_COMPLETED_HELP = ("Like Sonarr / Radarr: once qBittorrent has stopped a torrent at its own seed goal and "
                          "MangaList has checked the volumes in your library, MangaList asks qBittorrent to remove "
                          "the torrent and its downloaded copy (only torrents in the \"mangalist\" category).")
@@ -44,6 +46,25 @@ def normalize_url(text: str) -> str:
     if not url.lower().startswith(("http://", "https://")) or len(url.split("://", 1)[1]) == 0:
         raise ValueError("The address must start with http:// or https://")
     return url
+
+
+def _hint(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setStyleSheet("color: #666;")
+    return label
+
+
+def _with_hint(field: QWidget, hint: QLabel) -> QWidget:
+    """A field with its grey explanation right below it, as one form row (a word-wrapped label in a row of its own
+    gets a gap above it from QFormLayout)."""
+    box = QWidget()
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(2)
+    lay.addWidget(field)
+    lay.addWidget(hint)
+    return box
 
 
 class QbittorrentDialog(QDialog):
@@ -80,15 +101,13 @@ class QbittorrentDialog(QDialog):
         form.addRow("", self.tls_check)
         self.save_path_edit = QLineEdit()
         self.save_path_edit.setPlaceholderText(DEFAULT_SAVE_PATH)
-        self.save_path_edit.setToolTip("Where qBittorrent saves the \"mangalist\" category, as qBittorrent sees the "
-                                       "path. It must be on the same mount as your library for hard links.")
-        form.addRow("Save path:", self.save_path_edit)
+        self.save_path_edit.setToolTip("qBittorrent's save path for the \"mangalist\" category, as qBittorrent sees "
+                                       "it. It must be on the same mount as your library for hard links.")
+        self.save_path_help = _hint(DOWNLOAD_FOLDER_HELP)
+        form.addRow("Download folder:", _with_hint(self.save_path_edit, self.save_path_help))
         self.remove_check = QCheckBox("Remove Completed")
-        form.addRow("", self.remove_check)
-        self.remove_help = QLabel(REMOVE_COMPLETED_HELP)
-        self.remove_help.setWordWrap(True)
-        self.remove_help.setStyleSheet("color: #666;")
-        form.addRow("", self.remove_help)
+        self.remove_help = _hint(REMOVE_COMPLETED_HELP)
+        form.addRow("", _with_hint(self.remove_check, self.remove_help))
         outer.addLayout(form)
 
         row = QHBoxLayout()
@@ -131,7 +150,7 @@ class QbittorrentDialog(QDialog):
         """The settings as typed (raises ValueError for an unusable address or an empty save path)."""
         save_path = self.save_path_edit.text().strip()
         if not save_path:
-            raise ValueError("Enter the save path (for example " + DEFAULT_SAVE_PATH + ")")
+            raise ValueError("Enter the download folder (for example " + DEFAULT_SAVE_PATH + ")")
         return replace(self._settings, base_url=normalize_url(self.url_edit.text()),
                        username=self.user_edit.text().strip(), verify_tls=self.tls_check.isChecked(),
                        save_path=save_path, remove_completed=self.remove_check.isChecked())
