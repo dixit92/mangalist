@@ -1,0 +1,103 @@
+"""What the volumes GUI needs from the rest of MangaList, as one small interface.
+
+The dialogs (:mod:`.nyaa_dialog`, :mod:`.qbittorrent_dialog`, :mod:`.downloads_dialog`) and the main window
+talk only to a :class:`DownloadsBackend`; they never import the nyaa / qBittorrent services or the store. The
+shapes that cross it are :mod:`mangalist.downloads.contracts` (``NyaaCandidate``, ``Placement``,
+``DownloadRecord``) plus :class:`QbtSettings` below.
+
+**For the integrator.** Write the real adapter at merge and expose it as
+``mangalist.downloads.adapter.create_backend(db)`` (``db`` is the main window's store); :func:`create_backend`
+imports that and returns None when it does not exist (the volumes GUI then stays hidden). Each method maps to
+one existing piece:
+
+========================================  =======================================================================
+``series_id_for(folder)``                 the store's series row of an absolute series folder (``store.get_series``
+                                          through the root); None when the folder is not scanned. Cheap: it runs on
+                                          the UI thread, for every row of the Wanted panel.
+``placement(series_id)``                  the arrivals lane's layout inference -> ``Placement``.
+``search(titles, missing, held)``         ``VolumeSearch.search`` of the nyaa service (the same signature).
+``send(series_id, candidate, wanted,      add the torrent to qBittorrent in the ``mangalist`` category and create
+ target_dir)``                            the ``DownloadRecord`` (``DownloadStore.create``); returns the record.
+``records(series_id=None)``               ``DownloadStore.for_series`` (or every record, newest last).
+``load_settings()`` / ``save_settings``   the qBittorrent connection (address, user, TLS) and its two settings
+                                          (save path, Remove Completed); the password goes to the secrets table.
+``test_connection(settings, password)``   ``TorrentClient.version()`` against the typed values (a password of None
+                                          means "the stored one").
+========================================  =======================================================================
+
+Every method may block (network, database): the GUI calls them off the UI thread, except ``series_id_for`` and
+the settings getter / setter, which must be quick. A failure the owner should read raises :class:`BackendError`
+with a message that is safe to show (never a password, token or URL with credentials); anything else is shown
+as "unexpected error (TypeName)".
+
+Qt-free on purpose: the GUI test fakes and the adapter need not import PySide6.
+"""
+
+from __future__ import annotations
+
+import importlib
+import logging
+from dataclasses import dataclass
+from typing import Optional, Protocol, Sequence
+
+from ..downloads.contracts import DownloadRecord, NyaaCandidate, Placement, downloads_enabled
+
+_log = logging.getLogger(__name__)
+
+DEFAULT_SAVE_PATH = "/data/appdata/torrents/mangalist"
+ADAPTER_MODULE = "mangalist.downloads.adapter"
+
+
+class BackendError(Exception):
+    """A failure with a message fit to show the owner (no secrets in it)."""
+
+
+@dataclass(frozen=True)
+class QbtSettings:
+    """The qBittorrent settings the dialog edits. The password is not part of it: it is write-only
+    (``has_password`` says one is stored) and travels separately."""
+
+    base_url: str = ""
+    username: str = ""
+    has_password: bool = False
+    verify_tls: bool = True
+    save_path: str = DEFAULT_SAVE_PATH
+    remove_completed: bool = True
+
+
+class DownloadsBackend(Protocol):
+    def series_id_for(self, folder: str) -> Optional[int]: ...
+
+    def placement(self, series_id: int) -> Placement: ...
+
+    def search(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> Sequence[NyaaCandidate]: ...
+
+    def send(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
+             target_dir: str) -> DownloadRecord: ...
+
+    def records(self, series_id: Optional[int] = None) -> Sequence[DownloadRecord]: ...
+
+    def load_settings(self) -> QbtSettings: ...
+
+    def save_settings(self, settings: QbtSettings, password: Optional[str]) -> None:
+        """Store the settings. ``password`` None or '' keeps the stored one."""
+        ...
+
+    def test_connection(self, settings: QbtSettings, password: Optional[str]) -> str:
+        """Log in with the given values (password None or '' = the stored one) and return the client's
+        version text. Raises :class:`BackendError` with a readable reason."""
+        ...
+
+
+def create_backend(db) -> Optional[DownloadsBackend]:
+    """The real backend when downloads are switched on and the adapter exists, else None."""
+    if not downloads_enabled():
+        return None
+    try:
+        module = importlib.import_module(ADAPTER_MODULE)
+    except ModuleNotFoundError as exc:
+        if exc.name != ADAPTER_MODULE:
+            raise                       # the adapter exists but one of its own imports is broken
+        _log.warning("Downloads are switched on but %s is not available; the volumes GUI stays hidden", ADAPTER_MODULE)
+        return None
+    return module.create_backend(db)

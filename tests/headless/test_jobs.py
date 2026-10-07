@@ -53,9 +53,10 @@ def test_default_settings_rescan_on_downloads_off():
     assert s.catch_up is True
     reg = build_registry(s, ListRoots())
     assert s.mangapixer_schedule == DailyAt(3, 15)  # before the rescan
-    assert reg.names() == ["mangapixer-sync", "rescan", "dispatch-batch"]
+    assert reg.names() == ["mangapixer-sync", "rescan", "dispatch-batch", "downloads"]
     assert reg.get("rescan").active
     assert not reg.get("dispatch-batch").enabled
+    assert not reg.get("downloads").enabled and s.downloads_schedule == EveryHours(1)
     # The MangaPixer sync is scheduled by default and skips itself while no server is set up.
     assert [j.name for j in reg.active()] == ["mangapixer-sync", "rescan"]
 
@@ -66,6 +67,14 @@ def test_downloads_are_opt_in():
     reg = build_registry(s, ListRoots())
     assert reg.get("dispatch-batch").active
     assert reg.get("dispatch-batch").schedule == EveryHours(12)
+    assert reg.get("downloads").active and reg.get("downloads").schedule == EveryHours(1)
+
+
+def test_downloads_schedule_is_configurable():
+    s = HeadlessSettings.from_env({"MANGALIST_DOWNLOADS": "1", "MANGALIST_DOWNLOADS_SCHEDULE": "every 3h"})
+    assert build_registry(s, ListRoots()).get("downloads").schedule == EveryHours(3)
+    off = HeadlessSettings.from_env({"MANGALIST_DOWNLOADS": "1", "MANGALIST_DOWNLOADS_SCHEDULE": "off"})
+    assert not build_registry(off, ListRoots()).get("downloads").active
 
 
 def test_rescan_can_be_turned_off():

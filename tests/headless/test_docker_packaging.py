@@ -54,6 +54,8 @@ def test_env_defaults_match_the_runner_defaults():
     assert paths.ENV_DATA_DIR in env
     assert env[settings.ENV_RESCAN] == settings.DEFAULT_RESCAN
     assert env[settings.ENV_DISPATCH] == settings.DEFAULT_DISPATCH
+    assert settings.parse_schedule(env[settings.ENV_DOWNLOADS_SCHEDULE]) == \
+        settings.parse_schedule(settings.DEFAULT_DOWNLOADS_SCHEDULE)
     s = settings.HeadlessSettings.from_env(env)
     assert s.downloads_enabled is False and s.rescan_schedule is not None
 

@@ -68,6 +68,8 @@ ENV \
     MANGALIST_RESCAN_SCHEDULE=daily@03:30 \
     MANGALIST_DOWNLOADS=0 \
     MANGALIST_DISPATCH_SCHEDULE=daily@04:30 \
+    # Volumes MVP (with MANGALIST_DOWNLOADS=1): file finished downloads, remove completed torrents.
+    MANGALIST_DOWNLOADS_SCHEDULE=every:1h \
     MANGALIST_CATCH_UP=1 \
     PYTHONPATH=/opt/mangalist/app \
     PYTHONDONTWRITEBYTECODE=1

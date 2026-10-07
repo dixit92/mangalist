@@ -8,7 +8,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
-from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, from_own_matcher
+from ..knowledge import (LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, fmt_num, from_own_matcher,
+                         to_decimal)
 from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
@@ -185,6 +186,20 @@ class MangaTableModel(QAbstractTableModel):
     def links_at(self, row: int) -> List[OfficialLink]:
         got = self._evaluate(row)
         return list(got[1]) if got else []
+
+    def knowledge_at(self, row: int) -> Optional[SeriesKnowledge]:
+        """The knowledge behind *row*'s state (MangaPixer's or the own matcher's)."""
+        got = self._evaluate(row)
+        return got[2] if got else None
+
+    def held_volumes_at(self, row: int) -> Tuple[str, ...]:
+        """The volume numbers *row*'s folder holds as volume archives (exact decimal strings, ascending)."""
+        e = self.entry_at(row)
+        if e is None:
+            return ()
+        inventory = self._inventory_for(e) or fallback_inventory_from_entry(e)
+        nums = [d for d in (to_decimal(v) for v in inventory.held_volumes) if d is not None]
+        return tuple(fmt_num(d) for d in sorted(set(nums)))
 
     def mu_view(self, row: int):
         """What the MU Title / Licensed / Behind / Completed columns read for *row*: the entry itself (own

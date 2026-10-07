@@ -95,7 +95,7 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
     win = MainWindow()
     try:
         assert win._path_edit.text() == str(lib)
-        assert any(b.text() == "Roots…" for b in win.findChildren(QPushButton))
+        assert any(b.text() == "Roots" for b in win.findChildren(QPushButton))
         db.add_root(str(second))
         win._after_roots_changed()
         assert win._path_edit.text().startswith("2 roots:")

@@ -5,7 +5,9 @@ Guarantees:
 - **Moves only, never deletes.** A step is one ``rename`` on the same filesystem; a move that would cross
   filesystems is refused (no copy + delete), and a step never replaces an existing path (no-replace
   rename where the OS offers it, an existence check otherwise). The only removals are of EMPTY folders
-  the plan itself created, when it is undone (``rmdir`` cannot remove anything that has content).
+  the plan itself created, when it is undone (``rmdir`` cannot remove anything that has content) - and,
+  for link steps only, the extra NAME a step created, on undo (never the last copy), and a link step's own
+  temporary copy (see "Link steps" below).
 - **Write-ahead.** Before a step touches the disk its record is set to ``intent`` (durably committed),
   after it to ``done``; undo uses ``undo_intent`` -> ``undone``.
 - **Crash recovery.** :meth:`Journal.recover` (run on start) looks at every plan left ``applying`` /
@@ -21,6 +23,24 @@ Guarantees:
 - **One writer.** A plan with a ``root_path`` takes that root's ``.mangalist.lock`` while it applies or
   undoes, and every step must lie inside that root. Other tools writing into the library meanwhile is
   normal: a path they took simply makes that step fail (nothing is overwritten).
+
+**Link steps** (``op='link'``, :meth:`Journal.plan_links`; the volumes MVP's arrivals): a step that creates a NEW
+name in the library for a finished download's file. Every guarantee above holds, with these specifics:
+
+- Only the source may lie outside the plan's root (the torrent folder), and only for a link; the destination
+  must lie inside it (a link plan always has a root, so the root lock is always held). The destination is
+  created no-replace, its new folders are Windows-safe and recorded like a move's.
+- ``os.link`` first. When the filesystem cannot hard-link (``EXDEV``, ``EPERM``, ``ENOTSUP``, ...) the file is
+  copied into a temporary name in the destination folder, verified (size + MangaPixer's content signature
+  against the source as planned), then renamed no-replace onto the destination; the step records ``how``
+  (``link`` | ``copy``) and the log warns about the copy (double space until the torrent is removed).
+- The source is never modified, moved or removed; a source that changed since planning fails the step.
+- Write-ahead as for moves. Recovery settles an interrupted link: the destination present and the planned
+  file (same inode as the source, or the same size + signature) -> ``done``; absent -> ``planned``; anything
+  else -> ``failed``, left as is. A temporary copy left by the crash (the step's own name) is removed.
+- Undo removes ONLY the destination name, and only while it is still the file the step made (its recorded
+  inode; for a copy also size + signature) AND the source still holds the same data - so an undo never
+  removes the last copy of anything (e.g. after qBittorrent deleted the torrent's data).
 """
 
 from __future__ import annotations
@@ -30,6 +50,7 @@ import errno
 import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -67,6 +88,14 @@ class Move:
 
 
 @dataclass
+class Link:
+    """A new library name for *src* (a finished download's file) at *dst*."""
+
+    src: Union[str, os.PathLike]
+    dst: Union[str, os.PathLike]
+
+
+@dataclass
 class Step:
     id: int
     plan_id: int
@@ -80,6 +109,8 @@ class Step:
     created_dirs: List[str]
     state: str
     error: Optional[str]
+    how: Optional[str] = None           # a link step: 'link' | 'copy' once made
+    dst_ident: Optional[str] = None     # a link step: the created name's '<dev>:<ino>'
 
 
 @dataclass
@@ -200,10 +231,12 @@ class Journal:
     """Plans of moves recorded in the library database (``journal_plans`` / ``journal_steps``)."""
 
     def __init__(self, store, *, on_moved: Optional[Callable[[str, str, bool], None]] = None,
-                 lock_factory: Callable[[str], RootLock] = RootLock):
+                 lock_factory: Callable[[str], RootLock] = RootLock,
+                 link: Optional[Callable[[str, str], None]] = None):
         self.store = store
         self.on_moved = on_moved if on_moved is not None else _default_on_moved(store)
         self.lock_factory = lock_factory
+        self.link = link if link is not None else os.link  # a link step's hard link (tests inject EXDEV etc.)
 
     # --- reading -----------------------------------------------------------------------------------
 
@@ -218,7 +251,8 @@ class Journal:
                     steps=[Step(id=s["id"], plan_id=s["plan_id"], seq=s["seq"], op=s["op"], src=s["src"],
                                 dst=s["dst"], is_dir=bool(s["is_dir"]), src_size=s["src_size"],
                                 src_signature=s["src_signature"], created_dirs=json.loads(s["created_dirs"] or "[]"),
-                                state=s["state"], error=s["error"]) for s in steps])
+                                state=s["state"], error=s["error"], how=s["how"], dst_ident=s["dst_ident"])
+                           for s in steps])
 
     def list_plans(self, status: Optional[Sequence[str]] = None) -> List[Plan]:
         with self.store.connect() as con:
@@ -302,6 +336,63 @@ class Journal:
                             [(plan_id, i, s, d, 1 if isd else 0, sz, sg, now) for i, s, d, isd, sz, sg in rows])
         return self.get_plan(plan_id)
 
+    def plan_links(self, reason: str, links: Iterable[Union[Link, Tuple]], root_path,
+                   note: Optional[str] = None) -> Plan:
+        """Check *links* (new library names for files that may lie outside the root) and record them as a plan
+        of ``link`` steps. Raises :class:`StepRefused` (nothing recorded) for the first one that is not allowed."""
+        if root_path is None:
+            raise StepRefused("a link plan needs its root (every new name must lie inside it)")
+        root = _norm(root_path)
+        taken: Dict[str, bool] = {}     # destinations and folders the steps before will have created
+        rows = []
+        for i, ln in enumerate(links):
+            if not isinstance(ln, Link):
+                ln = Link(*ln)
+            src, dst = _norm(ln.src), _norm(ln.dst)
+            where = f"step {i + 1} ({src} -> {dst})"
+            if src == dst:
+                raise StepRefused(f"{where}: source and destination are the same")
+            if not _inside(dst, root):
+                raise StepRefused(f"{where}: {dst} is outside the plan's root {root}")
+            if not os.path.isfile(src) or os.path.islink(src):
+                raise StepRefused(f"{where}: the source is not a file")
+            if os.path.lexists(dst) or taken.get(os.path.normcase(dst)):
+                raise StepRefused(f"{where}: the destination exists (a link never replaces anything)")
+            count = 1
+            parent = os.path.dirname(dst)
+            new_dirs = []
+            while parent and not (os.path.isdir(parent) or taken.get(os.path.normcase(parent))) \
+                    and os.path.dirname(parent) != parent:
+                new_dirs.append(parent)
+                count += 1
+                parent = os.path.dirname(parent)
+            lex = _lexical(ln.dst)
+            for _ in range(count):
+                problem = windows_name_problem(os.path.basename(lex))
+                if problem:
+                    raise StepRefused(f"{where}: {os.path.basename(lex)!r}: {problem}")
+                lex = os.path.dirname(lex)
+            try:
+                size = os.stat(src).st_size
+                sig = content_signature(src, "hash")
+            except OSError as exc:
+                raise StepRefused(f"{where}: cannot read the source: {exc}") from None
+            for p in (dst, *new_dirs):
+                taken[os.path.normcase(p)] = True
+            rows.append((i, src, dst, size, sig))
+        if not rows:
+            raise StepRefused("a plan needs at least one link")
+        now = utcnow()
+        with self.store.connect(durable=True) as con:
+            cur = con.execute("INSERT INTO journal_plans (created_at, updated_at, reason, root_path, status, note, host,"
+                              " pid) VALUES (?,?,?,?, 'planned', ?,?,?)",
+                              (now, now, reason, root, note, this_host(), os.getpid()))
+            plan_id = int(cur.lastrowid)
+            con.executemany("INSERT INTO journal_steps (plan_id, seq, op, src, dst, is_dir, src_size, src_signature,"
+                            " state, updated_at) VALUES (?,?, 'link', ?,?, 0, ?,?, 'planned', ?)",
+                            [(plan_id, i, s, d, sz, sg, now) for i, s, d, sz, sg in rows])
+        return self.get_plan(plan_id)
+
     # --- applying ----------------------------------------------------------------------------------
 
     def apply(self, plan_id: int, lock: Optional[RootLock] = None) -> Plan:
@@ -327,6 +418,8 @@ class Journal:
         return self.get_plan(plan_id)
 
     def _apply_step(self, step: Step, held: Optional[RootLock]) -> Optional[str]:
+        if step.op == "link":
+            return self._apply_link(step, held)
         src, dst = step.src, step.dst
         if held is not None:
             try:
@@ -394,6 +487,8 @@ class Journal:
         return self.get_plan(plan_id)
 
     def _undo_step(self, step: Step, held: Optional[RootLock]) -> Optional[str]:
+        if step.op == "link":
+            return self._undo_link(step, held)
         src, dst = step.src, step.dst
         if held is not None:
             try:
@@ -419,18 +514,25 @@ class Journal:
 
     # --- recovery ----------------------------------------------------------------------------------
 
-    def recover(self) -> List[Plan]:
-        """Settle plans a crash left ``applying`` / ``undoing`` (not those of a live process on this host)."""
+    def recover(self, only: Optional[Iterable[int]] = None) -> List[Plan]:
+        """Settle plans a crash left ``applying`` / ``undoing`` (not those of a live process on this host);
+        *only*: just these plan ids (e.g. the arrivals job settles its own plans)."""
         recovered = []
         host = this_host()
+        wanted = None if only is None else {int(i) for i in only}
         with self.store.connect() as con:
             rows = con.execute("SELECT id, host, pid FROM journal_plans WHERE status IN ('applying', 'undoing')"
                                " ORDER BY id").fetchall()
         for r in rows:
+            if wanted is not None and r["id"] not in wanted:
+                continue
             if (r["host"] or "").lower() == host.lower() and r["pid"] != os.getpid() and pid_alive(r["pid"] or 0):
                 continue  # another live process on this machine is working on it
             plan = self.get_plan(r["id"])
             for step in plan.steps:
+                if step.op == "link":
+                    self._recover_link(step)
+                    continue
                 src_there, dst_there = exists_exact(step.src), exists_exact(step.dst)
                 if step.state == "intent":
                     if src_there and not dst_there:
@@ -458,6 +560,161 @@ class Journal:
             _log.warning("Journal plan %d (%s) was interrupted; it can be resumed or undone", plan.id, plan.reason)
             recovered.append(self.get_plan(plan.id))
         return recovered
+
+    # --- link steps --------------------------------------------------------------------------------
+
+    def _apply_link(self, step: Step, held: Optional[RootLock]) -> Optional[str]:
+        src, dst = step.src, step.dst
+        if held is not None:
+            try:
+                held.check()
+            except Exception as exc:  # noqa: BLE001 - LockLost
+                return self._fail(step, f"root lock lost: {exc}")
+        if not os.path.isfile(src):
+            return self._fail(step, "the source is gone")
+        if os.path.lexists(dst):
+            return self._fail(step, "the destination exists now (another tool?); nothing replaced")
+        try:
+            sig = content_signature(src, "hash")
+        except OSError as exc:
+            return self._fail(step, f"cannot read the source: {exc}")
+        if sig != step.src_signature:
+            return self._fail(step, "the source changed since the plan was made; re-plan")
+        missing: List[str] = []
+        parent = os.path.dirname(dst)
+        while parent and not os.path.isdir(parent):
+            missing.append(parent)
+            parent = os.path.dirname(parent)
+        missing.reverse()
+        self._set_step(step, "intent", created_dirs=missing)
+        made: List[str] = []
+        try:
+            for d in missing:
+                os.mkdir(d)
+                made.append(d)
+            how = self._make_link(step)
+        except OSError as exc:
+            for d in reversed(made):
+                _rmdir_if_empty(d)
+            if isinstance(exc, FileExistsError):
+                return self._fail(step, "the destination appeared meanwhile; nothing replaced")
+            return self._fail(step, f"link failed: {exc}")
+        self._set_link_made(step, how, _ident(dst))
+        self._set_step(step, "done", created_dirs=missing)
+        return None
+
+    def _make_link(self, step: Step) -> str:
+        """Create *step.dst* for *step.src*: a hard link, else a verified copy. Returns ``link`` | ``copy``."""
+        src, dst = step.src, step.dst
+        try:
+            self.link(src, dst)
+            return "link"
+        except OSError as exc:
+            if exc.errno not in _COPY_INSTEAD:
+                raise
+            why = exc
+        tmp = _link_temp(step)
+        _remove_own_temp(tmp)
+        try:
+            with open(src, "rb") as fin, open(tmp, "xb") as fout:   # 'x': never over anything
+                shutil.copyfileobj(fin, fout, 1024 * 1024)
+                fout.flush()
+                os.fsync(fout.fileno())
+            try:
+                shutil.copystat(src, tmp)                            # the mtime a link would share
+            except OSError:
+                pass
+            if os.stat(tmp).st_size != step.src_size or content_signature(tmp, "hash") != step.src_signature:
+                raise OSError(errno.EIO, "the copy does not match the source (size / content signature)")
+            rename_noreplace(tmp, dst)
+        except Exception:
+            _remove_own_temp(tmp)
+            raise
+        _log.warning("Plan %d step %d: no hard link possible (%s); COPIED %s -> %s instead (double space until "
+                     "the download is removed)", step.plan_id, step.seq + 1, why.strerror or why, src, dst)
+        return "copy"
+
+    def _link_made(self, step: Step) -> Optional[str]:
+        """How *step.dst* (present) is the planned file: ``link`` (the source's inode), ``copy`` (the planned size
+        and signature), or None (something else)."""
+        if _same_file(step.src, step.dst):
+            return "link"
+        try:
+            if os.path.isfile(step.dst) and os.stat(step.dst).st_size == step.src_size \
+                    and content_signature(step.dst, "hash") == step.src_signature:
+                return "copy"
+        except OSError:
+            pass
+        return None
+
+    def _link_problem(self, step: Step) -> Optional[str]:
+        """Why removing *step.dst* (present) would not be a safe undo, or None."""
+        try:
+            if step.dst_ident is None or _ident(step.dst) != step.dst_ident:
+                return "the library file is not the one this step made (replaced or moved since); not removed"
+            if step.how == "copy":
+                if os.stat(step.dst).st_size != step.src_size \
+                        or content_signature(step.dst, "hash") != step.src_signature:
+                    return "the library copy changed since it was made; not removed"
+                if not os.path.isfile(step.src) or content_signature(step.src, "hash") != step.src_signature:
+                    return ("the download's own file is gone or changed; the library copy is the only one left; "
+                            "not removed")
+            elif not _same_file(step.src, step.dst):
+                return "the download's own name is gone; the library link is the only one left; not removed"
+        except OSError as exc:
+            return f"cannot check the library file: {exc}; not removed"
+        return None
+
+    def _undo_link(self, step: Step, held: Optional[RootLock]) -> Optional[str]:
+        if held is not None:
+            try:
+                held.check()
+            except Exception as exc:  # noqa: BLE001
+                return self._note(step, f"root lock lost: {exc}")
+        if not exists_exact(step.dst):
+            return self._note(step, "the linked file is gone from the library")
+        problem = self._link_problem(step)
+        if problem:
+            return self._note(step, problem)
+        self._set_step(step, "undo_intent")
+        try:
+            os.remove(step.dst)          # this one name only; the data lives on under the source
+        except OSError as exc:
+            self._set_step(step, "done", error=f"undo failed: {exc}")
+            return f"undo failed: {exc}"
+        self._set_step(step, "undone")
+        for d in reversed(step.created_dirs):
+            _rmdir_if_empty(d)
+        return None
+
+    def _recover_link(self, step: Step) -> None:
+        if step.state == "intent":
+            _remove_own_temp(_link_temp(step))
+            if not os.path.lexists(step.dst):
+                for d in reversed(step.created_dirs):
+                    _rmdir_if_empty(d)
+                self._set_step(step, "planned", error=None)
+                return
+            how = self._link_made(step)
+            if how is None:
+                self._set_step(step, "failed", error="after a crash: the destination exists but is not the planned "
+                                                     "file; left as is")
+                return
+            self._set_link_made(step, how, _ident(step.dst))
+            self._set_step(step, "done", error=None)
+        elif step.state == "undo_intent":
+            if os.path.lexists(step.dst):
+                self._set_step(step, "done", error=None)
+            else:
+                self._set_step(step, "undone", error=None)
+                for d in reversed(step.created_dirs):
+                    _rmdir_if_empty(d)
+
+    def _set_link_made(self, step: Step, how: str, ident: Optional[str]) -> None:
+        with self.store.connect(durable=True) as con:
+            con.execute("UPDATE journal_steps SET how = ?, dst_ident = ?, updated_at = ? WHERE id = ?",
+                        (how, ident, utcnow(), step.id))
+        step.how, step.dst_ident = how, ident
 
     # --- internals ---------------------------------------------------------------------------------
 
@@ -519,6 +776,35 @@ class Journal:
         with self.store.connect(durable=True) as con:
             con.execute("UPDATE journal_plans SET status = ?, updated_at = ?, host = ?, pid = ? WHERE id = ?",
                         (status, utcnow(), this_host(), os.getpid(), plan_id))
+
+
+# A hard link is not possible here: copy (verified) instead.
+_COPY_INSTEAD = {e for e in (errno.EXDEV, errno.EPERM, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", None),
+                             errno.EMLINK, errno.ENOSYS, errno.EACCES) if e is not None}
+
+
+def _ident(path: str) -> Optional[str]:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return f"{st.st_dev}:{st.st_ino}"
+
+
+def _link_temp(step: Step) -> str:
+    """The temporary name a link step's copy is written to (in the destination folder; the step's own)."""
+    folder, name = os.path.split(step.dst)
+    return os.path.join(folder, f".{name}.mangalist-{step.plan_id}-{step.seq}.part")
+
+
+def _remove_own_temp(path: str) -> None:
+    """Remove a link step's own temporary copy (a regular file under the step's private name, never a library
+    file: nothing else creates that name)."""
+    try:
+        if os.path.isfile(path) and not os.path.islink(path):
+            os.remove(path)
+    except OSError:
+        _log.warning("Could not remove the temporary copy %s", path, exc_info=True)
 
 
 def _rmdir_if_empty(path: str) -> None:

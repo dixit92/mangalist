@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -31,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..identity import carry
+from .tables import resizable_columns
 
 ChooseFn = Callable[[QWidget, carry.MissingSeries, List[carry.LiveSeries]], Optional[int]]
 ConfirmFn = Callable[[QWidget, str], bool]
@@ -123,16 +123,16 @@ class MissingSeriesDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        resizable_columns(self.table, {0: 320})
         self.table.itemSelectionChanged.connect(self._update_buttons)
         lay.addWidget(self.table, 1)
         self.status_label = QLabel("")
         lay.addWidget(self.status_label)
 
         row = QHBoxLayout()
-        self.btn_reattach = QPushButton("Re-attach to...")
+        self.btn_reattach = QPushButton("Re-attach to")
         self.btn_reattach.clicked.connect(self.reattach_selected)
-        self.btn_forget = QPushButton("Forget...")
+        self.btn_forget = QPushButton("Forget")
         self.btn_forget.clicked.connect(self.forget_selected)
         for b in (self.btn_reattach, self.btn_forget):
             if button_style:

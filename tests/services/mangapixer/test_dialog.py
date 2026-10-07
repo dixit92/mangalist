@@ -92,3 +92,20 @@ def test_sync_now_mapping_and_override(qapp, cache, fake, sleeps, db, tmp_path):
     assert dlg.apply_override()
     assert cache.mapping(root.id).library_id == "lib0manga" and not cache.mapping(root.id).manual
     dlg.reject()
+
+
+def test_table_columns_can_be_resized_and_headers_are_not_cut(qapp, cache, sleeps):
+    from PySide6.QtWidgets import QHeaderView
+
+    dlg = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    dlg.resize(900, 600)
+    dlg.show()
+    qapp.processEvents()
+    for table in (dlg.lib_table, dlg.map_table):
+        header = table.horizontalHeader()
+        assert header.stretchLastSection()
+        for col in range(table.columnCount()):
+            assert header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive
+        for col in range(table.columnCount() - 1):      # the last one fills the rest
+            assert header.sectionSize(col) >= header.sectionSizeHint(col), table.horizontalHeaderItem(col).text()
+    dlg.close()

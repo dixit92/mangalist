@@ -7,6 +7,31 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Volumes from nyaa, filed for you (Unraid container, opt-in with `MANGALIST_DOWNLOADS=1`):** for a series
+  MangaPixer has matched that is licensed in English, **Find volumes on nyaa...** (Wanted panel, row menu) lists
+  nyaa's English-translated releases of that series - releases of other series sharing the name are left out -
+  ranked by how many of your missing volumes they hold (when MangaList cannot tell which English volumes are out:
+  how many volumes you do not have - a release on nyaa is itself proof that a volume is out), Digital before scans, trusted uploaders marked, volumes
+  you already have labelled, releases without seeders and light novels hidden. You pick one; MangaList adds it to
+  qBittorrent in its own category `mangalist`.
+- **Arrivals:** once the torrent has finished, MangaList hard-links only the missing volumes into the folder where
+  that series already keeps its volumes (asked when the layout is unclear), keeping the release's file names,
+  through the undo journal - nothing in the library is ever replaced. Without a possible hard link it copies and
+  verifies the file instead and says so.
+- **Remove Completed** (Sonarr / Radarr style, on by default): when qBittorrent has stopped the torrent at its seed
+  goal and the library files are checked, MangaList asks qBittorrent to delete the torrent and its downloaded copy -
+  only ever in the `mangalist` category, never when filing failed, never when the torrent's data lies in a library root.
+  A torrent you stop yourself before its seed goal is kept (resume it, or remove it in qBittorrent).
+- **qBittorrent...** (toolbar): Web UI address, user name, password (stored outside the settings, never shown
+  again), save path, Remove Completed, and a connection test. A **Downloads** list shows each download's state.
+- When MangaPixer's volume list has no English dates (e.g. its dates source could not be reached), the English
+  publishers' volume count decides which English volumes are out - as when there is no list - instead of "Can't tell".
+- Table columns can be resized in every dialog (MangaPixer, Missing series, Find volumes, Downloads); buttons no longer end
+  in "...".
+- `MANGALIST_DOWNLOADS_SCHEDULE` (default `every 1h`) sets how often finished downloads are filed and completed
+  torrents removed. The container must see the library and the torrent folder through **one** mount
+  (`/mnt/user` -> `/data`, as qBittorrent does) for hard links; see the README.
+
 ## [2026.10.3] - 2026-10-05
 
 The second MangaList release (testing build): phase 1 - knowing what is missing - plus series identity and MangaPixer 1.34.0 support.

@@ -3,7 +3,7 @@
 Tables: roots + exclusions, series (root-relative path + folder fingerprint + MangaUpdates identity),
 units (the parser's output), archives (one row per archive: path, size, mtime, content signature - the series
 identity of :mod:`mangalist.identity`), links_cache (the old ``mu_cache.db`` rows), ledger (dispatch requests),
-journal (filesystem plans), settings (the old ``config.json``), meta. Schema and migration rules:
+journal (filesystem plans: moves, and the arrivals' links), settings (the old ``config.json``), meta. Schema and migration rules:
 :mod:`mangalist.store.schema`; the one-time import of the old files: :mod:`mangalist.store.migrate`.
 
 No Qt here: the headless runner and the no-Qt CI job import this package.
@@ -26,7 +26,7 @@ from .. import paths
 from .archives import Archive, ArchivesMixin
 from .db import StoreBase, utcnow
 from .exclusions import ExclusionSet, InvalidPattern, normalize_pattern
-from .journal import ContentAndPathChange, Journal, JournalError, Move, Plan, PlanStateError, StepRefused
+from .journal import ContentAndPathChange, Journal, JournalError, Link, Move, Plan, PlanStateError, StepRefused
 from .lock import LOCK_NAME, LockBusy, LockError, LockLost, RootLock
 from .names import windows_name_problem, windows_safe_name
 from .roots import Root, RootError, RootsMixin
@@ -40,7 +40,7 @@ _log = logging.getLogger(__name__)
 __all__ = [
     "Store", "get_store", "reset_stores", "Root", "RootError", "Series", "SeriesSeen", "ScanRecord",
     "Unit", "UnitError", "ExclusionSet", "InvalidPattern", "normalize_pattern", "folder_fingerprint",
-    "seen_from_entries", "SCHEMA_VERSION", "utcnow", "Journal", "JournalError", "Move", "Plan", "PlanStateError",
+    "seen_from_entries", "SCHEMA_VERSION", "utcnow", "Journal", "JournalError", "Link", "Move", "Plan", "PlanStateError",
     "StepRefused", "ContentAndPathChange", "RootLock", "LockBusy", "LockError", "LockLost", "LOCK_NAME",
     "windows_name_problem", "windows_safe_name", "Archive",
 ]

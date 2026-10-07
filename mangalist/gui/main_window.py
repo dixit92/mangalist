@@ -58,6 +58,7 @@ from ..models import MangaEntry
 from ..scanner import LibraryScan, apply_kind_hint, record_library_scan, scan_library
 from ..store import Journal, Root, RootError
 from .detail_panel import DetailPanel
+from .downloads_backend import create_backend as create_downloads_backend
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .roots_dialog import RootsDialog
@@ -254,6 +255,9 @@ class MainWindow(QMainWindow):
         self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
                                         needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)))
 
+        # Volumes MVP: only with downloads switched on and a backend (the controller is built in _build_ui).
+        self._volumes = None
+        self._volumes_backend = self._make_volumes_backend()
         self._build_ui()
 
         self._thread: QThread | None = None
@@ -309,14 +313,14 @@ class MainWindow(QMainWindow):
         toolbar.setContentsMargins(4, 2, 4, 2)
         self.addToolBar(toolbar)
 
-        btn_choose = self._make_button("Choose Manga Root…")
+        btn_choose = self._make_button("Choose Manga Root")
         btn_choose.setToolTip("Add a folder of series folders as a root and scan")
         btn_choose.clicked.connect(self._on_choose_root)
         toolbar.addWidget(btn_choose)
 
         toolbar.addWidget(_toolbar_spacer(6))
 
-        btn_roots = self._make_button("Roots…")
+        btn_roots = self._make_button("Roots")
         btn_roots.setToolTip("Manage roots and their exclusions")
         btn_roots.clicked.connect(self._on_roots)
         toolbar.addWidget(btn_roots)
@@ -324,7 +328,7 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(_toolbar_spacer(6))
 
-        btn_mangapixer = self._make_button("MangaPixer…")
+        btn_mangapixer = self._make_button("MangaPixer")
         btn_mangapixer.setToolTip("Use a MangaPixer server's links and series data (API token)")
         btn_mangapixer.clicked.connect(self._on_mangapixer)
         toolbar.addWidget(btn_mangapixer)
@@ -334,7 +338,7 @@ class MainWindow(QMainWindow):
 
         btn_rescan = self._make_button("Rescan")
         btn_rescan.clicked.connect(self._on_rescan)
-        toolbar.addWidget(btn_rescan)
+        self._rescan_action = toolbar.addWidget(btn_rescan)
         self._btn_rescan = btn_rescan
 
         # Missing series (shown only when there are any): re-attach or forget.
@@ -493,6 +497,13 @@ class MainWindow(QMainWindow):
         self._sig_label.setVisible(False)
         sb.addPermanentWidget(self._sig_label)
 
+        if self._volumes_backend is not None:
+            from .volumes_controller import VolumesController
+
+            self._volumes = VolumesController(self, self._volumes_backend, self._model, self._wanted, self._detail,
+                                              self._status_label.setText)
+            self._volumes.add_toolbar_buttons(toolbar, self._make_button, _toolbar_spacer, before=self._rescan_action)
+
         # Connect selection (rebind in case it returned None earlier)
         sel = self._table.selectionModel()
         if sel is not None:
@@ -507,6 +518,10 @@ class MainWindow(QMainWindow):
     # --- Slots -----------------------------------------------------------
 
     # --- Roots -----------------------------------------------------------
+
+    def _make_volumes_backend(self):
+        """The volumes MVP's backend, or None (downloads off, or no adapter): then no volumes GUI exists."""
+        return create_downloads_backend(self._db)
 
     def _recover_journal(self) -> None:
         """Settle any rename plan a crash interrupted (write-ahead records)."""
@@ -692,6 +707,8 @@ class MainWindow(QMainWindow):
         else:  # a plain list of entries
             entries, loose, errors, renamed = list(result), [], [], []
         self._reload_examined()                     # the scan may have carried marks with series
+        if self._volumes is not None:
+            self._volumes.forget_series_ids()
         if renamed:
             # A renamed series folder keeps its "examined" mark, like its MangaUpdates link.
             moved = {str(old): str(new) for old, new in renamed}
@@ -1127,11 +1144,15 @@ class MainWindow(QMainWindow):
         idx = self._table.selectionModel().currentIndex()
         if not idx.isValid():
             self._detail.show_entry(None)
+            if self._volumes is not None:
+                self._volumes.show_in_detail(None)
             return
         src_index: QModelIndex = self._proxy.mapToSource(idx)
         row = src_index.row()
         entry = self._model.entry_at(row)
         self._detail.show_entry(entry, self._model.state_at(row), self._model.links_at(row))
+        if self._volumes is not None:
+            self._volumes.show_in_detail(row)
 
     # --- Context menu ----------------------------------------------------
 
@@ -1181,6 +1202,7 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self._table)
         act_kind = None
+        act_find_volumes = None
 
         if n == 1:
             if getattr(entries[0], "needs_kind", False):
@@ -1197,6 +1219,8 @@ class MainWindow(QMainWindow):
             act_open_mu = menu.addAction("Open MangaUpdates page")
             act_open_mu.setEnabled(bool(entry0.mu_url))
             act_check_mu = menu.addAction("Check MU for this entry")
+            if self._volumes is not None:
+                act_find_volumes = self._volumes.add_row_action(menu, rows[0])
             links_menu = menu.addMenu("Official sources")
             link_actions = {}
             for link in self._model.links_at(rows[0]):
@@ -1261,6 +1285,8 @@ class MainWindow(QMainWindow):
             self._open_url(link_actions[chosen])
         elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)
+        elif chosen is act_find_volumes and act_find_volumes is not None:
+            self._volumes.open_find_volumes(rows[0])
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)
         elif chosen is act_confirm_mu:
@@ -1452,6 +1478,8 @@ class MainWindow(QMainWindow):
     # --- Lifecycle --------------------------------------------------------
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._volumes is not None:
+            self._volumes.stop()
         self._stop_signatures()
         self._cfg["window"] = {"w": self.width(), "h": self.height()}
         self._save_column_state()

@@ -29,15 +29,21 @@ GROUPS: Tuple[Tuple[str, frozenset], ...] = (
 ROLE_ROW = Qt.UserRole          # a series item: the source-model row
 ROLE_URL = Qt.UserRole + 1      # a link item: its URL
 
+COL_DOWNLOAD = 3                # the volumes MVP's download status (shown only when downloads are on)
+
 
 class WantedPanel(QWidget):
     """A tree: group -> series (state, gaps) -> official links."""
 
     series_activated = Signal(int)   # source-model row
+    find_volumes_requested = Signal(int)   # source-model row (volumes MVP; only when downloads are on)
 
     def __init__(self, parent=None, open_url: Optional[Callable[[str], object]] = None):
         super().__init__(parent)
         self._open_url = open_url or webbrowser.open
+        # Volumes MVP hooks (set_downloads): None keeps the panel as it was without downloads.
+        self._volumes_availability: Optional[Callable[[int], Tuple[bool, str]]] = None
+        self._download_status: Optional[Callable[[int], Optional[Tuple[str, str]]]] = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
@@ -45,8 +51,9 @@ class WantedPanel(QWidget):
         layout.addWidget(self.summary)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(3)
-        self.tree.setHeaderLabels(["Series / source", "State", "Gaps / link"])
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(["Series / source", "State", "Gaps / link", "Download"])
+        self.tree.setColumnHidden(COL_DOWNLOAD, True)
         self.tree.setAlternatingRowColors(True)
         self.tree.header().setSectionResizeMode(QHeaderView.Interactive)
         self.tree.setColumnWidth(0, 320)
@@ -64,11 +71,26 @@ class WantedPanel(QWidget):
         self.btn_show.clicked.connect(self.show_selected)
         buttons.addWidget(self.btn_open)
         buttons.addWidget(self.btn_show)
+        self.btn_find = QPushButton("Find volumes on nyaa")
+        self.btn_find.clicked.connect(self.find_selected)
+        self.btn_find.setVisible(False)
+        buttons.addWidget(self.btn_find)
         buttons.addStretch(1)
         layout.addLayout(buttons)
         self._update_buttons()
 
     # ------------------------------------------------------------------
+
+    def set_downloads(self, availability_for: Optional[Callable[[int], Tuple[bool, str]]],
+                      status_for: Optional[Callable[[int], Optional[Tuple[str, str]]]]) -> None:
+        """Switch the volumes MVP's parts on (or off with None): the "Find volumes on nyaa..." button, enabled by
+        ``availability_for(source_row) -> (enabled, why_not)``, and the Download column, filled from
+        ``status_for(source_row) -> (text, tooltip) or None``."""
+        self._volumes_availability = availability_for
+        self._download_status = status_for
+        self.btn_find.setVisible(availability_for is not None)
+        self.tree.setColumnHidden(COL_DOWNLOAD, status_for is None)
+        self._update_buttons()
 
     def rebuild(self, model) -> None:
         """Refill from a MangaTableModel (``rowCount``, ``entry_at``, ``state_at``, ``links_at``)."""
@@ -97,6 +119,7 @@ class WantedPanel(QWidget):
             for row, st in rows:
                 item = QTreeWidgetItem([_title(model, row), st.state.value, st.gaps_text])
                 item.setData(0, ROLE_ROW, row)
+                self._fill_download(item, row)
                 item.setToolTip(1, st.tooltip())
                 item.setToolTip(2, st.gaps_tooltip())
                 group.addChild(item)
@@ -108,6 +131,26 @@ class WantedPanel(QWidget):
             group.setExpanded(first_build or name in expanded)
         self.summary.setText("   ".join(counts))
         self._update_buttons()
+
+    def _fill_download(self, item: QTreeWidgetItem, row: int) -> None:
+        got = self._download_status(row) if self._download_status is not None else None
+        if got:
+            item.setText(COL_DOWNLOAD, got[0])
+            item.setToolTip(COL_DOWNLOAD, got[1])
+
+    def refresh_downloads(self) -> None:
+        """Re-read the Download column (a status changed) without rebuilding the tree."""
+        if self._download_status is None:
+            return
+        for g in range(self.tree.topLevelItemCount()):
+            group = self.tree.topLevelItem(g)
+            for i in range(group.childCount()):
+                item = group.child(i)
+                row = item.data(0, ROLE_ROW)
+                if row is not None:
+                    item.setText(COL_DOWNLOAD, "")
+                    item.setToolTip(COL_DOWNLOAD, "")
+                    self._fill_download(item, int(row))
 
     def series_titles(self, group: int) -> List[str]:
         top = self.tree.topLevelItem(group)
@@ -145,7 +188,24 @@ class WantedPanel(QWidget):
         if item is not None:
             self.series_activated.emit(int(item.data(0, ROLE_ROW)))
 
+    def _series_row(self) -> Optional[int]:
+        """The source row of the selected series (or of the series a selected link belongs to)."""
+        item = self._selected()
+        while item is not None and item.data(0, ROLE_ROW) is None:
+            item = item.parent()
+        return None if item is None else int(item.data(0, ROLE_ROW))
+
+    def find_selected(self) -> None:
+        row = self._series_row()
+        if row is not None and self._volumes_availability is not None and self._volumes_availability(row)[0]:
+            self.find_volumes_requested.emit(row)
+
     def _update_buttons(self, *_args) -> None:
+        if self._volumes_availability is not None:
+            row = self._series_row()
+            enabled, why = self._volumes_availability(row) if row is not None else (False, "Select a series.")
+            self.btn_find.setEnabled(enabled)
+            self.btn_find.setToolTip("Search nyaa for the missing volumes of the selected series" if enabled else why)
         item = self._selected()
         self.btn_open.setEnabled(item is not None and (bool(item.data(0, ROLE_URL)) or item.data(0, ROLE_ROW) is not None))
         self.btn_show.setEnabled(item is not None and (item.data(0, ROLE_ROW) is not None or item.parent() is not None))
