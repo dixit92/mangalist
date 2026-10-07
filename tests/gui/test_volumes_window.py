@@ -213,3 +213,27 @@ def test_close_stops_the_refresh_timer(make_window):
     assert win._volumes._timer.isActive()
     win.close()
     assert not win._volumes._timer.isActive()
+
+
+def test_a_refresh_asked_for_during_a_read_runs_right_after_it(make_window, qapp):
+    import threading
+
+    backend = _backend()
+    reads = []
+    gate = threading.Event()
+    original = backend.records
+
+    def slow_records(series_id=None):
+        reads.append(1)
+        if len(reads) == 1:
+            gate.wait(10)
+        return original(series_id)
+
+    backend.records = slow_records
+    win = make_window(backend)
+    wait_until(qapp, lambda: reads)                                 # the startup read is running (held)
+    backend.record_list.append(record(1, series_id=1))
+    assert win._volumes.refresh_records() and win._volumes._again   # queued, not dropped
+    gate.set()
+    wait_until(qapp, lambda: len(reads) == 2 and win._volumes._call is None)
+    assert win._volumes.status_for_row(_row(win, QUEST))[0] == "Sent"
