@@ -36,13 +36,13 @@ def wait_until(qapp, predicate, timeout: float = 10.0) -> None:
 
 def candidate(title="Example Series v03-05 (Digital) (Group)", *, info_hash="a" * 40, vol_from="3", vol_to="5",
               covers_missing=("3", "4", "5"), covers_held=(), digital=True, group="Group", seeders=12, trusted=True,
-              not_comic=False, reasons=("Digital release", "Covers 3 missing volumes"), **kw) -> NyaaCandidate:
+              not_comic=False, is_pack=None, reasons=("Digital release", "Covers 3 missing volumes")) -> NyaaCandidate:
     return NyaaCandidate(
         title=title, view_url=f"https://nyaa.example/view/{info_hash[:6]}", torrent_url="https://nyaa.example/dl/x",
         info_hash=info_hash, size_bytes=734_003_200, seeders=seeders, leechers=1, downloads=40, trusted=trusted,
         remake=False, published="2026-09-30T12:00:00+00:00", category="3_1", vol_from=vol_from, vol_to=vol_to,
-        digital=digital, group=group, is_pack=vol_from != vol_to, not_comic=not_comic, covers_missing=tuple(covers_missing),
-        covers_held=tuple(covers_held), rank=1.0, reasons=tuple(reasons), **kw)
+        digital=digital, group=group, is_pack=(vol_from != vol_to) if is_pack is None else is_pack, not_comic=not_comic, covers_missing=tuple(covers_missing),
+        covers_held=tuple(covers_held), rank=1.0, reasons=tuple(reasons))
 
 
 def record(id=1, series_id=7, status=DownloadStatus.SENT, wanted=("3", "4", "5"), error=None, copied=False,

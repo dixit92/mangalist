@@ -87,13 +87,16 @@ class DetailPanel(QWidget):
         self._lbl_flags = QLabel("-")
         self._lbl_gaps = QLabel("-")
         self._lbl_mangapixer = QLabel("-")
-        for lbl in (self._lbl_state, self._lbl_flags, self._lbl_gaps, self._lbl_mangapixer):
+        self._lbl_download = QLabel("-")
+        for lbl in (self._lbl_state, self._lbl_flags, self._lbl_gaps, self._lbl_mangapixer, self._lbl_download):
             lbl.setWordWrap(True)
             lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._state_form.addRow("State:", self._lbl_state)
         self._state_form.addRow("Flags:", self._lbl_flags)
         self._state_form.addRow("Gaps:", self._lbl_gaps)
         self._state_form.addRow("MangaPixer:", self._lbl_mangapixer)
+        self._state_form.addRow("Download:", self._lbl_download)     # volumes MVP; hidden unless downloads are on
+        self.set_downloads_enabled(False)
         root.addWidget(self._state_box)
 
         # Official sources (A12): links open in the browser
@@ -127,6 +130,17 @@ class DetailPanel(QWidget):
         self.show_entry(None)
 
     # ------------------------------------------------------------------
+
+    def set_downloads_enabled(self, enabled: bool) -> None:
+        self._lbl_download.setVisible(enabled)
+        label = self._state_form.labelForField(self._lbl_download)
+        if label is not None:
+            label.setVisible(enabled)
+
+    def set_download(self, text: Optional[str], tooltip: str = "") -> None:
+        """The selected series' download status ("Sent", "Filed v03-v05", ...), or None for none."""
+        self._lbl_download.setText(text or "-")
+        self._lbl_download.setToolTip(tooltip if text else "")
 
     def show_entry(self, entry: Optional[MangaEntry], state: Optional[SeriesState] = None,
                    links: Optional[Sequence[OfficialLink]] = None) -> None:
