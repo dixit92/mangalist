@@ -5,7 +5,9 @@ Guarantees:
 - **Moves only, never deletes.** A step is one ``rename`` on the same filesystem; a move that would cross
   filesystems is refused (no copy + delete), and a step never replaces an existing path (no-replace
   rename where the OS offers it, an existence check otherwise). The only removals are of EMPTY folders
-  the plan itself created, when it is undone (``rmdir`` cannot remove anything that has content).
+  the plan itself created, when it is undone (``rmdir`` cannot remove anything that has content) - and,
+  for link steps only, the extra NAME a step created, on undo (never the last copy), and a link step's own
+  temporary copy (see "Link steps" below).
 - **Write-ahead.** Before a step touches the disk its record is set to ``intent`` (durably committed),
   after it to ``done``; undo uses ``undo_intent`` -> ``undone``.
 - **Crash recovery.** :meth:`Journal.recover` (run on start) looks at every plan left ``applying`` /
