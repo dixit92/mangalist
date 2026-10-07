@@ -336,6 +336,11 @@ class _Pass:
         if not t.stopped_complete:
             self._wait(rec, f"seeding (qBittorrent state {t.state}); removed once stopped at its seed goal")
             return
+        if not t.seed_goal_reached:     # stopped by hand (or no goal set): the owner's pause is not a seed goal
+            self._wait(rec, f"stopped before its seed goal (ratio {t.ratio:.2f}"
+                            + (f" of {t.max_ratio:g}" if t.max_ratio is not None and t.max_ratio >= 0 else "")
+                            + "); not removed - resume it in qBittorrent, or remove it there yourself")
+            return
         problem = self._library_problem(rec, t)
         if problem:
             self._wait(rec, f"not removed: {problem}")

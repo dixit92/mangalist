@@ -30,7 +30,8 @@ class FakeQbt:
             p = folder / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
-        info = TorrentInfo(info_hash, name, category, state, progress, str(self.save_root), str(folder), 1.0, 60)
+        info = TorrentInfo(info_hash, name, category, state, progress, str(self.save_root), str(folder), 2.0, 60,
+                           max_ratio=2.0, max_seeding_time=87600)        # at the owner's 2:1 goal
         self.infos[info_hash] = info
         self.file_lists[info_hash] = [TorrentFile(f"{name}/{rel}", len(data), (partial or {}).get(rel, 1.0))
                                       for rel, data in files.items()]

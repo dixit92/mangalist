@@ -94,6 +94,9 @@ class TorrentInfo:
     content_path: str
     ratio: float
     seeding_time: int                   # seconds
+    # The seed goal qBittorrent applies to this torrent (its own limit, else the global one; None or negative: none):
+    max_ratio: Optional[float] = None
+    max_seeding_time: Optional[int] = None    # minutes
 
     @property
     def complete(self) -> bool:
@@ -102,6 +105,15 @@ class TorrentInfo:
     @property
     def stopped_complete(self) -> bool:
         return self.state in STOPPED_COMPLETE_STATES
+
+    @property
+    def seed_goal_reached(self) -> bool:
+        """The ratio or the seeding time has reached qBittorrent's goal for it - so a stop was the seed goal's, not
+        the owner's own pause (the Sonarr / Radarr rule). No goal at all: never reached."""
+        by_ratio = self.max_ratio is not None and self.max_ratio >= 0 and self.ratio >= self.max_ratio - 0.005
+        by_time = (self.max_seeding_time is not None and self.max_seeding_time >= 0
+                   and self.seeding_time >= self.max_seeding_time * 60)
+        return by_ratio or by_time
 
 
 @dataclass(frozen=True)

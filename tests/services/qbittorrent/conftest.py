@@ -52,7 +52,7 @@ class FakeQbt:
                     save_path: str = "/data/appdata/torrents/mangalist") -> None:
         self.torrents[info_hash] = {
             "hash": info_hash, "name": name, "category": category, "state": state, "progress": progress,
-            "ratio": ratio, "seeding_time": seeding_time, "save_path": save_path,
+            "ratio": ratio, "seeding_time": seeding_time, "max_ratio": 2.0, "max_seeding_time": 87600, "save_path": save_path,
             "content_path": f"{save_path}/{name}", "size": 123456, "num_seeds": 0}
 
     def expire_sessions(self) -> None:

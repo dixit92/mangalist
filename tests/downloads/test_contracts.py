@@ -34,3 +34,13 @@ def test_magnet_and_placement():
 
 def test_password_not_in_repr():
     assert "hunter2" not in repr(QbtConnection("http://h:8080", "u", "hunter2"))
+
+
+def test_seed_goal_reached():
+    def t(ratio, seconds, max_ratio, max_minutes):
+        return TorrentInfo("ab" * 20, "x", "mangalist", "stoppedUP", 1.0, "/d", "/d/x", ratio, seconds,
+                           max_ratio=max_ratio, max_seeding_time=max_minutes)
+    assert t(2.0, 0, 2.0, -1).seed_goal_reached and t(1.999, 0, 2.0, -1).seed_goal_reached     # qBittorrent's rounding
+    assert not t(1.5, 0, 2.0, -1).seed_goal_reached
+    assert t(0.1, 87600 * 60, 2.0, 87600).seed_goal_reached and not t(0.1, 600, 2.0, 87600).seed_goal_reached
+    assert not t(5.0, 10 ** 9, -1.0, -1).seed_goal_reached and not t(5.0, 10 ** 9, None, None).seed_goal_reached

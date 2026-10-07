@@ -157,7 +157,9 @@ def _torrent_info(raw: Dict[str, Any]) -> TorrentInfo:
         category=str(raw.get("category") or ""), state=str(raw.get("state") or ""),
         progress=_float(raw.get("progress")), save_path=str(raw.get("save_path") or ""),
         content_path=str(raw.get("content_path") or ""), ratio=_float(raw.get("ratio")),
-        seeding_time=_int(raw.get("seeding_time")))
+        seeding_time=_int(raw.get("seeding_time")),
+        max_ratio=_float(raw["max_ratio"]) if raw.get("max_ratio") is not None else None,
+        max_seeding_time=_int(raw["max_seeding_time"]) if raw.get("max_seeding_time") is not None else None)
 
 
 # --- the client ---------------------------------------------------------------------------------------

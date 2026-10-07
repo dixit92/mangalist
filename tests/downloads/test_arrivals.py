@@ -106,6 +106,23 @@ def test_filed_but_still_seeding_is_not_removed(ledger, sent, qbt):
         assert status(ledger, sent) == S.FILED and qbt.deleted == []
 
 
+def test_stopped_by_hand_before_the_seed_goal_is_not_removed(ledger, sent, qbt):
+    # The Sonarr / Radarr rule: only a stop at the seed goal counts; the owner's own pause keeps the torrent.
+    qbt.set(HASH, state="stoppedUP", progress=1.0, ratio=0.4, seeding_time=600)
+    report = run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.FILED and qbt.deleted == []
+    assert any("stopped before its seed goal (ratio 0.40 of 2)" in why for _, why in report.waiting)
+    qbt.set(HASH, ratio=2.0)                                        # the goal reached: removed at the next pass
+    run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.REMOVED and qbt.deleted == [HASH]
+
+
+def test_a_torrent_without_any_seed_goal_is_never_removed(ledger, sent, qbt):
+    qbt.set(HASH, state="stoppedUP", progress=1.0, max_ratio=-1.0, max_seeding_time=-1)
+    run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.FILED and qbt.deleted == []
+
+
 def test_a_missing_or_changed_library_file_blocks_the_removal(ledger, sent, qbt, series):
     _, sdir = series
     qbt.set(HASH, state="uploading", progress=1.0)

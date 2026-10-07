@@ -21,10 +21,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 - **Remove Completed** (Sonarr / Radarr style, on by default): when qBittorrent has stopped the torrent at its seed
   goal and the library files are checked, MangaList asks qBittorrent to delete the torrent and its downloaded copy -
   only ever in the `mangalist` category, never when filing failed, never when the torrent's data lies in a library root.
+  A torrent you stop yourself before its seed goal is kept (resume it, or remove it in qBittorrent).
 - **qBittorrent...** (toolbar): Web UI address, user name, password (stored outside the settings, never shown
   again), save path, Remove Completed, and a connection test. A **Downloads** list shows each download's state.
 - When MangaPixer's volume list has no English dates (e.g. its dates source could not be reached), the English
   publishers' volume count decides which English volumes are out - as when there is no list - instead of "Can't tell".
+- Table columns can be resized in every dialog (MangaPixer, Missing series, Find volumes, Downloads); buttons no longer end
+  in "...".
 - `MANGALIST_DOWNLOADS_SCHEDULE` (default `every 1h`) sets how often finished downloads are filed and completed
   torrents removed. The container must see the library and the torrent folder through **one** mount
   (`/mnt/user` -> `/data`, as qBittorrent does) for hard links; see the README.
