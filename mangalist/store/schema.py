@@ -27,9 +27,13 @@ ARCHIVE_MOVE_HOW = ("scan", "pairing", "journal")            # how an archive mo
 SERIES_CARRY_HOW = ("archives", "mangapixer", "manual", "fingerprint")
 UNIT_KINDS = ("volume", "chapter", "extra", "oneshot", "unknown")
 SERIES_KIND_HINTS = ("volumes", "chapters")  # or None: not answered yet (C12)
-LEDGER_STATUS = ("queued", "dispatched", "completed", "failed", "cancelled")
+LEDGER_STATUS = ("queued", "dispatched", "completed", "failed", "cancelled",
+                 # the volumes MVP's downloads (tool 'qbittorrent'; mangalist.downloads.contracts.DownloadStatus)
+                 "sent", "downloaded", "filed", "removed")
 PLAN_STATUS = ("planned", "applying", "applied", "failed", "interrupted", "undoing", "undone", "undo_failed")
 STEP_STATE = ("planned", "intent", "done", "failed", "undo_intent", "undone")
+STEP_OPS = ("move", "link")
+LINK_HOW = ("link", "copy")                                  # how a link step created its name
 
 # --- Migrations ----------------------------------------------------------------------------------------
 
@@ -328,12 +332,41 @@ CREATE TABLE IF NOT EXISTS mangapixer_carries (
 ALTER TABLE series ADD COLUMN missing_since TEXT;
 """
 
+# Volumes MVP, arrivals lane: download records on the (so far unused) ``ledger`` table - tool 'qbittorrent',
+# external_ref = the torrent's info hash, destination = the target folder, request = JSON (wanted volumes +
+# the release's title / urls) - the qBittorrent connection (its password kept out of ``settings``), and the
+# journal's ``link`` step (mangalist.store.downloads, mangalist.store.journal).
+_V5_DOWNLOADS = """
+ALTER TABLE ledger ADD COLUMN filed_files TEXT NOT NULL DEFAULT '[]'; -- JSON: library paths created, series-relative
+ALTER TABLE ledger ADD COLUMN copied      INTEGER NOT NULL DEFAULT 0; -- 1 = a copy fallback was used (double space)
+ALTER TABLE ledger ADD COLUMN plan_id     INTEGER;                    -- the journal plan that filed it
+CREATE INDEX IF NOT EXISTS ledger_by_status ON ledger (tool, status);
+CREATE INDEX IF NOT EXISTS ledger_by_ref ON ledger (tool, external_ref);
+
+-- One row (id = 1): the qBittorrent Web UI. The password lives here, not in ``settings`` (as the MangaPixer
+-- token does): config.load() / config.save() copy every settings key around.
+CREATE TABLE IF NOT EXISTS qbittorrent_connection (
+    id          INTEGER PRIMARY KEY,
+    base_url    TEXT,
+    username    TEXT,
+    password    TEXT,                                 -- never logged, never shown again after entry
+    verify_tls  INTEGER NOT NULL DEFAULT 1,
+    updated_at  TEXT    NOT NULL
+);
+
+-- A ``link`` step (op = 'link'): how its name was made (link | copy) and that name's identity (dev:ino),
+-- so undo removes only the very file the step created.
+ALTER TABLE journal_steps ADD COLUMN how       TEXT;
+ALTER TABLE journal_steps ADD COLUMN dst_ident TEXT;
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
     (2, _V2_MANGAPIXER),
     (3, _V3_INVENTORY),
     (4, _V4_IDENTITY),
+    (5, _V5_DOWNLOADS),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

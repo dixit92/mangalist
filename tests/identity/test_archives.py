@@ -12,7 +12,7 @@ from .conftest import make_archive, scan, sign
 
 
 def test_schema_4_adds_the_identity_tables(db):
-    assert db.schema_version() == schema.SCHEMA_VERSION == 4
+    assert db.schema_version() == schema.SCHEMA_VERSION >= 4
     with db.connect() as con:
         tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         cols = {r[1] for r in con.execute("PRAGMA table_info(series)")}
@@ -31,7 +31,7 @@ def test_a_schema_3_database_upgrades_to_4_and_keeps_its_rows(tmp_path):
     con.commit()
     con.close()
     st = store.Store(path, import_legacy=False)
-    assert st.schema_version() == 4
+    assert st.schema_version() == schema.SCHEMA_VERSION
     (row,) = st.list_series(1)
     assert row.rel_path == "Old Series" and row.kind_hint == "volumes" and row.fingerprint == "v1:1:ab"
     assert row.missing_since is None and st.list_archives() == []
