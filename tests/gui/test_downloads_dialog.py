@@ -50,3 +50,26 @@ def test_read_error_is_shown(qapp):
     dlg = DownloadsDialog(backend)
     wait_until(qapp, lambda: dlg.btn_refresh.isEnabled())
     assert "Could not load the downloads: the downloads table is unreadable" in dlg.status_label.text()
+
+
+def test_check_now_runs_the_check_off_the_ui_thread_then_reloads(qapp):
+    backend = FakeBackend(records=[record(1, status=S.SENT)])
+    dlg = DownloadsDialog(backend, series_name=lambda i: "Example Series")
+    wait_until(qapp, lambda: dlg.btn_check.isEnabled())
+    backend.record_list = [record(1, status=S.FILED)]          # what the check changed
+    assert dlg.check_now() and not dlg.btn_check.isEnabled() and not dlg.btn_refresh.isEnabled()
+    wait_until(qapp, lambda: dlg.btn_check.isEnabled() and dlg.table.rowCount() == 1
+               and dlg.table.item(0, 3).text() == "Filed v03-v05 - seeding")
+    assert backend.checks == 1 and threading.get_ident() not in backend.threads
+    assert dlg.status_label.text() == "Checked now: 1 checked: 1 filed, 0 removed, 0 failed, 0 waiting."
+
+
+def test_check_now_failure_is_shown_and_the_list_kept(qapp):
+    backend = FakeBackend(records=[record(1, status=S.SENT)])
+    dlg = DownloadsDialog(backend, series_name=lambda i: "Example Series")
+    wait_until(qapp, lambda: dlg.btn_check.isEnabled())
+    backend.check_error = "qBittorrent could not be reached"
+    dlg.check_now()
+    wait_until(qapp, lambda: dlg.btn_check.isEnabled())
+    assert "Could not check the downloads: qBittorrent could not be reached" in dlg.status_label.text()
+    assert dlg.table.rowCount() == 1

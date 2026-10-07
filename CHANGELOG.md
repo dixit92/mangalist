@@ -28,6 +28,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
   publishers' volume count decides which English volumes are out - as when there is no list - instead of "Can't tell".
 - Table columns can be resized in every dialog (MangaPixer, Missing series, Find volumes, Downloads); buttons no longer end
   in "...", and the **Wanted panel** toggle is a button that stays pressed while the panel is open.
+- **Check now** (Downloads dialog) runs the downloads check on demand - filing finished downloads and Remove Completed -
+  besides the hourly schedule.
 - `MANGALIST_DOWNLOADS_SCHEDULE` (default `every 1h`) sets how often finished downloads are filed and completed
   torrents removed. The container must see the library and the torrent folder through **one** mount
   (`/mnt/user` -> `/data`, as qBittorrent does) for hard links; see the README.
