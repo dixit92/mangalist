@@ -71,7 +71,7 @@ def test_disabled_when_not_licensed_in_english_or_not_scanned():
 def test_search_titles_main_first_deduplicated_and_capped():
     k = _knowledge(english_title="Example Series EN", alt_titles=tuple(f"Alt {i}" for i in range(20)))
     titles = search_titles(k, "Folder Name", "example series en")
-    assert titles[0] == "Example Series EN" and titles[1] == "Example Series" and len(titles) == 10
+    assert titles[:3] == ("Example Series EN", "Folder Name", "Example Series") and len(titles) == 10
     assert search_titles(_knowledge(alt_titles=()), None, "  ") == ("Example Series",)
 
 

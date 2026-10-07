@@ -16,6 +16,7 @@ that certainly fills a missing volume, above one that certainly fills none.
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
@@ -57,8 +58,20 @@ def series_forms(titles: Iterable[str]) -> FrozenSet[str]:
     return frozenset(out)
 
 
+# A title naming the series twice: "Ao no Exorcist | Blue Exorcist v01-31", "Original / English Ch. 01".
+_NAME_SPLIT = re.compile(r"\s+[|/]\s+")
+
+
 def matches_series(parsed: ParsedTitle, forms: FrozenSet[str]) -> bool:
-    return bool(parsed.series) and bool(_forms(parsed.series) & forms)
+    """The release is the series: its series name equals one of the series' names after normalisation - or, for a
+    title giving several names (``A | B``, ``A / B``), EVERY one of them does (so ``A / B Gaiden`` or a crossover
+    ``A | Other`` is not the series)."""
+    if not parsed.series:
+        return False
+    if _forms(parsed.series) & forms:
+        return True
+    names = [n for n in _NAME_SPLIT.split(parsed.series) if n.strip()]
+    return len(names) > 1 and all(_forms(n) & forms for n in names)
 
 
 # --- coverage -------------------------------------------------------------------------------------------

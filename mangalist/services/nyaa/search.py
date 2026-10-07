@@ -1,9 +1,10 @@
 """``NyaaSearch``: :class:`mangalist.downloads.contracts.VolumeSearch` over nyaa's RSS.
 
-For a series known by several names: query the main title first, the alternatives only while nothing usable has
-been found (at most ``max_queries`` requests, 2 s apart), keep the releases that really are the series (see
-:mod:`.ranking`), drop 0-seeder results, hide light novels / EPUBs (unless asked), drop chapter releases and releases
-that certainly fill none of the missing volumes (with no missing list: that hold only volumes already held), dedupe by info hash, rank best first.
+For a series known by several names: always query the first two names and merge the results, the further
+alternatives only while nothing usable has been found (at most ``max_queries`` requests, 2 s apart); keep the
+releases that really are the series (see :mod:`.ranking`), drop 0-seeder results, hide light novels / EPUBs (unless
+asked), drop chapter releases and releases that certainly fill none of the missing volumes (with no missing list:
+that hold only volumes already held), dedupe by info hash, rank best first.
 """
 
 from __future__ import annotations
@@ -22,6 +23,9 @@ from .titles import parse_title
 _log = logging.getLogger(__name__)
 
 DEFAULT_MAX_QUERIES = 4
+#: The first names are always asked (releases are named in different languages); later ones only while nothing
+#: usable has been found.
+ALWAYS_ASKED = 2
 _QUERY_JUNK = re.compile(r"[^\w']+", re.UNICODE)
 
 
@@ -71,7 +75,7 @@ class NyaaSearch:
                 if not self.keep_no_coverage and fills_nothing(candidate, parsed, missing):
                     continue
                 found[item.info_hash] = candidate
-            if found:
+            if found and len(asked) >= ALWAYS_ASKED:
                 break
             _log.info("nyaa: nothing usable for %r; trying the next title", query)
         return order(found.values())

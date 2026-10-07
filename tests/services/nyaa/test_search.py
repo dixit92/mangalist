@@ -51,12 +51,14 @@ def test_chapter_releases_are_dropped():
 
 # --- queries ------------------------------------------------------------------------------------------
 
-def test_alternatives_are_queried_only_when_nothing_matched():
-    client = FakeClient({"shingeki no kyojin": feed(item("Shingeki no Kyojin v01 (Digital)")),
-                         "attack on titan": feed(item("Attack on Titan v02 (Digital)"))})
-    out = search(client, ["Shingeki no Kyojin", "Attack on Titan"], ["1", "2"])
-    assert [q for q, _ in client.calls] == ["Shingeki no Kyojin"]
-    assert titles(out) == ["Shingeki no Kyojin v01 (Digital)"]
+def test_the_first_two_names_are_always_asked_and_merged():
+    # English releases and romanised ones are named differently: one name alone misses half of them.
+    client = FakeClient({"blue example": feed(item("Blue Example v03 (Digital) (One)")),
+                         "ao no example": feed(item("Ao no Example v01-02 (Digital) (Pack)")),
+                         "aoex": feed(item("Aoex v04 (Digital)"))})
+    out = search(client, ["Blue Example", "Ao no Example", "Aoex"], ["1", "2", "3", "4"])
+    assert [q for q, _ in client.calls] == ["Blue Example", "Ao no Example"]   # the third: only while nothing found
+    assert sorted(titles(out)) == ["Ao no Example v01-02 (Digital) (Pack)", "Blue Example v03 (Digital) (One)"]
 
 
 def test_the_next_title_is_tried_when_the_first_has_no_usable_result():
@@ -257,3 +259,14 @@ def test_without_a_missing_list_or_holdings_every_volume_counts():
     client = FakeClient({"s": feed(item("S v01-03 (Digital) (Pack)"), item("S v02.5 (Digital) (Half)"))})
     out = {c.group: c for c in search(client, ["S"], [], [])}
     assert out["Pack"].covers_missing == ("1", "2", "3") and out["Half"].covers_missing == ("2.5",)
+
+
+def test_a_title_giving_two_names_matches_either():
+    client = FakeClient({"blue example": feed(
+        item("Ao no Example | Blue Example v01-31 + 151-158 (2011-2024) (Digital) (Group)"),
+        item("Ao no Example / Blue Example Gaiden v05 (Digital) (Gaiden)"),   # the second name is a spin-off
+        item("Blue Example | Red Example v02 (Digital) (Crossover)"),         # the second name is another series
+        item("Blue Example / Ao no Example v03 (Digital) (Three)"))})
+    out = {c.group: c for c in search(client, ["Blue Example", "Ao no Example"], [], ["1"])}
+    assert set(out) == {"Group", "Three"}
+    assert out["Group"].vol_from == "1" and out["Group"].vol_to == "31" and len(out["Group"].covers_missing) == 30

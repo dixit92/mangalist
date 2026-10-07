@@ -36,11 +36,12 @@ class Availability:
 
 
 def search_titles(knowledge: SeriesKnowledge, *own_titles: Optional[str]) -> Tuple[str, ...]:
-    """The series' names for the search: the knowledge's main title (English first), its alternatives, then the
-    folder's own names; case-insensitive duplicates dropped."""
+    """The series' names for the search: the English title, the folder's own names (in an English library usually
+    the English release name), then the knowledge's main title and its alternatives; case-insensitive duplicates
+    dropped. nyaa's English releases are named in English, so those come first."""
     seen = set()
     out: List[str] = []
-    for title in (knowledge.search_title, knowledge.title, *knowledge.alt_titles, *own_titles):
+    for title in (knowledge.english_title, *own_titles, knowledge.title, *knowledge.alt_titles):
         text = (title or "").strip()
         if text and text.casefold() not in seen:
             seen.add(text.casefold())
