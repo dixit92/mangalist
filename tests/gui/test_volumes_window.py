@@ -76,7 +76,7 @@ def _row(win, title):
 
 
 def _backend():
-    ids = {f"/lib/{t}": i for i, t in enumerate((QUEST, REVIEW, OWN, DONE), start=1)}      # NEW is not scanned
+    ids = {str(Path("/lib") / t): i for i, t in enumerate((QUEST, REVIEW, OWN, DONE), start=1)}      # NEW is not scanned
     return FakeBackend(series_ids=ids)
 
 
@@ -114,7 +114,7 @@ def test_find_volumes_enable_rules(make_window, title, enabled, why):
     assert got.enabled is enabled and why in got.reason
     if enabled:
         assert got.target.missing == ("2", "3") and got.target.held == ("1",)
-        assert got.target.series_id == 1 and got.target.folder == "/lib/Example Quest"
+        assert got.target.series_id == 1 and got.target.folder == str(Path("/lib") / QUEST)
 
 
 def test_row_menu_action_is_disabled_with_a_tooltip_reason(make_window):
