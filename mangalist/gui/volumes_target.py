@@ -48,6 +48,11 @@ def search_titles(knowledge: SeriesKnowledge, *own_titles: Optional[str]) -> Tup
     return tuple(out[:MAX_SEARCH_TITLES])
 
 
+def volume_label(number: str) -> str:
+    """``'3'`` -> ``v03``, ``'12'`` -> ``v12``, ``'6.5'`` -> ``v6.5``."""
+    return f"v{number.zfill(2)}" if number.isdigit() else f"v{number}"
+
+
 def numbers_text(numbers: Iterable[str], *, pad: bool = False) -> str:
     """``['1','2','3','5','6.5']`` -> ``1-3, 5, 6.5`` (whole numbers in a row merge); ``pad`` writes the
     volume style ``v01-v03, v05, v6.5``. Numbers are exact: nothing goes through a float."""
@@ -55,9 +60,7 @@ def numbers_text(numbers: Iterable[str], *, pad: bool = False) -> str:
     out: List[str] = []
 
     def label(text: str) -> str:
-        if not pad:
-            return text
-        return f"v{text.zfill(2)}" if text.isdigit() else f"v{text}"
+        return volume_label(text) if pad else text
 
     def flush() -> None:
         if ints:

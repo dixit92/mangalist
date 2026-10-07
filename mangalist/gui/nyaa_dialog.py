@@ -39,7 +39,7 @@ from ..classifier import _human
 from ..downloads.contracts import DownloadRecord, NyaaCandidate, Placement
 from .background import BackgroundCall, start_call
 from .downloads_backend import DownloadsBackend
-from .volumes_target import VolumeTarget, numbers_text
+from .volumes_target import VolumeTarget, numbers_text, volume_label
 
 ConfirmFn = Callable[[QWidget, str], bool]
 
@@ -61,12 +61,12 @@ def _yes(flag: bool) -> str:
 
 
 def volumes_text(candidate: NyaaCandidate) -> str:
-    """The volume range the release's title states (``3-5``, ``3``), or ``?`` when it does not say."""
+    """The volume range the release's title states (``v03-v05``, ``v03``), or ``?`` when it does not say."""
     if candidate.vol_from is None:
         return "?"
     if candidate.vol_to is None or candidate.vol_to == candidate.vol_from:
-        return candidate.vol_from
-    return f"{candidate.vol_from}-{candidate.vol_to}"
+        return volume_label(candidate.vol_from)
+    return f"{volume_label(candidate.vol_from)}-{volume_label(candidate.vol_to)}"
 
 
 def wanted_volumes_for(candidate: NyaaCandidate, missing: Sequence[str]) -> Sequence[str]:
@@ -203,6 +203,7 @@ class NyaaDialog(QDialog):
         self._search_state = "searching"
         self.btn_retry.setEnabled(False)
         self.progress.setVisible(True)
+        self.search_label.setStyleSheet("")
         self.search_label.setText("Searching nyaa...")
         target = self.target
         self._spawn(lambda: list(self._backend.search(target.titles, target.missing, target.held)),
@@ -266,6 +267,7 @@ class NyaaDialog(QDialog):
         self.btn_retry.setEnabled(True)
         self._candidates = []
         self.table.setRowCount(0)
+        self.search_label.setStyleSheet("color: #b71c1c;")
         self.search_label.setText(f"The nyaa search failed: {message}")
         self._update_send()
 
