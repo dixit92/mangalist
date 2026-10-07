@@ -204,13 +204,16 @@ def test_wanted_panel_toggle_is_remembered(window):
     from mangalist import config
 
     win, _ = window
-    assert win._wanted_toggle.text() == "Wanted panel"
+    assert win._btn_wanted.text() == "Wanted panel" and win._btn_wanted.isCheckable()   # a button, not flat text
     win.show()
-    win._wanted_toggle.trigger()
+    win._btn_wanted.click()
     assert win._wanted_dock.isVisible() and config.load().get("wanted_panel") is True
+    assert win._btn_wanted.isChecked()
     assert win._wanted.tree.topLevelItemCount() == 3      # built when shown
+    win._wanted_dock.close()                              # the dock's own close button: the button follows
+    assert not win._btn_wanted.isChecked() and config.load().get("wanted_panel") is False
     win._wanted_toggle.trigger()
-    assert config.load().get("wanted_panel") is False
+    assert win._btn_wanted.isChecked()
 
 
 def test_detail_panel_shows_state_gaps_and_links(window):

@@ -85,7 +85,7 @@ def test_invalid_input_is_reported_and_nothing_is_saved(qapp):
     assert not dlg.save() and "http://" in dlg.status_label.text() and backend.saved == []
     dlg.url_edit.setText("http://qbt.example:8080")
     dlg.save_path_edit.setText("  ")
-    assert not dlg.save() and "save path" in dlg.status_label.text() and backend.saved == []
+    assert not dlg.save() and "download folder" in dlg.status_label.text() and backend.saved == []
 
 
 def test_test_connection_runs_off_the_ui_thread_with_the_typed_values(qapp):
