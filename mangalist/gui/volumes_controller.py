@@ -48,6 +48,7 @@ class VolumesController(QObject):
         self.records: List[DownloadRecord] = []
         self._latest: Dict[int, DownloadRecord] = {}
         self._call: Optional[BackgroundCall] = None
+        self._again = False                     # a refresh was asked for while one was running
         self._detail_row: Optional[int] = None
         # The dialog openers: tests (and the integrator) can swap them.
         from .downloads_dialog import open_downloads_dialog
@@ -155,9 +156,11 @@ class VolumesController(QObject):
     # --- download status -----------------------------------------------------------------------------
 
     def refresh_records(self) -> bool:
-        """Read every record off the UI thread, then repaint the status texts. One read at a time."""
+        """Read every record off the UI thread, then repaint the status texts. One read at a time: a request
+        made while one runs (a send just finished) is run right after it, so the newest state is never missed."""
         if self._call is not None:
-            return False
+            self._again = True
+            return True
         backend = self.backend
         self._call = start_call(lambda: list(backend.records()), self._on_records, self._on_records_failed)
         self._call.finished.connect(self._on_call_finished)
@@ -174,6 +177,9 @@ class VolumesController(QObject):
 
     def _on_call_finished(self) -> None:
         self._call = None
+        if self._again:
+            self._again = False
+            self.refresh_records()
 
     def status_for_row(self, src_row: int) -> Optional[Tuple[str, str]]:
         """(text, tooltip) of the newest download of the series in *src_row*, or None."""
@@ -194,5 +200,6 @@ class VolumesController(QObject):
 
     def stop(self) -> None:
         self._timer.stop()
+        self._again = False
         if self._call is not None:
             self._call.abandon()
