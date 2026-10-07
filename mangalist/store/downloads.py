@@ -125,6 +125,12 @@ class DownloadLedger:
                                (TOOL, series_id)).fetchall()
         return [_record(r) for r in rows]
 
+    def all_records(self) -> Sequence[DownloadRecord]:
+        """Every download record, oldest first (the GUI's Downloads list)."""
+        with self.connect() as con:
+            rows = con.execute("SELECT * FROM ledger WHERE tool = ? ORDER BY id", (TOOL,)).fetchall()
+        return [_record(r) for r in rows]
+
     def active(self) -> Sequence[DownloadRecord]:
         """Every record not yet REMOVED / FAILED / CANCELLED, oldest first."""
         with self.connect() as con:

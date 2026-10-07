@@ -112,7 +112,8 @@ def test_backend_factory_needs_the_switch_and_an_adapter(monkeypatch):
     monkeypatch.delenv("MANGALIST_DOWNLOADS", raising=False)
     assert create_backend(object()) is None                                    # switched off
     monkeypatch.setenv("MANGALIST_DOWNLOADS", "1")
-    assert create_backend(object()) is None                                    # on, but no adapter on this branch
+    monkeypatch.setattr(downloads_backend, "ADAPTER_MODULE", "mangalist.downloads.no_such_adapter")
+    assert create_backend(object()) is None                                    # on, but no adapter
 
     class Adapter:
         @staticmethod

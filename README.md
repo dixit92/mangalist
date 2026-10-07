@@ -48,7 +48,34 @@ docker run -d --name mangalist -p 5800:5800 \
 Then open `https://<host>:5800/`. The certificate is self-signed unless you put your own in
 `/config/certs`. HTTPS is on because browsers only allow clipboard sync with the host over HTTPS.
 `USER_ID` / `GROUP_ID` default to Unraid's `99` / `100`. The scheduled rescan is `MANGALIST_RESCAN_SCHEDULE`
-(default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1`.
+(default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1` (below).
+
+#### Volumes from nyaa (Unraid, opt-in)
+
+With `MANGALIST_DOWNLOADS=1`, a series that MangaPixer has matched and that misses English volumes gets
+**Find volumes on nyaa...** (Wanted panel and the row menu). MangaList searches nyaa's English-translated
+literature, ranks the releases (the most missing volumes covered first, Digital over scans), and **you
+pick** one. MangaList adds it to qBittorrent in its own category `mangalist`, and when it has finished,
+hard-links the missing volumes into the series folder where that series already keeps its volumes (the
+release's file names are kept). Like Sonarr / Radarr's "Remove Completed", once qBittorrent has stopped
+the torrent at its seed goal and the library files are checked, MangaList asks qBittorrent to delete the
+torrent and its downloaded copy (on by default; only ever in the `mangalist` category).
+
+Set it up:
+
+- **Mount the whole user-share tree at `/data`, the same way qBittorrent does** (e.g. binhex-qbittorrentvpn's
+  `/mnt/user` -> `/data`): `-v /mnt/user:/data`, then add your roots as `/data/<share>/...`. A hard link only
+  works inside one mount; with separate mounts for the library and the torrent folder every file is
+  copied instead (double space until the torrent is removed). Both containers then see identical paths.
+- In MangaList, **qBittorrent...**: the Web UI address, user name and password, and the save path
+  (default `/data/appdata/torrents/mangalist`, which must lie outside every library root). **Test
+  connection** checks the login.
+- In qBittorrent, give torrents a seed goal that **stops** them (e.g. ratio 2, action "Stop"); Remove
+  Completed waits for that.
+- `MANGALIST_DOWNLOADS_SCHEDULE` (default `every 1h`): how often finished downloads are filed and completed
+  torrents removed.
+
+Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 
 > **Local use only - do not expose it to the internet.** MangaList is a personal, single-user desktop
 > app, not a server: the web GUI has **no login**, and whoever opens it can rename and move files in

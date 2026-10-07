@@ -205,6 +205,11 @@ class SeriesMixin:
             moved = _rekey_link(con, str(old_folder), str(new_folder)) or moved
         return moved
 
+    def series_for_folder(self, folder) -> Optional[Series]:
+        """The series row of an absolute folder inside a root, or None (not scanned, or outside every root)."""
+        loc = self._locate(folder)
+        return self.get_series(*loc) if loc is not None else None
+
     def _locate(self, folder) -> Optional[Tuple[int, str]]:
         """(root id, root-relative path) of an absolute folder inside a root, else None. Tries the path as
         given and the root resolved (the scanner keys folders under the resolved root)."""

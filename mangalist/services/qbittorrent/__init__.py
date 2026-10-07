@@ -19,7 +19,13 @@ from .client import (
     normalize_base_url,
 )
 
+
+def client_from_connection(conn) -> QbtClient:
+    """The client for a stored :class:`~mangalist.downloads.contracts.QbtConnection` (the downloads job and the GUI's
+    backend build theirs here)."""
+    return QbtClient(conn)
+
 __all__ = [
     "AuthFailed", "DeleteRefused", "IpBanned", "QbtClient", "QbtError", "TorrentNotFound", "TorrentRejected",
-    "UnexpectedResponse", "Unreachable", "normalize_base_url",
+    "UnexpectedResponse", "Unreachable", "client_from_connection", "normalize_base_url",
 ]
