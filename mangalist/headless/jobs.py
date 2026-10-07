@@ -6,7 +6,10 @@
   then signs new archives in the background order (series identity).
 - ``dispatch-batch``: the batched download dispatch. Downloads are phase 3+ and opt-in: the job is
   registered but DISABLED unless downloads are turned on, and even then it only logs for now.
-  Nothing is ever dispatched on discovery - only in these scheduled batches.
+  Nothing is ever dispatched on discovery - only in these scheduled batches. (The volumes MVP sends on the
+  owner's pick instead; this stub stays.)
+- ``downloads``: the volumes MVP's arrivals pass (:mod:`mangalist.headless.downloads_job`) - file finished
+  ``mangalist`` torrents into their series folders and remove completed ones. Enabled only with downloads on.
 
 Roots come from a :class:`RootsProvider`. The default, :class:`StoreRootsProvider`, reads the
 roots database (each root with its exclusions, which the rescan never scans) plus an optional
@@ -356,9 +359,11 @@ def make_dispatch(downloads_enabled: bool) -> JobFunc:
 def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) -> JobRegistry:
     """The runner's jobs from :class:`~mangalist.headless.settings.HeadlessSettings`."""
     provider = provider or StoreRootsProvider()
+    from .downloads_job import DESCRIPTION as DL_DESCRIPTION, JOB_NAME as DL_JOB, make_downloads_job
     from .mangapixer_job import DESCRIPTION as MP_DESCRIPTION, JOB_NAME as MP_JOB, make_mangapixer_sync
 
     mp_schedule = getattr(settings, "mangapixer_schedule", None)
+    dl_schedule = getattr(settings, "downloads_schedule", None)
     return JobRegistry([
         # First, so the rescan after it already sees MangaPixer's latest links; skipped while no
         # MangaPixer server is set up.
@@ -371,4 +376,7 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
             settings.dispatch_schedule, enabled=settings.downloads_enabled,
             description="Dispatch the batched downloads (opt-in, off by default)",
             catch_up=settings.catch_up),
+        Job(DL_JOB, make_downloads_job(), dl_schedule,
+            enabled=bool(settings.downloads_enabled) and dl_schedule is not None,
+            description=DL_DESCRIPTION, catch_up=settings.catch_up),
     ])

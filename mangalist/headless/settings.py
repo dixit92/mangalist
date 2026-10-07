@@ -5,8 +5,10 @@ set them; a desktop user can export them too).
 Variable                       Default             Meaning
 =============================  ==================  ====================================================
 ``MANGALIST_RESCAN_SCHEDULE``  ``daily@03:30``     When to rescan the library roots (``off`` to stop).
-``MANGALIST_DOWNLOADS``        ``0``               Opt-in: allow the batched download dispatch.
+``MANGALIST_DOWNLOADS``        ``0``               Opt-in: downloads (the volumes MVP; the Unraid container).
 ``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the download batch runs (only with downloads on).
+``MANGALIST_DOWNLOADS_SCHEDULE`` ``every 1h``      When to file finished downloads and remove completed
+                                                   torrents (the ``downloads`` job; only with downloads on).
 ``MANGALIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
 ``MANGALIST_MANGAPIXER_SYNC_SCHEDULE`` ``daily@03:15`` When to sync the MangaPixer source (before the rescan;
                                                    skipped while no MangaPixer server is set up).
@@ -35,10 +37,12 @@ ENV_DOWNLOADS = "MANGALIST_DOWNLOADS"
 ENV_DISPATCH = "MANGALIST_DISPATCH_SCHEDULE"
 ENV_CATCH_UP = "MANGALIST_CATCH_UP"
 ENV_MANGAPIXER = "MANGALIST_MANGAPIXER_SYNC_SCHEDULE"
+ENV_DOWNLOADS_SCHEDULE = "MANGALIST_DOWNLOADS_SCHEDULE"
 
 DEFAULT_RESCAN = "daily@03:30"
 DEFAULT_DISPATCH = "daily@04:30"
 DEFAULT_MANGAPIXER = "daily@03:15"
+DEFAULT_DOWNLOADS_SCHEDULE = "every 1h"
 
 _TRUE = {"1", "true", "yes", "y", "on", "enable", "enabled"}
 _FALSE = {"0", "false", "no", "n", "off", "disable", "disabled", ""}
@@ -96,6 +100,7 @@ class HeadlessSettings:
     catch_up: bool
     tz: tzinfo
     mangapixer_schedule: Optional[Schedule] = None
+    downloads_schedule: Optional[Schedule] = None
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "HeadlessSettings":
@@ -112,4 +117,5 @@ class HeadlessSettings:
             catch_up=parse_bool(env.get(ENV_CATCH_UP), True),
             tz=local_timezone(env),
             mangapixer_schedule=parse_schedule(get(ENV_MANGAPIXER, DEFAULT_MANGAPIXER)),
+            downloads_schedule=parse_schedule(get(ENV_DOWNLOADS_SCHEDULE, DEFAULT_DOWNLOADS_SCHEDULE)),
         )
