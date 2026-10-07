@@ -520,9 +520,10 @@ def compute_state(
 
     known = k is not None and k.matched
 
-    # English volumes out: the volume list, else the English publishers' volume count (1..N).
+    # English volumes out: the volume list's English dates, else the English publishers' volume count (1..N) - also
+    # when the list has no English date at all (e.g. MangaPixer could not reach its English-dates source).
     out_vols: List[VolumeInfo] = released_volumes(k.volumes, today) if known else []
-    if known and k.licensed and not k.volumes and k.publisher_volumes:
+    if known and k.licensed and k.publisher_volumes and not any(v.english_date for v in k.volumes):
         out_vols = [VolumeInfo(volume=fmt_num(n)) for n in range(1, int(k.publisher_volumes) + 1)]
 
     # 1. Empty folder = wanted.

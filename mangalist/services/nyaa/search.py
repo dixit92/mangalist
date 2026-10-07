@@ -2,8 +2,8 @@
 
 For a series known by several names: query the main title first, the alternatives only while nothing usable has
 been found (at most ``max_queries`` requests, 2 s apart), keep the releases that really are the series (see
-:mod:`.ranking`), drop 0-seeder results, hide light novels / EPUBs (unless asked), drop chapter releases and - when
-the missing volumes are known - releases that certainly fill none of them, dedupe by info hash, rank best first.
+:mod:`.ranking`), drop 0-seeder results, hide light novels / EPUBs (unless asked), drop chapter releases and releases
+that certainly fill none of the missing volumes (with no missing list: that hold only volumes already held), dedupe by info hash, rank best first.
 """
 
 from __future__ import annotations

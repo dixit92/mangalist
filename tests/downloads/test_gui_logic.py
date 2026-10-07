@@ -18,7 +18,7 @@ from mangalist.states import GAP_CHAPTER, GAP_VOLUME, Gap, SeriesState, State
 
 def _knowledge(**kw) -> SeriesKnowledge:
     base = dict(source=SOURCE_MANGAPIXER, link_state=LINK_CONFIRMED, mu_id="123", title="Example Series",
-                alt_titles=("Exemplar", "example series"))
+                alt_titles=("Exemplar", "example series"), licensed_en=True)
     base.update(kw)
     return SeriesKnowledge(**base)
 
@@ -53,12 +53,17 @@ def test_disabled_when_mangapixer_has_no_match_for_it():
     assert not dont.enabled and "Don't match" in dont.reason
 
 
-def test_disabled_without_missing_volumes_or_a_scanned_folder():
-    none_missing = _availability(_knowledge(), _state())
-    assert not none_missing.enabled and "No missing volumes" in none_missing.reason
-    only_chapters = _availability(_knowledge(), _state(chapters=(10, 11)))
-    assert not only_chapters.enabled and "No missing volumes" in only_chapters.reason
-    assert not _availability(_knowledge(), None).enabled
+def test_missing_volumes_are_a_hint_not_a_condition():
+    # MangaList cannot tell which English volumes are out (no dates, no count) - nyaa's results are compared with
+    # the held volumes instead (a release on nyaa is proof that a volume is out).
+    for state in (_state(), _state(chapters=(10, 11)), None):
+        got = _availability(_knowledge(), state)
+        assert got.enabled and got.target.missing == () and got.target.held == ("1",)
+
+
+def test_disabled_when_not_licensed_in_english_or_not_scanned():
+    unlicensed = _availability(_knowledge(licensed_en=False), _state(3))
+    assert not unlicensed.enabled and "Not licensed in English" in unlicensed.reason
     unscanned = _availability(_knowledge(), _state(3), series_id=None)
     assert not unscanned.enabled and "rescan" in unscanned.reason
 

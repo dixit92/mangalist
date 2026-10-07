@@ -24,7 +24,7 @@ from .conftest import FakeBackend, qapp, record, wait_until  # noqa: E402,F401
 QUEST = "Example Quest"        # MangaPixer-matched, holds volume 1: volumes 2-3 are out and missing
 REVIEW = "Review Series"       # MangaPixer: needs review
 OWN = "Own Matcher Series"     # no MangaPixer link
-DONE = "Finished Series"       # MangaPixer-matched, holds volumes 1-3: nothing missing
+DONE = "Finished Series"       # MangaPixer-matched, holds volumes 1-3: nothing known missing (still searchable)
 NEW = "Unscanned Series"       # matched with missing volumes but not in the store yet
 
 HELD = {QUEST: ["1"], REVIEW: ["1"], OWN: ["1"], DONE: ["1", "2", "3"], NEW: ["1"]}
@@ -105,14 +105,16 @@ def test_toolbar_has_qbittorrent_and_downloads_buttons_before_rescan(make_window
     (QUEST, True, ""),
     (REVIEW, False, "MangaPixer"),
     (OWN, False, "not linked there"),
-    (DONE, False, "No missing volumes"),
+    (DONE, True, ""),
     (NEW, False, "rescan first"),
 ])
 def test_find_volumes_enable_rules(make_window, title, enabled, why):
     win = make_window(_backend())
     got = win._volumes.availability(_row(win, title))
     assert got.enabled is enabled and why in got.reason
-    if enabled:
+    if title == DONE:                   # nothing known missing: nyaa's results are compared with the held volumes
+        assert got.target.missing == () and got.target.held == ("1", "2", "3")
+    elif enabled:
         assert got.target.missing == ("2", "3") and got.target.held == ("1",)
         assert got.target.series_id == 1 and got.target.folder == str(Path("/lib") / QUEST)
 

@@ -86,17 +86,19 @@ def numbers_text(numbers: Iterable[str], *, pad: bool = False) -> str:
 def find_volumes_availability(*, series_id: Optional[int], folder: str, title: str, english_title: Optional[str],
                               knowledge: Optional[SeriesKnowledge], state: Optional[SeriesState],
                               held: Sequence[str]) -> Availability:
-    """Whether a series can be searched on nyaa. Enabled only for a series matched in MangaPixer (source
-    ``mangapixer`` and ``matched``) that has missing volumes and a scanned folder."""
+    """Whether a series can be searched on nyaa. Enabled for a series matched in MangaPixer (source ``mangapixer``
+    and ``matched``), licensed in English, with a scanned folder. The missing volumes are a ranking hint, not a
+    condition: when MangaList cannot tell which English volumes are out (``missing`` empty), nyaa's results are
+    compared with the volumes held - a release on nyaa is itself proof that a volume is out."""
     if knowledge is None or knowledge.source != SOURCE_MANGAPIXER:
         return Availability(False, "Only series matched in MangaPixer can be searched on nyaa "
                                    "(this one is not linked there).")
     if not knowledge.matched:
         why = knowledge.not_a_series_reason or "MangaPixer has not matched this series yet"
         return Availability(False, f"Only series matched in MangaPixer can be searched on nyaa ({why}).")
+    if not knowledge.licensed:
+        return Availability(False, "Not licensed in English: there are no English volumes to look for.")
     missing = state.missing_volumes if state is not None else ()
-    if not missing:
-        return Availability(False, "No missing volumes: there is nothing to look for.")
     if series_id is None:
         return Availability(False, "MangaList has not scanned this folder yet: rescan first.")
     return Availability(True, "", VolumeTarget(series_id=series_id, folder=folder, title=title,

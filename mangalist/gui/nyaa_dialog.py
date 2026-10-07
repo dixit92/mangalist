@@ -110,7 +110,8 @@ class NyaaDialog(QDialog):
         outer.addWidget(self.title_label)
 
         form = QFormLayout()
-        self.missing_label = QLabel(numbers_text(self.target.missing, pad=True) or "-")
+        self.missing_label = QLabel(numbers_text(self.target.missing, pad=True)
+                                    or "not known - releases are compared with the volumes you have")
         self.missing_label.setWordWrap(True)
         self.missing_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         form.addRow("Missing volumes:", self.missing_label)
@@ -339,7 +340,10 @@ class NyaaDialog(QDialog):
         if candidate.info_hash in self._sent_hashes:
             return "This release was already sent."
         if not wanted_volumes_for(candidate, self.target.missing):
-            return "This release holds none of the missing volumes."
+            if candidate.vol_from is None:
+                return "The title does not say which volumes this release holds, and the missing volumes are not known."
+            return ("This release holds none of the missing volumes." if self.target.missing
+                    else "This release holds only volumes you already have.")
         return None
 
     def _update_send(self, *_args) -> None:

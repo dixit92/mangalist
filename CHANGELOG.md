@@ -8,9 +8,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 ## [Unreleased]
 
 - **Volumes from nyaa, filed for you (Unraid container, opt-in with `MANGALIST_DOWNLOADS=1`):** for a series
-  MangaPixer has matched that misses English volumes, **Find volumes on nyaa...** (Wanted panel, row menu) lists
+  MangaPixer has matched that is licensed in English, **Find volumes on nyaa...** (Wanted panel, row menu) lists
   nyaa's English-translated releases of that series - releases of other series sharing the name are left out -
-  ranked by how many of your missing volumes they hold, Digital before scans, trusted uploaders marked, volumes
+  ranked by how many of your missing volumes they hold (when MangaList cannot tell which English volumes are out:
+  how many volumes you do not have - a release on nyaa is itself proof that a volume is out), Digital before scans, trusted uploaders marked, volumes
   you already have labelled, releases without seeders and light novels hidden. You pick one; MangaList adds it to
   qBittorrent in its own category `mangalist`.
 - **Arrivals:** once the torrent has finished, MangaList hard-links only the missing volumes into the folder where
@@ -22,6 +23,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
   only ever in the `mangalist` category, never when filing failed, never when the torrent's data lies in a library root.
 - **qBittorrent...** (toolbar): Web UI address, user name, password (stored outside the settings, never shown
   again), save path, Remove Completed, and a connection test. A **Downloads** list shows each download's state.
+- When MangaPixer's volume list has no English dates (e.g. its dates source could not be reached), the English
+  publishers' volume count decides which English volumes are out - as when there is no list - instead of "Can't tell".
 - `MANGALIST_DOWNLOADS_SCHEDULE` (default `every 1h`) sets how often finished downloads are filed and completed
   torrents removed. The container must see the library and the torrent folder through **one** mount
   (`/mnt/user` -> `/data`, as qBittorrent does) for hard links; see the README.

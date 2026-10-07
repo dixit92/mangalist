@@ -52,10 +52,10 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 
 #### Volumes from nyaa (Unraid, opt-in)
 
-With `MANGALIST_DOWNLOADS=1`, a series that MangaPixer has matched and that misses English volumes gets
+With `MANGALIST_DOWNLOADS=1`, a series that MangaPixer has matched and that is licensed in English gets
 **Find volumes on nyaa...** (Wanted panel and the row menu). MangaList searches nyaa's English-translated
-literature, ranks the releases (the most missing volumes covered first, Digital over scans), and **you
-pick** one. MangaList adds it to qBittorrent in its own category `mangalist`, and when it has finished,
+literature, ranks the releases (the most missing volumes covered first - or, when MangaList cannot tell which
+English volumes are out, the most volumes you do not have - Digital over scans), and **you pick** one. MangaList adds it to qBittorrent in its own category `mangalist`, and when it has finished,
 hard-links the missing volumes into the series folder where that series already keeps its volumes (the
 release's file names are kept). Like Sonarr / Radarr's "Remove Completed", once qBittorrent has stopped
 the torrent at its seed goal and the library files are checked, MangaList asks qBittorrent to delete the

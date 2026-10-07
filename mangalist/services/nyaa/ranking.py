@@ -79,6 +79,27 @@ def _covered(volumes: Sequence[str], parsed: ParsedTitle) -> Tuple[str, ...]:
     return tuple(out)
 
 
+_MAX_RANGE = 500    # a range wider than this is not expanded into volume numbers (a malformed title)
+
+
+def _not_held(parsed: ParsedTitle, held: Sequence[str]) -> Tuple[str, ...]:
+    """With no missing list (MangaList cannot tell which English volumes are out): the volumes of the release's range
+    that are not held - its whole numbers and its two ends, as :func:`_covered` reads a range."""
+    if parsed.vol_from is None or parsed.vol_to is None or parsed.renumbered:
+        return ()
+    low, high = Decimal(parsed.vol_from), Decimal(parsed.vol_to)
+    if high < low or high - low > _MAX_RANGE:
+        return ()
+    have = {d for d in (to_decimal(v) for v in held) if d is not None}
+    first = int(low) if low == low.to_integral_value() else int(low) + 1
+    numbers = sorted({low, high} | {Decimal(n) for n in range(first, int(high) + 1)})
+    return tuple(_plain(d) for d in numbers if d not in have)
+
+
+def _plain(d: Decimal) -> str:
+    return format(d.normalize(), "f")
+
+
 def _uncertain(parsed: ParsedTitle) -> bool:
     return bool(parsed.renumbered) or (parsed.vol_from is None and parsed.is_pack)
 
@@ -93,10 +114,11 @@ def _list(volumes: Sequence[str], limit: int = 6) -> str:
 
 def build_candidate(item: RssItem, parsed: ParsedTitle, missing: Sequence[str], held: Sequence[str]
                     ) -> NyaaCandidate:
-    covers_missing = _covered(missing, parsed)
+    # The missing list may be unknown (empty): then every volume of the release that is not held counts.
+    covers_missing = _covered(missing, parsed) if missing else _not_held(parsed, held)
     covers_held = _covered(held, parsed)
     uncertain = _uncertain(parsed)
-    tier = float(len(covers_missing)) or (_UNCERTAIN_TIER if uncertain and missing else 0.0)
+    tier = float(len(covers_missing)) or (_UNCERTAIN_TIER if uncertain else 0.0)
 
     rank = (tier * _TIER + (_DIGITAL if parsed.digital else 0.0) + (_TRUSTED if item.trusted else 0.0)
             - (_REMAKE if item.remake else 0.0) + min(item.seeders, _SEEDERS_CAP))
@@ -104,7 +126,8 @@ def build_candidate(item: RssItem, parsed: ParsedTitle, missing: Sequence[str], 
     reasons: List[str] = []
     if covers_missing:
         n = len(covers_missing)
-        reasons.append(f"covers {n} missing volume{'s' if n != 1 else ''} ({_list(covers_missing)})")
+        what = "missing volume" if missing else "volume you do not have"
+        reasons.append(f"covers {n} {what}{'s' if n != 1 else ''} ({_list(covers_missing)})")
     elif parsed.renumbered:
         reasons.append(f"{parsed.renumbered} edition: its volume numbers may differ from the series'")
     elif parsed.vol_from is None and parsed.is_pack:
@@ -133,8 +156,9 @@ def build_candidate(item: RssItem, parsed: ParsedTitle, missing: Sequence[str], 
 
 
 def fills_nothing(candidate: NyaaCandidate, parsed: ParsedTitle, missing: Sequence[str]) -> bool:
-    """True when the release certainly holds none of the missing volumes (its numbers are known and comparable)."""
-    return bool(missing) and not candidate.covers_missing and not _uncertain(parsed) and parsed.vol_from is not None
+    """True when the release certainly holds none of the missing volumes - or, with no missing list, only volumes
+    already held (its numbers are known and comparable)."""
+    return not candidate.covers_missing and not _uncertain(parsed) and parsed.vol_from is not None
 
 
 def order(candidates: Iterable[NyaaCandidate]) -> List[NyaaCandidate]:

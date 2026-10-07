@@ -234,3 +234,26 @@ def test_a_pack_without_numbers_is_flagged_and_has_no_volumes():
     pack = next(c for c in out if c.title.startswith("Vinland Saga (2013-2025)"))
     assert pack.is_pack and pack.vol_from is None and pack.vol_to is None and pack.covers_missing == ()
     assert out[0].title.startswith("Vinland Saga v29")          # the only release that certainly fills a volume
+
+
+# --- no missing list (MangaList cannot tell which English volumes are out) -----------------------------
+
+
+def test_without_a_missing_list_the_volumes_not_held_count():
+    client = FakeClient({"s": feed(
+        item("S v01-03 (Digital) (Pack)"), item("S v04 (Digital) (Four)"), item("S v02 (Digital) (Held)"),
+        item("S (2013-2025) (Digital) (Numberless)"))})
+    out = search(client, ["S"], [], ["1", "2"])
+    by_group = {c.group: c for c in out}
+    assert "Held" not in by_group                                   # only a volume already held: dropped
+    assert by_group["Pack"].covers_missing == ("3",) and by_group["Pack"].covers_held == ("1", "2")
+    assert by_group["Four"].covers_missing == ("4",)
+    assert "volume you do not have" in " ".join(by_group["Four"].reasons)
+    assert by_group["Numberless"].covers_missing == ()              # unknown contents: kept, ranked below
+    assert out[-1].group == "Numberless"
+
+
+def test_without_a_missing_list_or_holdings_every_volume_counts():
+    client = FakeClient({"s": feed(item("S v01-03 (Digital) (Pack)"), item("S v02.5 (Digital) (Half)"))})
+    out = {c.group: c for c in search(client, ["S"], [], [])}
+    assert out["Pack"].covers_missing == ("1", "2", "3") and out["Half"].covers_missing == ("2.5",)

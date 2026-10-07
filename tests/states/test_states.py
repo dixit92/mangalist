@@ -435,3 +435,15 @@ def test_an_unknown_link_state_is_not_a_series_and_never_fails():
     assert s.state == State.NOT_A_SERIES and s.gaps == ()
     # An empty folder with an unknown state is not "wanted" either.
     assert state(inv(), k, folder_empty=True).state == State.NOT_A_SERIES
+
+
+def test_a_volume_list_without_english_dates_falls_back_to_the_publishers_count():
+    # MangaPixer sent its volume list but could not reach its English-dates source: the English publishers'
+    # volume count (here 3) decides which English volumes are out, as when there is no list at all.
+    it = item()
+    for v in it["volumes"]["items"]:
+        v["englishDate"], v["englishDateKind"] = None, None
+    s = state(inv(held_volumes=["1"]), from_mangapixer_item(it))
+    assert s.state == State.MISSING_VOLUMES and s.missing_volumes == ("2", "3")
+    it["record"]["englishPublishers"] = []                         # no count either: nothing to tell
+    assert state(inv(held_volumes=["1"]), from_mangapixer_item(it)).missing_volumes == ()
