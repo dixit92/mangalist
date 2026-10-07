@@ -144,6 +144,8 @@ def locate_series(db, series_id: int):
     database no longer knows it or its root."""
     from ..store.series import _row
 
+    if series_id is None:           # the ledger's series_id is SET NULL when the series row goes (root removed)
+        raise LookupError("the series is no longer in the library database")
     with db.connect() as con:
         r = con.execute("SELECT * FROM series WHERE id = ?", (int(series_id),)).fetchone()
     if r is None:
