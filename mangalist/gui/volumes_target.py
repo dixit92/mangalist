@@ -111,20 +111,29 @@ def find_volumes_availability(*, series_id: Optional[int], folder: str, title: s
 
 
 def status_text(record: DownloadRecord) -> str:
-    """"Sent", "Downloaded", "Filed v03-v05", "Failed: <reason>", "Removed", "Cancelled"."""
+    """"Sent", "Downloaded", "Filed v03-v05 - seeding", "Filed v03-v05 - done", "Failed: <reason>", "Cancelled".
+
+    The volumes come first: once filed they are in the library, whatever happens to the torrent afterwards - "done"
+    means qBittorrent finished seeding and the torrent with its downloaded copy was removed (never the library's)."""
     status = record.status
-    if status == DownloadStatus.FILED:
+    if status in (DownloadStatus.FILED, DownloadStatus.REMOVED):
         vols = numbers_text(record.wanted_volumes, pad=True)
-        return f"Filed {vols}" if vols else "Filed"
+        filed = f"Filed {vols}" if vols else "Filed"
+        return f"{filed} - {'seeding' if status == DownloadStatus.FILED else 'done'}"
     if status == DownloadStatus.FAILED:
         return f"Failed: {record.error}" if record.error else "Failed"
     return {DownloadStatus.SENT: "Sent", DownloadStatus.DOWNLOADED: "Downloaded",
-            DownloadStatus.REMOVED: "Removed", DownloadStatus.CANCELLED: "Cancelled"}.get(status, status.capitalize())
+            DownloadStatus.CANCELLED: "Cancelled"}.get(status, status.capitalize())
 
 
 def status_tooltip(record: DownloadRecord) -> str:
     lines = [record.title, f"Volumes: {numbers_text(record.wanted_volumes, pad=True) or '-'}",
              f"Target folder: {record.target_dir}", f"Updated: {record.updated_at}"]
+    if record.status == DownloadStatus.FILED:
+        lines.append("The volumes are in the library; qBittorrent is still seeding the torrent.")
+    if record.status == DownloadStatus.REMOVED:
+        lines.append("Done: qBittorrent finished seeding, and MangaList removed the torrent and its downloaded copy. "
+                     "The volumes stay in the library.")
     if record.copied:
         lines.append("Copied, not hard-linked: the library holds its own copy (double the space).")
     if record.status == DownloadStatus.FAILED and record.error:

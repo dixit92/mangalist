@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QProgressBar,
@@ -39,6 +38,7 @@ from ..classifier import _human
 from ..downloads.contracts import DownloadRecord, NyaaCandidate, Placement
 from .background import BackgroundCall, start_call
 from .downloads_backend import DownloadsBackend
+from .tables import resizable_columns
 from .volumes_target import VolumeTarget, numbers_text, volume_label
 
 ConfirmFn = Callable[[QWidget, str], bool]
@@ -160,12 +160,8 @@ class NyaaDialog(QDialog):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setWordWrap(False)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setSectionResizeMode(COL_TITLE, QHeaderView.Stretch)
-        for col, width in ((COL_VOLUMES, 70), (COL_COVERS, 110), (COL_HELD, 100), (COL_DIGITAL, 60), (COL_GROUP, 120),
-                           (COL_SIZE, 80), (COL_SEEDERS, 70), (COL_TRUSTED, 60), (COL_PUBLISHED, 90)):
-            self.table.setColumnWidth(col, width)
+        resizable_columns(self.table, {COL_TITLE: 420, COL_VOLUMES: 70, COL_COVERS: 110, COL_HELD: 100, COL_DIGITAL: 60,
+                                       COL_GROUP: 120, COL_SIZE: 80, COL_SEEDERS: 70, COL_TRUSTED: 60, COL_PUBLISHED: 90})
         self.table.itemSelectionChanged.connect(self._update_send)
         self.table.itemDoubleClicked.connect(lambda *_: self.open_selected_page())
         outer.addWidget(self.table, 1)
@@ -179,7 +175,7 @@ class NyaaDialog(QDialog):
         self.btn_page = QPushButton("Open nyaa page")
         self.btn_page.setToolTip("Open the selected release's page on nyaa in the browser")
         self.btn_page.clicked.connect(self.open_selected_page)
-        self.btn_send = QPushButton("Send to qBittorrent...")
+        self.btn_send = QPushButton("Send to qBittorrent")
         self.btn_send.clicked.connect(self.send_selected)
         buttons.addWidget(self.btn_page)
         buttons.addWidget(self.btn_send)

@@ -94,11 +94,12 @@ def _record(status, **kw) -> DownloadRecord:
 def test_status_texts():
     assert status_text(_record(DownloadStatus.SENT)) == "Sent"
     assert status_text(_record(DownloadStatus.DOWNLOADED)) == "Downloaded"
-    assert status_text(_record(DownloadStatus.FILED)) == "Filed v03-v05"
-    assert status_text(_record(DownloadStatus.FILED, wanted_volumes=("7",))) == "Filed v07"
+    assert status_text(_record(DownloadStatus.FILED)) == "Filed v03-v05 - seeding"
+    assert status_text(_record(DownloadStatus.FILED, wanted_volumes=("7",))) == "Filed v07 - seeding"
     assert status_text(_record(DownloadStatus.FAILED, error="no space left")) == "Failed: no space left"
     assert status_text(_record(DownloadStatus.FAILED)) == "Failed"
-    assert status_text(_record(DownloadStatus.REMOVED)) == "Removed"
+    assert status_text(_record(DownloadStatus.REMOVED)) == "Filed v03-v05 - done"      # the volumes stay; the torrent went
+    assert "volumes stay in the library" in status_tooltip(_record(DownloadStatus.REMOVED))
     assert status_text(_record(DownloadStatus.CANCELLED)) == "Cancelled"
 
 

@@ -73,13 +73,13 @@ class VolumesController(QObject):
     def add_toolbar_buttons(self, toolbar: QToolBar, make_button: Callable[[str], QWidget],
                             spacer: Callable[[int], QWidget], before: Optional[QAction] = None) -> None:
         """qBittorrent… and Downloads…, inserted before the *before* action (appended when None)."""
-        btn_qbt = make_button("qBittorrent…")
+        btn_qbt = make_button("qBittorrent")
         btn_qbt.setToolTip("Where MangaList sends the volumes you pick on nyaa (qBittorrent Web UI)")
         btn_qbt.clicked.connect(self.open_qbittorrent)
         add = (lambda w: toolbar.insertWidget(before, w)) if before is not None else toolbar.addWidget
         add(btn_qbt)
         add(spacer(6))
-        btn_dl = make_button("Downloads…")
+        btn_dl = make_button("Downloads")
         btn_dl.setToolTip("Volumes sent to qBittorrent and where each one stands")
         btn_dl.clicked.connect(self.open_downloads)
         add(btn_dl)

@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QProgressBar,
@@ -37,6 +36,7 @@ from ..services.mangapixer import client as mpc
 from ..services.mangapixer import mapping as mp_map
 from ..services.mangapixer.sync import SyncResult, sync_all
 from ..store.mangapixer import MangaPixerCache, kind_is_default
+from .tables import cell, resizable_columns
 
 ClientFactory = Callable[[str, Optional[str], object], mpc.MangaPixerClient]
 
@@ -48,6 +48,7 @@ NONE = "__none__"
 
 def _default_client_factory(base_url: str, token: Optional[str], verify) -> mpc.MangaPixerClient:
     return mpc.MangaPixerClient(base_url, token, verify=verify)
+
 
 
 class _SyncWorker(QObject):
@@ -110,7 +111,7 @@ class MangaPixerDialog(QDialog):
         ca_row = QHBoxLayout()
         self.ca_edit = QLineEdit()
         self.ca_edit.setPlaceholderText("optional: the CA file of a self-signed certificate")
-        self.btn_ca = QPushButton("Browse...")
+        self.btn_ca = QPushButton("Browse")
         self.btn_ca.clicked.connect(self._browse_ca)
         ca_row.addWidget(self.ca_edit, 1)
         ca_row.addWidget(self.btn_ca)
@@ -137,7 +138,7 @@ class MangaPixerDialog(QDialog):
         lv = QVBoxLayout(libs)
         self.lib_table = QTableWidget(0, 5)
         self.lib_table.setHorizontalHeaderLabels(["Library", "Kind", "Items", "Used", "Last sync"])
-        self.lib_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        resizable_columns(self.lib_table)
         self.lib_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         lv.addWidget(self.lib_table)
         outer.addWidget(libs)
@@ -147,7 +148,7 @@ class MangaPixerDialog(QDialog):
         self.map_table = QTableWidget(0, 5)
         self.map_table.setHorizontalHeaderLabels(["Root", "MangaPixer library", "Inside (trail)", "Matched",
                                                   "Unmatched"])
-        self.map_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        resizable_columns(self.map_table)
         self.map_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.map_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.map_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -277,7 +278,8 @@ class MangaPixerDialog(QDialog):
             cells = [name, lib.kind or "-", str(self._cache.item_count(lib.id)),
                      "yes" if lib.id in to_sync else "no (kind)", last]
             for col, text in enumerate(cells):
-                self.lib_table.setItem(row, col, QTableWidgetItem(text))
+                self.lib_table.setItem(row, col, cell(text))
+        self.lib_table.resizeColumnsToContents()
 
         self.lib_combo.clear()
         self.lib_combo.addItem("Automatic", AUTO)
@@ -303,7 +305,8 @@ class MangaPixerDialog(QDialog):
                 matched = "" if m.matched is None else str(m.matched)
                 unmatched = "" if m.unmatched is None else str(m.unmatched)
             for col, text in enumerate([root.name, lib_text, prefix, matched, unmatched]):
-                self.map_table.setItem(row, col, QTableWidgetItem(text))
+                self.map_table.setItem(row, col, cell(text))
+        self.map_table.resizeColumnsToContents()
         last = self._cache.last_sync_at()
         self.sync_label.setText(f"Last sync: {last}" if last else "Not synced yet")
 

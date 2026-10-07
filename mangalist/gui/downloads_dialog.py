@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QProgressBar,
     QPushButton,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 from ..downloads.contracts import DownloadRecord
 from .background import BackgroundCall, start_call
 from .downloads_backend import DownloadsBackend
+from .tables import resizable_columns
 from .volumes_target import numbers_text, status_text, status_tooltip
 
 COLUMNS = ("Series", "Release", "Volumes", "Status", "Target folder", "Updated")
@@ -51,11 +51,7 @@ class DownloadsDialog(QDialog):
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
         self.table.verticalHeader().setVisible(False)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        for col, width in ((0, 170), (2, 100), (3, 210), (4, 230), (5, 120)):
-            self.table.setColumnWidth(col, width)
+        resizable_columns(self.table, {0: 170, 1: 360, 2: 100, 3: 210, 4: 230, 5: 120})
         outer.addWidget(self.table, 1)
 
         self.status_label = QLabel("")

@@ -1,5 +1,5 @@
 """The volumes GUI inside the main window (offscreen Qt, fake backend): nothing exists without downloads; with them,
-"Find volumes on nyaa..." is enabled only for a MangaPixer-matched series with missing volumes (row menu and Wanted
+"Find volumes on nyaa..." is enabled only for a MangaPixer-matched series licensed in English (row menu and Wanted
 panel), the toolbar has qBittorrent / Downloads, and a series' download status shows in the Wanted panel and the
 detail panel."""
 
@@ -88,16 +88,16 @@ def test_nothing_of_the_volumes_gui_exists_without_downloads(make_window):
     from PySide6.QtWidgets import QPushButton
 
     labels = {b.text() for b in win.findChildren(QPushButton)}
-    assert "qBittorrent…" not in labels and "Downloads…" not in labels
+    assert "qBittorrent" not in labels and "Downloads" not in labels
 
 
 def test_toolbar_has_qbittorrent_and_downloads_buttons_before_rescan(make_window):
     win = make_window(_backend())
-    assert win._volumes.btn_qbittorrent.text() == "qBittorrent…" and win._volumes.btn_downloads.text() == "Downloads…"
+    assert win._volumes.btn_qbittorrent.text() == "qBittorrent" and win._volumes.btn_downloads.text() == "Downloads"
     buttons = (win._btn_mangapixer, win._volumes.btn_qbittorrent, win._volumes.btn_downloads, win._btn_rescan)
     win.show()
     xs = [w.mapTo(win, w.rect().topLeft()).x() for w in buttons]
-    assert [w.text() for w in buttons] == ["MangaPixer…", "qBittorrent…", "Downloads…", "Rescan"]
+    assert [w.text() for w in buttons] == ["MangaPixer", "qBittorrent", "Downloads", "Rescan"]
     assert xs == sorted(xs) and len(set(xs)) == 4
 
 
@@ -166,10 +166,10 @@ def test_download_status_shows_in_the_wanted_panel_and_the_detail_panel(make_win
     panel.rebuild(win._model)
     group = panel.tree.topLevelItem(1)
     texts = {group.child(i).text(0): group.child(i).text(3) for i in range(group.childCount())}
-    assert texts[QUEST] == "Filed v03-v05"                  # the newest record of the series wins
+    assert texts[QUEST] == "Filed v03-v05 - seeding"                  # the newest record of the series wins
     assert not panel.tree.isColumnHidden(3)
     win._volumes.show_in_detail(_row(win, QUEST))
-    assert win._detail._lbl_download.text() == "Filed v03-v05" and "Target folder" in win._detail._lbl_download.toolTip()
+    assert win._detail._lbl_download.text() == "Filed v03-v05 - seeding" and "Target folder" in win._detail._lbl_download.toolTip()
     win._volumes.show_in_detail(_row(win, OWN))
     assert win._detail._lbl_download.text() == "-"
     assert win._volumes.status_for_row(_row(win, DONE)) == ("Failed: no space left", win._volumes.status_for_row(

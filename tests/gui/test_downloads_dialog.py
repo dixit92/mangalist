@@ -21,7 +21,7 @@ def test_lists_records_newest_first_with_status_wording(qapp):
     dlg = DownloadsDialog(backend, series_name=lambda i: {7: "Example Series"}.get(i, f"Series #{i}"))
     wait_until(qapp, lambda: dlg.records)
     rows = [[dlg.table.item(r, c).text() for c in range(6)] for r in range(dlg.table.rowCount())]
-    assert [r[3] for r in rows] == ["Removed", "Failed: no space left", "Filed v03-v05"]
+    assert [r[3] for r in rows] == ["Filed v03-v05 - done", "Failed: no space left", "Filed v03-v05 - seeding"]
     assert rows[2][:3] == ["Example Series", "Example Series v03-05", "v03-v05"] and rows[0][0] == "Series #9"
     assert threading.get_ident() not in backend.threads
     assert "Updated: 2026-10-07T10:05" in dlg.table.item(0, 3).toolTip()

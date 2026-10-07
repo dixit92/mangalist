@@ -71,7 +71,7 @@ class WantedPanel(QWidget):
         self.btn_show.clicked.connect(self.show_selected)
         buttons.addWidget(self.btn_open)
         buttons.addWidget(self.btn_show)
-        self.btn_find = QPushButton("Find volumes on nyaa...")
+        self.btn_find = QPushButton("Find volumes on nyaa")
         self.btn_find.clicked.connect(self.find_selected)
         self.btn_find.setVisible(False)
         buttons.addWidget(self.btn_find)

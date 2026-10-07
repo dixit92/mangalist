@@ -313,14 +313,14 @@ class MainWindow(QMainWindow):
         toolbar.setContentsMargins(4, 2, 4, 2)
         self.addToolBar(toolbar)
 
-        btn_choose = self._make_button("Choose Manga Root…")
+        btn_choose = self._make_button("Choose Manga Root")
         btn_choose.setToolTip("Add a folder of series folders as a root and scan")
         btn_choose.clicked.connect(self._on_choose_root)
         toolbar.addWidget(btn_choose)
 
         toolbar.addWidget(_toolbar_spacer(6))
 
-        btn_roots = self._make_button("Roots…")
+        btn_roots = self._make_button("Roots")
         btn_roots.setToolTip("Manage roots and their exclusions")
         btn_roots.clicked.connect(self._on_roots)
         toolbar.addWidget(btn_roots)
@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(_toolbar_spacer(6))
 
-        btn_mangapixer = self._make_button("MangaPixer…")
+        btn_mangapixer = self._make_button("MangaPixer")
         btn_mangapixer.setToolTip("Use a MangaPixer server's links and series data (API token)")
         btn_mangapixer.clicked.connect(self._on_mangapixer)
         toolbar.addWidget(btn_mangapixer)
