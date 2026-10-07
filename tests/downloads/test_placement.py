@@ -107,7 +107,7 @@ def test_never_a_folder_outside_the_series_folder(sdir, tmp_path):
 def test_placement_from_the_library_database(tmp_path):
     from mangalist import store
 
-    from .conftest import scan
+    from .fakes import scan
 
     store.reset_stores()
     db = store.get_store()

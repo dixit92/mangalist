@@ -12,7 +12,7 @@ from mangalist.downloads.arrivals import run_arrivals, volumes_of
 from mangalist.downloads.contracts import DownloadStatus as S
 from mangalist.store import Journal, LOCK_NAME, RootLock
 
-from .conftest import HASH, candidate, data
+from .fakes import HASH, candidate, data
 
 PACK = {
     "Series A v01 (Digital).cbz": data("pack v01"),       # held already
@@ -276,7 +276,7 @@ def test_a_crash_mid_plan_is_recovered_and_resumed(ledger, sent, qbt, db, series
 
 def test_torrent_data_inside_a_library_root_is_never_deleted(ledger, series, db, tmp_path):
     """A misconfigured save path inside the library: filing works, deleting is refused."""
-    from .conftest import FakeQbt
+    from .fakes import FakeQbt
 
     sid, sdir = series
     (root,) = db.list_roots()
