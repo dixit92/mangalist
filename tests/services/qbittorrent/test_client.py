@@ -356,3 +356,9 @@ def test_a_204_login_without_a_session_cookie_is_unexpected(qbt, client):
     qbt.login_status_override = 204
     with pytest.raises(UnexpectedResponse, match="no session cookie"):
         client.version()
+
+
+def test_a_v5_add_answered_202_accepted_is_fine(qbt, client):
+    qbt.v5 = True
+    client.add("https://nyaa.example/download/1.torrent", category="mangalist")
+    assert qbt.added == [("https://nyaa.example/download/1.torrent", "mangalist")]

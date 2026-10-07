@@ -15,6 +15,13 @@ from .placement import same_or_inside
 _log = logging.getLogger(__name__)
 
 
+def _in_category(client: TorrentClient, info_hash: str) -> bool:
+    try:
+        return any(t.info_hash.lower() == info_hash.lower() for t in client.torrents(QBITTORRENT_CATEGORY))
+    except Exception:  # noqa: BLE001 - cannot tell: the add's own error stands
+        return False
+
+
 class SendRefused(ValueError):
     """The pick cannot be sent as given (nothing was added to qBittorrent)."""
 
@@ -46,7 +53,15 @@ def send_pick(client: TorrentClient, store: DownloadStore, series_id: int, candi
             raise SendRefused(f"the qBittorrent save path overlaps the library root {root.path}; downloads must be "
                               "saved outside the library")
     client.ensure_category(QBITTORRENT_CATEGORY, save_path)
-    client.add(candidate.torrent_url or candidate.magnet, category=QBITTORRENT_CATEGORY)
+    try:
+        client.add(candidate.torrent_url or candidate.magnet, category=QBITTORRENT_CATEGORY)
+    except Exception:
+        # Already there? (sent before, but the record was not written - a crash, or an answer MangaList did not
+        # understand): a torrent with this hash in MangaList's own category is recorded, not refused.
+        if not _in_category(client, candidate.info_hash):
+            raise
+        _log.info("Sent download: %s is already in qBittorrent's %r category; recording it", candidate.title,
+                  QBITTORRENT_CATEGORY)
     record = store.create(series_id, candidate, wanted_volumes, target)
     _log.info("Sent download %d to qBittorrent: %s (volumes %s) -> %s", record.id, candidate.title,
               ", ".join(record.wanted_volumes), target)

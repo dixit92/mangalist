@@ -137,6 +137,8 @@ class FakeQbt:
             if self.add_answer == "Ok.":
                 for link in form.get("urls", "").split("\n"):
                     self.added.append((link, form.get("category")))
+            if self.v5 and self.add_answer == "Ok.":
+                return 202, b"", {}                  # 5.x: Accepted (the add is queued)
             return 200, self.add_answer.encode(), {}
         if path == "torrents/delete":
             hashes = form.get("hashes", "")

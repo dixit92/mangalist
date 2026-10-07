@@ -52,3 +52,25 @@ def test_refusals_add_nothing(ledger, series, qbt, place, tmp_path, library):
     with pytest.raises(SendRefused, match="already being downloaded"):
         send_pick(qbt, ledger, sid, candidate(), ["3"], place, save)
     assert len(qbt.calls) == 2
+
+
+def test_a_torrent_already_in_the_category_is_recorded_not_refused(ledger, series, qbt, place, tmp_path):
+    # Sent before but never recorded (the record write crashed, or the answer was not understood): sending again
+    # records it - qBittorrent's duplicate refusal is not an error when the torrent is in MangaList's category.
+    sid, _ = series
+    qbt.put(HASH, "Example Release", {"Example v02.cbz": b"x"}, state="downloading")
+
+    def refuse(url, *, category):
+        raise RuntimeError("qBittorrent did not add the torrent: already there")
+    qbt.add = refuse
+    rec = send_pick(qbt, ledger, sid, candidate(), ["2"], place, str(tmp_path / "t"))
+    assert rec.status == DownloadStatus.SENT and ledger.active() == [rec]
+
+
+def test_a_refused_add_of_a_torrent_not_in_the_category_stays_an_error(ledger, series, qbt, place, tmp_path):
+    def refuse(url, *, category):
+        raise RuntimeError("invalid torrent")
+    qbt.add = refuse
+    with pytest.raises(RuntimeError, match="invalid torrent"):
+        send_pick(qbt, ledger, series[0], candidate(), ["2"], place, str(tmp_path / "t"))
+    assert ledger.active() == []

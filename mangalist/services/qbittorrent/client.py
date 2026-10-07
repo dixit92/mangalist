@@ -248,7 +248,8 @@ class QbtClient:
 
     def _call(self, method: str, path: str, params: Optional[Dict[str, Any]] = None,
               data: Optional[Dict[str, Any]] = None) -> requests.Response:
-        """One API call: log in first if needed, log in again once on 403. Returns a 2xx / 404 / 409 response."""
+        """One API call: log in first if needed, log in again once on 403. Returns a 2xx / 404 / 409 response (any 2xx:
+        qBittorrent 5.x answers an add with 202 Accepted)."""
         if not self._logged_in:
             self._login()
         resp = self._send(method, path, params, data)
@@ -264,7 +265,7 @@ class QbtClient:
         status = resp.status_code
         if status >= 500:
             raise UnexpectedResponse(f"qBittorrent server error (HTTP {status})", status)
-        if status not in (200, 404, 409):
+        if not (200 <= status < 300 or status in (404, 409)):   # 5.x: 202 Accepted for an add, 204 for actions
             raise UnexpectedResponse(f"unexpected answer from qBittorrent (HTTP {status}) for {path}", status)
         return resp
 
