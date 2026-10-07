@@ -58,6 +58,7 @@ from .knowledge import (
     released_volumes,
     to_decimal,
 )
+from .split_chapters import splits_of
 
 
 class State(str, Enum):
@@ -147,6 +148,7 @@ class _Held:
     highest_volume: Optional[Decimal]
     highest_chapter: Optional[Decimal]
     n_unknown: int
+    split_missing: Tuple[Decimal, ...] = ()   # parts of a split chapter missing below the highest part held
 
     def holds_chapter(self, c: Decimal) -> bool:
         if c in self.chapters or c in self.covered:
@@ -197,6 +199,9 @@ def _count(value: Any) -> int:
 def _held(inv: Any, knowledge: Optional[SeriesKnowledge]) -> _Held:
     vols, _ = _decimals(getattr(inv, "held_volumes", ()) or ())
     chs, ranges = _decimals(getattr(inv, "held_chapters", ()) or ())
+    # Split chapters (2.1 + 2.2 = chapter 2), MangaPixer's rule: the chapter counts as held.
+    splits = splits_of(chs, ranges)
+    chs = set(chs) | {Decimal(n) for n in splits.chapters}
     covered, cov_ranges = _decimals(getattr(inv, "chapters_covered_by_volumes", ()) or ())
     # A held volume that MangaPixer's volume list maps to chapters covers those chapters (counted once).
     if knowledge is not None:
@@ -212,7 +217,7 @@ def _held(inv: Any, knowledge: Optional[SeriesKnowledge]) -> _Held:
     if hc is None and (chs or ranges):
         hc = max(list(chs) + [hi for _, hi in ranges])
     return _Held(frozenset(vols), frozenset(chs), tuple(ranges), frozenset(covered), hv, hc,
-                 _count(getattr(inv, "unknown_kind_files", None)))
+                 _count(getattr(inv, "unknown_kind_files", None)), splits.missing_parts)
 
 
 def _whole_numbers(lo: Decimal, hi: Decimal) -> Set[Decimal]:
@@ -600,6 +605,7 @@ def compute_state(
             missing = [c for c in _whole_numbers(start, target) if not held.holds_chapter(c)]
             if target != target.to_integral_value() and not held.holds_chapter(target):
                 missing.append(target)
+            missing += [p for p in held.split_missing if p <= target and p not in missing]
             gaps += _chapter_gaps(missing)
             chapters_checked = True
             reasons.append(f"Latest chapter {fmt_num(target)}")

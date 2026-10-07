@@ -107,8 +107,9 @@ def test_missing_chapters_with_decimal_holes():
     k = own(licensed_en=False, latest_chapter="12.5")
     s = state(inv(held_chapters=["1", "2", "2.5", "4", "5", "9", "10.1", "11", "12"]), k)
     assert s.state == State.MISSING_CHAPTERS
-    assert s.missing_chapters == (("3", None), ("6", "8"), ("10", None), ("12.5", None))
-    assert s.gaps_text == "Ch. 3, 6-8, 10, 12.5"
+    # 10.1 starts a split chapter 10 (MangaPixer's SplitsOf rule): chapter 10 is held; 2.5 next to 2 stays an extra.
+    assert s.missing_chapters == (("3", None), ("6", "8"), ("12.5", None))
+    assert s.gaps_text == "Ch. 3, 6-8, 12.5"
 
 
 def test_exact_decimal_chapters_never_go_through_floats():
