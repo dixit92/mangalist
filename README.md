@@ -28,7 +28,7 @@ The builds are not code-signed. Check a download against `SHA256SUMS` (`sha256su
 
 If you run [MangaPixer](https://github.com/dixit92/mangapixer) 1.33.0 or later on the same library,
 MangaList can use what MangaPixer already knows instead of looking everything up again: in MangaPixer,
-**Administration > API tokens > Create token**, then in MangaList **MangaPixer...** enter the server
+**Administration > API tokens > Create token**, then in MangaList **MangaPixer** enter the server
 address and paste the token. MangaList maps each root to a MangaPixer library by its folder names and
 syncs MangaPixer's links, volume lists and Completion answers (read-only - it never changes anything
 in MangaPixer). Folders MangaPixer does not know still use MangaList's own matcher.
@@ -53,7 +53,7 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 #### Volumes from nyaa (Unraid, opt-in)
 
 With `MANGALIST_DOWNLOADS=1`, a series that MangaPixer has matched and that is licensed in English gets
-**Find volumes on nyaa...** (Wanted panel and the row menu). MangaList searches nyaa's English-translated
+**Find volumes on nyaa** (Wanted panel and the row menu). MangaList searches nyaa's English-translated
 literature, ranks the releases (the most missing volumes covered first - or, when MangaList cannot tell which
 English volumes are out, the most volumes you do not have - Digital over scans), and **you pick** one. MangaList adds it to qBittorrent in its own category `mangalist`, and when it has finished,
 hard-links the missing volumes into the series folder where that series already keeps its volumes (the
@@ -67,7 +67,7 @@ Set it up:
   `/mnt/user` -> `/data`): `-v /mnt/user:/data`, then add your roots as `/data/<share>/...`. A hard link only
   works inside one mount; with separate mounts for the library and the torrent folder every file is
   copied instead (double space until the torrent is removed). Both containers then see identical paths.
-- In MangaList, **qBittorrent...**: the Web UI address, user name and password, and the save path
+- In MangaList, **qBittorrent**: the Web UI address, user name and password, and the download folder
   (default `/data/appdata/torrents/mangalist`, which must lie outside every library root). **Test
   connection** checks the login.
 - In qBittorrent, give torrents a seed goal that **stops** them (e.g. ratio 2, action "Stop"); Remove

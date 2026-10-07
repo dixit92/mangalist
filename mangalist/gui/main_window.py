@@ -292,8 +292,9 @@ class MainWindow(QMainWindow):
         "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #e8f0fe,stop:1 #c5d8fc);"
         "  border-color: #5585d6;"
         "}"
-        "QPushButton:pressed {"
+        "QPushButton:pressed, QPushButton:checked {"
         "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #b8ccf5,stop:1 #d0e2ff);"
+        "  border-color: #5585d6;"
         "}"
         "QPushButton:disabled {"
         "  color: #999;"
@@ -472,9 +473,18 @@ class MainWindow(QMainWindow):
         self._wanted_dock = dock
         toggle = dock.toggleViewAction()
         toggle.setText("Wanted panel")
-        toggle.setToolTip("Show the series that are wanted, missing units or have an upgrade, with their official sources")
-        self._toolbar.insertAction(self._wanted_toolbar_slot, toggle)   # next to the State filter
+        # A real button (a toolbar action is drawn as flat text): pressed while the panel is open, in step with the
+        # dock's own close button through the action.
+        btn_wanted = self._make_button("Wanted panel")
+        btn_wanted.setCheckable(True)
+        btn_wanted.setToolTip("Show the series that are wanted, missing units or have an upgrade, with their official "
+                              "sources")
+        btn_wanted.setChecked(dock.isVisibleTo(self))
+        btn_wanted.clicked.connect(lambda _checked=False: toggle.trigger())
+        toggle.toggled.connect(btn_wanted.setChecked)
+        self._toolbar.insertWidget(self._wanted_toolbar_slot, btn_wanted)   # next to the State filter
         self._wanted_toggle = toggle
+        self._btn_wanted = btn_wanted
         self._wanted_timer = QTimer(self)
         self._wanted_timer.setSingleShot(True)
         self._wanted_timer.setInterval(300)
