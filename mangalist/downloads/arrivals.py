@@ -37,7 +37,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 from ..scanner import ARCHIVE_EXTS
 from ..store.downloads import DownloadLedger, StatusConflict
 from .contracts import QBITTORRENT_CATEGORY, DownloadRecord, DownloadStatus, TorrentClient, TorrentInfo
-from .placement import locate_series, same_or_inside
+from .placement import locate_series, same_or_inside, series_units
 
 _log = logging.getLogger(__name__)
 
@@ -89,9 +89,10 @@ def volumes_of(name: str, kind_hint: Optional[str] = None, series_title: Optiona
 
 
 def held_volumes(db, series, series_dir: str) -> Set[Decimal]:
-    """The volumes the series holds right now: its stored ``volume`` units plus every archive in its folder."""
+    """The volumes the series holds right now: its stored ``volume`` units (nested rows included) plus every
+    archive in its folder, read again now."""
     held: Set[Decimal] = set()
-    for u in db.list_units(series.id):
+    for u in series_units(db, series):
         if u.kind == "volume" and u.vol_from is not None:
             held |= _expand(Decimal(u.vol_from), Decimal(u.vol_to) if u.vol_to is not None else None)
     title = os.path.basename(series_dir)

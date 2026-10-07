@@ -1,7 +1,10 @@
 """Where a series' new volume archives go: the place its EXISTING layout uses (the owner's rule, D6).
 
 Read from the scan's ``units`` rows (``rel_path`` relative to the series folder) and, for what the units cannot
-say, one listing of the series folder (and of its direct subfolders). Rules, in order:
+say, one listing of the series folder (and of its direct subfolders). The scanner records a subfolder with
+archives (other than ``Chapters`` / ``Extras`` / ...) as its own, nested series row - e.g. ``Series/Volumes`` -
+so :func:`series_units` merges the units of the series' nested rows in (paths made relative to the series
+folder): the layout on disk is what counts. Rules, in order:
 
 1. The series folder is not there (moved, root not mounted) -> ambiguous, no options (rescan first).
 2. A direct subfolder that holds images and no archives, named like a volume (``Vol. 01``, ``Series v02``):
@@ -152,7 +155,23 @@ def locate_series(db, series_id: int):
     return series, root, os.path.join(root.path, *series.rel_path.split("/"))
 
 
+def series_units(db, series) -> List:
+    """The units of *series* and of every present series row nested inside its folder (the scanner's subseries,
+    e.g. ``Series/Volumes``), each ``rel_path`` relative to *series*' folder."""
+    from dataclasses import replace
+
+    units = list(db.list_units(series.id))
+    prefix = series.rel_path.rstrip("/") + "/"
+    for other in db.list_series(series.root_id):
+        if other.id == series.id or other.status != "present" or not other.rel_path.startswith(prefix):
+            continue
+        sub = other.rel_path[len(prefix):]
+        units.extend(replace(u, rel_path=f"{sub}/{u.rel_path}") for u in db.list_units(other.id))
+    return units
+
+
 def placement_for(db, series_id: int) -> Placement:
-    """The placement of library series *series_id* from the library database (series row, root, units)."""
-    _, _, series_dir = locate_series(db, series_id)
-    return infer_placement(series_dir, db.list_units(series_id))
+    """The placement of library series *series_id* from the library database (series row, root, the units of
+    the series and of its nested rows)."""
+    series, _, series_dir = locate_series(db, series_id)
+    return infer_placement(series_dir, series_units(db, series))
