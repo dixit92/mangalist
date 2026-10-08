@@ -1,8 +1,9 @@
-# Docker build context for packaging/docker/Dockerfile: only requirements.txt, mangalist/ and
-# packaging/docker/ are needed.
+# Docker build context for packaging/docker/Dockerfile: only requirements.txt, mangalist/, packaging/docker/ and
+# the icon (packaging/icons/mangalist-512.png, the web GUI's icons) are needed.
 **
 !requirements.txt
 !mangalist/
 !packaging/docker/
+!packaging/icons/mangalist-512.png
 **/__pycache__
 **/*.py[cod]

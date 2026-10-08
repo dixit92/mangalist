@@ -60,6 +60,26 @@ def test_env_defaults_match_the_runner_defaults():
     assert s.downloads_enabled is False and s.rescan_schedule is not None
 
 
+def test_the_icon_is_mangalists_own():
+    df = _dockerfile()
+    # The Unraid label and the web GUI's icons show MangaList's icon (not MangaPixer's, which the label used before).
+    assert 'net.unraid.docker.icon="https://raw.githubusercontent.com/dixit92/MangaList/main/packaging/icons/mangalist-512.png"' in df
+    assert "unraid-templates/main/icon.png" not in df
+    assert 'install_app_icon.sh "file:///tmp/mangalist-icon.png"' in df
+
+
+def test_dockerignore_lets_through_every_file_the_dockerfile_copies():
+    # The context is an allow-list (.dockerignore: ** plus exceptions); a COPY of anything else fails in CI only
+    # (a hand-made tar context skips .dockerignore).
+    root = DOCKER.parents[1]
+    allowed = [ln[1:].rstrip("/") for ln in (root / ".dockerignore").read_text(encoding="utf-8").splitlines()
+               if ln.startswith("!")]
+    sources = re.findall(r"^COPY\s+(\S+)\s+\S+$", _dockerfile(), flags=re.M)
+    assert sources
+    for src in sources:
+        assert any(src == a or src.startswith(a + "/") for a in allowed), f"{src} is excluded by .dockerignore"
+
+
 def test_volumes_port_and_name():
     df = _dockerfile()
     assert 'VOLUME ["/config", "/data"]' in df

@@ -30,7 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     from mangalist import log_config, paths
-    from mangalist.gui.main_window import MainWindow, _build_app_icon
+    from mangalist.gui.app_icon import build_app_icon
+    from mangalist.gui.main_window import MainWindow
 
     log_config.setup()
     # Once: copy settings and cache from the pre-per-user location (data/ next to the program).
@@ -53,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("MangaList")
-    app.setWindowIcon(_build_app_icon())
+    app.setWindowIcon(build_app_icon())
     win = MainWindow()
     win.show()
     if "--smoke-test" in args:
