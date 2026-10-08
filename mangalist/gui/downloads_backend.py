@@ -23,6 +23,8 @@ one existing piece:
                                           (save path, Remove Completed); the password goes to the secrets table.
 ``test_connection(settings, password)``   ``TorrentClient.version()`` against the typed values (a password of None
                                           means "the stored one").
+``check_now()``                           the scheduled downloads job, run once now (file finished downloads, Remove
+                                          Completed); returns its one-line summary.
 ========================================  =======================================================================
 
 Every method may block (network, database): the GUI calls them off the UI thread, except ``series_id_for`` and
@@ -86,6 +88,11 @@ class DownloadsBackend(Protocol):
     def test_connection(self, settings: QbtSettings, password: Optional[str]) -> str:
         """Log in with the given values (password None or '' = the stored one) and return the client's
         version text. Raises :class:`BackendError` with a readable reason."""
+        ...
+
+    def check_now(self) -> str:
+        """Run the downloads job once now - the same check the container runs every hour - and return its summary
+        ("1 checked: 1 filed, 0 removed, ..."). Raises :class:`BackendError` with a readable reason."""
         ...
 
 

@@ -40,6 +40,8 @@ class DownloadsDialog(QDialog):
         self._backend = backend
         self._series_name = series_name or (lambda series_id: f"Series #{series_id}")
         self._call: Optional[BackgroundCall] = None
+        self._note: Optional[str] = None            # the last "Check now" summary, kept across the reload
+        self._check_failed = False
         self.records: List[DownloadRecord] = []
 
         outer = QVBoxLayout(self)
@@ -62,12 +64,17 @@ class DownloadsDialog(QDialog):
         row = QHBoxLayout()
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.clicked.connect(self.refresh)
+        self.btn_check = QPushButton("Check now")
+        self.btn_check.setToolTip("File finished downloads and remove completed torrents now - the same check that "
+                                  "runs every hour on its own")
+        self.btn_check.clicked.connect(self.check_now)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setMaximumWidth(140)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
         row.addWidget(self.btn_refresh)
+        row.addWidget(self.btn_check)
         row.addWidget(self.progress)
         row.addStretch(1)
         box = QDialogButtonBox(QDialogButtonBox.Close)
@@ -77,10 +84,43 @@ class DownloadsDialog(QDialog):
         if autostart:
             self.refresh()
 
+    def check_now(self) -> bool:
+        """Run the downloads check once (off the UI thread), then reload the list."""
+        if self._call is not None:
+            return False
+        self._busy(True)
+        self.status_label.setStyleSheet("")
+        self.status_label.setText("Checking qBittorrent...")
+        backend = self._backend
+        self._call = start_call(backend.check_now, self._on_checked, self._on_check_error)
+        self._call.finished.connect(self._after_check)
+        return True
+
+    def _on_checked(self, summary: str) -> None:
+        self._note = f"Checked now: {summary}."
+
+    def _on_check_error(self, message: str) -> None:
+        self._note = None
+        self.status_label.setStyleSheet("color: #b71c1c;")
+        self.status_label.setText(f"Could not check the downloads: {message}")
+        self._check_failed = True
+
+    def _after_check(self) -> None:
+        self._on_call_finished()
+        if not self._check_failed:
+            self.refresh()
+        self._check_failed = False
+
+    def _busy(self, busy: bool) -> None:
+        self.btn_refresh.setEnabled(not busy)
+        self.btn_check.setEnabled(not busy)
+        self.progress.setVisible(busy)
+
     def refresh(self) -> bool:
         if self._call is not None:
             return False
         self.btn_refresh.setEnabled(False)
+        self.btn_check.setEnabled(False)
         self.progress.setVisible(True)
         self.status_label.setStyleSheet("")
         self.status_label.setText("Loading...")
@@ -101,7 +141,8 @@ class DownloadsDialog(QDialog):
                 item = QTableWidgetItem(text)
                 item.setToolTip(tip)
                 self.table.setItem(row, col, item)
-        self.status_label.setText("" if self.records else "Nothing has been sent to qBittorrent yet.")
+        empty = "" if self.records else "Nothing has been sent to qBittorrent yet."
+        self.status_label.setText(" ".join(t for t in (self._note or "", empty) if t))
 
     def _on_error(self, message: str) -> None:
         self.status_label.setStyleSheet("color: #b71c1c;")
@@ -109,8 +150,7 @@ class DownloadsDialog(QDialog):
 
     def _on_call_finished(self) -> None:
         self._call = None
-        self.btn_refresh.setEnabled(True)
-        self.progress.setVisible(False)
+        self._busy(False)
 
     def done(self, result: int) -> None:
         if self._call is not None:

@@ -99,6 +99,17 @@ class Backend:
         except QbtError as exc:
             raise BackendError(str(exc)) from None
 
+    def check_now(self) -> str:
+        """The scheduled downloads job, once, now (the hourly schedule is unchanged). A pass the scheduler runs at the
+        same moment is harmless: record changes are conditional and filing holds the root lock."""
+        from ..headless.downloads_job import make_downloads_job
+        from ..headless.jobs import JobContext
+
+        result = make_downloads_job(open_ledger=lambda: self.ledger, client_factory=self._client_factory)(JobContext())
+        if result.status == "error":
+            raise BackendError(result.message)
+        return result.message
+
     def _connection(self, settings: QbtSettings, password: Optional[str]) -> QbtConnection:
         try:
             base_url = normalize_base_url(settings.base_url)

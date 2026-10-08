@@ -82,6 +82,8 @@ class FakeBackend:
         self.sent: List[tuple] = []
         self.threads: List[int] = []
         self.gate: Optional[threading.Event] = None          # set to hold a search until released
+        self.checks = 0
+        self.check_error: Optional[str] = None
 
     def series_id_for(self, folder):
         return self.series_ids.get(folder)
@@ -127,3 +129,10 @@ class FakeBackend:
         if self.test_error:
             raise BackendError(self.test_error)
         return "v5.2.4"
+
+    def check_now(self):
+        self.threads.append(threading.get_ident())
+        self.checks += 1
+        if self.check_error:
+            raise BackendError(self.check_error)
+        return "1 checked: 1 filed, 0 removed, 0 failed, 0 waiting"
