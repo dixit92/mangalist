@@ -7,14 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
-- **Split chapters count as chapters:** files numbered as parts of a chapter (`Ch. 2.1` + `Ch. 2.2`) are chapter 2, as
-  MangaPixer reads them - such a folder no longer shows those chapters as missing. A part missing between two others
-  (`4.1` and `4.3`) is listed; a lone `10.5` is still an extra.
+## [2026.10.4] - 2026-10-07
+
+The third MangaList release (testing build): missing volumes found on nyaa, downloaded with qBittorrent and filed by hard link (Unraid container, opt-in), plus split chapters and GUI fixes.
+
 - **Volumes from nyaa, filed for you (Unraid container, opt-in with `MANGALIST_DOWNLOADS=1`):** for a series
   MangaPixer has matched that is licensed in English, **Find volumes on nyaa** (Wanted panel, row menu) lists
   nyaa's English-translated releases of that series - releases of other series sharing the name are left out -
   ranked by how many of your missing volumes they hold (when MangaList cannot tell which English volumes are out:
-  how many volumes you do not have - a release on nyaa is itself proof that a volume is out), Digital before scans, trusted uploaders marked, volumes
+  how many volumes you do not have - a release on nyaa is itself proof that a volume is out), Digital before scans,
+  trusted uploaders marked, volumes
   you already have labelled, releases without seeders and light novels hidden. You pick one; MangaList adds it to
   qBittorrent in its own category `mangalist`.
 - **Arrivals:** once the torrent has finished, MangaList hard-links only the missing volumes into the folder where
@@ -32,6 +34,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
   publishers' volume count decides which English volumes are out - as when there is no list - instead of "Can't tell".
 - Table columns can be resized in every dialog (MangaPixer, Missing series, Find volumes, Downloads); buttons no longer end
   in "...", and the **Wanted panel** toggle is a button that stays pressed while the panel is open.
+- **Split chapters count as chapters:** files numbered as parts of a chapter (`Ch. 2.1` + `Ch. 2.2`) are chapter 2, as
+  MangaPixer reads them - such a folder no longer shows those chapters as missing. A part missing between two others
+  (`4.1` and `4.3`) is listed; a lone `10.5` is still an extra.
 - **Check now** (Downloads dialog) runs the downloads check on demand - filing finished downloads and Remove Completed -
   besides the hourly schedule.
 - `MANGALIST_DOWNLOADS_SCHEDULE` (default `every 1h`) sets how often finished downloads are filed and completed
