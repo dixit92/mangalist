@@ -100,6 +100,8 @@ def test_status_texts():
     assert status_text(_record(DownloadStatus.FAILED)) == "Failed"
     assert status_text(_record(DownloadStatus.REMOVED)) == "Filed v03-v05 - done"      # the volumes stay; the torrent went
     assert "volumes stay in the library" in status_tooltip(_record(DownloadStatus.REMOVED))
+    tip = status_tooltip(_record(DownloadStatus.REMOVED, error="removed in qBittorrent, not by MangaList"))
+    assert "the torrent was removed in qBittorrent, not by MangaList" in tip
     assert status_text(_record(DownloadStatus.CANCELLED)) == "Cancelled"
 
 

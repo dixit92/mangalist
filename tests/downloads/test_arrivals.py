@@ -330,3 +330,26 @@ def test_volume_numbers_of_names():
     assert volumes_of("Series A v01-03.cbz") == {1, 2, 3}
     assert volumes_of("Series A c012.cbz") == set()
     assert volumes_of("07.cbz") == set() and volumes_of("07.cbz", "volumes") == {7}
+
+
+def test_a_torrent_the_owner_removes_after_filing_is_done_not_failed(ledger, sent, qbt, series):
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.FILED
+    del qbt.infos[HASH]                                   # the owner removed it in qBittorrent (with its data)
+    report = run_arrivals(qbt, ledger)
+    rec = ledger.get(sent.id)
+    assert rec.status == S.REMOVED and rec.error == "removed in qBittorrent, not by MangaList"
+    assert report.removed == [sent.id] and report.failed == [] and qbt.deleted == []
+
+
+def test_removed_after_filing_but_the_library_files_are_gone_too_fails(ledger, sent, qbt, series):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    for name in ledger.get(sent.id).filed_files:
+        (sdir / name).unlink()
+    del qbt.infos[HASH]
+    run_arrivals(qbt, ledger)
+    rec = ledger.get(sent.id)
+    assert rec.status == S.FAILED and "is no longer in the library" in rec.error

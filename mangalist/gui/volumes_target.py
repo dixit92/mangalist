@@ -132,8 +132,11 @@ def status_tooltip(record: DownloadRecord) -> str:
     if record.status == DownloadStatus.FILED:
         lines.append("The volumes are in the library; qBittorrent is still seeding the torrent.")
     if record.status == DownloadStatus.REMOVED:
-        lines.append("Done: qBittorrent finished seeding, and MangaList removed the torrent and its downloaded copy. "
-                     "The volumes stay in the library.")
+        if record.error:                # e.g. "removed in qBittorrent, not by MangaList"
+            lines.append(f"Done: the torrent was {record.error}. The volumes stay in the library.")
+        else:
+            lines.append("Done: qBittorrent finished seeding, and MangaList removed the torrent and its downloaded "
+                         "copy. The volumes stay in the library.")
     if record.copied:
         lines.append("Copied, not hard-linked: the library holds its own copy (double the space).")
     if record.status == DownloadStatus.FAILED and record.error:
