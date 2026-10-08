@@ -35,6 +35,11 @@ RUN python3 -m venv /opt/mangalist/venv \
     && rm /tmp/requirements-image.txt \
     && find /opt/mangalist/venv -name '__pycache__' -prune -exec rm -rf {} +
 
+# The web GUI's icons (browser tab, home-screen) from MangaList's icon (mangalist/gui/app_icon.py, rendered into
+# packaging/icons/ by packaging/make_icon.py --repo). Before the app code, so this layer stays cached.
+COPY packaging/icons/mangalist-512.png /tmp/mangalist-icon.png
+RUN install_app_icon.sh "file:///tmp/mangalist-icon.png" && rm -f /tmp/mangalist-icon.png
+
 # Declared here, not at the top: a changing version stamp must not invalidate the layers above.
 ARG DOCKER_IMAGE_VERSION=dev
 
@@ -84,4 +89,4 @@ LABEL \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.version="${DOCKER_IMAGE_VERSION}" \
     net.unraid.docker.webui="https://[IP]:[PORT:5800]/" \
-    net.unraid.docker.icon="https://raw.githubusercontent.com/dixit92/unraid-templates/main/icon.png"
+    net.unraid.docker.icon="https://raw.githubusercontent.com/dixit92/MangaList/main/packaging/icons/mangalist-512.png"

@@ -60,6 +60,14 @@ def test_env_defaults_match_the_runner_defaults():
     assert s.downloads_enabled is False and s.rescan_schedule is not None
 
 
+def test_the_icon_is_mangalists_own():
+    df = _dockerfile()
+    # The Unraid label and the web GUI's icons show MangaList's icon (not MangaPixer's, which the label used before).
+    assert 'net.unraid.docker.icon="https://raw.githubusercontent.com/dixit92/MangaList/main/packaging/icons/mangalist-512.png"' in df
+    assert "unraid-templates/main/icon.png" not in df
+    assert 'install_app_icon.sh "file:///tmp/mangalist-icon.png"' in df
+
+
 def test_volumes_port_and_name():
     df = _dockerfile()
     assert 'VOLUME ["/config", "/data"]' in df

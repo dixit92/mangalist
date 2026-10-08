@@ -1,8 +1,13 @@
-"""Render the app icon (the same painter the running app uses) into files for the packages:
+"""Render the app icon (mangalist/gui/app_icon.py, the same renderer the running app uses) into files:
 
     build/icons/MangaList.png      1024 px (macOS: PyInstaller turns it into .icns)
     build/icons/MangaList-256.png  256 px (Linux AppImage / .desktop)
     build/icons/MangaList.ico      16-256 px (Windows exe and installer)
+
+With --repo it (re)writes the committed copies instead, after a change to the icon:
+
+    packaging/icons/mangalist-icon.svg   the master SVG (browsers apply its clip)
+    packaging/icons/mangalist-512.png    the container's browser icon and the Unraid label
 
 Needs PySide6 and Pillow; runs headless (QT_QPA_PLATFORM=offscreen is set if unset).
 """
@@ -16,25 +21,36 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "build" / "icons"
+REPO = ROOT / "packaging" / "icons"
 
 
 def main() -> int:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     sys.path.insert(0, str(ROOT))
-    from PIL import Image
     from PySide6.QtCore import QBuffer, QIODevice
     from PySide6.QtWidgets import QApplication
 
-    from mangalist.gui.main_window import render_app_icon
+    from mangalist.gui.app_icon import ICON_SVG, render_app_icon
 
-    app = QApplication.instance() or QApplication([])  # noqa: F841 - fonts need an application
-    OUT.mkdir(parents=True, exist_ok=True)
+    app = QApplication.instance() or QApplication([])  # noqa: F841 - QPixmap needs an application
 
     def png_bytes(size: int) -> bytes:
         buf = QBuffer()
         buf.open(QIODevice.WriteOnly)
         render_app_icon(size).save(buf, "PNG")
         return bytes(buf.data())
+
+    if "--repo" in sys.argv[1:]:
+        REPO.mkdir(parents=True, exist_ok=True)
+        (REPO / "mangalist-icon.svg").write_text(ICON_SVG, encoding="utf-8")
+        (REPO / "mangalist-512.png").write_bytes(png_bytes(512))
+        for f in sorted(REPO.iterdir()):
+            print(f"{f.relative_to(ROOT)}  {f.stat().st_size} bytes")
+        return 0
+
+    OUT.mkdir(parents=True, exist_ok=True)
+
+    from PIL import Image
 
     (OUT / "MangaList.png").write_bytes(png_bytes(1024))
     (OUT / "MangaList-256.png").write_bytes(png_bytes(256))

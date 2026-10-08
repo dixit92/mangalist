@@ -1,5 +1,7 @@
 # MangaList
 
+<img src="packaging/icons/mangalist-512.png" alt="MangaList icon" width="96" align="right">
+
 A PySide6 desktop tool that scans a "Manga Root" folder, classifies each manga subfolder as
 **Volume-based**, **Chapter-based** or **Both** from its archive file names (`.cbz`, `.zip`, `.cbr`,
 `.rar`, `.7z`, `.cb7`), and matches it to [MangaUpdates](https://www.mangaupdates.com) to show what

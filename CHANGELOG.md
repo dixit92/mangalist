@@ -7,6 +7,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **A new icon:** MangaPixer's icon turned 90 degrees, in inverted colours - for the app, the installers, the web GUI of the
+  container and its Unraid label (which showed MangaPixer's own icon until now).
+
 ## [2026.10.4] - 2026-10-07
 
 The third MangaList release (testing build): missing volumes found on nyaa, downloaded with qBittorrent and filed by hard link (Unraid container, opt-in), plus split chapters and GUI fixes.
