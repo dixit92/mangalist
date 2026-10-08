@@ -162,8 +162,8 @@ class VolumesController(QObject):
             self._again = True
             return True
         backend = self.backend
-        self._call = start_call(lambda: list(backend.records()), self._on_records, self._on_records_failed)
-        self._call.finished.connect(self._on_call_finished)
+        self._call = start_call(lambda: list(backend.records()), self._on_records, self._on_records_failed,
+                                self._on_call_finished)
         return True
 
     def _on_records(self, records) -> None:

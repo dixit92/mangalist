@@ -25,6 +25,7 @@ push the tag. CI refuses a tag without its section here and uses the section as 
   goal and the library files are checked, MangaList asks qBittorrent to delete the torrent and its downloaded copy -
   only ever in the `mangalist` category, never when filing failed, never when the torrent's data lies in a library root.
   A torrent you stop yourself before its seed goal is kept (resume it, or remove it in qBittorrent).
+  A torrent you remove in qBittorrent yourself after its volumes were filed is "done", not "failed".
 - **qBittorrent** (toolbar): Web UI address, user name, password (stored outside the settings, never shown
   again), download folder (qBittorrent's own copy while it seeds - not the library), Remove Completed, and a connection test. A **Downloads** list shows each download's state.
 - When MangaPixer's volume list has no English dates (e.g. its dates source could not be reached), the English

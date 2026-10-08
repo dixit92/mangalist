@@ -63,12 +63,17 @@ class BackgroundCall(QThread):
 
 
 def start_call(fn: Callable[[], Any], on_done: Optional[Callable[[Any], None]] = None,
-               on_error: Optional[Callable[[str], None]] = None) -> BackgroundCall:
-    """Start ``fn()`` in a thread; ``on_done(result)`` / ``on_error(message)`` run on the calling thread."""
+               on_error: Optional[Callable[[str], None]] = None,
+               on_finished: Optional[Callable[[], None]] = None) -> BackgroundCall:
+    """Start ``fn()`` in a thread; ``on_done(result)`` / ``on_error(message)``, then ``on_finished()``, run on the
+    calling thread. Every callback is connected BEFORE the thread starts: a signal emitted before its slot is
+    connected is lost, so a call that finished quickly would otherwise leave its caller busy for ever."""
     call = BackgroundCall(fn)
     if on_done is not None:
         call.succeeded.connect(on_done)
     if on_error is not None:
         call.failed.connect(on_error)
+    if on_finished is not None:
+        call.finished.connect(on_finished)
     call.start()
     return call

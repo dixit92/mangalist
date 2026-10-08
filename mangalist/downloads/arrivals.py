@@ -160,11 +160,20 @@ class _Pass:
 
     def _one(self, rec: DownloadRecord, t: Optional[TorrentInfo]) -> None:
         if t is None or t.category != QBITTORRENT_CATEGORY:
-            why = (f"the torrent is no longer in qBittorrent's {QBITTORRENT_CATEGORY!r} category (removed there, or "
-                   "moved to another category)")
+            gone = (f"the torrent is no longer in qBittorrent's {QBITTORRENT_CATEGORY!r} category (removed there, or "
+                    "moved to another category)")
             if rec.status == DownloadStatus.FILED:
-                why += "; its filed files stay in the library, Remove Completed has nothing to do"
-            self._fail(rec, why)
+                # The owner removed it in qBittorrent after filing: done, not failed - the volumes are in the library.
+                problem = self._filed_files_problem(rec)
+                if problem is None:
+                    self.ledger.set_status(rec.id, DownloadStatus.REMOVED, expect=(DownloadStatus.FILED,),
+                                           error="removed in qBittorrent, not by MangaList")
+                    self.report.removed.append(rec.id)
+                    _log.info("Arrivals: download %d (%s): %s after filing; done", rec.id, rec.title, gone)
+                    return
+                self._fail(rec, f"{gone}, and {problem}")
+                return
+            self._fail(rec, gone)
             return
         if rec.status == DownloadStatus.SENT:
             if not t.complete:
@@ -352,8 +361,8 @@ class _Pass:
         _log.info("Arrivals: download %d (%s) stopped at its seed goal; qBittorrent removed the torrent and its "
                   "data", rec.id, rec.title)
 
-    def _library_problem(self, rec: DownloadRecord, t: TorrentInfo) -> Optional[str]:
-        """Why the torrent may not be deleted yet (None: every filed file verified, its data outside the library)."""
+    def _filed_files_problem(self, rec: DownloadRecord) -> Optional[str]:
+        """Why the filed files are not all in the library at their filed size (None: they are)."""
         plan_id = self.ledger.plan_id(rec.id)
         if plan_id is None or not rec.filed_files:
             return "no filed files recorded"
@@ -361,11 +370,7 @@ class _Pass:
             plan = self.journal.get_plan(plan_id)
         except Exception:  # noqa: BLE001 - PlanStateError
             return f"its journal plan {plan_id} is gone"
-        done = [s for s in plan.steps if s.state == "done"]
-        if len(done) != len(rec.filed_files):
-            return "the filed files and the journal disagree"
-        data = [p for p in (t.content_path, t.save_path) if p]
-        for s in done:
+        for s in (s for s in plan.steps if s.state == "done"):
             name = posixpath.basename(s.dst.replace(os.sep, "/"))
             try:
                 size = os.stat(s.dst).st_size if os.path.isfile(s.dst) else None
@@ -374,9 +379,22 @@ class _Pass:
             if size is None:
                 return f"{name} is no longer in the library"
             if size != s.src_size:
-                return f"{name} in the library is not the filed size ({size} != {s.src_size} bytes)"
+                return f"{name} in the library is not the filed size"
+        return None
+
+    def _library_problem(self, rec: DownloadRecord, t: TorrentInfo) -> Optional[str]:
+        """Why the torrent may not be deleted yet (None: every filed file verified, its data outside the library)."""
+        problem = self._filed_files_problem(rec)
+        if problem:
+            return problem
+        plan = self.journal.get_plan(self.ledger.plan_id(rec.id))
+        done = [s for s in plan.steps if s.state == "done"]
+        if len(done) != len(rec.filed_files):
+            return "the filed files and the journal disagree"
+        data = [p for p in (t.content_path, t.save_path) if p]
+        for s in done:
             if any(same_or_inside(s.dst, p) for p in data):
-                return f"{name} lies inside the torrent's own data"
+                return f"{posixpath.basename(s.dst.replace(os.sep, '/'))} lies inside the torrent's own data"
         for root in self.db.list_roots():
             for p in data:
                 if same_or_inside(p, root.path) or same_or_inside(root.path, p):
