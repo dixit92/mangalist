@@ -50,3 +50,19 @@ def test_an_abandoned_call_delivers_nothing_and_cleans_up(qapp):
     release.set()
     wait_until(qapp, lambda: call not in _ACTIVE)
     assert got == [] and call.abandoned
+
+
+def test_callbacks_are_connected_before_the_thread_starts(qapp, monkeypatch):
+    # A call that finishes before its caller could connect would be lost (Qt drops a signal emitted before its slot
+    # is connected). Run the thread body synchronously inside start(): every callback must still arrive.
+    from mangalist.gui import background
+
+    def start_now(self):
+        self.run()
+        self.finished.emit()
+    monkeypatch.setattr(background.BackgroundCall, "start", start_now)
+    got = []
+    background.start_call(lambda: 7, got.append, None, lambda: got.append("finished"))
+    background.start_call(lambda: 1 / 0, None, got.append, lambda: got.append("finished"))
+    qapp.processEvents()
+    assert got == [7, "finished", "unexpected error (ZeroDivisionError)", "finished"]

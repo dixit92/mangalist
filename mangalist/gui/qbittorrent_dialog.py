@@ -202,8 +202,7 @@ class QbittorrentDialog(QDialog):
         self._say("Testing the connection...")
         backend = self._backend
         self._call = start_call(lambda: backend.test_connection(settings, password), self._on_tested,
-                                self._on_test_failed)
-        self._call.finished.connect(self._on_call_finished)
+                                self._on_test_failed, self._on_call_finished)
         return True
 
     def _on_tested(self, version: str) -> None:

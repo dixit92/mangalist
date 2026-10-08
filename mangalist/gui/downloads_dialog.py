@@ -92,8 +92,7 @@ class DownloadsDialog(QDialog):
         self.status_label.setStyleSheet("")
         self.status_label.setText("Checking qBittorrent...")
         backend = self._backend
-        self._call = start_call(backend.check_now, self._on_checked, self._on_check_error)
-        self._call.finished.connect(self._after_check)
+        self._call = start_call(backend.check_now, self._on_checked, self._on_check_error, self._after_check)
         return True
 
     def _on_checked(self, summary: str) -> None:
@@ -125,8 +124,8 @@ class DownloadsDialog(QDialog):
         self.status_label.setStyleSheet("")
         self.status_label.setText("Loading...")
         backend = self._backend
-        self._call = start_call(lambda: list(backend.records()), self._on_records, self._on_error)
-        self._call.finished.connect(self._on_call_finished)
+        self._call = start_call(lambda: list(backend.records()), self._on_records, self._on_error,
+                                self._on_call_finished)
         return True
 
     def _on_records(self, records: Sequence[DownloadRecord]) -> None:

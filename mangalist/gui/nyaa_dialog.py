@@ -207,9 +207,11 @@ class NyaaDialog(QDialog):
                     self._on_results, self._on_search_error)
 
     def _spawn(self, fn, on_done, on_error) -> None:
-        call = start_call(fn, on_done, on_error)
+        made = []                       # the call, for its own finish callback (delivered by the event loop, after this)
+        call = start_call(fn, on_done, on_error,
+                          lambda: self._calls.remove(made[0]) if made and made[0] in self._calls else None)
+        made.append(call)
         self._calls.append(call)
-        call.finished.connect(lambda c=call: self._calls.remove(c) if c in self._calls else None)
 
     def _on_placement(self, placement: Placement) -> None:
         self._placement = placement
