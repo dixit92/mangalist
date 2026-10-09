@@ -1,4 +1,4 @@
-"""The MangaPixer settings dialog (offscreen Qt) against the local fake server."""
+"""The MangaPixer settings panel and its dialog (offscreen Qt) against the local fake server."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QLineEdit  # noqa: E402
 
-from mangalist.gui.mangapixer_dialog import TOKEN_STORED_HINT, MangaPixerDialog  # noqa: E402
+from mangalist.gui.mangapixer_dialog import TOKEN_STORED_HINT, MangaPixerDialog, MangaPixerPanel  # noqa: E402
 from mangalist.services.mangapixer.client import MangaPixerClient  # noqa: E402
 
 from .conftest import TOKEN, add_root_with_series, folder  # noqa: E402
@@ -34,7 +34,7 @@ def _wait(dlg, seconds=20):
 
 
 def test_token_is_masked_and_never_shown_again(qapp, cache, fake, sleeps):
-    dlg = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    dlg = MangaPixerPanel(cache, client_factory=_factory(sleeps))
     assert dlg.token_edit.echoMode() == QLineEdit.EchoMode.PasswordEchoOnEdit
     dlg.url_edit.setText(fake.url)
     dlg.token_edit.setText(TOKEN)
@@ -43,13 +43,13 @@ def test_token_is_masked_and_never_shown_again(qapp, cache, fake, sleeps):
     assert dlg.save_connection()
     assert cache.token() == TOKEN
     assert dlg.token_edit.text() == "" and dlg.token_edit.placeholderText() == TOKEN_STORED_HINT
-    again = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    again = MangaPixerPanel(cache, client_factory=_factory(sleeps))
     assert again.token_edit.text() == "" and TOKEN not in again.status_label.text()
     assert again.test_connection()                          # uses the stored token
 
 
 def test_wrong_token_is_reported_once(qapp, cache, fake, sleeps):
-    dlg = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    dlg = MangaPixerPanel(cache, client_factory=_factory(sleeps))
     dlg.url_edit.setText(fake.url)
     dlg.token_edit.setText("mpx_wrong")
     assert not dlg.test_connection()
@@ -58,7 +58,7 @@ def test_wrong_token_is_reported_once(qapp, cache, fake, sleeps):
 
 
 def test_bad_address(qapp, cache, sleeps):
-    dlg = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    dlg = MangaPixerPanel(cache, client_factory=_factory(sleeps))
     dlg.url_edit.setText("ftp://nowhere")
     assert not dlg.save_connection() and "http" in dlg.status_label.text()
 
@@ -68,7 +68,7 @@ def test_sync_now_mapping_and_override(qapp, cache, fake, sleeps, db, tmp_path):
     fake.libraries.append({"id": "lib1", "displayName": "Comics", "kind": "comic"})
     fake.items["lib1"] = [folder("c1", ["One"])]
     root = add_root_with_series(db, tmp_path, "Shonen", ["One", "Two", "Three"])
-    dlg = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    dlg = MangaPixerPanel(cache, client_factory=_factory(sleeps))
     dlg.url_edit.setText(fake.url)
     dlg.token_edit.setText(TOKEN)
     assert dlg.sync_now()
@@ -91,13 +91,13 @@ def test_sync_now_mapping_and_override(qapp, cache, fake, sleeps, db, tmp_path):
     dlg.lib_combo.setCurrentIndex(dlg.lib_combo.findData("__auto__"))
     assert dlg.apply_override()
     assert cache.mapping(root.id).library_id == "lib0manga" and not cache.mapping(root.id).manual
-    dlg.reject()
+    dlg.stop()
 
 
 def test_table_columns_can_be_resized_and_headers_are_not_cut(qapp, cache, sleeps):
     from PySide6.QtWidgets import QHeaderView
 
-    dlg = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    dlg = MangaPixerPanel(cache, client_factory=_factory(sleeps))
     dlg.resize(900, 600)
     dlg.show()
     qapp.processEvents()
@@ -109,3 +109,25 @@ def test_table_columns_can_be_resized_and_headers_are_not_cut(qapp, cache, sleep
         for col in range(table.columnCount() - 1):      # the last one fills the rest
             assert header.sectionSize(col) >= header.sectionSizeHint(col), table.horizontalHeaderItem(col).text()
     dlg.close()
+
+
+def test_the_panel_says_what_changed_and_warns_when_the_token_cannot_request_scans(qapp, cache, fake, sleeps):
+    panel = MangaPixerPanel(cache, client_factory=_factory(sleeps))
+    changed = []
+    panel.changed.connect(lambda: changed.append(True))
+    panel.url_edit.setText(fake.url)
+    panel.token_edit.setText(TOKEN)
+    assert panel.save_connection() and changed == [True]
+    assert not panel.scan_label.isVisibleTo(panel)
+    cache.scan_forbidden_at = lambda: "2026-10-08T10:00:00Z"        # MangaPixer answered 403 to a scan request
+    panel._load()
+    assert panel.scan_label.isVisibleTo(panel) and "cannot request library scans" in panel.scan_label.text()
+    panel.forget_token()
+    assert len(changed) == 2
+
+
+def test_the_dialog_wraps_the_panel(qapp, cache, sleeps):
+    dlg = MangaPixerDialog(cache, client_factory=_factory(sleeps))
+    assert dlg.panel.url_edit.text() == "" and dlg.windowTitle() == "MangaPixer source"
+    dlg.reject()
+    dlg.deleteLater()

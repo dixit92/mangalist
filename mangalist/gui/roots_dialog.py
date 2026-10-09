@@ -1,8 +1,9 @@
 """Roots manager: the list of library roots, each root's settings and exclusions, with a live preview of
 what the exclusion patterns hide.
 
-Edits are made on copies and written to the database only on OK (all validated first), so Cancel
-leaves everything as it was. Nothing on disk is changed by this dialog.
+:class:`RootsEditor` is the content as a widget (the Settings dialog's Library section embeds it); :class:`RootsDialog`
+wraps it with OK / Cancel. Edits are made on copies and written to the database only by :meth:`RootsEditor.commit`
+(all validated first), so Cancel leaves everything as it was. Nothing on disk is changed by either.
 """
 
 from __future__ import annotations
@@ -47,12 +48,11 @@ def _default_browse(parent: QWidget, title: str, start: str) -> str:
     return QFileDialog.getExistingDirectory(parent, title, start or str(Path.home()))
 
 
-class RootsDialog(QDialog):
+class RootsEditor(QWidget):
     def __init__(self, db, parent: Optional[QWidget] = None, browse: Optional[BrowseFn] = None,
-                 button_style: str = ""):
+                 button_style: str = "", select: int = 0):
         super().__init__(parent)
-        self.setWindowTitle("Roots")
-        self.resize(980, 600)
+        self.setObjectName("rootsEditor")
         self._db = db
         self._browse = browse or _default_browse
         self._button_style = button_style
@@ -62,7 +62,7 @@ class RootsDialog(QDialog):
         self._loading = False
         self.changed = False
         self._build_ui()
-        self._refresh_list(select=0)
+        self._refresh_list(select=select)
 
     # --- UI ------------------------------------------------------------------------------------------
 
@@ -74,6 +74,7 @@ class RootsDialog(QDialog):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
         intro = QLabel("A root is a folder whose subfolders are series folders. Exclusions are folders or "
                        "files (patterns relative to the root) that are never scanned.")
         intro.setWordWrap(True)
@@ -178,14 +179,9 @@ class RootsDialog(QDialog):
         splitter.setSizes([260, 720])
 
         self.error_label = QLabel("")
-        self.error_label.setStyleSheet("color: #b71c1c;")
+        self.error_label.setProperty("tone", "bad")
         self.error_label.setWordWrap(True)
         outer.addWidget(self.error_label)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        outer.addWidget(buttons)
 
     @staticmethod
     def _with_button(edit: QLineEdit, button: QPushButton) -> QWidget:
@@ -397,14 +393,16 @@ class RootsDialog(QDialog):
 
     # --- save ----------------------------------------------------------------------------------------
 
-    def accept(self) -> None:
+    def commit(self) -> bool:
+        """Validate every draft and write them (and the removals) to the database; False (with the reason in
+        ``error_label``) when something is wrong - nothing is written then."""
         try:
             for i, r in enumerate(self._drafts):
                 r.position = i
                 validate_root(r, self._drafts)
         except RootError as exc:
             self.error_label.setText(str(exc))
-            return
+            return False
         try:
             for root_id in self._removed:
                 self._db.remove_root(root_id)
@@ -418,7 +416,31 @@ class RootsDialog(QDialog):
                     self._db.update_root(r)
         except RootError as exc:
             self.error_label.setText(str(exc))
-            return
+            return False
         self._removed.clear()
         self.changed = True
-        super().accept()
+        self.error_label.clear()
+        return True
+
+
+class RootsDialog(QDialog):
+    def __init__(self, db, parent: Optional[QWidget] = None, browse: Optional[BrowseFn] = None,
+                 button_style: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("Roots")
+        self.resize(980, 600)
+        self.editor = RootsEditor(db, self, browse=browse, button_style=button_style)
+        outer = QVBoxLayout(self)
+        outer.addWidget(self.editor, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        outer.addWidget(buttons)
+
+    @property
+    def changed(self) -> bool:
+        return self.editor.changed
+
+    def accept(self) -> None:
+        if self.editor.commit():
+            super().accept()
