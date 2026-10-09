@@ -83,21 +83,6 @@ def test_nothing_of_the_volumes_gui_exists_without_downloads(make_window):
     assert win._volumes is None and win._volumes_backend is None and win._download_tab is None
     assert not win._top.tab_download.isVisibleTo(win) and win._pages.count() == 1
     assert not win._detail._lbl_download.isVisibleTo(win._detail)
-    labels = [a.text() for a in win._settings_menu.actions()]
-    assert "qBittorrent…" not in labels and "Downloads…" not in labels
-
-
-def test_settings_reach_qbittorrent_and_downloads(make_window):
-    win = make_window(_backend())
-    opened = []
-    win._volumes.run_qbittorrent = lambda parent, backend: opened.append("qbt")
-    win._volumes.run_downloads = lambda parent, backend, name: opened.append("downloads")
-    acts = {a.text(): a for a in win._settings_menu.actions()}
-    assert [t for t in acts if t.endswith("…")] == ["Library folders…", "Add a library folder…", "MangaPixer…",
-                                                    "qBittorrent…", "Downloads…"]
-    acts["qBittorrent…"].trigger()
-    acts["Downloads…"].trigger()
-    assert opened == ["qbt", "downloads"]
 
 
 @pytest.mark.parametrize("title, enabled, why", [
@@ -120,7 +105,7 @@ def test_find_volumes_enable_rules(make_window, title, enabled, why):
 
 def _wanted(win):
     win._rebuild_wanted()
-    return {(w.title, w.group): w for w in win._download_tab.series()}
+    return {(w.title, w.group): w for w in win._download_tab._wanted}
 
 
 def test_the_download_tab_gets_every_series_with_gaps(make_window):
@@ -151,25 +136,7 @@ def test_row_menu_leads_to_the_download_tab(make_window):
     assert not off.isEnabled() and "no gaps" in off.toolTip()
     assert win.get_missing(str(Path("/lib") / QUEST))
     assert win._top.current() == 1 and win._pages.currentWidget() is win._download_tab
-    assert win._download_tab._selected().title == QUEST
-
-
-def test_the_placeholder_tab_opens_the_dialog_for_a_findable_series(make_window):
-    win = make_window(_backend())
-    opened = []
-    win._volumes.run_nyaa = lambda parent, backend, target: opened.append(target) or type("D", (), {})()
-    win._rebuild_wanted()
-    tab = win._download_tab
-    tab.focus(str(Path("/lib") / NEW))
-    assert not tab.btn_find.isEnabled() and "rescan first" in tab.btn_find.toolTip()
-    tab.focus(str(Path("/lib") / QUEST))
-    assert tab.btn_find.isEnabled()
-    tab.btn_find.click()
-    assert [t.title for t in opened] == [QUEST]
-    shown = []
-    tab.show_in_list.connect(shown.append)
-    tab.btn_show.click()
-    assert shown == [str(Path("/lib") / QUEST)]
+    assert win._download_tab.current_folder() == str(Path("/lib") / QUEST)
 
 
 def test_download_status_shows_in_the_detail_panel(make_window, qapp):
@@ -230,6 +197,7 @@ def test_close_stops_the_refresh_timer(make_window):
 
 
 def test_a_refresh_asked_for_during_a_read_runs_right_after_it(make_window, qapp):
+    import sys
     import threading
 
     backend = _backend()
@@ -237,7 +205,17 @@ def test_a_refresh_asked_for_during_a_read_runs_right_after_it(make_window, qapp
     gate = threading.Event()
     original = backend.records
 
+    def from_the_controller():                  # the Download tab's list reads the records too: count only these
+        frame = sys._getframe(1)
+        while frame is not None:
+            if frame.f_code.co_filename.endswith("volumes_controller.py"):
+                return True
+            frame = frame.f_back
+        return False
+
     def slow_records(series_id=None):
+        if not from_the_controller():
+            return original(series_id)
         reads.append(1)
         if len(reads) == 1:
             gate.wait(10)

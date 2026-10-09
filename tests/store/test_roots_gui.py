@@ -116,9 +116,8 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
     db.add_root(str(lib), exclusions=["@Oneshots/**"])
     win = MainWindow()
     try:
-        # The top bar names the library folder (its path in the tooltip); its dialog is under Settings.
+        # The top bar names the library folder (its path in the tooltip); its page is under Settings > Library.
         assert win._top.status.text() == "Manga" and win._top.status.toolTip() == f"Manga: {lib}"
-        assert "Library folders…" in [a.text() for a in win._settings_menu.actions()]
         assert win._list.stack.currentIndex() == 2 and win._list.btn_add_root.isHidden() is False   # empty state
         db.add_root(str(second))
         win._after_roots_changed()

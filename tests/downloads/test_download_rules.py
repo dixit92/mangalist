@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 from mangalist.downloads.contracts import DownloadStatus as S
 from mangalist.downloads.options import (
-    KEY_MATCH_ANILIST,
     KEY_MU_AUTOSTART,
     KEY_SCAN_AFTER_FILING,
     NyaaOptions,
@@ -128,8 +127,7 @@ class _Store:
 def test_switches_default_and_round_trip():
     store = _Store()
     assert load_nyaa_options(store) == NyaaOptions()
-    assert get_flag(store, KEY_MATCH_ANILIST) is True and get_flag(store, KEY_MU_AUTOSTART) is False
-    assert get_flag(store, KEY_SCAN_AFTER_FILING) is True
+    assert get_flag(store, KEY_MU_AUTOSTART) is False and get_flag(store, KEY_SCAN_AFTER_FILING) is True
     set_flag(store, KEY_MU_AUTOSTART, True)
     set_flag(store, KEY_SCAN_AFTER_FILING, False)
     assert get_flag(store, KEY_MU_AUTOSTART) is True and get_flag(store, KEY_SCAN_AFTER_FILING) is False
@@ -139,4 +137,4 @@ def test_switches_default_and_round_trip():
     store.data["downloads.nyaa"] = {"english": "yes", "raw": True, "junk": 1}
     assert load_nyaa_options(store) == NyaaOptions(raw=True)                           # a wrong type falls back
     store.data["mu_autostart"] = "maybe"
-    assert get_flag(store, KEY_MU_AUTOSTART) is False
+    assert get_flag(store, KEY_MU_AUTOSTART) is False                                 # a wrong type: the default

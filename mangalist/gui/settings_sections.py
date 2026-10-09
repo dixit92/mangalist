@@ -17,8 +17,6 @@ from typing import Mapping, Optional
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QGridLayout, QVBoxLayout, QWidget
 
 from ..downloads.options import (
-    KEY_MATCH_ANILIST,
-    KEY_MATCH_MANGAPIXER,
     KEY_MU_AUTOSTART,
     KEY_SCAN_AFTER_FILING,
     NyaaOptions,
@@ -155,15 +153,10 @@ class MatchingPage(SectionPage):
     def __init__(self, db, parent: Optional[QWidget] = None):
         super().__init__("Matching", MATCHING_LEAD, parent)
         self._db = db
-        self.mangapixer_check = checkbox("Use MangaPixer's links for the folders it knows (recommended when connected)",
-                                         get_flag(db, KEY_MATCH_MANGAPIXER))
         self.mu_check = checkbox("Look up new series on MangaUpdates automatically", get_flag(db, KEY_MU_AUTOSTART),
                                  tip="Starts the MangaUpdates lookup after each scan (the old \"Auto-start MU\")")
-        self.anilist_check = checkbox("Use AniList for English links and totals", get_flag(db, KEY_MATCH_ANILIST))
-        for box, key in ((self.mangapixer_check, KEY_MATCH_MANGAPIXER), (self.mu_check, KEY_MU_AUTOSTART),
-                         (self.anilist_check, KEY_MATCH_ANILIST)):
-            box.toggled.connect(lambda on, k=key: set_flag(self._db, k, on))
-            self.body.addWidget(box)
+        self.mu_check.toggled.connect(lambda on: set_flag(self._db, KEY_MU_AUTOSTART, on))
+        self.body.addWidget(self.mu_check)
 
 
 class AutomationPage(SectionPage):

@@ -88,6 +88,10 @@ def make_window(qapp, monkeypatch):
     made = []
 
     def make(*, downloads=False, tab=None, dupes=None, settings=None, finder=None, entries=True):
+        tab = tab or FakeDownloadTab
+        dupes = dupes or FakeDuplicatesView
+        settings = settings or (lambda parent, db, backend, section=None: None)
+        finder = finder or (lambda db: [])
         store.reset_stores()
         backend = FakeBackend(series_ids={str(LIB / t): i for i, t in enumerate((QUEST, TWIN_A, TWIN_B, PLAIN), 1)})
         monkeypatch.setattr(mw.MainWindow, "_make_volumes_backend", lambda self: backend if downloads else None)
@@ -173,33 +177,11 @@ def test_lane_bs_settings_rescan_and_reread(make_window, monkeypatch):
     win._exec_menu = lambda menu, pos: menus.append(menu)
     win._mp_items = {"x": None}
     win._top.btn_settings.click()
-    assert calls == [(win, win._db, None, None)] and menus == []
+    assert calls == [(win, win._db, None, None)] and menus == []        # the dialog, never a menu
     assert scans == [None] and win._mp_items == {}
-    assert win._cfg["mu_autostart"] is True and win._chk_autostart.isChecked()
+    assert win._cfg["mu_autostart"] is True
     win._persist_examined()                         # a later save of the window's settings keeps the dialog's
     assert config.load()["mu_autostart"] is True
-
-
-def test_settings_without_lane_b_is_a_menu_of_the_existing_dialogs(make_window):
-    win = make_window()
-    menus = []
-    win._exec_menu = lambda menu, pos: menus.append(menu)
-    win._top.btn_settings.click()
-    assert menus == [win._settings_menu]
-    acts = {a.text(): a for a in win._settings_menu.actions()}
-    acts["Look up MangaUpdates after every scan"].trigger()
-    assert config.load()["mu_autostart"] is True
-
-
-def test_duplicates_chip_without_lane_c_filters_the_table(make_window):
-    win = make_window()
-    chip = win._list.chips["duplicates"]
-    assert chip.count == 1                                          # one series held in two folders
-    chip.click()
-    titles = [win._model.entry_at(win._proxy.mapToSource(win._proxy.index(r, 0)).row()).title
-              for r in range(win._proxy.rowCount())]
-    assert sorted(titles) == [TWIN_A, TWIN_B] and win._list.stack.currentIndex() == 0
-    assert "Showing 2 duplicate entries" in win._status_label.text()
 
 
 def test_lane_cs_view_takes_the_tables_place(make_window, qapp):

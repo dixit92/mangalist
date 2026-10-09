@@ -1,4 +1,4 @@
-"""The owner's download and matching switches (Settings dialog), stored in the library database's settings table.
+"""The owner's download switches (Settings dialog), stored in the library database's settings table.
 
 Qt-free: the Settings dialog writes them, the adapter / jobs read them. Every getter falls back to the default when
 nothing is stored (or the stored value has the wrong type), so a fresh database behaves as before the switches existed.
@@ -10,13 +10,10 @@ from dataclasses import asdict, dataclass, replace
 from typing import Any, Dict
 
 KEY_NYAA = "downloads.nyaa"                        # dict of the NyaaOptions fields
-KEY_MATCH_MANGAPIXER = "matching.use_mangapixer"   # use MangaPixer's links for the folders it knows
-KEY_MATCH_ANILIST = "matching.use_anilist"         # use AniList for English links and totals
 KEY_MU_AUTOSTART = "mu_autostart"                  # the old "Auto-start MU" (config.py's key): look new series up
 KEY_SCAN_AFTER_FILING = "mangapixer.scan_after_filing"   # ask MangaPixer to rescan a library after filing into it
 
-DEFAULTS: Dict[str, bool] = {KEY_MATCH_MANGAPIXER: True, KEY_MATCH_ANILIST: True, KEY_MU_AUTOSTART: False,
-                             KEY_SCAN_AFTER_FILING: True}
+DEFAULTS: Dict[str, bool] = {KEY_MU_AUTOSTART: False, KEY_SCAN_AFTER_FILING: True}
 
 
 @dataclass(frozen=True)

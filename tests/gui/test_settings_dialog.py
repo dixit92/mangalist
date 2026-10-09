@@ -11,7 +11,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit  # noqa: E402
 
 from mangalist import config, store  # noqa: E402
-from mangalist.downloads.options import KEY_MATCH_ANILIST, KEY_MU_AUTOSTART, KEY_SCAN_AFTER_FILING, NyaaOptions, get_flag, load_nyaa_options  # noqa: E402,E501
+from mangalist.downloads.options import KEY_MU_AUTOSTART, KEY_SCAN_AFTER_FILING, NyaaOptions, get_flag, load_nyaa_options  # noqa: E402,E501
 from mangalist.gui import settings_dialog as sd  # noqa: E402
 from mangalist.gui.downloads_backend import BackendError, QbtSettings  # noqa: E402
 from mangalist.gui.settings_dialog import SettingsDialog, open_settings  # noqa: E402
@@ -121,7 +121,7 @@ def test_five_sections_in_the_mockups_order_with_their_hints(qapp, db, cache):
                                                               SECTION_MATCHING, SECTION_AUTOMATION]
     assert [(t, h) for _k, t, h in sd.NAV] == [
         ("Library", "Roots, file naming"), ("Connected services", "MangaPixer, qBittorrent, Suwayomi"),
-        ("Download sources", "nyaa, Suwayomi sources"), ("Matching", "MangaUpdates, AniList"),
+        ("Download sources", "nyaa, Suwayomi sources"), ("Matching", "MangaUpdates"),
         ("Automation", "Schedules, Remove Completed")]
     assert dlg.current == SECTION_LIBRARY and dlg.windowTitle() == "Settings"
     assert dlg._nav[SECTION_LIBRARY].property("current") is True
@@ -424,15 +424,14 @@ def test_suwayomi_sources_wait_for_suwayomi_and_point_to_the_services(qapp, db, 
 # --- Matching and Automation -------------------------------------------------------------------------------
 
 
-def test_matching_switches_are_stored_and_the_old_auto_start_mu_is_the_same_setting(qapp, db, cache):
+def test_matching_has_only_the_switch_that_works_and_it_is_the_old_auto_start_mu(qapp, db, cache):
     dlg, _ = make(qapp, db, cache)
     page = dlg.pages[SECTION_MATCHING]
-    assert page.mangapixer_check.isChecked() and page.anilist_check.isChecked() and not page.mu_check.isChecked()
+    assert [box.text() for box in page.findChildren(QCheckBox)] == [page.mu_check.text()]
+    assert not page.mu_check.isChecked() and "MangaUpdates" in page.mu_check.text()
     page.mu_check.setChecked(True)
-    page.anilist_check.setChecked(False)
-    assert get_flag(db, KEY_MU_AUTOSTART) is True and get_flag(db, KEY_MATCH_ANILIST) is False
-    assert config.load()["mu_autostart"] is True                                  # what the toolbar checkbox read
-    assert "MangaUpdates" in page.mu_check.text() and "AniList" in page.anilist_check.text()
+    assert get_flag(db, KEY_MU_AUTOSTART) is True
+    assert config.load()["mu_autostart"] is True                                  # what the window reads after a scan
 
 
 def test_automation_shows_the_container_schedules_read_only(qapp, db, cache):

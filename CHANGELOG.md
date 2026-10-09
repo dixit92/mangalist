@@ -7,6 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **A new look, in two tabs:** **List** (your library, with state chips - Missing volumes, Missing chapters, Upgrades,
+  Duplicates and more - and a details panel you can collapse) and **Download** (the series to get, grouped, with
+  nyaa's releases for the one you select and the downloads in progress). "Get the missing volumes" in the List tab
+  takes you to that series in the Download tab. The app bundles the IBM Plex fonts.
+- **One Settings dialog** replaces the separate dialogs: Library, Connected services (MangaPixer, qBittorrent),
+  Download sources (nyaa: English and/or raw, hide light novels, only trusted uploaders), Matching and Automation
+  (the container's schedules, Remove Completed).
+- **Duplicates:** the Duplicates chip lists series held in more than one folder, and duplicate files (the same number
+  twice in one folder, MangaPixer's rule) to keep or discard. Discarded files are deleted only after a confirmation
+  that lists every one of them, and one copy of each number always stays.
 - **A new icon:** MangaPixer's icon turned 90 degrees, in inverted colours - for the app, the installers, the web GUI of the
   container and its Unraid label (which showed MangaPixer's own icon until now).
 

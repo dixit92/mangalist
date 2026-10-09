@@ -30,7 +30,7 @@ The builds are not code-signed. Check a download against `SHA256SUMS` (`sha256su
 
 If you run [MangaPixer](https://github.com/dixit92/mangapixer) 1.33.0 or later on the same library,
 MangaList can use what MangaPixer already knows instead of looking everything up again: in MangaPixer,
-**Administration > API tokens > Create token**, then in MangaList **MangaPixer** enter the server
+**Administration > API tokens > Create token**, then in MangaList **Settings > Connected services > MangaPixer** enter the server
 address and paste the token. MangaList maps each root to a MangaPixer library by its folder names and
 syncs MangaPixer's links, volume lists and Completion answers (read-only - it never changes anything
 in MangaPixer). Folders MangaPixer does not know still use MangaList's own matcher.
@@ -55,7 +55,8 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 #### Volumes from nyaa (Unraid, opt-in)
 
 With `MANGALIST_DOWNLOADS=1`, a series that MangaPixer has matched and that is licensed in English gets
-**Find volumes on nyaa** (Wanted panel and the row menu). MangaList searches nyaa's English-translated
+a place in the **Download** tab ("Get the missing volumes" in the List tab's details and row menu takes you
+there). MangaList searches nyaa's English-translated
 literature, ranks the releases (the most missing volumes covered first - or, when MangaList cannot tell which
 English volumes are out, the most volumes you do not have - Digital over scans), and **you pick** one. MangaList adds it to qBittorrent in its own category `mangalist`, and when it has finished,
 hard-links the missing volumes into the series folder where that series already keeps its volumes (the
@@ -69,7 +70,7 @@ Set it up:
   `/mnt/user` -> `/data`): `-v /mnt/user:/data`, then add your roots as `/data/<share>/...`. A hard link only
   works inside one mount; with separate mounts for the library and the torrent folder every file is
   copied instead (double space until the torrent is removed). Both containers then see identical paths.
-- In MangaList, **qBittorrent**: the Web UI address, user name and password, and the download folder
+- In MangaList, **Settings > Connected services > qBittorrent**: the Web UI address, user name and password, and the download folder
   (default `/data/appdata/torrents/mangalist`, which must lie outside every library root). **Test
   connection** checks the login.
 - In qBittorrent, give torrents a seed goal that **stops** them (e.g. ratio 2, action "Stop"); Remove
@@ -124,6 +125,14 @@ The **MU Title** column shows the result:
 A confirmed match (✔) is never re-scored. The golden tests in `tests/golden` replay recorded public
 MangaUpdates responses and check that the results equal MangaPixer's.
 
+## Duplicates
+
+The List tab's **Duplicates** chip shows series held in more than one folder (to look at; nothing changes) and
+duplicate files: the same chapter or volume number in two files of one folder, by MangaPixer's rule. Mark each
+file **Keep** or **Discard** (by default the newest is kept), then **Apply**: MangaList lists every file it is
+about to delete and deletes them only after you confirm. There is no holding folder - the files are gone - and at
+least one copy of each number always stays.
+
 ## Build and release
 
 CI (`.github/workflows`) runs the tests on Windows, macOS and Linux and builds every package
@@ -148,3 +157,6 @@ Not affiliated with, endorsed by, or sponsored by either service.
 ## License
 
 [MIT](LICENSE) for this project's code. Data from the services above belongs to its owners.
+
+The app bundles the [IBM Plex](https://github.com/IBM/plex) Sans and Mono fonts (`mangalist/assets/fonts`),
+Copyright © 2017 IBM Corp., under the [SIL Open Font License 1.1](mangalist/assets/fonts/OFL.txt).

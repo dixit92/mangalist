@@ -45,7 +45,7 @@ NAV = (
     (SECTION_LIBRARY, "Library", "Roots, file naming"),
     (SECTION_SERVICES, "Connected services", "MangaPixer, qBittorrent, Suwayomi"),
     (SECTION_SOURCES, "Download sources", "nyaa, Suwayomi sources"),
-    (SECTION_MATCHING, "Matching", "MangaUpdates, AniList"),
+    (SECTION_MATCHING, "Matching", "MangaUpdates"),
     (SECTION_AUTOMATION, "Automation", "Schedules, Remove Completed"),
 )
 

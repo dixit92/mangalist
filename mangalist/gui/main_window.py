@@ -48,7 +48,6 @@ from .list_tab import DUPLICATES, PAGE_DUPLICATES, PAGE_EMPTY, PAGE_TABLE, ListT
 from .list_text import wanted_label, wanted_series
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
-from .roots_dialog import RootsDialog
 from .shell import WantedSeries
 from .table_model import (
     COL_BEHIND, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LICENSED, COL_MU_TITLE, COL_OFFICIAL, COL_STATE,
@@ -228,7 +227,7 @@ class MainWindow(QMainWindow):
         "Last Modified", "Subfolders", "Vol %", "Ch %", "Both %",
     ]
     _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
-    _DEFAULT_WIDTHS = {COL_TITLE: 340, COL_STATE: 200, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
+    _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 170, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
                        COL_FILES: 80, COL_EXAMINED: 32, COL_MU_TITLE: 260, COL_OFFICIAL: 180}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
@@ -346,34 +345,25 @@ class MainWindow(QMainWindow):
         lst.splitter.setSizes([int(s) for s in saved] if saved and len(saved) == 2 else [width - 380, 380])
         lst.splitter.splitterMoved.connect(self._on_splitter_moved)
 
-        # --- the Download tab (lane B's; a placeholder until it merges) and the downloads' status
+        # --- the Download tab (lane B's) and the downloads' status
         if self._volumes_backend is not None:
             from .volumes_controller import VolumesController
 
             self._volumes = VolumesController(self, self._volumes_backend, self._model, self._detail,
                                               self._status_label.setText)
-            tab_class = lanes.download_tab_class()
-            if tab_class is not None:
-                tab = tab_class(self._volumes_backend, self)
-            else:
-                tab = lanes.PlaceholderDownloadTab(self._volumes_backend, self, find_volumes=self._find_volumes_for)
+            tab = lanes.download_tab_class()(self._volumes_backend, self)
             tab.count_changed.connect(self._top.set_download_count)
             tab.show_in_list.connect(self.show_folder_in_list)
             self._download_tab = tab
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
 
-        # --- the duplicates view (lane C's; without it the Duplicates chip filters the table)
-        view_class = lanes.duplicates_view_class()
-        if view_class is not None:
-            view = view_class(self._db, self)
-            view.show_in_list.connect(self.show_folder_in_list)
-            view.files_deleted.connect(self._on_files_deleted)
-            lst.set_duplicates_widget(view)
-            self._duplicates_view = view
-
-        # Settings: lane B's dialog; until it merges, a menu of the dialogs it absorbs.
-        self._settings_menu = self._build_settings_menu()
+        # --- the duplicates view (lane C's)
+        view = lanes.duplicates_view_class()(self._db, self)
+        view.show_in_list.connect(self.show_folder_in_list)
+        view.files_deleted.connect(self._on_files_deleted)
+        lst.set_duplicates_widget(view)
+        self._duplicates_view = view
 
         # Chip counts, the "To get" list and the details' call to action follow the model (debounced).
         self._derived_timer = QTimer(self)
@@ -398,23 +388,6 @@ class MainWindow(QMainWindow):
         header.sectionMoved.connect(self._on_column_moved)
         header.sectionResized.connect(self._on_section_resized)
 
-    def _build_settings_menu(self) -> QMenu:
-        """The Settings button's menu while lane B's dialog is not merged: the dialogs it will absorb."""
-        menu = QMenu(self)
-        menu.addAction("Library folders…", self._on_roots)
-        menu.addAction("Add a library folder…", self._on_choose_root)
-        menu.addAction("MangaPixer…", self._on_mangapixer)
-        if self._volumes is not None:
-            menu.addAction("qBittorrent…", self._volumes.open_qbittorrent)
-            menu.addAction("Downloads…", self._volumes.open_downloads)
-        menu.addSeparator()
-        act = menu.addAction("Look up MangaUpdates after every scan")
-        act.setCheckable(True)
-        act.setChecked(bool(self._cfg.get("mu_autostart", False)))
-        act.toggled.connect(self._on_mu_autostart_toggled)
-        self._chk_autostart = act
-        return menu
-
     # --- Tabs, Settings, the List tab's state ------------------------------
 
     def _exec_menu(self, menu: QMenu, global_pos: QPoint):
@@ -434,25 +407,19 @@ class MainWindow(QMainWindow):
         self._filter_edit.selectAll()
 
     def _on_settings(self) -> None:
-        open_settings = lanes.open_settings_function()
-        if open_settings is None:
-            btn = self._top.btn_settings
-            self._exec_menu(self._settings_menu, btn.mapToGlobal(btn.rect().bottomLeft()))
-            return
         from ..identity.carry import last_carry_id
 
         try:
             before = last_carry_id(self._db)
         except Exception:  # noqa: BLE001
             before = 0
-        result = open_settings(self, self._db, self._volumes_backend)
+        result = lanes.open_settings_function()(self, self._db, self._volumes_backend)
         self._apply_settings_result(result, before)
 
     def _apply_settings_result(self, result, carry_before: int = 0) -> None:
         """After the Settings dialog: re-read the settings it may have written, then rescan / re-read MangaPixer /
         reload the downloads as it says."""
         self._cfg = config.load()           # every change this window makes is saved at once: nothing is lost
-        self._chk_autostart.setChecked(bool(self._cfg.get("mu_autostart", False)))
         if result is None:
             return
         if getattr(result, "mangapixer_changed", False):
@@ -479,8 +446,9 @@ class MainWindow(QMainWindow):
         if key is None:
             self._status_label.setText("Showing all entries")
         elif dupes:
-            n = sum(1 for i in range(self._model.rowCount()) if self._model.is_duplicate(i))
-            self._status_label.setText(f"Showing {n} duplicate entries")
+            series, numbers = len(self._model.duplicate_series()), self._dupe_file_groups or 0
+            self._status_label.setText(f"Duplicates: {series} series in more than one folder, "
+                                       f"{numbers} number{'s' if numbers != 1 else ''} held by more than one file")
         else:
             self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {chip_label(key)}")
 
@@ -610,12 +578,6 @@ class MainWindow(QMainWindow):
         if row is not None:
             self._select_source_row(row)
 
-    def _find_volumes_for(self, folder: str) -> None:
-        """The placeholder Download tab's "Find volumes on nyaa...": the existing dialog."""
-        row = self._row_for_folder(folder)
-        if row is not None and self._volumes is not None:
-            self._volumes.open_find_volumes(row)
-
     def _on_files_deleted(self, paths) -> None:
         """Lane C's view deleted duplicate files: rescan so the table and the database follow."""
         self._status_label.setText(f"{len(paths)} duplicate file(s) deleted - rescanning")
@@ -624,7 +586,7 @@ class MainWindow(QMainWindow):
     def _count_duplicate_files(self) -> None:
         """Lane C's duplicate-numbers finder, off the UI thread, for the Duplicates chip's count."""
         finder = lanes.find_duplicate_files_function()
-        if finder is None or self._dupe_call is not None:
+        if self._dupe_call is not None:
             return
         from .background import start_call
 
@@ -727,23 +689,6 @@ class MainWindow(QMainWindow):
         config.save(self._cfg)
         self._show_roots()
         self._start_scan()
-
-    def _make_roots_dialog(self) -> RootsDialog:
-        return RootsDialog(self._db, self, button_style=self._BUTTON_STYLE)
-
-    def _on_roots(self) -> None:
-        dlg = self._make_roots_dialog()
-        if dlg.exec() == RootsDialog.Accepted:
-            self._after_roots_changed(rescan=True)
-
-    def _on_mangapixer(self) -> None:
-        from ..identity.carry import last_carry_id
-        from ..services.mangapixer import open_cache
-        from .mangapixer_dialog import open_mangapixer_dialog
-
-        before = last_carry_id(self._db)
-        open_mangapixer_dialog(self, open_cache(self._db))
-        self._after_mangapixer_changed(before)
 
     def _after_mangapixer_changed(self, carry_before: int) -> None:
         """The connection, the mappings or the synced items may have changed: re-read MangaPixer's data."""
@@ -1166,11 +1111,6 @@ class MainWindow(QMainWindow):
         if self._mu_thread is not None:
             self._mu_thread.quit()
             self._mu_thread.wait(wait_ms)
-
-    def _on_mu_autostart_toggled(self, checked: bool) -> None:
-        if bool(self._cfg.get("mu_autostart", False)) != checked:
-            self._cfg["mu_autostart"] = checked
-            config.save(self._cfg)
 
     # --- Selection from elsewhere -------------------------------------------
 
