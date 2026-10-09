@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.10] - 2026-10-09
+
+The ninth MangaList release (testing build): the Download tab shows one group at a time (Missing volumes, Upgrades, Missing chapters) with resizable panels, an upgrade says so in the release panel, the holding folder can be emptied early, and a series can be excluded from its library from the List's right-click menu.
+
 - **Download tab, one group at a time:** chips above the "To get" list - **Missing volumes**, **Upgrades**, **Missing
   chapters**, each with its count - show one group (remembered); "Get the volume upgrades" in the List opens the
   Upgrades group. The "To get" panel and the **In progress** panel are resizable (remembered).
