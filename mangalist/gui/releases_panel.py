@@ -663,6 +663,7 @@ class ReleasesPanel(QWidget):
         tone, note, tip = "", "", ""
         text, checked, enabled = PARTIAL_TEXT, self._partial_on, False
         if state in ("waiting", "reading"):
+            enabled = True                                  # unticking now sends the whole pack without waiting
             note = "Reading the release's file list..."
         elif state == "failed":
             checked = False
@@ -692,7 +693,7 @@ class ReleasesPanel(QWidget):
                 bits.append(f"The whole pack will be downloaded ({describe_whole(sel)}).")
             note = " ".join(bits)
         self.partial_check.setText(text)
-        self.partial_check.setChecked(bool(checked) and (enabled or state in ("waiting", "reading")))
+        self.partial_check.setChecked(bool(checked))
         self.partial_check.setEnabled(enabled)
         self.partial_check.blockSignals(False)
         self.partial_note.setText(note)
@@ -712,6 +713,8 @@ class ReleasesPanel(QWidget):
             return f"Download: only the missing volumes ({describe(sel)})\n"
         if sel is not None and sel.readable:
             return f"Download: the whole pack ({describe_whole(sel)})\n"
+        if sel is None:
+            return "Download: the whole pack\n"                  # unticked before the list was read
         return "Download: the whole pack (its file list could not be read)\n"
 
     # --- actions ---------------------------------------------------------------------------------------
