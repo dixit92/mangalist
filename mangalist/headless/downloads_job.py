@@ -39,7 +39,9 @@ class _NoReport:
 def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
     """After a pass: when it filed volumes, record a rescan (the series' state catches up now, not at the nightly
     rescan) and ask MangaPixer to scan the libraries filed into (MangaPixer 1.36.0, the token's ``library:scan``
-    scope); scan requests MangaPixer could not start yet are retried whenever they are due. Returns a summary."""
+    scope); scan requests MangaPixer could not start yet are retried whenever they are due - unless the owner switched
+    the requests off (Settings > Automation). Returns a summary."""
+    from ..downloads.options import KEY_SCAN_AFTER_FILING, get_flag
     from ..services.mangapixer import open_cache
     from ..services.mangapixer.scans import libraries_for_series, request_scans
 
@@ -51,6 +53,8 @@ def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
 
         res = make_rescan(StoreRootsProvider(db=store), backfill=False)(ctx)   # the nightly rescan signs archives
         notes.append(f"rescan {res.status}")
+    if not get_flag(store, KEY_SCAN_AFTER_FILING):
+        return "; ".join(notes) or None
     cache = open_cache(store)
     libraries = libraries_for_series(cache, series_ids)
     if libraries or cache.pending_scans():
