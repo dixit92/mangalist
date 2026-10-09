@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.5] - 2026-10-08
+
+The fourth MangaList release (testing build): a new look in two tabs (List and Download), one Settings dialog, a Duplicates view, MangaPixer library scans after filing, and a new icon.
+
 - **A new look, in two tabs:** **List** (your library, with state chips - Missing volumes, Missing chapters, Upgrades,
   Duplicates and more - and a details panel you can collapse) and **Download** (the series to get, grouped, with
   nyaa's releases for the one you select and the downloads in progress). "Get the missing volumes" in the List tab
