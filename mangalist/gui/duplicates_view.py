@@ -78,6 +78,11 @@ STYLE = """
     color: #ffffff; font-weight: 600; }
 #DuplicatesView QPushButton[role="primary"]:hover { background: #163a87; }
 #DuplicatesView QPushButton[role="primary"]:disabled { border-color: #c4c4bf; background: #e3e3df; color: #9a9a96; }
+#DuplicatesView QPushButton[role="danger"] { height: 36px; border: 1px solid #8b1d1d; background: #8b1d1d; color: #ffffff;
+    font-weight: 600; }
+#DuplicatesView QPushButton[role="danger"]:hover { background: #6e1616; }
+#DuplicatesView QListWidget { background: #ffffff; border: 1px solid #dcdcd8; border-radius: 6px;
+    font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }
 #DuplicatesView QPushButton[role="link"] { height: 26px; padding: 0 10px; font-size: 12px; }
 #DuplicatesView QPushButton[role="keep"], #DuplicatesView QPushButton[role="discard"] { height: 26px; min-width: 52px;
     padding: 0 10px; font-size: 12px; background: #ffffff; color: #3a3a38; }
@@ -92,6 +97,10 @@ def _label(text: str = "", role: Optional[str] = None, tone: Optional[str] = Non
     label = QLabel(text)
     if role:
         label.setProperty("role", role)
+    if role == "pill":
+        label.setAlignment(Qt.AlignCenter)
+        label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        label.setFixedHeight(20)
     if tone:
         label.setProperty("tone", tone)
     if tip:
@@ -151,6 +160,8 @@ class ConfirmDiscardDialog(QDialog):
     def __init__(self, files: Sequence[DuplicateFile], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Delete these files?")
+        self.setObjectName("DuplicatesView")          # the view's look (its stylesheet is keyed on this name)
+        self.setStyleSheet(STYLE)
         self.setModal(True)
         self.resize(720, 420)
         total = sum(f.size for f in files)
@@ -168,6 +179,8 @@ class ConfirmDiscardDialog(QDialog):
                                                QDialogButtonBox.AcceptRole)
         self.cancel_button = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
         self.delete_button.setAutoDefault(False)
+        self.delete_button.setProperty("role", "danger")
+        self.delete_button.setCursor(Qt.PointingHandCursor)
         self.cancel_button.setDefault(True)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -211,7 +224,7 @@ class _FileRow(QFrame):
         self.name.setToolTip(file.path)
         row.addWidget(self.name, 1)
         for tag in tags:
-            row.addWidget(_label(tag, "pill"))
+            row.addWidget(_label(tag, "pill"), 0, Qt.AlignVCenter)
         self.group = _label(file.group or "", "muted")
         self.group.setMinimumWidth(90)
         row.addWidget(self.group)
@@ -336,7 +349,7 @@ class DuplicatesView(QWidget):
             box.setSpacing(10)
             head = QHBoxLayout()
             head.addWidget(_label(series.title, "title"))
-            head.addWidget(_label(f"{len(series.folders)} folders", "pill"))
+            head.addWidget(_label(f"{len(series.folders)} folders", "pill"), 0, Qt.AlignVCenter)
             head.addStretch(1)
             box.addLayout(head)
             side = QHBoxLayout()
