@@ -30,7 +30,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Union
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 
@@ -123,6 +123,19 @@ class ServerError(MangaPixerError):
 
 
 # --- data ---------------------------------------------------------------------------------------------
+
+SCAN_STARTED = "started"            # 202: the scan runs
+SCAN_BUSY = "busy"                  # 409 scan_in_progress / 429 rate_limited: try again after retry_after
+SCAN_COOLDOWN = "cooldown"          # 429 scan_cooldown: a token started a scan of this library less than 5 min ago
+SCAN_FORBIDDEN = "forbidden"        # 403: the token lacks the library:scan scope
+
+
+@dataclass(frozen=True)
+class ScanRequest:
+    outcome: str
+    run_id: Optional[str] = None
+    retry_after: Optional[float] = None     # seconds
+
 
 @dataclass
 class Ping:
@@ -287,22 +300,26 @@ class MangaPixerClient:
     def _url(self, endpoint: str) -> str:
         return f"{self.base_url}/api/v1/export/{endpoint}"
 
-    def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _send(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+        """One request with the token (never in the URL); network and TLS failures become ConnectionFailed."""
         token = _check_token(self._token.reveal())
-        url = self._url(endpoint)
+        try:
+            return self._session.request(method, self._url(endpoint), params=params, timeout=self.timeout,
+                                         verify=self.verify, headers={"Authorization": f"Bearer {token}"},
+                                         allow_redirects=method == "GET")
+        except requests.exceptions.SSLError:
+            raise ConnectionFailed(
+                f"the certificate of {self.base_url} was not accepted (a self-signed MangaPixer certificate "
+                "needs its CA file, or certificate checks turned off)") from None
+        except requests.exceptions.Timeout:
+            raise ConnectionFailed(f"{self.base_url} did not answer in {self.timeout:.0f} s") from None
+        except requests.exceptions.RequestException as exc:
+            raise ConnectionFailed(f"cannot reach {self.base_url} ({type(exc).__name__})") from None
+
+    def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         attempts = 0
         while True:
-            try:
-                resp = self._session.get(url, params=params, timeout=self.timeout, verify=self.verify,
-                                         headers={"Authorization": f"Bearer {token}"}, allow_redirects=True)
-            except requests.exceptions.SSLError:
-                raise ConnectionFailed(
-                    f"the certificate of {self.base_url} was not accepted (a self-signed MangaPixer certificate "
-                    "needs its CA file, or certificate checks turned off)") from None
-            except requests.exceptions.Timeout:
-                raise ConnectionFailed(f"{self.base_url} did not answer in {self.timeout:.0f} s") from None
-            except requests.exceptions.RequestException as exc:
-                raise ConnectionFailed(f"cannot reach {self.base_url} ({type(exc).__name__})") from None
+            resp = self._send("GET", endpoint, params)
             status = resp.status_code
             if status == 429:
                 code = self._error_code(resp)
@@ -374,6 +391,35 @@ class MangaPixerClient:
                               status, code)
 
     # --- endpoints -----------------------------------------------------------------------------------
+
+    def request_scan(self, library_id: str) -> "ScanRequest":
+        """``POST /api/v1/export/libraries/{id}/scan`` (MangaPixer 1.36.0; the token needs the ``library:scan`` scope):
+        ask MangaPixer for a full scan of one library. Never retried or waited for here - the caller keeps a
+        refused request and tries again after ``retry_after``. Raises TokenRejected (401), LibraryNotFound (404),
+        ConnectionFailed and the other client errors."""
+        resp = self._send("POST", f"libraries/{quote(str(library_id), safe='')}/scan")
+        status, code = resp.status_code, self._error_code(resp)
+        if status == 202:
+            try:
+                body = resp.json()
+            except ValueError:
+                body = {}
+            run_id = body.get("scanRunId") if isinstance(body, dict) else None
+            return ScanRequest(SCAN_STARTED, run_id=str(run_id) if run_id else None)
+        if status == 409 and code == "scan_in_progress":
+            return ScanRequest(SCAN_BUSY, retry_after=self._retry_after(resp) or 60.0)
+        if status == 429:
+            outcome = SCAN_COOLDOWN if code == "scan_cooldown" else SCAN_BUSY
+            return ScanRequest(outcome, retry_after=self._retry_after(resp) or 60.0)
+        if status == 403:
+            return ScanRequest(SCAN_FORBIDDEN)
+        if status == 404 and code in ("library_not_found", "libraryNotFound"):
+            raise LibraryNotFound("the MangaPixer library is gone (re-read the libraries and re-map)", 404, code)
+        if status == 405:
+            raise NotFound("this MangaPixer cannot scan on request (MangaPixer 1.36.0 or newer needed)", 405, code)
+        if status >= 400:
+            self._raise_for(resp)
+        raise MangaPixerError(f"unexpected answer from MangaPixer (HTTP {status})", status, code)
 
     def ping(self) -> Ping:
         """``GET /api/v1/export/ping``: checks the address and the token."""

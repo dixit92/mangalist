@@ -17,6 +17,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 - **Duplicates:** the Duplicates chip lists series held in more than one folder, and duplicate files (the same number
   twice in one folder, MangaPixer's rule) to keep or discard. Discarded files are deleted only after a confirmation
   that lists every one of them, and one copy of each number always stays.
+- **MangaPixer sees new volumes within minutes:** after filing downloads, MangaList asks MangaPixer (1.36.0 or later) to
+  rescan each library it filed into - one request per library; when MangaPixer is busy or cooling down, again after the
+  time it names. The token needs the **Request library scans** permission (create a new token with it); without it
+  MangaList stops asking until a new token is entered. Settings > Automation can switch the requests off.
+- After filing, MangaList also records the series' new volumes right away (they no longer show as missing until the
+  nightly rescan).
 - **A new icon:** MangaPixer's icon turned 90 degrees, in inverted colours - for the app, the installers, the web GUI of the
   container and its Unraid label (which showed MangaPixer's own icon until now).
 

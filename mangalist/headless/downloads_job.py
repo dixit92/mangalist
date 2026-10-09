@@ -30,10 +30,50 @@ def _default_client_factory(conn):
     return factory(conn) if factory is not None else None
 
 
+class _NoReport:
+    """A pass that filed nothing (no download in progress)."""
+
+    filed: tuple = ()
+
+
+def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
+    """After a pass: when it filed volumes, record a rescan (the series' state catches up now, not at the nightly
+    rescan) and ask MangaPixer to scan the libraries filed into (MangaPixer 1.36.0, the token's ``library:scan``
+    scope); scan requests MangaPixer could not start yet are retried whenever they are due. Returns a summary."""
+    from ..services.mangapixer import open_cache
+    from ..services.mangapixer.scans import libraries_for_series, request_scans
+
+    store = ledger.store
+    series_ids = [rec.series_id for rec in (ledger.get(i) for i in report.filed) if rec is not None]
+    notes = []
+    if series_ids:
+        from .jobs import StoreRootsProvider, make_rescan
+
+        res = make_rescan(StoreRootsProvider(db=store), backfill=False)(ctx)   # the nightly rescan signs archives
+        notes.append(f"rescan {res.status}")
+    cache = open_cache(store)
+    libraries = libraries_for_series(cache, series_ids)
+    if libraries or cache.pending_scans():
+        notes.append(request_scans(cache, libraries).summary())
+    return "; ".join(notes) or None
+
+
 def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
-                       client_factory: Optional[Callable[[object], object]] = None) -> JobFunc:
+                       client_factory: Optional[Callable[[object], object]] = None,
+                       after: Optional[Callable[[JobContext, object, object], Optional[str]]] = after_pass) -> JobFunc:
     """The job function. *open_ledger* / *client_factory* are for tests (default: the data folder's database and
-    a client built from its stored connection)."""
+    a client built from its stored connection); *after* runs after each pass (None: nothing)."""
+
+    def _after(ctx: JobContext, ledger, report) -> Optional[str]:
+        if after is None:
+            return None
+        try:
+            return after(ctx, ledger, report)
+        except Cancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the filing is done; this extra step must not fail the job
+            _log.warning("Downloads: the after-filing step failed (%s)", type(exc).__name__, exc_info=True)
+            return f"after filing: {type(exc).__name__}"
 
     def downloads(ctx: JobContext) -> JobResult:
         from ..downloads.arrivals import run_arrivals
@@ -46,7 +86,8 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
 
             ledger = DownloadLedger(get_store())
         if not ledger.active():
-            return JobResult("skipped", "no downloads in progress")
+            note = _after(ctx, ledger, _NoReport())     # pending MangaPixer scans are retried all the same
+            return JobResult("skipped", "no downloads in progress" + (f"; {note}" if note else ""))
         conn = ledger.connection()
         if conn is None:
             _log.info("Downloads: no qBittorrent connection is set up; skipped")
@@ -66,6 +107,10 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         status = "error" if report.errors else "ok"
         message = (f"{report.checked} checked: {len(report.filed)} filed, {len(report.removed)} removed, "
                    f"{len(report.failed)} failed, {len(report.waiting)} waiting")
+        note = _after(ctx, ledger, report)
+        if note:
+            message += f"; {note}"
+            extra["after"] = note
         _log.info("Downloads: %s", message)
         return JobResult(status, message, extra)
 
