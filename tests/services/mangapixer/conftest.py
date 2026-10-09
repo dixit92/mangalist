@@ -55,14 +55,18 @@ class FakeMangaPixer:
         self.extra_fields = False
         self.queue: List[Tuple[str, int, Any, Dict[str, str]]] = []   # (endpoint, status, body, headers)
         self.requests: List[Dict[str, Any]] = []
+        self.scan_scope = True                       # the token has library:scan (1.36.0)
+        self.scans: List[str] = []                   # library ids a scan was started for
         self._lock = threading.Lock()
 
     # --- request handling ----------------------------------------------------------------------------
 
-    def handle(self, path: str, query: Dict[str, str], headers: Dict[str, str]) -> Tuple[int, Any, Dict[str, str]]:
+    def handle(self, path: str, query: Dict[str, str], headers: Dict[str, str],
+               method: str = "GET") -> Tuple[int, Any, Dict[str, str]]:
         endpoint = path.rsplit("/", 1)[-1] if path.startswith("/api/v1/export/") else path
         with self._lock:
-            self.requests.append({"endpoint": endpoint, "path": path, "query": dict(query), "headers": dict(headers)})
+            self.requests.append({"endpoint": endpoint, "path": path, "query": dict(query), "headers": dict(headers),
+                                  "method": method})
             for n, (ep, status, body, hdrs) in enumerate(self.queue):
                 if ep in (endpoint, "*"):
                     del self.queue[n]
@@ -72,6 +76,16 @@ class FakeMangaPixer:
         auth = headers.get("authorization", "")
         if auth != f"Bearer {self.token}":
             return 401, None, {"WWW-Authenticate": 'Bearer error="invalid_token"'}
+        if method == "POST":            # 1.36.0: POST /api/v1/export/libraries/{id}/scan (token scope library:scan)
+            parts = path.split("/")
+            if len(parts) != 7 or parts[4] != "libraries" or parts[6] != "scan":
+                return 405, None, {}
+            if not self.scan_scope:
+                return 403, None, {}
+            if parts[5] not in {lib["id"] for lib in self.libraries}:
+                return 404, {"error": "library_not_found", "message": "no such library"}, {}
+            self.scans.append(parts[5])
+            return 202, {"scanRunId": f"run{len(self.scans)}"}, {}
         if endpoint == "ping":
             return 200, {"ok": True, "serverTime": self.server_time, "auth": "token"}, {}
         if endpoint == "libraries":
@@ -128,6 +142,19 @@ def _handler(fake: FakeMangaPixer):
             query = {k: v[-1] for k, v in parse_qs(parts.query, keep_blank_values=True).items()}
             headers = {k.lower(): v for k, v in self.headers.items()}
             status, body, hdrs = fake.handle(parts.path, query, headers)
+            data = b"" if body is None else (body if isinstance(body, bytes) else json.dumps(body).encode())
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            for k, v in hdrs.items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_POST(self):  # noqa: N802
+            parts = urlsplit(self.path)
+            headers = {k.lower(): v for k, v in self.headers.items()}
+            status, body, hdrs = fake.handle(parts.path, {}, headers, method="POST")
             data = b"" if body is None else (body if isinstance(body, bytes) else json.dumps(body).encode())
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
