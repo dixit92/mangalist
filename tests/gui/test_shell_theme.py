@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QtMsgType, qInstallMessageHandler  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QtMsgType, qInstallMessageHandler  # noqa: E402
 from PySide6.QtGui import QFontDatabase, QFontInfo  # noqa: E402
 from PySide6.QtWidgets import QPushButton, QWidget  # noqa: E402
 
@@ -19,7 +19,10 @@ from .conftest import qapp  # noqa: E402,F401
 
 @pytest.fixture
 def themed(qapp):
-    """The theme on the shared application, undone afterwards (the other tests keep Qt's defaults)."""
+    """The theme on the shared application, undone afterwards (the other tests keep Qt's defaults). Widgets earlier
+    tests let go of are deleted first: an application-wide style change restyles every live widget (~9 s each way)."""
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
     saved = (qapp.style().name(), qapp.palette(), qapp.font(), qapp.styleSheet())
     warnings = []
 
