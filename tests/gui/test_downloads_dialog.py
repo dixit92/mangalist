@@ -120,3 +120,33 @@ def test_the_dialog_wraps_the_list(qapp):
     assert dlg.list.table.item(0, 0).text() == "Example Series" and dlg.windowTitle() == "Downloads"
     dlg.reject()
     dlg.deleteLater()
+
+
+def test_remove_now_from_the_row_menu_after_a_yes(qapp):
+    stopped = record(1, status=S.FILED, error="stopped before its seed goal (ratio 0.40 of 2)")
+    backend = FakeBackend(records=[stopped, record(2, status=S.SENT)])
+    asked = []
+    dlg = DownloadsList(backend, confirm_remove=lambda rec: asked.append(rec.id) or True)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 2)
+    assert "stopped before its seed goal" in dlg.table.cellWidget(1, 2).findChild(QLabel).text()
+    menus = []
+
+    def answer(menu, pos):
+        acts = {a.text(): a for a in menu.actions()}
+        menus.append({t: a.isEnabled() for t, a in acts.items()})
+        return acts["Remove now…"]
+    dlg._exec_menu = answer
+    sent_row = dlg.table.visualItemRect(dlg.table.item(0, 0)).center()
+    dlg._on_context_menu(sent_row)                                   # newest first: the SENT one is row 0
+    filed_row = dlg.table.visualItemRect(dlg.table.item(1, 0)).center()
+    dlg._on_context_menu(filed_row)
+    assert menus == [{"Remove now…": False}, {"Remove now…": True}] and asked == [1]
+    wait_until(qapp, lambda: dlg._call is None and dlg.btn_refresh.isEnabled())
+    assert backend.removed_now == [1] and "Removed from qBittorrent" in dlg.status_label.text()
+
+
+def test_remove_now_asks_and_a_no_removes_nothing(qapp):
+    backend = FakeBackend(records=[record(1, status=S.FILED)])
+    dlg = DownloadsList(backend, confirm_remove=lambda rec: False)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 1)
+    assert not dlg.remove_now(backend.record_list[0]) and not getattr(backend, "removed_now", [])

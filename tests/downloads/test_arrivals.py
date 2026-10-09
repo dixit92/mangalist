@@ -353,3 +353,56 @@ def test_removed_after_filing_but_the_library_files_are_gone_too_fails(ledger, s
     run_arrivals(qbt, ledger)
     rec = ledger.get(sent.id)
     assert rec.status == S.FAILED and "is no longer in the library" in rec.error
+
+
+# --- stopped by hand: said on the record; Remove now (owner, 2026-10-09) ---------------------------------------
+
+def test_a_download_stopped_before_its_goal_says_so_on_its_record(ledger, sent, qbt):
+    from mangalist.gui.volumes_target import status_text
+
+    qbt.set(HASH, state="stoppedUP", progress=1.0, ratio=0.4, seeding_time=600)
+    run_arrivals(qbt, ledger)
+    rec = ledger.get(sent.id)
+    assert rec.status == S.FILED and rec.error == "stopped before its seed goal (ratio 0.40 of 2)"
+    assert status_text(rec) == "Filed v02-v03 - stopped before its seed goal (ratio 0.40 of 2)"
+    qbt.set(HASH, state="uploading")                                # resumed: plainly seeding again
+    run_arrivals(qbt, ledger)
+    rec = ledger.get(sent.id)
+    assert rec.error is None and status_text(rec) == "Filed v02-v03 - seeding"
+
+
+def test_remove_now_removes_a_stopped_download_and_keeps_the_library(ledger, sent, qbt, series):
+    from mangalist.downloads.arrivals import remove_now
+
+    _sid, sdir = series
+    qbt.set(HASH, state="stoppedUP", progress=1.0, ratio=0.4, seeding_time=600)
+    run_arrivals(qbt, ledger)
+    filed = [os.path.join(str(sdir), f) for f in ledger.get(sent.id).filed_files]
+    assert filed and all(os.path.exists(p) for p in filed)
+    rec = remove_now(qbt, ledger, sent.id)
+    assert rec.status == S.REMOVED and rec.error == "removed by you (Remove now)" and qbt.deleted == [HASH]
+    assert all(os.path.exists(p) for p in filed)                    # the library keeps its volumes
+
+
+def test_remove_now_is_refused_when_a_library_file_is_missing_or_it_is_not_filed(ledger, sent, qbt, series):
+    from mangalist.downloads.arrivals import RemoveRefused, remove_now
+
+    _sid, sdir = series
+    with pytest.raises(RemoveRefused):                              # still SENT
+        remove_now(qbt, ledger, sent.id)
+    qbt.set(HASH, state="stoppedUP", progress=1.0, ratio=0.4, seeding_time=600)
+    run_arrivals(qbt, ledger)
+    os.remove(os.path.join(str(sdir), ledger.get(sent.id).filed_files[0]))
+    with pytest.raises(RemoveRefused):
+        remove_now(qbt, ledger, sent.id)
+    assert status(ledger, sent) == S.FILED and qbt.deleted == []
+
+
+def test_remove_now_of_a_torrent_already_gone_from_qbittorrent(ledger, sent, qbt):
+    from mangalist.downloads.arrivals import remove_now
+
+    qbt.set(HASH, state="stoppedUP", progress=1.0, ratio=0.4, seeding_time=600)
+    run_arrivals(qbt, ledger)
+    del qbt.infos[HASH]
+    rec = remove_now(qbt, ledger, sent.id)
+    assert rec.status == S.REMOVED and rec.error == "removed in qBittorrent, not by MangaList" and qbt.deleted == []

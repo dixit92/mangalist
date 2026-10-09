@@ -130,6 +130,17 @@ class FakeBackend:
             raise BackendError(self.test_error)
         return "v5.2.4"
 
+    def remove_now(self, record_id):
+        """Remove now: the record becomes REMOVED (the volumes cycle's row action)."""
+        from dataclasses import replace as _replace
+
+        self.threads.append(threading.get_ident())
+        self.removed_now = getattr(self, "removed_now", []) + [record_id]
+        i = next(i for i, r in enumerate(self.record_list) if r.id == record_id)
+        self.record_list[i] = _replace(self.record_list[i], status=DownloadStatus.REMOVED,
+                                       error="removed by you (Remove now)")
+        return self.record_list[i]
+
     def check_now(self):
         self.threads.append(threading.get_ident())
         self.checks += 1

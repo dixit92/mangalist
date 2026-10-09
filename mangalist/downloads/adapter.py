@@ -201,6 +201,18 @@ class Backend:
         except QbtError as exc:
             raise BackendError(str(exc)) from None
 
+    def remove_now(self, record_id: int) -> DownloadRecord:
+        """Remove one filed download's torrent and its downloaded copy now (the owner's choice; library files stay)."""
+        from .arrivals import RemoveRefused, remove_now
+
+        conn = self.ledger.connection()
+        if conn is None or not conn.base_url:
+            raise BackendError("qBittorrent is not set up yet")
+        try:
+            return remove_now(self._client_factory(conn), self.ledger, record_id)
+        except (RemoveRefused, QbtError) as exc:
+            raise BackendError(f"not removed: {exc}") from None
+
     def set_remove_completed(self, on: bool) -> None:
         self.ledger.set_remove_completed(on)
 

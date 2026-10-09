@@ -119,7 +119,9 @@ def status_text(record: DownloadRecord) -> str:
     if status in (DownloadStatus.FILED, DownloadStatus.REMOVED):
         vols = numbers_text(record.wanted_volumes, pad=True)
         filed = f"Filed {vols}" if vols else "Filed"
-        return f"{filed} - {'seeding' if status == DownloadStatus.FILED else 'done'}"
+        if status == DownloadStatus.FILED:
+            return f"{filed} - {record.error}" if record.error else f"{filed} - seeding"   # e.g. stopped by hand
+        return f"{filed} - done"
     if status == DownloadStatus.FAILED:
         return f"Failed: {record.error}" if record.error else "Failed"
     return {DownloadStatus.SENT: "Sent", DownloadStatus.DOWNLOADED: "Downloaded",
@@ -130,7 +132,11 @@ def status_tooltip(record: DownloadRecord) -> str:
     lines = [record.title, f"Volumes: {numbers_text(record.wanted_volumes, pad=True) or '-'}",
              f"Target folder: {record.target_dir}", f"Updated: {record.updated_at}"]
     if record.status == DownloadStatus.FILED:
-        lines.append("The volumes are in the library; qBittorrent is still seeding the torrent.")
+        if record.error:
+            lines.append(f"The volumes are in the library; the torrent is {record.error} - MangaList leaves it. "
+                         "Resume it in qBittorrent, or right-click: Remove now.")
+        else:
+            lines.append("The volumes are in the library; qBittorrent is still seeding the torrent.")
     if record.status == DownloadStatus.REMOVED:
         if record.error:                # e.g. "removed in qBittorrent, not by MangaList"
             lines.append(f"Done: the torrent was {record.error}. The volumes stay in the library.")
