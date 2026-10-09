@@ -55,7 +55,23 @@ class Library:
                 rel: units_from_parsed(rel, parse_name(rel.rsplit("/", 1)[-1], ctx), (self.dir / series / rel).stat().st_size)
                 for rel in rels}
         self.db.sync_units(by_series)
+        self._record_archives()
         return self
+
+    def _record_archives(self) -> None:
+        """The archive rows a scan leaves (path, size, mtime), written directly: the identity pass is not under test here."""
+        with self.db.connect() as con:
+            for series, rels in self.files.items():
+                sid = self.series_id(series)
+                for rel in rels:
+                    path = self.dir / series / Path(*rel.split("/"))
+                    if not path.exists():
+                        continue
+                    st = path.stat()
+                    con.execute(
+                        "INSERT OR REPLACE INTO archives (root_id, series_id, rel_path, size, mtime_ns, status, first_seen_at,"
+                        " last_seen_at) VALUES (?,?,?,?,?, 'present', 'then', 'now')",
+                        (self.root.id, sid, f"{series}/{rel}", st.st_size, st.st_mtime_ns))
 
     def series_id(self, series: str) -> int:
         return self.db.get_series(self.root.id, series).id

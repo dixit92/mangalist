@@ -176,6 +176,26 @@ def _stat_plain_file(path: Path) -> Optional[Tuple[Path, int, int]]:
     return path, st.st_size, st.st_mtime_ns
 
 
+# --- showing -----------------------------------------------------------------------------------------------
+
+def human_size(n: int) -> str:
+    """``1536`` -> ``"1.5 KB"`` (binary units, one decimal from KB up)."""
+    size = float(max(0, int(n)))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{int(size)} B" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{int(n)} B"     # unreachable
+
+
+def format_time(iso: str) -> str:
+    """An ISO 8601 time as the owner's local ``2026-09-30 14:02``; the text itself when it does not parse."""
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return iso
+
+
 # --- the default choice ----------------------------------------------------------------------------------
 
 def default_keep(group: DuplicateGroup) -> DuplicateFile:
@@ -311,6 +331,18 @@ def discard_duplicates(db, selections: Sequence[Tuple[DuplicateGroup, Collection
             if lock is not None:
                 lock.release()
     return outcomes
+
+
+def busy_reason(db, paths: Iterable[str]) -> Optional[str]:
+    """Why a discard of *paths* cannot start now - another instance (a scan's filing, a plan) holds the lock of a root
+    they lie in - or None. A look only: :func:`discard_duplicates` takes the lock itself."""
+    root_dirs = [r.path for r in db.list_roots()]
+    for root_dir in sorted({_root_holding(os.path.normpath(p), root_dirs) for p in paths} - {None}):
+        lock = RootLock(root_dir)
+        info = lock.read()
+        if info is not None and not lock.is_stale(info):
+            return f"{Path(root_dir).name or root_dir} is being changed by {info.host} (pid {info.pid})"
+    return None
 
 
 def _refused(path: str, reason: str) -> DiscardOutcome:
