@@ -201,7 +201,38 @@ class MangaPixerCache:
                 " token=excluded.token, verify_tls=excluded.verify_tls, ca_file=excluded.ca_file,"
                 " token_rejected_at=excluded.token_rejected_at, updated_at=excluded.updated_at",
                 (cur["base_url"], cur["token"], cur["verify_tls"], cur["ca_file"], rejected, now))
+        if token is not self._KEEP or (base_url is not None and rejected is None):
+            self.mark_scan_forbidden(False)     # a new token (or server) may have the library:scan scope
         return self.connection()
+
+    # --- library scans on request (MangaPixer 1.36.0) ----------------------------------------------------
+
+    _SCAN_PENDING = "mangapixer.scan_pending"          # {library id: not before (ISO UTC)}
+    _SCAN_FORBIDDEN = "mangapixer.scan_forbidden_at"   # when MangaPixer said the token lacks library:scan
+
+    def pending_scans(self) -> Dict[str, str]:
+        """Libraries a scan was asked for but not started yet (MangaPixer busy / cooling down / unreachable)."""
+        value = self.store.get_setting(self._SCAN_PENDING, {})
+        return {str(k): str(v) for k, v in value.items()} if isinstance(value, dict) else {}
+
+    def set_scan_pending(self, library_id: str, not_before: str) -> None:
+        pending = self.pending_scans()
+        pending[str(library_id)] = not_before
+        self.store.set_setting(self._SCAN_PENDING, pending)
+
+    def clear_scan_pending(self, library_id: str) -> None:
+        pending = self.pending_scans()
+        if pending.pop(str(library_id), None) is not None:
+            self.store.set_setting(self._SCAN_PENDING, pending)
+
+    def scan_forbidden_at(self) -> Optional[str]:
+        value = self.store.get_setting(self._SCAN_FORBIDDEN)
+        return str(value) if value else None
+
+    def mark_scan_forbidden(self, forbidden: bool = True) -> None:
+        """HTTP 403 on a scan request: the token lacks the library:scan scope - no more requests until a new token."""
+        if forbidden or self.scan_forbidden_at():
+            self.store.set_setting(self._SCAN_FORBIDDEN, utcnow() if forbidden else None)
 
     def mark_token_rejected(self, rejected: bool = True) -> None:
         """HTTP 401: remember it, so no scheduled sync tries the same token again."""

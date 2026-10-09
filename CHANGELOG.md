@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **MangaPixer sees new volumes within minutes:** after filing downloads, MangaList asks MangaPixer (1.36.0 or later) to
+  rescan each library it filed into - one request per library; when MangaPixer is busy or cooling down, again after the
+  time it names. The token needs the **Request library scans** permission (create a new token with it); without it
+  MangaList stops asking until a new token is entered.
+- After filing, MangaList also records the series' new volumes right away (they no longer show as missing until the
+  nightly rescan).
 - **A new icon:** MangaPixer's icon turned 90 degrees, in inverted colours - for the app, the installers, the web GUI of the
   container and its Unraid label (which showed MangaPixer's own icon until now).
 
