@@ -36,7 +36,8 @@ a = Analysis(
     ["mangalist/__main__.py"],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
+    # The bundled IBM Plex fonts (OFL; mangalist/gui/theme.py registers them at start).
+    datas=[("mangalist/assets/fonts", "mangalist/assets/fonts")],
     hiddenimports=[
         "mangalist.gui.main_window",
         "mangalist.gui.table_model",
@@ -54,6 +55,13 @@ a = Analysis(
         "mangalist._version",
         "mangalist.scanner",
         "mangalist.anilist_client",
+        "mangalist.gui.theme",
+        # Loaded by name (mangalist/gui/lanes.py), so PyInstaller cannot see them: the Download tab, Settings and the
+        # duplicates view (a name that does not exist yet is only a build warning).
+        "mangalist.gui.download_tab",
+        "mangalist.gui.settings_dialog",
+        "mangalist.gui.duplicates_view",
+        "mangalist.duplicates",
     ],
     hookspath=[],
     hooksconfig={},

@@ -1,5 +1,5 @@
-"""State / Gaps / Official source columns, the state filter, the Wanted panel and the detail panel
-(offscreen Qt, synthetic entries - no files, no network)."""
+"""State / Gaps / Official source / English columns, the state chips and the details panel (offscreen Qt, synthetic
+entries - no files, no network)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from mangalist.gui.table_model import (  # noqa: E402
     COL_MU_TITLE,
     COL_GAPS,
     COL_OFFICIAL,
+    COL_ENGLISH,
     COL_STATE,
     COLUMNS,
     STATE_FILTERS,
@@ -83,7 +84,8 @@ def test_new_columns_are_appended_and_keep_the_old_ones(model):
     assert COLUMNS[:15] == ["✓", "Dupe", "Title", "Alternative Title", "Files", "Subfolders", "Vol %", "Ch %",
                             "Both %", "Verdict", "Last Modified", "MU Title", "Licensed", "Behind", "Completed"]
     assert COLUMNS[COL_STATE] == "State" and COLUMNS[COL_GAPS] == "Gaps" and COLUMNS[COL_OFFICIAL] == "Official source"
-    assert model.columnCount() == 18
+    assert COLUMNS[COL_ENGLISH] == "English" and model.columnCount() == 19
+    assert model.headerData(9, Qt.Horizontal) == "Kind"          # "Verdict" keeps its name in the settings
 
 
 def test_state_gaps_and_official_cells_from_the_fallback(model):
@@ -95,6 +97,8 @@ def test_state_gaps_and_official_cells_from_the_fallback(model):
     assert _cell(model, 3, COL_STATE) == "Complete"
     assert _cell(model, 3, COL_OFFICIAL) == "Example Press"
     assert _cell(model, 0, COL_OFFICIAL) == "Search only"
+    assert _cell(model, 3, COL_ENGLISH) == "Example Press" and _cell(model, 1, COL_ENGLISH) == "Not licensed"
+    assert _cell(model, 2, COL_ENGLISH) == ""                # nothing known
     tip = _cell(model, 0, COL_OFFICIAL, Qt.ToolTipRole)
     assert "Amazon (search) [search, search]: https://www.amazon.com/s?k=Alpha+Empty" in tip
 
@@ -153,7 +157,6 @@ def window(qapp):
     opened = []
     win = MainWindow()
     win._open_url = opened.append
-    win._wanted._open_url = opened.append
     win._model.set_state_providers(today=TODAY)
     win._on_scan_finished(entries())
     try:
@@ -163,80 +166,75 @@ def window(qapp):
         win.deleteLater()
 
 
-def test_main_window_state_filter(window):
+def _shown(win):
+    return [win._model.entry_at(win._proxy.mapToSource(win._proxy.index(r, 0)).row()).title
+            for r in range(win._proxy.rowCount())]
+
+
+def test_main_window_state_chips_filter_and_count(window):
     win, _ = window
+    lst = win._list
     assert win._proxy.rowCount() == 5
-    win._state_combo.setCurrentIndex(win._state_combo.findData("wanted"))
-    assert win._proxy.rowCount() == 1
-    assert win._model.entry_at(win._proxy.mapToSource(win._proxy.index(0, 0)).row()).title == "Alpha Empty"
-    win._state_combo.setCurrentIndex(win._state_combo.findData("Missing chapters"))
-    assert win._proxy.rowCount() == 1 and "Missing chapters" in win._status_label.text()
-    win._state_combo.setCurrentIndex(0)
-    assert win._proxy.rowCount() == 5
+    win._refresh_derived()
+    assert lst.chips[None].count == 5 and lst.chips["Missing chapters"].count == 1
+    assert lst.chips["Complete"].count == 1 and lst.chips["Can't tell"].count == 2     # Charlie; Echo: no numbers
+    lst.chips["Missing chapters"].click()
+    assert _shown(win) == ["Bravo Chapters"] and "Missing chapters" in win._status_label.text()
+    assert lst.chips["Missing chapters"].isChecked() and not lst.chips[None].isChecked()
+    # The other filters sit behind "More": the chip names the one picked, with its count.
+    wanted = next(a for k, a in lst._more_actions.items() if k == "wanted")
+    assert wanted.text() == "Wanted (any)   1"
+    wanted.trigger()
+    assert _shown(win) == ["Alpha Empty"] and lst.chip_more.isChecked() and lst.chip_more.text() == "Wanted (any) ▾"
+    assert lst.chip_more.count == 1
+    lst.chips[None].click()
+    assert win._proxy.rowCount() == 5 and lst.chip_more.text() == "More ▾"
 
 
-def test_wanted_panel_groups_links_and_selection(window):
-    win, opened = window
-    assert not win._wanted_dock.isVisible() or win._wanted_dock.isHidden() is False
-    win._wanted.rebuild(win._model)
-    tree = win._wanted.tree
-    assert [tree.topLevelItem(i).text(0) for i in range(3)] == [
-        "Wanted  (1)", "Missing  (1)", "Upgrade available  (0)"]
-    assert win._wanted.series_titles(0) == ["Alpha Empty"] and win._wanted.series_titles(1) == ["Bravo Chapters"]
-    series = tree.topLevelItem(0).child(0)
-    assert series.text(1) == "Wanted - scanlation only"
-    link = series.child(0)
-    assert link.text(0) == "Amazon (search)"
-    win._wanted._on_double_clicked(link, 0)
-    assert opened == ["https://www.amazon.com/s?k=Alpha+Empty&i=stripbooks"]
-    # A series opens its first page; "Show in table" selects it, clearing a filter that hid it.
-    tree.setCurrentItem(series)
-    win._wanted.open_selected()
-    assert len(opened) == 2
-    win._state_combo.setCurrentIndex(win._state_combo.findData("missing"))
-    win._wanted.show_selected()
-    assert win._state_combo.currentIndex() == 0
+def test_selecting_from_elsewhere_clears_the_filters_that_hide_the_series(window):
+    win, _ = window
+    win._list.chips["Complete"].click()
+    win._filter_edit.setText("Delta")
+    win.show_folder_in_list(str(ROOT / "Alpha Empty"))
+    assert win._list.current_filter() is None and win._filter_edit.text() == ""
     sel = win._table.selectionModel().selectedRows()
     assert [win._model.entry_at(win._proxy.mapToSource(i).row()).title for i in sel] == ["Alpha Empty"]
 
 
-def test_wanted_panel_toggle_is_remembered(window):
-    from mangalist import config
-
-    win, _ = window
-    assert win._btn_wanted.text() == "Wanted panel" and win._btn_wanted.isCheckable()   # a button, not flat text
-    win.show()
-    win._btn_wanted.click()
-    assert win._wanted_dock.isVisible() and config.load().get("wanted_panel") is True
-    assert win._btn_wanted.isChecked()
-    assert win._wanted.tree.topLevelItemCount() == 3      # built when shown
-    win._wanted_dock.close()                              # the dock's own close button: the button follows
-    assert not win._btn_wanted.isChecked() and config.load().get("wanted_panel") is False
-    win._wanted_toggle.trigger()
-    assert win._btn_wanted.isChecked()
-
-
-def test_detail_panel_shows_state_gaps_and_links(window):
+def test_detail_panel_shows_state_gaps_holds_and_links(window):
     win, _ = window
     win._table.selectRow(win._proxy.mapFromSource(win._model.index(1, 0)).row())
     d = win._detail
-    assert d._lbl_state.text() == "Missing chapters"
+    assert d._lbl_state.text() == "Missing chapters" and "#fbeaea" in d._lbl_state.styleSheet()
     assert d._lbl_gaps.text() == "Ch. 3, 5" and "Missing chapters:" in d._lbl_gaps.toolTip()
-    assert d._lbl_mangapixer.text() == "-"
+    assert d._lbl_holds.text() == "Chapters 1-2, 4" and d._lbl_english.text() == "Not licensed"
+    assert d._lbl_mangapixer.text() == "-" and not d._lbl_mangapixer.isVisibleTo(d)    # no MangaPixer: no row
+    assert d._eng_label.text() == "Bravo Chapters · MangaUpdates: matched"
     assert '<a href="https://www.amazon.com/s?k=Bravo+Chapters&amp;i=stripbooks">Amazon (search)</a>' in \
         d._links_label.text()
     assert d._links_label.openExternalLinks()
+    assert not d.btn_get.isVisibleTo(d)             # downloads are off: no Download tab to go to
     d.show_entry(None)
     assert d._lbl_state.text() == "-" and d._links_label.text() == "-"
+    assert not d._links_box.isVisibleTo(d)
 
 
-def test_default_column_order_puts_state_next_to_the_match(window):
+def test_default_columns_are_the_mockups_and_the_header_menu_remembers(window):
+    from mangalist import config
+
     win, _ = window
     header = win._table.horizontalHeader()
-    order = sorted(range(len(COLUMNS)), key=header.visualIndex)
-    names = [COLUMNS[i] for i in order]
-    assert names[:7] == ["✓", "Dupe", "Title", "MU Title", "State", "Gaps", "Behind"]
-    assert names.index("Official source") == names.index("Completed") + 1
+    shown = [COLUMNS[i] for i in sorted(range(len(COLUMNS)), key=header.visualIndex) if not header.isSectionHidden(i)]
+    assert shown == ["Title", "State", "Gaps", "English", "Verdict", "Files"]
+    assert win._proxy.headerData(9, Qt.Horizontal) == "KIND"
+    win._toggle_column(COLUMNS.index("MU Title"))
+    assert not header.isSectionHidden(COLUMNS.index("MU Title"))
+    assert "MU Title" not in config.load()["list_hidden_columns"]
+    menus = []
+    win._exec_menu = lambda menu, pos: menus.append(menu) or None
+    win._on_header_context_menu(header.rect().center())
+    texts = {a.text(): a for a in menus[0].actions()}
+    assert not texts["Title"].isEnabled() and texts["Kind"].isChecked() and not texts["Dupe"].isChecked()
 
 
 def test_main_window_uses_mangapixer_for_known_folders_and_skips_their_mu_lookup(window):

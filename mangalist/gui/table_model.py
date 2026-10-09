@@ -14,6 +14,8 @@ from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 from ..official_sources import KIND_SEARCH, official_links, primary_label
+from .list_text import english_text
+from .shell import DuplicateSeries
 from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, State, compute_state, \
     fallback_inventory_from_entry
 
@@ -36,7 +38,11 @@ COLUMNS = [
     "State",
     "Gaps",
     "Official source",
+    "English",
 ]
+
+# What the header shows where it differs from the column's name (the name is what the settings remember).
+HEADER_LABELS = {"Verdict": "Kind"}
 
 COL_EXAMINED = 0
 COL_DUPE = 1
@@ -56,7 +62,13 @@ COL_COMPLETED = 14
 COL_STATE = 15
 COL_GAPS = 16
 COL_OFFICIAL = 17
+COL_ENGLISH = 18
 STATE_COLUMNS = (COL_STATE, COL_GAPS, COL_OFFICIAL)
+
+# Extra roles for the List tab's delegates (list_delegates.py).
+SUBTITLE_ROLE = Qt.UserRole + 1     # Title: the matched series' title, shown under the folder's
+REVIEW_ROLE = Qt.UserRole + 2       # Title: the match needs review (the subtitle turns orange)
+STATE_ROLE = Qt.UserRole + 3        # State: the SeriesState (the badge's colour)
 
 # State filters (key -> label), in the order the toolbar lists them; None = every row.
 STATE_FILTERS: List[Tuple[Optional[str], str]] = (
@@ -84,13 +96,11 @@ def state_matches(state: Optional[SeriesState], key: Optional[str]) -> bool:
         return state.state == State.UPGRADE or state.complete_with_upgrade
     return state.state.value == key
 
-# Saturated dark green for examined rows — contrasts strongly with white text
-# on dark themes, distinct from the table's alternating rows and selection highlight.
-EXAMINED_ROW_BG = QColor(38, 110, 55)      # saturated forest green
-# Saturated orange for MU matches the matcher put in the review tier — opaque so it reads well on dark themes.
-WEAK_MATCH_BG = QColor(196, 96, 30)         # saturated burnt orange
-# Deep blue-purple highlight for the row currently being fetched from MU.
-MU_PROCESSING_BG = QColor(60, 80, 160)      # deep blue-purple
+# Row tints in the light theme's colours (gui/theme.py): examined rows green, a match in the review tier orange,
+# the row being fetched from MangaUpdates blue - each distinct from the picked row (#eef3fd).
+EXAMINED_ROW_BG = QColor("#e7f3ec")
+WEAK_MATCH_BG = QColor("#fdf0e3")
+MU_PROCESSING_BG = QColor("#dce6fa")
 
 
 class MangaTableModel(QAbstractTableModel):
@@ -148,7 +158,7 @@ class MangaTableModel(QAbstractTableModel):
         """Recompute every row's state (e.g. after new knowledge arrived)."""
         self._state_cache.clear()
         if self._entries:
-            self.dataChanged.emit(self.index(0, COL_STATE), self.index(len(self._entries) - 1, COL_OFFICIAL),
+            self.dataChanged.emit(self.index(0, COL_STATE), self.index(len(self._entries) - 1, COL_ENGLISH),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
     def _on_data_changed(self, top_left, bottom_right, roles=()) -> None:
@@ -157,9 +167,9 @@ class MangaTableModel(QAbstractTableModel):
             return
         for r in rows:
             self._state_cache.pop(r, None)
-        if top_left.column() > COL_STATE or bottom_right.column() < COL_OFFICIAL:
+        if top_left.column() > COL_STATE or bottom_right.column() < COL_ENGLISH:
             # The row changed elsewhere (MU match, override): repaint its state cells too.
-            self.dataChanged.emit(self.index(top_left.row(), COL_STATE), self.index(bottom_right.row(), COL_OFFICIAL),
+            self.dataChanged.emit(self.index(top_left.row(), COL_STATE), self.index(bottom_right.row(), COL_ENGLISH),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
     def _evaluate(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]:
@@ -200,6 +210,14 @@ class MangaTableModel(QAbstractTableModel):
         inventory = self._inventory_for(e) or fallback_inventory_from_entry(e)
         nums = [d for d in (to_decimal(v) for v in inventory.held_volumes) if d is not None]
         return tuple(fmt_num(d) for d in sorted(set(nums)))
+
+    def held_chapters_at(self, row: int) -> Tuple[Any, ...]:
+        """The chapters *row*'s folder holds as chapter archives (numbers, or ``(from, to)`` for a range archive)."""
+        e = self.entry_at(row)
+        if e is None:
+            return ()
+        inventory = self._inventory_for(e) or fallback_inventory_from_entry(e)
+        return tuple(inventory.held_chapters or ())
 
     def mu_view(self, row: int):
         """What the MU Title / Licensed / Behind / Completed columns read for *row*: the entry itself (own
@@ -242,6 +260,15 @@ class MangaTableModel(QAbstractTableModel):
         key = e.mu_title.strip().lower()
         all_dups = self._dupe_map.get(key, [])
         return [r for r in all_dups if r != row]
+
+    def duplicate_series(self) -> List[DuplicateSeries]:
+        """The series held in more than one folder (the same MangaUpdates title), for the Duplicates view."""
+        out = []
+        for rows in self._dupe_map.values():
+            if len(rows) > 1:
+                title = self._entries[rows[0]].mu_title or self._entries[rows[0]].title
+                out.append(DuplicateSeries(title=title, folders=tuple(str(self._entries[r].folder) for r in rows)))
+        return sorted(out, key=lambda d: d.title.lower())
 
     def set_mu_processing_row(self, row: Optional[int]) -> None:
         old = self._mu_processing_row
@@ -325,7 +352,7 @@ class MangaTableModel(QAbstractTableModel):
         if role != Qt.DisplayRole:
             return None
         if orientation == Qt.Horizontal:
-            return COLUMNS[section]
+            return column_label(section)
         return section + 1
 
     def data(self, index: QModelIndex, role=Qt.DisplayRole):
@@ -381,12 +408,22 @@ class MangaTableModel(QAbstractTableModel):
                 return _completed_text(v)
             if col == COL_STATE:
                 st = self.state_at(index.row())
-                return _state_text(st) if st else ""
+                return state_text(st) if st else ""
             if col == COL_GAPS:
                 st = self.state_at(index.row())
                 return st.gaps_text if st else ""
             if col == COL_OFFICIAL:
                 return _official_text(self.links_at(index.row()))
+            if col == COL_ENGLISH:
+                return english_text(self.knowledge_at(index.row()))
+
+        if role == SUBTITLE_ROLE and col == COL_TITLE:
+            v = self.mu_view(index.row())
+            return (v.mu_title or "") if v is not None else ""
+        if role == REVIEW_ROLE and col == COL_TITLE:
+            return needs_review(e)
+        if role == STATE_ROLE and col == COL_STATE:
+            return self.state_at(index.row())
 
         if role == Qt.TextAlignmentRole:
             if col in (COL_FILES, COL_SUBS, COL_VOL, COL_CH, COL_BOTH, COL_MTIME):
@@ -493,14 +530,22 @@ class MangaTableModel(QAbstractTableModel):
                 return st.n_missing if st else -1
             if col == COL_OFFICIAL:
                 return _official_text(self.links_at(index.row())).lower()
+            if col == COL_ENGLISH:
+                return english_text(self.knowledge_at(index.row())).lower()
 
         return None
+
+
+def column_label(col: int) -> str:
+    """What the header and its show / hide menu call column *col*."""
+    name = COLUMNS[col]
+    return HEADER_LABELS.get(name, name)
 
 
 # --- State / Gaps / Official source helpers -------------------------------------
 
 
-def _state_text(st: SeriesState) -> str:
+def state_text(st: SeriesState) -> str:
     """The state, with its flags: ``Up to date · Upcoming``; for a folder that is not a series, why (e.g.
     ``Collection about <series>``)."""
     if st.state == State.NOT_A_SERIES and st.reasons:
