@@ -7,6 +7,11 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Duplicates: apply to a chosen few series:** tick the series cards you want and use **Apply to selected (N series, M
+  files)** - next to the per-series Apply and Apply (all).
+- Fixed: the "series' group" tag no longer goes to a copy whose group appears nowhere else in the folder (the copy itself
+  was counted as evidence for its own group).
+
 ## [2026.10.8] - 2026-10-09
 
 The seventh MangaList release (testing build): new roots pair with their MangaPixer library on their first scan, Settings > Library shows each root's pairing, Sync now on the MangaPixer card, and a Windows lock-file fix.

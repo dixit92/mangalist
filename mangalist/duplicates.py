@@ -240,7 +240,8 @@ def usual_group(groups_by_number: Dict[Decimal, List[str]], number: Decimal, can
         if count == sum(near.values()) or count > 1:            # the neighbours agree
             pick = best
     if pick is None:
-        every = Counter(key(g) for gs in groups_by_number.values() for g in gs)
+        # the folder's favourite from the OTHER numbers only: the copies themselves are no evidence for their own group
+        every = Counter(key(g) for n, gs in groups_by_number.items() if n != number for g in gs)
         if every:
             best, count = every.most_common(1)[0]
             if list(every.values()).count(count) == 1:          # a clear favourite, not a tie

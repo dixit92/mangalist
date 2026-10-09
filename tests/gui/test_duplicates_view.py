@@ -429,3 +429,30 @@ def test_an_apply_that_deletes_nothing_does_not_stay_busy(views, pair):
     view.apply()
     wait_until(views.qapp, lambda: not view._applying and not view._scanning)
     assert not view.busy_bar.isVisibleTo(view) and view._body.isEnabled()
+
+
+def test_apply_to_selected_deletes_only_in_the_ticked_series(views, two_series):
+    _lib, (a_old, a_new), (b_old, b_new) = two_series
+    view = views.scanned()
+    view.show()
+    assert not view.apply_selected_button.isVisibleTo(view)             # nothing ticked
+    view.pick_series([str(b_old.parent)])
+    assert view.apply_selected_button.isVisibleTo(view)
+    assert view.apply_selected_button.text() == "Apply to selected (1 series, 1 file)"
+    deleted = []
+    view.files_deleted.connect(deleted.append)
+    view.apply_selected_button.click()
+    wait_until(views.qapp, lambda: deleted and not view._scanning)
+    assert [len(f) for f in views.asked] == [1] and deleted == [[str(b_old)]]
+    assert a_old.exists() and a_new.exists() and not b_old.exists() and b_new.exists()
+    assert view._picked == set() and not view.apply_selected_button.isVisibleTo(view)   # its series left the list
+
+
+def test_apply_to_selected_covers_every_ticked_series(views, two_series):
+    _lib, (a_old, _a_new), (b_old, _b_new) = two_series
+    view = views.scanned()
+    view.pick_series([str(a_old.parent), str(b_old.parent)])
+    assert view.apply_selected_button.text() == "Apply to selected (2 series, 2 files)"
+    view.apply(series=set(view._picked))
+    wait_until(views.qapp, lambda: not view._applying and not view._scanning)
+    assert [len(f) for f in views.asked] == [2] and not a_old.exists() and not b_old.exists()
