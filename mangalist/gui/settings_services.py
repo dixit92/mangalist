@@ -81,6 +81,7 @@ class ServicesPage(SectionPage):
         self._info = info or _default_info
         self._calls: List[BackgroundCall] = []
         self._checked = False
+        self._syncing = False
         self.mp_panel: Optional[MangaPixerPanel] = None
         self.qbt_panel: Optional[QbittorrentPanel] = None
 
@@ -106,6 +107,12 @@ class ServicesPage(SectionPage):
 
         self.mp_card.btn_secondary.setText("Test")
         self.mp_card.btn_secondary.clicked.connect(self.test_mangapixer)
+        # "Sync now" on the card itself, not only under Edit (owner, 2026-10-09)
+        self.mp_sync = button("Sync now")
+        self.mp_sync.setToolTip("Fetch MangaPixer's links, volume lists and libraries now, and pair the roots "
+                                "(otherwise daily in the container)")
+        self.mp_sync.clicked.connect(self.sync_mangapixer)
+        self.mp_card.buttons.insertWidget(self.mp_card.buttons.indexOf(self.mp_card.btn_secondary), self.mp_sync)
         self.mp_card.btn_primary.clicked.connect(self.edit_mangapixer)
         self.qbt_card.btn_secondary.clicked.connect(self.test_qbittorrent)
         self.qbt_card.btn_primary.clicked.connect(self.edit_qbittorrent)
@@ -130,10 +137,13 @@ class ServicesPage(SectionPage):
             card.detail_label.setText("-")
             card.btn_secondary.setEnabled(False)
             card.btn_primary.setEnabled(False)
+            self.mp_sync.setEnabled(False)
             return
         conn = self._cache.connection()
         card.detail_label.setText("\n".join(mangapixer_lines(self._cache)))
         card.btn_secondary.setEnabled(bool(conn.base_url and conn.has_token))
+        self.mp_sync.setEnabled(bool(conn.base_url and conn.has_token) and not conn.token_rejected_at
+                                and not self._syncing)
         if not conn.base_url or not conn.has_token:
             card.set_status("Not set up", "muted")
         elif conn.token_rejected_at:
@@ -204,6 +214,46 @@ class ServicesPage(SectionPage):
 
         self._spawn(run, self._mp_result, lambda message: self._mp_result(("failed", message)))
         return True
+
+    def sync_mangapixer(self) -> bool:
+        """Sync MangaPixer now, in the background (what Edit > Sync now does); the roots are paired again after it."""
+        cache = self._cache
+        if cache is None or self._syncing:
+            return False
+        conn = cache.connection()
+        if not conn.base_url or not conn.has_token or conn.token_rejected_at:
+            return False
+        factory = self._client_factory or (lambda url, token, verify: mpc.MangaPixerClient(url, token, verify=verify))
+        client = factory(conn.base_url, cache.token(), conn.verify)
+        self._syncing = True
+        self.mp_sync.setEnabled(False)
+        self.mp_sync.setText("Syncing...")
+        self.mp_card.set_status("Syncing...", "muted")
+
+        def run():
+            from ..services.mangapixer.sync import sync_all
+
+            try:
+                return sync_all(cache, client=client, manual=True)
+            finally:
+                client.close()
+
+        self._spawn(run, self._mp_synced, lambda message: self._mp_synced(None, message))
+        return True
+
+    def _mp_synced(self, result, error: str = "") -> None:
+        self._syncing = False
+        self.mp_sync.setText("Sync now")
+        self._refresh_mangapixer()
+        if result is None:
+            self.mp_card.set_note(f"Sync failed: {error}")
+            return
+        if getattr(result, "token_rejected", False):
+            self.mp_card.set_note("MangaPixer refused the token (wrong, revoked or expired). Enter a new one under Edit.")
+            return
+        if not scan_forbidden(self._cache):                     # that warning stays visible
+            self.mp_card.set_note(f"Sync: {getattr(result, 'message', 'done')}", "muted")
+        self.mangapixer_changed.emit()
 
     def _mp_result(self, answer) -> None:
         kind, detail = answer

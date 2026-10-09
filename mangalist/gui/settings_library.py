@@ -91,23 +91,38 @@ class LibraryPage(SectionPage):
 
     def _summary(self, root) -> str:
         try:
-            count = len(self._db.list_series(root.id))
+            count = len([x for x in self._db.list_series(root.id) if getattr(x, "status", "present") == "present"])
         except Exception:  # noqa: BLE001 - a summary only
             count = 0
         text = f"{count} series"
-        library = self._mangapixer_library(root)
-        return f"{text} · MangaPixer: {library}" if library else text
+        pairing = self._mangapixer_pairing(root)
+        return f"{text}\nMangaPixer: {pairing}" if pairing else text
 
-    def _mangapixer_library(self, root) -> str:
+    def _mangapixer_pairing(self, root) -> str:
+        """Which MangaPixer library (and folder inside it) the root is part of, or why none - "" when MangaPixer is
+        not connected. Owner, 2026-10-09: "There should be some indication in the Library tab ... which mangapixer
+        library your root is a part of (if at all)"."""
         if self._cache is None:
             return ""
         try:
-            mapping = self._cache.mapping(root.id)
-            if mapping is None or not mapping.library_id:
+            conn = self._cache.connection()
+            if not (conn.base_url and conn.has_token):
                 return ""
+            mapping = self._cache.mapping(root.id)
+            if mapping is None:
+                return ("not paired yet - it pairs after the next scan" if self._cache.libraries(present_only=True)
+                        else "not paired yet - sync MangaPixer first")
+            if not mapping.library_id:
+                return "not paired (your choice)" if mapping.manual else "no library matched these folders"
             lib = self._cache.library(mapping.library_id)
-            return lib.display_name if lib is not None else ""
-        except Exception:  # noqa: BLE001
+            if lib is None or not lib.present:
+                return "the paired library is no longer in MangaPixer"
+            where = lib.display_name + (" › " + "/".join(mapping.prefix) if mapping.prefix else "")
+            if mapping.manual:
+                where += " (manual)"
+            total = (mapping.matched or 0) + (mapping.unmatched or 0)
+            return f"{where} · {mapping.matched or 0} of {total} series" if total else where
+        except Exception:  # noqa: BLE001 - a summary only
             return ""
 
     # --- the editor -----------------------------------------------------------------------------------------
