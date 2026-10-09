@@ -189,6 +189,33 @@ def test_library_lists_the_roots_with_their_series_and_mangapixer_library(qapp, 
     assert root.id is not None
 
 
+def test_library_says_which_mangapixer_library_each_root_is_part_of(qapp, db, cache, library, tmp_path):
+    from mangalist.services.mangapixer import mapping as mp_map
+    from mangalist.store.mangapixer import Mapping
+
+    class Lib:
+        def __init__(self, id, name, kind="manga"):
+            self.id, self.display_name, self.kind = id, name, kind
+            self.folder_count = self.item_count = self.last_scan_at = None
+
+    whole = db.add_root(str(library), "Manga-Ongoing")
+    inside = db.add_root(str(tmp_path / "other" / "M" / "Manga"), "Other manga")
+    mine = db.add_root(str(tmp_path / "comics"), "Comics")
+    fresh = db.add_root(str(tmp_path / "new"), "New")
+    assert "MangaPixer" not in all_text(make(qapp, db, cache)[0].pages[SECTION_LIBRARY])   # not connected: no line
+    cache.set_connection(base_url="mangapixer.example:8080", token="t")
+    cache.save_libraries([Lib("ongoing", "Manga-Ongoing"), Lib("other", "Other", None)])
+    cache.save_mapping(Mapping(root_id=whole.id, library_id="ongoing", prefix=[], matched=290, unmatched=6))
+    cache.save_mapping(Mapping(root_id=inside.id, library_id="other", prefix=["M", "Manga"], matched=12, unmatched=0))
+    mp_map.set_manual_mapping(cache, mine.id, None)
+    text = all_text(make(qapp, db, cache)[0].pages[SECTION_LIBRARY])
+    assert "MangaPixer: Manga-Ongoing · 290 of 296 series" in text
+    assert "MangaPixer: Other › M/Manga · 12 of 12 series" in text
+    assert "MangaPixer: not paired (your choice)" in text
+    assert "MangaPixer: not paired yet - it pairs after the next scan" in text            # the new root
+    assert fresh.id is not None
+
+
 def test_library_with_no_roots_says_what_to_do(qapp, db, cache):
     dlg, _ = make(qapp, db, cache)
     assert "No roots yet" in all_text(dlg.pages[SECTION_LIBRARY])
@@ -491,3 +518,27 @@ def test_no_secret_is_in_any_text_of_the_dialog(qapp, db, cache):
     settle(qapp, dlg)
     text = all_text(dlg) + " ".join(b.text() for b in dlg.findChildren(QCheckBox))
     assert TOKEN not in text and PASSWORD not in text and "mpx_" not in text
+
+
+def test_sync_now_is_on_the_mangapixer_card_not_only_under_edit(qapp, db, cache, monkeypatch):
+    from mangalist.services.mangapixer import sync as mp_sync
+
+    synced = []
+
+    def fake_sync_all(c, client=None, manual=False, **kw):
+        synced.append((c is cache, manual))
+        return mp_sync.SyncResult(status="ok", message="2 libraries, 5 items")
+    monkeypatch.setattr(mp_sync, "sync_all", fake_sync_all)
+    dlg, _ = make(qapp, db, cache, section=SECTION_SERVICES)
+    page = dlg.pages[SECTION_SERVICES]
+    assert page.mp_sync.text() == "Sync now" and not page.mp_sync.isEnabled()     # not connected yet
+    cache.set_connection(base_url="mangapixer.example:8080", token="t")
+    page.refresh()
+    assert page.mp_sync.isEnabled()
+    changed = []
+    page.mangapixer_changed.connect(lambda: changed.append(1))
+    assert page.sync_mangapixer()
+    assert page.mp_sync.text() == "Syncing..." and not page.mp_sync.isEnabled()
+    wait_until(qapp, lambda: not page._syncing)
+    assert synced == [(True, True)] and changed == [1]
+    assert page.mp_sync.isEnabled() and "Sync: 2 libraries, 5 items" in page.mp_card.note_label.text()

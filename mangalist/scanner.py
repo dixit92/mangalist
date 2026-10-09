@@ -401,7 +401,8 @@ def record_library_scan(db, result: LibraryScan) -> List[tuple]:
     """Write a :class:`LibraryScan` into the database: series rows (see ``Store.record_scan``), the archive rows
     with move detection and series carry-over across all roots (:mod:`mangalist.identity`), and every
     archive's units (``units`` table, see ``Store.sync_units``); then MangaPixer's pending ``carriedFrom``
-    pairs (when a MangaPixer source is set up).
+    pairs (when a MangaPixer source is set up), and last each root's automatic pairing with a MangaPixer library
+    (from the libraries already synced - no network; a root added since the last sync is paired right away).
 
     Each series' stored "volumes or chapters?" answer is applied to its entry first (its files are
     re-parsed in place when the scan used another answer, e.g. a folder renamed since the answer was
@@ -439,7 +440,26 @@ def record_library_scan(db, result: LibraryScan) -> List[tuple]:
             _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None))
         except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
             _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
+    if scanned:
+        try:
+            refresh_mangapixer_pairing(db)
+        except Exception:  # noqa: BLE001 - the scan is recorded; the daily sync pairs again
+            _log.warning("Pairing the roots with MangaPixer's libraries failed", exc_info=True)
     return renamed
+
+
+def refresh_mangapixer_pairing(db) -> bool:
+    """Re-propose every automatically paired root's MangaPixer library from the libraries already synced (manual
+    pairings keep theirs; their matched / unmatched counts are refreshed). False when MangaPixer was never synced.
+    Owner, 2026-10-09: a root added after the last sync stayed unpaired until the next "Sync now" / daily sync."""
+    from .services.mangapixer import open_cache
+    from .services.mangapixer.mapping import refresh_auto_mappings
+
+    cache = open_cache(db)
+    if not cache.libraries(present_only=True):
+        return False
+    refresh_auto_mappings(cache)
+    return True
 
 
 def _root_of(db, root_id: int):
