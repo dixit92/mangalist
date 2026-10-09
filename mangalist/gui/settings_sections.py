@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Mapping, Optional
 
-from PySide6.QtWidgets import QGridLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QGridLayout, QVBoxLayout, QWidget
 
 from ..downloads.options import (
     KEY_MATCH_ANILIST,
@@ -90,7 +90,9 @@ class SourcesPage(SectionPage):
             row = hbox(label(number, "mono"), label(name), label(note, "muted"), None, spacing=10)
             holder = QWidget()
             holder.setLayout(row)
-            holder.setEnabled(False)
+            fade = QGraphicsOpacityEffect(holder)          # the mockup's greyed-out example rows
+            fade.setOpacity(0.55)
+            holder.setGraphicsEffect(fade)
             sv.addWidget(holder)
         self.suwayomi_rows = suwayomi
         self.body.addWidget(suwayomi)

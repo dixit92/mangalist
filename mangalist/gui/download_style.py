@@ -6,6 +6,7 @@ The widgets carry the hooks, the stylesheet decides the look - so the applicatio
 the same selectors, and :func:`apply_style` is the only place this module's sheet is attached (drop the call to let the
 theme alone style them):
 
+- ``QFrame[nav="true"]`` a Settings section entry (``[current="true"]`` the open one);
 - ``QPushButton[primary="true"]`` the blue button; ``QPushButton[link="true"]`` a text-link button
 - ``QLabel[badge="ok|run|done|bad|warn|muted"]`` a pill; ``QLabel[tone="ok|bad|warn"]`` a coloured message
 - ``QLabel[role="h1|h2|h3|muted|mono|lead"]`` text roles; ``QFrame[card="true"]`` a bordered card
@@ -58,6 +59,8 @@ QFrame#inProgressPanel {{ border: none; border-top: 1px solid {LINE}; }}
 QFrame#toGetFooter {{ background: #fafaf8; border: none; border-top: 1px solid #e3e3df; }}
 QFrame#toGetHeader {{ background: #ffffff; border: none; border-bottom: 1px solid #e3e3df; }}
 QFrame#settingsHeader {{ background: #ffffff; border: none; border-bottom: 1px solid #e3e3df; }}
+QScrollArea#settingsScroll {{ background: #ffffff; border: none; }}
+QWidget#settingsBody {{ background: #ffffff; }}
 QFrame#settingsNav {{ background: #fafaf8; border: none; border-right: 1px solid #e3e3df; }}
 
 QLabel[role="h1"] {{ font-size: 16px; font-weight: 600; }}
@@ -67,6 +70,8 @@ QLabel[role="muted"] {{ color: {MUTED}; font-size: 13px; }}
 QLabel[role="lead"] {{ color: {MUTED}; }}
 QLabel[role="mono"] {{ font-family: {FONT_MONO}; color: {MUTED}; font-size: 13px; }}
 QLabel[role="name"] {{ font-weight: 700; font-size: 15px; }}
+QLabel[role="navtitle"] {{ font-weight: 600; font-size: 14px; background: transparent; }}
+QLabel[role="navhint"] {{ font-size: 12px; color: #6b6b67; background: transparent; }}
 QLabel[badge] {{ border-radius: 8px; padding: 3px 9px; font-size: 12px; font-weight: 600; }}
 {_badge_rules()}
 {_tone_rules()}
@@ -81,20 +86,16 @@ QPushButton[primary="true"]:disabled {{ background: #a9b9dc; border-color: #a9b9
 QPushButton[link="true"] {{ border: none; background: transparent; color: {ACCENT}; min-height: 24px; padding: 0 4px; }}
 QPushButton[link="true"]:hover {{ color: #163a87; text-decoration: underline; }}
 QPushButton[link="true"]:disabled {{ color: #9a9a96; }}
-QPushButton[nav="true"] {{ text-align: left; border: none; border-radius: 6px; padding: 8px 12px; background: transparent; }}
-QPushButton[nav="true"][current="true"] {{ background: {ACCENT_SOFT}; }}
+QFrame[nav="true"] {{ border: none; border-radius: 6px; background: transparent; }}
+QFrame[nav="true"][current="true"] {{ background: {ACCENT_SOFT}; }}
 
 QLineEdit, QComboBox, QSpinBox {{ min-height: 32px; border: 1px solid {FIELD_LINE}; border-radius: 6px; padding: 0 10px;
                                   background: #ffffff; selection-background-color: {ACCENT}; }}
 QLineEdit:disabled {{ background: #f3f3f1; color: #8a8a86; }}
-QCheckBox {{ spacing: 8px; }}
-QCheckBox:disabled {{ color: #8a8a86; }}
 
 QFrame[card="true"] {{ border: 1px solid {LINE}; border-radius: 8px; background: #ffffff; }}
 QFrame[card="dashed"] {{ border: 1px dashed {FIELD_LINE}; border-radius: 8px; background: transparent; }}
 QFrame[card="quiet"] {{ border: 1px solid {LINE}; border-radius: 8px; background: #fafaf8; }}
-QFrame[card] QLabel {{ border: none; background: transparent; }}
-QFrame[card] QCheckBox {{ border: none; background: transparent; }}
 QFrame[card="dashed"] QLabel {{ color: {MUTED}; }}
 
 QTreeWidget#toGetTree {{ border: none; background: #ffffff; outline: 0; selection-background-color: {SELECTED};

@@ -19,7 +19,7 @@ from .download_widgets import button, hbox, label
 from .downloads_backend import BackendError, DownloadsBackend
 from .mangapixer_dialog import ClientFactory, MangaPixerPanel
 from .qbittorrent_dialog import QbittorrentPanel
-from .settings_common import SectionPage, ServiceCard, back_link
+from .settings_common import SectionPage, ServiceCard, back_link, clear_layout
 
 LEAD = "Programs MangaList talks to. Each needs an address and a login; download sources need them."
 MANGAPIXER_WHAT = ("Series links, volume lists and Completion for the folders MangaPixer knows; library scans after "
@@ -245,11 +245,9 @@ class ServicesPage(SectionPage):
         self._clear_editor()
         back = back_link("Connected services")
         back.clicked.connect(self.close_editor)
-        self.editor_layout.addLayout(hbox(back, None))
+        self.editor_layout.addLayout(hbox(back, None, *buttons))
         self.editor_layout.addWidget(label(title, "h3"))
         self.editor_layout.addWidget(widget, 1)
-        if buttons:
-            self.editor_layout.addLayout(hbox(None, *buttons))
         self.stack.setCurrentWidget(self.editor_page)
 
     def edit_mangapixer(self) -> Optional[MangaPixerPanel]:
@@ -292,18 +290,7 @@ class ServicesPage(SectionPage):
             if panel is not None:
                 panel.stop()
         self.mp_panel = self.qbt_panel = None
-        while self.editor_layout.count():
-            item = self.editor_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().setParent(None)
-                item.widget().deleteLater()
-            elif item.layout() is not None:
-                lay = item.layout()
-                while lay.count():
-                    child = lay.takeAt(0)
-                    if child.widget() is not None:
-                        child.widget().setParent(None)
-                        child.widget().deleteLater()
+        clear_layout(self.editor_layout)
 
     def stop(self) -> None:
         for call in list(self._calls):

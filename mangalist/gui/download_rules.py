@@ -160,6 +160,16 @@ SCHEDULE_ROWS = (("Rescan the library", "MANGALIST_RESCAN_SCHEDULE", "daily@03:3
                  ("File finished downloads", "MANGALIST_DOWNLOADS_SCHEDULE", "every 1h"))
 
 
+def schedule_text(described: str) -> str:
+    """``daily@03:30`` -> ``daily 03:30``; ``every 1h`` -> ``every hour``; ``every 12h`` -> ``every 12 hours``."""
+    if described.startswith("daily@"):
+        return "daily " + described[len("daily@"):]
+    if described.startswith("every ") and described.endswith("h"):
+        hours = described[len("every "):-1]
+        return "every hour" if hours in ("1", "1.0") else f"every {hours} hours"
+    return described
+
+
 def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, str, bool]]:
     """(what, when, from the environment?) for the Automation section. The schedules come from the container's
     environment; a bad value is shown as it is, flagged, rather than hidden."""
@@ -174,7 +184,7 @@ def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, st
         text = default if raw is None else raw
         try:
             parsed = parse_schedule(text)
-            when = parsed.describe() if parsed is not None else "off"
+            when = schedule_text(parsed.describe()) if parsed is not None else "off"
         except ValueError:
             when = f"{text} (not understood)"
         if name == "MANGALIST_DOWNLOADS_SCHEDULE" and when != "off":

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QStackedWidget, 
 
 from .download_widgets import button, card, hbox, label
 from .roots_dialog import BrowseFn, RootsEditor
-from .settings_common import SectionPage, back_link, placeholder
+from .settings_common import SectionPage, back_link, clear_layout, placeholder
 
 LEAD = "The folders MangaList manages. MangaList files downloads only into these."
 NAMING_TEXT = "File naming - one naming scheme per root, applied by the renamer (phase 2)."
@@ -60,10 +60,7 @@ class LibraryPage(SectionPage):
     # --- the overview ------------------------------------------------------------------------------------
 
     def refresh(self) -> None:
-        while self.roots_layout.count():
-            item = self.roots_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+        clear_layout(self.roots_layout)
         roots = self._db.list_roots()
         if not roots:
             empty = label(NO_ROOTS, "lead", wrap=True)
@@ -129,9 +126,8 @@ class LibraryPage(SectionPage):
         cancel = button("Cancel")
         cancel.clicked.connect(self.cancel_edit)
         self._edit_buttons = (back, save, cancel)
-        self.editor_layout.addLayout(hbox(back, None))
+        self.editor_layout.addLayout(hbox(back, None, cancel, save))       # Save stays in view: the editor is tall
         self.editor_layout.addWidget(editor, 1)
-        self.editor_layout.addLayout(hbox(None, cancel, save))
         self.stack.setCurrentWidget(self.editor_page)
         return editor
 
@@ -158,16 +154,7 @@ class LibraryPage(SectionPage):
             self.editor.setParent(None)
             self.editor.deleteLater()
             self.editor = None
-        while self.editor_layout.count():
-            item = self.editor_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
-            elif item.layout() is not None:
-                lay = item.layout()
-                while lay.count():
-                    child = lay.takeAt(0)
-                    if child.widget() is not None:
-                        child.widget().deleteLater()
+        clear_layout(self.editor_layout)
         self.stack.setCurrentIndex(0)
 
     def stop(self) -> None:

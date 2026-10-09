@@ -45,6 +45,18 @@ class SectionPage(QWidget):
         """The dialog closes: abandon background work."""
 
 
+def clear_layout(layout) -> None:
+    """Remove every item of *layout* (nested layouts too) and delete the widgets in them."""
+    while layout.count():
+        item = layout.takeAt(0)
+        widget, child = item.widget(), item.layout()
+        if widget is not None:
+            widget.setParent(None)
+            widget.deleteLater()
+        elif child is not None:
+            clear_layout(child)
+
+
 def placeholder(text: str) -> QFrame:
     """The dashed box of something that comes later."""
     box = card("dashed")

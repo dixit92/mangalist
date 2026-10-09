@@ -11,12 +11,11 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
-    QPushButton,
     QScrollArea,
     QStackedWidget,
     QVBoxLayout,
@@ -51,8 +50,11 @@ NAV = (
 )
 
 
-class _NavButton(QPushButton):
-    """A section's entry: its name over a smaller grey hint."""
+class _NavButton(QFrame):
+    """A section's entry: its name over a smaller grey hint (which wraps). A frame, not a push button, so the wrapped
+    hint can make the entry taller."""
+
+    clicked = Signal()
 
     def __init__(self, text: str, hint: str):
         super().__init__()
@@ -61,15 +63,16 @@ class _NavButton(QPushButton):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8)
         lay.setSpacing(0)
-        self.title = label(text)
-        self.title.setProperty("role", "name")
-        self.title.setStyleSheet("font-size: 14px;")
-        self.hint = label(hint, "muted")
-        self.hint.setStyleSheet("font-size: 12px; color: #6b6b67;")
+        self.title = label(text, "navtitle")
+        self.hint = label(hint, "navhint", wrap=True)
         for w in (self.title, self.hint):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             lay.addWidget(w)
-        self.setMinimumHeight(52)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class SettingsDialog(QDialog):
@@ -136,9 +139,11 @@ class SettingsDialog(QDialog):
         for key in SECTIONS:
             page = self.pages[key]
             scroll = QScrollArea()
+            scroll.setObjectName("settingsScroll")
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             holder = QWidget()
+            holder.setObjectName("settingsBody")
             hv = QVBoxLayout(holder)
             hv.setContentsMargins(28, 22, 28, 22)
             hv.addWidget(page)
