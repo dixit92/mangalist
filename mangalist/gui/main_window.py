@@ -50,8 +50,8 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
-    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LICENSED, COL_MU_TITLE, COL_OFFICIAL,
-    COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
+    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MU_TITLE,
+    COL_OFFICIAL, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .links import open_link
@@ -238,7 +238,8 @@ class MainWindow(QMainWindow):
     ]
     _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
     _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 170, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
-                       COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180}
+                       COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180,
+                       COL_LIBRARY: 130}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
     _CFG_COLUMNS_VERSION = "list_columns_version"     # 2: the Library column exists (hidden unless the owner showed it)
@@ -1431,6 +1432,8 @@ class MainWindow(QMainWindow):
         name = COLUMNS[col]
         if name in hidden:
             hidden.discard(name)
+            header = self._table.horizontalHeader()      # a column shown for the first time may be narrower than its default
+            header.resizeSection(col, max(header.sectionSize(col), self._DEFAULT_WIDTHS.get(col, 0)))
         else:
             hidden.add(name)
         self._cfg[self._CFG_HIDDEN] = sorted(hidden)

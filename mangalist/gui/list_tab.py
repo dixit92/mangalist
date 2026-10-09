@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from ..states import State
 from .chips import ChipButton, FlowLayout
 from .detail_panel import DetailPanel
+from .library_picker import LibraryPicker
 from .list_delegates import ROW_HEIGHT, MonoDelegate, SecondaryDelegate, StateBadgeDelegate, TitleDelegate
 from .table_model import (
     COL_ENGLISH, COL_FILES, COL_GAPS, COL_LIBRARY, COL_STATE, COL_TITLE, COL_VERDICT, STATE_FILTERS,
@@ -109,7 +110,7 @@ class ListTab(QWidget):
         row.addWidget(self.search, 1, Qt.AlignmentFlag.AlignTop)
 
         # "All libraries · <root> · <root> ..." - a dropdown, so many roots never crowd the bar (hidden with one).
-        self.library_picker = QComboBox()
+        self.library_picker = LibraryPicker()
         self.library_picker.setObjectName("libraryPicker")
         self.library_picker.setAccessibleName("Library")
         self.library_picker.setToolTip("Show one library folder, or all of them")
