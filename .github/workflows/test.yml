@@ -65,9 +65,9 @@ jobs:
         run: pip install pytest regex platformdirs requests
 
       - name: Import check
-        run: python -c "import sys, mangalist.matcher, mangalist.mu_match, mangalist.paths, mangalist.parsing, mangalist.headless, mangalist.store, mangalist.services.mangapixer, mangalist.inventory, mangalist.scanner, mangalist.knowledge, mangalist.states, mangalist.official_sources, mangalist.identity, mangalist.downloads, mangalist.downloads.adapter, mangalist.services.nyaa, mangalist.services.qbittorrent, mangalist.gui.downloads_backend, mangalist.gui.volumes_target, mangalist.gui.shell; assert 'PySide6' not in sys.modules"
+        run: python -c "import sys, mangalist.matcher, mangalist.mu_match, mangalist.paths, mangalist.parsing, mangalist.headless, mangalist.store, mangalist.services.mangapixer, mangalist.inventory, mangalist.scanner, mangalist.knowledge, mangalist.states, mangalist.official_sources, mangalist.identity, mangalist.downloads, mangalist.downloads.adapter, mangalist.services.nyaa, mangalist.services.qbittorrent, mangalist.gui.downloads_backend, mangalist.gui.volumes_target, mangalist.gui.shell, mangalist.duplicates; assert 'PySide6' not in sys.modules"
 
       - name: Run tests
         run: >
           python -m pytest -q tests/matcher tests/golden tests/test_mu_match.py tests/test_mu_cache.py
-          tests/test_paths.py tests/test_classifier.py tests/parsing tests/headless tests/store tests/services tests/inventory tests/states tests/test_phase1_integration.py tests/identity tests/downloads
+          tests/test_paths.py tests/test_classifier.py tests/parsing tests/headless tests/store tests/services tests/inventory tests/states tests/test_phase1_integration.py tests/identity tests/downloads tests/duplicates
