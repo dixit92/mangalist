@@ -14,10 +14,22 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Mapping, Optional
 
-from PySide6.QtWidgets import QGraphicsOpacityEffect, QGridLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QComboBox,
+    QGraphicsOpacityEffect,
+    QGridLayout,
+    QLineEdit,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .. import upgrades
 
 from ..downloads.options import (
     KEY_MU_AUTOSTART,
+    KEY_PARTIAL_DOWNLOADS,
     KEY_SCAN_AFTER_FILING,
     NyaaOptions,
     get_flag,
@@ -72,6 +84,13 @@ class SourcesPage(SectionPage):
                                  self.trusted_check, self.seeders_check)):
             grid.addWidget(box, i // 2, i % 2)
         nv.addLayout(grid)
+        self.partial_check = checkbox("Download only the missing volumes of a pack", True,
+                                      tip="New sends start with \"Only the missing volumes\" ticked; untick it for one "
+                                          "send to download the whole pack. A torrent that skips files seeds only what "
+                                          "it downloaded.")
+        nv.addWidget(self.partial_check)
+        nv.addWidget(label("qBittorrent skips the files of a pack that hold no missing volume. You choose again "
+                           "for every send.", "muted", wrap=True))
         self.body.addWidget(nyaa)
 
         suwayomi = card("quiet")
@@ -98,10 +117,13 @@ class SourcesPage(SectionPage):
         self.refresh()
         for box in (self.on_check, self.english_check, self.raw_check, self.novels_check, self.trusted_check):
             box.toggled.connect(self._changed)
+        self.partial_check.toggled.connect(self._partial_changed)
 
     def refresh(self) -> None:
         self._loading = True
         opts = load_nyaa_options(self._db)
+        self.partial_check.setChecked(get_flag(self._db, KEY_PARTIAL_DOWNLOADS))
+        self.partial_check.setEnabled(self._backend is not None)
         self.on_check.setChecked(opts.enabled)
         self.english_check.setChecked(opts.english)
         self.raw_check.setChecked(opts.raw)
@@ -131,6 +153,11 @@ class SourcesPage(SectionPage):
             text, kind = ("Ready", "ok") if configured else ("Needs qBittorrent", "warn")
         self.nyaa_badge.setText(text)
         set_prop(self.nyaa_badge, "badge", kind)
+
+    def _partial_changed(self, on: bool) -> None:
+        if self._loading:
+            return
+        set_flag(self._db, KEY_PARTIAL_DOWNLOADS, on)       # read when a release is selected: nothing to reload
 
     def _changed(self, *_args) -> None:
         if self._loading:
@@ -198,10 +225,109 @@ class AutomationPage(SectionPage):
         self.status_label = label("", wrap=True)
         self.status_label.setProperty("tone", "bad")
         self.body.addWidget(self.status_label)
+        self._build_replaced()
         self.body.addWidget(placeholder(AUTOMATIC_DOWNLOADS))
         self._cache = cache
         self.refresh()
         self._loading = False
+
+    # Replaced chapters (upgrades): what happens to chapter files once a filed volume holds them.
+    REPLACED_LEAD = ("When a volume you filed holds chapters you have as chapter files (an upgrade), those files are "
+                     "no longer needed. Only chapters MangaPixer's volume list puts wholly in a filed volume count.")
+    HOLDING_DAY_CHOICES = (7, 14, 30, 60, 90, 180, 365)
+    HOLDING_HINT = ("Outside every library folder and MangaPixer library, on the same disk share as the library "
+                    "(the container's /data). Files keep their folders there, so they can be restored.")
+
+    def _build_replaced(self) -> None:
+        box = card("true")
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(16, 14, 16, 14)
+        bv.setSpacing(8)
+        bv.addWidget(label("Replaced chapters", "name"))
+        bv.addWidget(label(self.REPLACED_LEAD, "lead", wrap=True))
+        self.hold_radio = QRadioButton("Move them to a holding folder - restorable, done after each filing")
+        self.delete_radio = QRadioButton("Delete them after I confirm the list of files - nothing is deleted before")
+        self._mode_group = QButtonGroup(self)
+        for radio in (self.hold_radio, self.delete_radio):
+            self._mode_group.addButton(radio)
+            bv.addWidget(radio)
+        self.holding_edit = QLineEdit()
+        self.holding_edit.setAccessibleName("Holding folder")
+        self.holding_edit.setPlaceholderText(upgrades.DEFAULT_HOLDING_FOLDER)
+        self.days_combo = QComboBox()
+        self.days_combo.setAccessibleName("Empty the holding folder after")
+        self.days_combo.setMinimumWidth(140)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
+        grid.addWidget(label("Holding folder"), 0, 0)
+        grid.addWidget(self.holding_edit, 0, 1)
+        grid.addWidget(label("Empty it after"), 1, 0)
+        grid.addLayout(hbox(self.days_combo, None), 1, 1)
+        grid.setColumnStretch(1, 1)
+        bv.addLayout(grid)
+        self.holding_hint = label(self.HOLDING_HINT, "muted", wrap=True)
+        bv.addWidget(self.holding_hint)
+        self.replaced_status = label("", wrap=True)
+        bv.addWidget(self.replaced_status)
+        self.body.addWidget(box)
+        self.hold_radio.toggled.connect(self._replaced_mode_changed)
+        self.holding_edit.editingFinished.connect(self._holding_folder_changed)
+        self.days_combo.currentIndexChanged.connect(self._holding_days_changed)
+
+    def _refresh_replaced(self) -> None:
+        settings = upgrades.load_settings(self._db)
+        self.hold_radio.setChecked(settings.mode == upgrades.MODE_HOLDING)
+        self.delete_radio.setChecked(settings.mode == upgrades.MODE_DELETE)
+        self.holding_edit.setText(settings.holding_folder)
+        self.days_combo.clear()
+        for days in sorted(set(self.HOLDING_DAY_CHOICES) | {settings.holding_days}):
+            self.days_combo.addItem(f"{days} days" if days != 1 else "1 day", days)
+        self.days_combo.setCurrentIndex(self.days_combo.findData(settings.holding_days))
+        self._show_holding_state(settings.mode)
+
+    def _show_holding_state(self, mode: str) -> None:
+        holding = mode == upgrades.MODE_HOLDING
+        for widget in (self.holding_edit, self.days_combo, self.holding_hint):
+            widget.setEnabled(holding)
+        problem = upgrades.holding_problem(self._db, self.holding_edit.text()) if holding else None
+        self._say_replaced(f"The holding folder cannot be used: {problem}. Nothing is moved until it is fixed."
+                           if problem else "", "bad")
+
+    def _say_replaced(self, text: str, tone: str) -> None:
+        self.replaced_status.setText(text)
+        set_prop(self.replaced_status, "tone", tone if text else "")
+
+    def _replaced_mode_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        mode = upgrades.MODE_HOLDING if self.hold_radio.isChecked() else upgrades.MODE_DELETE
+        upgrades.set_mode(self._db, mode)
+        self._show_holding_state(mode)
+        self.downloads_changed.emit()
+
+    def _holding_folder_changed(self) -> None:
+        if self._loading:
+            return
+        text = self.holding_edit.text().strip()
+        if text == upgrades.load_settings(self._db).holding_folder:
+            return
+        try:
+            upgrades.set_holding_folder(self._db, text)
+        except ValueError as exc:
+            self._loading = True
+            self.holding_edit.setText(upgrades.load_settings(self._db).holding_folder)
+            self._loading = False
+            self._say_replaced(f"Not changed: {exc}.", "bad")
+            return
+        self._say_replaced("Holding folder saved.", "ok")
+        self.downloads_changed.emit()
+
+    def _holding_days_changed(self, _index: int) -> None:
+        days = self.days_combo.currentData()
+        if self._loading or not isinstance(days, int):
+            return
+        upgrades.set_holding_days(self._db, days)
 
     def refresh(self) -> None:
         self._loading = True
@@ -216,6 +342,7 @@ class AutomationPage(SectionPage):
             except BackendError:
                 self.remove_check.setChecked(False)
         self.scan_note.setVisible(bool(self._cache is not None and scan_forbidden(self._cache)))
+        self._refresh_replaced()
         self._loading = False
 
     def on_show(self) -> None:

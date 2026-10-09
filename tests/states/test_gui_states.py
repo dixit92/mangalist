@@ -22,6 +22,7 @@ from mangalist.gui.table_model import (  # noqa: E402
     COL_ENGLISH,
     COL_STATE,
     COLUMNS,
+    COL_LIBRARY,
     STATE_FILTERS,
     MangaTableModel,
     state_matches,
@@ -84,7 +85,8 @@ def test_new_columns_are_appended_and_keep_the_old_ones(model):
     assert COLUMNS[:15] == ["✓", "Dupe", "Title", "Alternative Title", "Files", "Subfolders", "Vol %", "Ch %",
                             "Both %", "Verdict", "Last Modified", "MU Title", "Licensed", "Behind", "Completed"]
     assert COLUMNS[COL_STATE] == "State" and COLUMNS[COL_GAPS] == "Gaps" and COLUMNS[COL_OFFICIAL] == "Official source"
-    assert COLUMNS[COL_ENGLISH] == "English" and model.columnCount() == 19
+    assert COLUMNS[COL_ENGLISH] == "English" and model.columnCount() == 20
+    assert COLUMNS[COL_LIBRARY] == "Library" and COL_LIBRARY == len(COLUMNS) - 1       # appended: no index moved
     assert model.headerData(9, Qt.Horizontal) == "Kind"          # "Verdict" keeps its name in the settings
 
 

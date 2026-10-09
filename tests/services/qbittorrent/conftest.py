@@ -37,6 +37,8 @@ class FakeQbt:
         self.requests: List[Dict[str, Any]] = []
         self.deleted: List[Dict[str, Any]] = []
         self.added: List[tuple] = []                 # (link, category)
+        self.add_forms: List[Dict[str, str]] = []    # every add request's form (stopped / paused, autoTMM, ...)
+        self.actions: List[tuple] = []               # (path, hash) of start / stop / resume / pause
         self.add_answer = "Ok."
         self.login_status_override: Optional[int] = None
         self.login_body_override: Optional[str] = None
@@ -134,12 +136,40 @@ class FakeQbt:
                 return 404, b"", {}
             return self._json(self.files.get(h, []))
         if path == "torrents/add":
+            self.add_forms.append(dict(form))
             if self.add_answer == "Ok.":
                 for link in form.get("urls", "").split("\n"):
                     self.added.append((link, form.get("category")))
             if self.v5 and self.add_answer == "Ok.":
                 return 202, b"", {}                  # 5.x: Accepted (the add is queued)
             return 200, self.add_answer.encode(), {}
+        if path == "torrents/filePrio":
+            h = form.get("hash", "")
+            if h not in self.torrents:
+                return 404, b"", {}
+            rows = self.files.get(h, [])
+            if not rows:
+                return 409, b"", {}                      # no metadata yet
+            ids = form.get("id", "").split("|")
+            if form.get("priority") not in ("0", "1", "6", "7") or not all(i.isdigit() for i in ids):
+                return 400, b"", {}
+            if any(int(i) >= len(rows) for i in ids):
+                return 409, b"", {}                      # no such file
+            for i in ids:
+                rows[int(i)]["priority"] = int(form["priority"])
+            return 200, b"", {}
+        if path in ("torrents/start", "torrents/stop", "torrents/resume", "torrents/pause"):
+            new_name = path in ("torrents/start", "torrents/stop")
+            if new_name != self.v5:
+                return 404, b"", {}                      # 5.x renamed them; 4.x only knows resume / pause
+            h = form.get("hashes", "")
+            self.actions.append((path.split("/")[1], h))
+            if h in self.torrents:
+                stopping = path.endswith(("stop", "pause"))
+                state = self.torrents[h]["state"]
+                self.torrents[h]["state"] = (("stoppedDL" if self.v5 else "pausedDL") if stopping else "downloading") \
+                    if not state.endswith("UP") else state
+            return 200, b"", {}
         if path == "torrents/delete":
             hashes = form.get("hashes", "")
             targets = list(self.torrents) if hashes == "all" else hashes.split("|")

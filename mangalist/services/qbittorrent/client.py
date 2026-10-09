@@ -1,8 +1,9 @@
 """A qBittorrent Web API v2 client: :class:`mangalist.downloads.contracts.TorrentClient`. No Qt.
 
 Targets qBittorrent 5.2.4 (the Unraid box's version; v5 renamed pause / resume to stop / start and the states to
-``stoppedUP`` / ``stoppedDL``) and stays compatible with 4.x: MangaList only lists, adds, reads files and deletes,
-and those endpoints and fields are the same in both. ``contracts.STOPPED_COMPLETE_STATES`` knows both state names.
+``stoppedUP`` / ``stoppedDL``) and stays compatible with 4.x: MangaList lists, adds, reads files, sets file priorities
+and deletes, and those endpoints and fields are the same in both (start / stop are the one rename: 5.x ``start`` /
+``stop``, 4.x ``resume`` / ``pause``; the client tries the new name first). ``contracts.STOPPED_COMPLETE_STATES`` knows both state names.
 
 Rules:
 
@@ -19,7 +20,10 @@ Rules:
   the torrent's category is exactly :data:`~mangalist.downloads.contracts.QBITTORRENT_CATEGORY`. It takes one
   well-formed info hash; there is no bulk and no ``all``.
 - ``add`` puts the torrent into the category with automatic torrent management on, so the category's save path
-  decides where it lands whatever the box's default mode is.
+  decides where it lands whatever the box's default mode is. ``stopped=True`` adds it stopped (5.x ``stopped``, 4.x
+  ``paused``: both are sent), so file priorities can be set before a byte is downloaded.
+- ``set_file_priority`` is ``torrents/filePrio`` (0 = do not download); ``start`` / ``stop`` act on ONE torrent
+  (no bulk, no ``all``).
 - HTTP and HTTPS both work; certificates are verified unless the connection says ``verify_tls=False``.
 
 Errors are all :class:`QbtError`: :class:`Unreachable`, :class:`AuthFailed` (and :class:`IpBanned`),
@@ -30,7 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
@@ -76,7 +80,7 @@ class TorrentRejected(QbtError):
     """qBittorrent answered ``Fails.`` to an add: an invalid link, or the torrent is already there."""
 
 
-class TorrentNotFound(QbtError):
+class TorrentNotFound(QbtError, LookupError):
     """No torrent with that info hash."""
 
 
@@ -312,15 +316,19 @@ class QbtClient:
             self._ok(resp, f"changing the save path of the category {name!r}")
             _log.info("qBittorrent: category %r now saves to %s", name, save_path)
 
-    def add(self, url: str, *, category: str) -> None:
-        """Add a torrent by ``.torrent`` URL or magnet link into ``category`` (one link; never several)."""
+    def add(self, url: str, *, category: str, stopped: bool = False) -> None:
+        """Add a torrent by ``.torrent`` URL or magnet link into ``category`` (one link; never several). ``stopped``:
+        add it stopped (it downloads nothing until :meth:`start`)."""
         link = str(url or "").strip()
         if not link.lower().startswith(_ADD_SCHEMES) or any(c in link for c in "\r\n\t "):
             raise ValueError("add takes one magnet link or http(s) .torrent URL")
         category = str(category or "").strip()
         if not category:
             raise ValueError("add needs a category")
-        resp = self._call("POST", "torrents/add", data={"urls": link, "category": category, "autoTMM": "true"})
+        form = {"urls": link, "category": category, "autoTMM": "true"}
+        if stopped:
+            form.update({"stopped": "true", "paused": "true"})      # 5.x name, 4.x name
+        resp = self._call("POST", "torrents/add", data=form)
         if resp.status_code == 409 or (resp.text or "").strip() == "Fails.":
             raise TorrentRejected("qBittorrent did not add the torrent: the link is not a valid torrent, or it is "
                                   "already in qBittorrent")
@@ -345,8 +353,46 @@ class QbtClient:
         rows = self._json(resp, "the file list")
         if not isinstance(rows, list):
             raise UnexpectedResponse("qBittorrent's file list is not a list")
+        rows = [r for r in rows if isinstance(r, dict)]
         return [TorrentFile(name=str(r.get("name") or "").replace("\\", "/"), size=_int(r.get("size")),
-                            progress=_float(r.get("progress"))) for r in rows if isinstance(r, dict)]
+                            progress=_float(r.get("progress")),
+                            index=_int(r["index"]) if r.get("index") is not None else position,
+                            priority=_int(r["priority"]) if r.get("priority") is not None else 1)
+                for position, r in enumerate(rows)]
+
+    def set_file_priority(self, info_hash: str, file_ids: Sequence[int], priority: int) -> None:
+        """Set the priority of these files of ONE torrent (0 = do not download, 1 = normal). qBittorrent answers 409
+        while it has no file list yet (a magnet link's metadata) and 400 for an id it does not know."""
+        h = _hash(info_hash)
+        ids = sorted({int(i) for i in file_ids})
+        if not ids or ids[0] < 0:
+            raise ValueError("file priorities need at least one file id (0 or more)")
+        if priority not in (0, 1, 6, 7):
+            raise ValueError("a file priority is 0 (do not download), 1 (normal), 6 (high) or 7 (maximal)")
+        resp = self._call("POST", "torrents/filePrio",
+                          data={"hash": h, "id": "|".join(str(i) for i in ids), "priority": str(priority)})
+        if resp.status_code == 404:
+            raise TorrentNotFound("qBittorrent has no torrent with that info hash")
+        if resp.status_code == 409:
+            raise UnexpectedResponse("qBittorrent has no file list for this torrent yet (or no such file)", 409)
+        self._ok(resp, "setting the file priorities")
+        _log.info("qBittorrent: torrent %s: priority %d for %d file(s)", h, priority, len(ids))
+
+    def start(self, info_hash: str) -> None:
+        """Start ONE torrent (5.x ``torrents/start``; 4.x ``torrents/resume``)."""
+        self._run("start", "resume", info_hash)
+
+    def stop(self, info_hash: str) -> None:
+        """Stop ONE torrent (5.x ``torrents/stop``; 4.x ``torrents/pause``)."""
+        self._run("stop", "pause", info_hash)
+
+    def _run(self, new: str, old: str, info_hash: str) -> None:
+        h = _hash(info_hash)
+        resp = self._call("POST", f"torrents/{new}", data={"hashes": h})
+        if resp.status_code == 404:                    # 4.x does not know the 5.x name
+            resp = self._call("POST", f"torrents/{old}", data={"hashes": h})
+        self._ok(resp, f"the {new} request")
+        _log.info("qBittorrent: torrent %s: %s", h, new)
 
     def delete(self, info_hash: str, *, delete_files: bool) -> None:
         """Ask qBittorrent to delete ONE torrent (and its data when ``delete_files``), only when it is in the

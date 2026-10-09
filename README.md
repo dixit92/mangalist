@@ -80,6 +80,19 @@ Set it up:
 - `MANGALIST_DOWNLOADS_SCHEDULE` (default `every 1h`): how often finished downloads are filed and completed
   torrents removed.
 
+A pack is downloaded **only for the volumes you are missing** by default (the release panel shows "Only the missing
+volumes (n of N files)" - untick it for the whole pack; Settings > Download sources sets the default): MangaList reads
+the release's `.torrent` first and tells qBittorrent to skip the other files. A torrent you stop yourself before its
+seed goal is never removed by MangaList; right-click it in the Download tab's In progress list and **Remove now** does
+it (after a confirmation).
+
+**Upgrades (chapters to volumes).** A series held as chapters whose English volumes are out is listed under
+**Upgrades** in the Download tab, with the same search and send. Once its volumes are filed, the chapter files they
+replace are moved to a **holding folder** outside every library (Settings > Automation; default
+`/data/appdata/mangalist/replaced`, restorable, emptied after 30 days) or, if you choose, **deleted after a
+confirmation** listing every file. On Unraid, a holding folder on the same share as the library avoids moves across
+disks (a move the share refuses shows as failed, with Try again; nothing is lost).
+
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 
 > **Local use only - do not expose it to the internet.** MangaList is a personal, single-user desktop
@@ -126,6 +139,12 @@ The **MU Title** column shows the result:
 
 A confirmed match (✔) is never re-scored. The golden tests in `tests/golden` replay recorded public
 MangaUpdates responses and check that the results equal MangaPixer's.
+
+## Several libraries
+
+With more than one library (root), the List's **Library** picker shows one of them or all; the chips, the Duplicates
+view and the Download tab follow it. **Rescan ▾** rescans a single library, and a rescan shows each library's series as
+soon as it has been read. Settings > Library shows which MangaPixer library each root is paired with.
 
 ## Duplicates
 

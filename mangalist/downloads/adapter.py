@@ -7,6 +7,12 @@ method maps to one piece: the library store (series lookup), :func:`~mangalist.d
 :class:`~mangalist.store.downloads.DownloadLedger` (records, connection, settings) and the qBittorrent client.
 Failures the owner should read become :class:`~mangalist.gui.downloads_backend.BackendError` with the service's own
 message (the clients never put a password in one).
+
+**Partial downloads.** :meth:`Backend.inspect_pack` reads a release's ``.torrent`` through the nyaa client (its
+politeness rules apply: one client, one lock) and returns the :class:`~mangalist.downloads.partial.PackSelection` the
+release panel shows before sending; it never raises for a file list that cannot be read - the selection says so and the
+whole pack is what a send then downloads. :meth:`Backend.send` takes ``only_missing`` (False unless the caller says so)
+and keeps what the send did with the pack for :meth:`Backend.take_pack_outcome`.
 """
 
 from __future__ import annotations
@@ -25,10 +31,12 @@ from ..services.nyaa.client import NyaaClient
 from ..services.nyaa.ranking import order
 from ..services.qbittorrent import QbtError, client_from_connection, normalize_base_url
 from ..store.downloads import DownloadLedger
+from ..torrent_files import TorrentError, read_torrent
 from .contracts import DownloadRecord, NyaaCandidate, Placement, QbtConnection, TorrentClient
-from .options import NyaaOptions, load_nyaa_options, save_nyaa_options
+from .options import KEY_PARTIAL_DOWNLOADS, NyaaOptions, get_flag, load_nyaa_options, save_nyaa_options, set_flag
+from .partial import PackOutcome, PackSelection, choose_files, hint_for, log_selection
 from .placement import placement_for
-from .service import SendRefused, send_pick
+from .service import PackSetupError, SendRefused, send_pick
 
 _log = logging.getLogger(__name__)
 
@@ -43,6 +51,8 @@ class Backend:
         self._nyaa_client = nyaa_client            # one client for every category: nyaa's politeness delay is per client
         self._search_lock = threading.Lock()    # one search at a time: nyaa's politeness delay is per client
         self._client_factory = client_factory
+        self._packs: Dict[tuple, PackSelection] = {}      # readable file lists already looked at, newest last
+        self._outcomes: Dict[str, PackOutcome] = {}       # what the last send of a torrent did with its pack
 
     # --- library ---------------------------------------------------------------------------------------
 
@@ -79,16 +89,19 @@ class Backend:
         nyaa's politeness delay holds across them)."""
         if self._search is not None:
             return [self._search]
-        if self._nyaa_client is None:
-            self._nyaa_client = NyaaClient()
         out = []
         for category in options.categories():
             key = (category, not options.hide_light_novels)
             if key not in self._searches:
-                self._searches[key] = NyaaSearch(self._nyaa_client, category=category,
+                self._searches[key] = NyaaSearch(self._nyaa(), category=category,
                                                  include_not_comic=not options.hide_light_novels)
             out.append(self._searches[key])
         return out
+
+    def _nyaa(self) -> NyaaClient:
+        if self._nyaa_client is None:
+            self._nyaa_client = NyaaClient()
+        return self._nyaa_client
 
     def nyaa_options(self) -> NyaaOptions:
         return load_nyaa_options(self.db)
@@ -96,18 +109,70 @@ class Backend:
     def set_nyaa_options(self, options: NyaaOptions) -> None:
         save_nyaa_options(self.db, options)
 
+    # --- partial downloads -----------------------------------------------------------------------------
+
+    def partial_default(self) -> bool:
+        """Settings > Download sources: does a pack's release panel start with "only the missing volumes" ticked?"""
+        return get_flag(self.db, KEY_PARTIAL_DOWNLOADS)
+
+    def set_partial_default(self, on: bool) -> None:
+        set_flag(self.db, KEY_PARTIAL_DOWNLOADS, on)
+
+    def inspect_pack(self, candidate: NyaaCandidate, wanted_volumes: Sequence[str]) -> PackSelection:
+        """Which files of the release hold *wanted_volumes*, from its ``.torrent`` on nyaa. A file list that cannot be
+        read is a selection with ``problem`` set, not an error: the whole pack is then what a send downloads."""
+        wanted = tuple(str(v) for v in wanted_volumes)
+        key = (candidate.info_hash.lower(), wanted, hint_for(candidate))
+        if key in self._packs:
+            return self._packs[key]
+        problem = self._pack_problem(candidate)
+        listing = None
+        if problem is None:
+            try:
+                with self._search_lock:         # nyaa's politeness delay is per client
+                    data = self._nyaa().torrent(candidate.torrent_url)
+                listing = read_torrent(data)
+            except NyaaError as exc:
+                problem = f"nyaa did not give the torrent file ({exc})"
+            except TorrentError as exc:
+                problem = f"the torrent file could not be read ({exc})"
+            if listing is not None and not listing.has_hash(candidate.info_hash):
+                problem, listing = "the torrent file on nyaa is not the release that was listed", None
+        if listing is None:
+            _log.info("Partial: %s: file list not read: %s", candidate.title, problem)
+            return PackSelection(wanted=wanted, problem=problem or "the file list is not available")
+        selection = choose_files([(f.name, f.size) for f in listing.files], wanted, hint_for(candidate))
+        log_selection(candidate.title, selection, "the .torrent on nyaa")
+        self._packs[key] = selection
+        while len(self._packs) > 32:
+            del self._packs[next(iter(self._packs))]
+        return selection
+
+    @staticmethod
+    def _pack_problem(candidate: NyaaCandidate) -> Optional[str]:
+        if not (candidate.torrent_url or "").lower().startswith(("http://", "https://")):
+            return "the release has only a magnet link, so its files cannot be listed before it is sent"
+        return None
+
+    def take_pack_outcome(self, info_hash: str) -> Optional[PackOutcome]:
+        """What the last send of this torrent did with its pack (once: it is forgotten after)."""
+        return self._outcomes.pop(info_hash.lower(), None)
+
     # --- qBittorrent -----------------------------------------------------------------------------------
 
-    def send(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
-             target_dir: str) -> DownloadRecord:
+    def send(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str], target_dir: str,
+             only_missing: bool = False) -> DownloadRecord:
         conn = self.ledger.connection()
         if conn is None or not conn.base_url:
             raise BackendError("qBittorrent is not set up yet (toolbar: qBittorrent...)")
         placement = replace(self.placement(series_id), target_dir=target_dir, options=())
+        key = candidate.info_hash.lower()
+        self._outcomes.pop(key, None)
         try:
             return send_pick(self._client_factory(conn), self.ledger, series_id, candidate, wanted_volumes,
-                             placement, self.ledger.save_path())
-        except (SendRefused, QbtError) as exc:
+                             placement, self.ledger.save_path(), only_missing=only_missing,
+                             on_pack=lambda outcome: self._outcomes.__setitem__(key, outcome))
+        except (SendRefused, QbtError, PackSetupError) as exc:
             raise BackendError(str(exc)) from None
 
     def records(self, series_id: Optional[int] = None) -> Sequence[DownloadRecord]:
@@ -135,6 +200,18 @@ class Backend:
             return self._client_factory(self._connection(settings, password)).version()
         except QbtError as exc:
             raise BackendError(str(exc)) from None
+
+    def remove_now(self, record_id: int) -> DownloadRecord:
+        """Remove one filed download's torrent and its downloaded copy now (the owner's choice; library files stay)."""
+        from .arrivals import RemoveRefused, remove_now
+
+        conn = self.ledger.connection()
+        if conn is None or not conn.base_url:
+            raise BackendError("qBittorrent is not set up yet")
+        try:
+            return remove_now(self._client_factory(conn), self.ledger, record_id)
+        except (RemoveRefused, QbtError) as exc:
+            raise BackendError(f"not removed: {exc}") from None
 
     def set_remove_completed(self, on: bool) -> None:
         self.ledger.set_remove_completed(on)

@@ -216,7 +216,7 @@ def test_choices_survive_a_refresh(views, lib):
 
 
 def test_a_scan_that_fails_is_shown(views, monkeypatch):
-    def boom(db):
+    def boom(db, root_ids=None):
         raise RuntimeError("secret")
     monkeypatch.setattr(duplicates_view, "find_duplicate_files", boom)
     view = views.scanned()
@@ -227,9 +227,9 @@ def test_a_scan_in_flight_when_the_view_is_stopped_is_dropped(views, pair, monke
     gate = threading.Event()
     real = find_duplicate_files
 
-    def slow(db):
+    def slow(db, root_ids=None):
         gate.wait(5)
-        return real(db)
+        return real(db, root_ids=root_ids)
     monkeypatch.setattr(duplicates_view, "find_duplicate_files", slow)
     view = views.make()
     seen = []
@@ -249,12 +249,12 @@ def test_only_the_newest_scan_counts(views, pair, monkeypatch):
     real = find_duplicate_files
     calls = []
 
-    def maybe_slow(db):
+    def maybe_slow(db, root_ids=None):
         calls.append(1)
         if len(calls) == 1:
             gate.wait(5)
             return []                    # the first scan's (stale) answer
-        return real(db)
+        return real(db, root_ids=root_ids)
     monkeypatch.setattr(duplicates_view, "find_duplicate_files", maybe_slow)
     view = views.make()
     view.refresh()
@@ -429,3 +429,52 @@ def test_an_apply_that_deletes_nothing_does_not_stay_busy(views, pair):
     view.apply()
     wait_until(views.qapp, lambda: not view._applying and not view._scanning)
     assert not view.busy_bar.isVisibleTo(view) and view._body.isEnabled()
+
+
+def test_apply_to_selected_deletes_only_in_the_ticked_series(views, two_series):
+    _lib, (a_old, a_new), (b_old, b_new) = two_series
+    view = views.scanned()
+    view.show()
+    assert not view.apply_selected_button.isVisibleTo(view)             # nothing ticked
+    view.pick_series([str(b_old.parent)])
+    assert view.apply_selected_button.isVisibleTo(view)
+    assert view.apply_selected_button.text() == "Apply to selected (1 series, 1 file)"
+    deleted = []
+    view.files_deleted.connect(deleted.append)
+    view.apply_selected_button.click()
+    wait_until(views.qapp, lambda: deleted and not view._scanning)
+    assert [len(f) for f in views.asked] == [1] and deleted == [[str(b_old)]]
+    assert a_old.exists() and a_new.exists() and not b_old.exists() and b_new.exists()
+    assert view._picked == set() and not view.apply_selected_button.isVisibleTo(view)   # its series left the list
+
+
+def test_apply_to_selected_covers_every_ticked_series(views, two_series):
+    _lib, (a_old, _a_new), (b_old, _b_new) = two_series
+    view = views.scanned()
+    view.pick_series([str(a_old.parent), str(b_old.parent)])
+    assert view.apply_selected_button.text() == "Apply to selected (2 series, 2 files)"
+    view.apply(series=set(view._picked))
+    wait_until(views.qapp, lambda: not view._applying and not view._scanning)
+    assert [len(f) for f in views.asked] == [2] and not a_old.exists() and not b_old.exists()
+
+
+def test_the_library_scope_limits_the_duplicate_files(views, lib, db, tmp_path):
+    from tests.duplicates.conftest import Library
+
+    lib.add(S, "Series c001.cbz", size=10, mtime_ns=T0)
+    lib.add(S, "Series c001 [2].cbz", size=20, mtime_ns=T0 + 1)
+    lib.scan()
+    other = Library(db, tmp_path / "other-share", "Manhwa")
+    other.add("Other Series", "Other c001.cbz", size=10, mtime_ns=T0)
+    other.add("Other Series", "Other c001 [2].cbz", size=20, mtime_ns=T0 + 1)
+    other.scan()
+    view = views.scanned()
+    assert {g.title for g in view.file_groups} == {S, "Other Series"}
+    view.set_library_scope([other.root.id])
+    view.refresh()
+    wait_until(views.qapp, lambda: not view._scanning)
+    assert {g.title for g in view.file_groups} == {"Other Series"}
+    view.set_library_scope(None)
+    view.refresh()
+    wait_until(views.qapp, lambda: not view._scanning)
+    assert len(view.file_groups) == 2

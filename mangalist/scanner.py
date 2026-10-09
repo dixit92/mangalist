@@ -10,6 +10,10 @@ Every archive is parsed by the layered parser (:mod:`mangalist.parsing`) with it
 folder title, the root's naming scheme (when set) and the series' stored "volumes or chapters?" answer
 (Design Decisions C12). :func:`record_library_scan` stores each archive's units per series in the
 database (``units`` table) and applies stored answers; :func:`answer_series_kind` records a new answer.
+
+A scan of several roots can be recorded root by root (:func:`scan_and_record_library`: the window shows each root's
+series as soon as it is read), and a scan of only some roots records only those - see its docstring for why moves
+between roots are still carried.
 """
 
 from __future__ import annotations
@@ -333,6 +337,7 @@ class RootScan:
     folder: Path                                  # the resolved folder that was walked
     entries: List[MangaEntry] = field(default_factory=list)
     error: Optional[str] = None
+    loose: List[LooseArchive] = field(default_factory=list)
 
 
 @dataclass
@@ -340,6 +345,7 @@ class LibraryScan:
     roots: List[RootScan] = field(default_factory=list)
     loose: List[LooseArchive] = field(default_factory=list)
     identity: Optional[object] = None   # set by record_library_scan: mangalist.identity.moves.IdentityReport
+    renamed: List[tuple] = field(default_factory=list)   # (old folder, new folder) recognised while recording
 
     @property
     def entries(self) -> List[MangaEntry]:
@@ -355,49 +361,107 @@ def _root_schemes(root) -> Tuple[str, ...]:
     return (scheme,) if isinstance(scheme, str) and scheme.strip() else ()
 
 
+def scan_one_root(
+    root,
+    progress: Optional[Callable[[int, int, str], None]] = None,
+    *,
+    db=None,
+    label: bool = False,
+) -> RootScan:
+    """Scan one ``store.Root``-like (``id``, ``name``, ``path``, ``exclusions``, ``naming_scheme``). A root that
+    cannot be read comes back with ``error`` set and no entries. *label* puts the root's name before each folder
+    in *progress* (several roots in one scan); *db* supplies the stored "volumes or chapters?" answers."""
+    name = getattr(root, "name", "") or str(root.path)
+    folder = Path(root.path)
+    try:
+        folder = folder.resolve()
+    except OSError:
+        pass
+    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder)
+    loose: List[Path] = []
+    prog = progress
+    if progress and label:
+        def prog(d, t, n, _name=name):  # noqa: E306 - label the folder with its root
+            progress(d, t, f"{_name}: {n}" if n else "")
+    hints: Dict[str, str] = {}
+    if db is not None and rs.root_id is not None:
+        try:
+            hints = db.series_kind_hints(rs.root_id)
+        except Exception:  # noqa: BLE001 - the scan works without the answers
+            _log.warning("Reading the stored series kinds failed", exc_info=True)
+    try:
+        rs.entries = scan_root(folder, prog, exclusions=list(getattr(root, "exclusions", []) or []),
+                               loose=loose, root_id=rs.root_id, kind_hints=hints, schemes=_root_schemes(root))
+    except (OSError, NotADirectoryError) as exc:
+        rs.error = str(exc)
+    rs.loose = [LooseArchive(rs.root_id, name, p) for p in loose]
+    return rs
+
+
 def scan_library(
     roots: Sequence,
     progress: Optional[Callable[[int, int, str], None]] = None,
     *,
     db=None,
 ) -> LibraryScan:
-    """Scan every root (``store.Root``-like: ``id``, ``name``, ``path``, ``exclusions``,
-    ``naming_scheme``). A root that cannot be read is reported in :attr:`LibraryScan.errors`; the others
-    are still scanned. With *db*, the series' stored "volumes or chapters?" answers are used while
-    parsing (without it, :func:`record_library_scan` applies them afterwards)."""
+    """Scan every root (:func:`scan_one_root`). A root that cannot be read is reported in
+    :attr:`LibraryScan.errors`; the others are still scanned. With *db*, the series' stored "volumes or
+    chapters?" answers are used while parsing (without it, :func:`record_library_scan` applies them afterwards)."""
     result = LibraryScan()
     many = len(roots) > 1
     for root in roots:
-        name = getattr(root, "name", "") or str(root.path)
-        folder = Path(root.path)
-        try:
-            folder = folder.resolve()
-        except OSError:
-            pass
-        rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder)
-        loose: List[Path] = []
-        prog = progress
-        if progress and many:
-            def prog(d, t, n, _name=name):  # noqa: E306 - label the folder with its root
-                progress(d, t, f"{_name}: {n}" if n else "")
-        hints: Dict[str, str] = {}
-        if db is not None and rs.root_id is not None:
-            try:
-                hints = db.series_kind_hints(rs.root_id)
-            except Exception:  # noqa: BLE001 - the scan works without the answers
-                _log.warning("Reading the stored series kinds failed", exc_info=True)
-        try:
-            rs.entries = scan_root(folder, prog, exclusions=list(getattr(root, "exclusions", []) or []),
-                                   loose=loose, root_id=rs.root_id, kind_hints=hints,
-                                   schemes=_root_schemes(root))
-        except (OSError, NotADirectoryError) as exc:
-            rs.error = str(exc)
+        rs = scan_one_root(root, progress, db=db, label=many)
         result.roots.append(rs)
-        result.loose.extend(LooseArchive(rs.root_id, name, p) for p in loose)
+        result.loose.extend(rs.loose)
     return result
 
 
-def record_library_scan(db, result: LibraryScan) -> List[tuple]:
+def scan_and_record_library(
+    roots: Sequence,
+    db=None,
+    *,
+    progress: Optional[Callable[[int, int, str], None]] = None,
+    on_start: Optional[Callable[[int, int, str], None]] = None,
+    on_root: Optional[Callable[[RootScan, List[tuple]], None]] = None,
+) -> LibraryScan:
+    """Scan *roots* one after another and, with *db*, record each root as soon as it was read; *on_root(root scan,
+    renamed)* is called after that, so a window can show the root's series before the next root is read, and
+    *on_start(number, how many, root name)* before each root is read (a window names it in its status).
+
+    Recording per root is as good as recording all roots at once because identity never needs the other roots in
+    the same call: a series moved from root A to root B is recognised whichever of the two is read first (A first:
+    its archives go missing and B's new paths pair with them; B first: the archives of A that vanish later pair
+    after the fact with B's live rows, :func:`mangalist.identity.moves.pair_after_the_fact`), with the same carry-over
+    of its link, kind answer and examined mark. MangaPixer's pairing is refreshed once, after the last root. An
+    exception from *progress* (the window closing) abandons the root being read; roots already recorded stay."""
+    result = LibraryScan()
+    many = len(roots) > 1
+    recorded = False
+    for number, root in enumerate(roots, start=1):
+        if on_start is not None:
+            on_start(number, len(roots), getattr(root, "name", "") or str(root.path))
+        rs = scan_one_root(root, progress, label=many)
+        result.roots.append(rs)
+        result.loose.extend(rs.loose)
+        renamed: List[tuple] = []
+        if db is not None and not rs.error and rs.root_id is not None:
+            try:
+                renamed = record_library_scan(db, LibraryScan(roots=[rs]), pair=False)
+                recorded = True
+            except Exception:  # noqa: BLE001 - the root is still shown
+                _log.warning("Recording %s in the library database failed", rs.root_name, exc_info=True)
+        result.renamed.extend(renamed)
+        if on_root is not None:
+            on_root(rs, renamed)
+    if recorded:
+        try:
+            refresh_mangapixer_pairing(db)
+        except Exception:  # noqa: BLE001 - the scan is recorded; the daily sync pairs again
+            _log.warning("Pairing the roots with MangaPixer's libraries failed", exc_info=True)
+    return result
+
+
+def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[tuple]:
     """Write a :class:`LibraryScan` into the database: series rows (see ``Store.record_scan``), the archive rows
     with move detection and series carry-over across all roots (:mod:`mangalist.identity`), and every
     archive's units (``units`` table, see ``Store.sync_units``); then MangaPixer's pending ``carriedFrom``
@@ -412,7 +476,10 @@ def record_library_scan(db, result: LibraryScan) -> List[tuple]:
     Returns ``(old folder, new folder)`` for every series folder recognised as renamed or moved (its row,
     MangaUpdates link, kind answer and examined mark moved with it); the full report is set as
     ``result.identity``. Roots that failed to scan are left untouched (their series and archives are not
-    marked missing just because a share was offline).
+    marked missing just because a share was offline). *result* may hold only some of the roots (a one-root
+    rescan, or one root of a progressive scan): the others are not touched, and a series that moved to or from a
+    root that is not in it is recognised when that root is scanned (module docstring of
+    :mod:`mangalist.identity.moves`). ``pair=False`` skips the MangaPixer pairing (the caller refreshes it once).
     """
     from .identity.mangapixer import apply_pending
     from .identity.moves import record_archives
@@ -440,7 +507,7 @@ def record_library_scan(db, result: LibraryScan) -> List[tuple]:
             _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None))
         except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
             _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
-    if scanned:
+    if scanned and pair:
         try:
             refresh_mangapixer_pairing(db)
         except Exception:  # noqa: BLE001 - the scan is recorded; the daily sync pairs again

@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import logging
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote
@@ -39,7 +40,7 @@ from PySide6.QtWidgets import (
 from .. import config, mu_cache, store
 from .._version import __version__
 from ..models import MangaEntry
-from ..scanner import LibraryScan, apply_kind_hint, record_library_scan, scan_library
+from ..scanner import LibraryScan, RootScan, apply_kind_hint, scan_and_record_library
 from ..store import Journal, Root, RootError
 from . import lanes
 from .app_icon import build_app_icon
@@ -50,8 +51,8 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
-    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LICENSED, COL_MU_TITLE, COL_OFFICIAL,
-    COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
+    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MU_TITLE,
+    COL_OFFICIAL, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .links import open_link
@@ -70,9 +71,12 @@ class _ScanStopped(Exception):
 
 
 class ScanWorker(QObject):
-    """Scans every root, then records the series rows (a renamed series folder keeps its link)."""
+    """Scans the roots one after another and records each as soon as it was read (a renamed series folder keeps its
+    link): the window shows a root's series without waiting for the others."""
 
-    progress = Signal(int, int, str)
+    progress = Signal(int, int, str)        # folders done, folders in the root being read, the folder's name
+    root_started = Signal(int, int, str)    # which root (1-based), how many, its name
+    root_scanned = Signal(object, object)   # RootScan (already recorded), [(old folder, new folder)] it carried
     finished = Signal(object)  # LibraryScan, with .renamed = [(old folder, new folder)]
     failed = Signal(str)
 
@@ -83,7 +87,7 @@ class ScanWorker(QObject):
         self._stop = False
 
     def stop(self) -> None:
-        """Abandon the scan at the next folder (nothing is recorded)."""
+        """Abandon the scan at the next folder (the root being read is not recorded; roots done stay recorded)."""
         self._stop = True
 
     def _progress(self, done: int, total: int, name: str) -> None:
@@ -91,9 +95,15 @@ class ScanWorker(QObject):
             raise _ScanStopped()
         self.progress.emit(done, total, name)
 
+    def _started(self, number: int, count: int, name: str) -> None:
+        if self._stop:
+            raise _ScanStopped()
+        self.root_started.emit(number, count, name)
+
     def run(self) -> None:
         try:
-            result = scan_library(self._roots, progress=self._progress)
+            result = scan_and_record_library(self._roots, self._db, progress=self._progress, on_start=self._started,
+                                             on_root=self.root_scanned.emit)
         except _ScanStopped:
             return
         except Exception as exc:  # noqa: BLE001
@@ -104,12 +114,6 @@ class ScanWorker(QObject):
         if not result.entries and result.errors and len(result.errors) == len(self._roots):
             self.failed.emit("\n".join(result.errors))
             return
-        result.renamed = []
-        if self._db is not None:
-            try:
-                result.renamed = record_library_scan(self._db, result)
-            except Exception:  # noqa: BLE001 - the scan itself is still shown
-                _log.warning("Recording the scan in the library database failed", exc_info=True)
         self.finished.emit(result)
 
 
@@ -154,15 +158,34 @@ class _SortProxy(QSortFilterProxyModel):
         self._dupes_only = False
         self._state_filter: Optional[str] = None
 
+    @contextmanager
+    def _filter_change(self):
+        """Qt 6.10+ announces a filter change around it (``invalidateFilter`` is deprecated there and warned on every
+        call); older PySide6 (requirements allow 6.6+) re-filters after it."""
+        if hasattr(self, "beginFilterChange"):
+            self.beginFilterChange()
+            try:
+                yield
+            finally:
+                self.endFilterChange()
+        else:
+            yield
+            self.invalidateFilter()
+
+    def refresh_scope(self) -> None:
+        """The model's library scope changed: let the rows of the picked library through."""
+        with self._filter_change():
+            pass
+
     def set_dupes_only(self, enabled: bool) -> None:
         """Filter to show only duplicate MU matches."""
-        self._dupes_only = enabled
-        self.invalidateFilter()
+        with self._filter_change():
+            self._dupes_only = enabled
 
     def set_state_filter(self, key: Optional[str]) -> None:
         """Show only rows whose rescan state passes *key* (table_model.STATE_FILTERS; None = all)."""
-        self._state_filter = key
-        self.invalidateFilter()
+        with self._filter_change():
+            self._state_filter = key
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         # The mockup's headers: upper case, numbers right-aligned over their column.
@@ -180,6 +203,8 @@ class _SortProxy(QSortFilterProxyModel):
             return False
 
         source_model = self.sourceModel()
+        if source_model is not None and not source_model.in_scope(source_row):     # the Library picker
+            return False
         if self._state_filter is not None and source_model is not None:
             if not state_matches(source_model.state_at(source_row), self._state_filter):
                 return False
@@ -223,15 +248,18 @@ class MainWindow(QMainWindow):
     # The List tab's columns: what shows by default and in which order (the owner's choices are remembered under
     # their own keys, so the old toolbar-era settings do not carry the old 18-column layout over).
     _DEFAULT_COL_ORDER = [
-        "Title", "State", "Gaps", "English", "Verdict", "Files",
+        "Title", "Library", "State", "Gaps", "English", "Verdict", "Files",
         "✓", "Dupe", "MU Title", "Behind", "Licensed", "Completed", "Official source", "Alternative Title",
         "Last Modified", "Subfolders", "Vol %", "Ch %", "Both %",
     ]
     _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
     _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 170, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
-                       COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180}
+                       COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180,
+                       COL_LIBRARY: 130}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
+    _CFG_COLUMNS_VERSION = "list_columns_version"     # 2: the Library column exists (hidden unless the owner showed it)
+    _CFG_LIBRARY = "list_library"                      # the picked library folder's path ("" or absent: all libraries)
     _CFG_SPLITTER = "list_splitter_sizes"
     _CFG_DETAILS = "details_panel"
 
@@ -268,8 +296,13 @@ class MainWindow(QMainWindow):
         self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
         self._dupe_call = None
         self._wanted_series: List[WantedSeries] = []
+        self._dupe_per_folder: Dict[str, Tuple[int, int]] = {}
         self._last_scan: Optional[datetime.datetime] = None
         self._scan_label = ""
+        self._library: Optional[int] = None          # the picked library folder (root id); None = all libraries
+        self._libraries_key: Optional[tuple] = None
+        self._scan_applied: set = set()              # root ids whose rows the running scan has put in the table
+        self._scan_pos: Optional[Tuple[int, int, str]] = None   # (which root, how many, its name) being read
 
         self._thread: QThread | None = None
         self._worker: ScanWorker | None = None
@@ -300,6 +333,7 @@ class MainWindow(QMainWindow):
         self._top = TopBar()
         self._top.tab_changed.connect(self._on_tab_changed)
         self._top.rescan_clicked.connect(self._on_rescan)
+        self._top.rescan_root_clicked.connect(self._on_rescan_root)
         self._top.settings_clicked.connect(self._on_settings)
         self._top.missing_clicked.connect(self._on_missing)
         col.addWidget(self._top)
@@ -330,6 +364,7 @@ class MainWindow(QMainWindow):
         self._btn_mu_start.clicked.connect(self._on_mu_start)
         self._btn_mu_stop.clicked.connect(self._on_mu_stop)
         lst.filter_changed.connect(self._on_filter_changed)
+        lst.library_changed.connect(self._on_library_changed)
         lst.details_toggled.connect(self._on_details_toggled)
         lst.add_root_clicked.connect(lambda: self._on_choose_root())
         self._detail.get_requested.connect(self._on_get_requested)
@@ -356,6 +391,8 @@ class MainWindow(QMainWindow):
             tab = lanes.download_tab_class()(self._volumes_backend, self)
             tab.count_changed.connect(self._top.set_download_count)
             tab.show_in_list.connect(self.show_folder_in_list)
+            if hasattr(tab, "library_changed"):         # Restore / Move / Delete of replaced chapters moved files
+                tab.library_changed.connect(self._on_replaced_chapters_moved)
             self._download_tab = tab
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
@@ -450,14 +487,65 @@ class MainWindow(QMainWindow):
             self._dupe_focus = None
             self._duplicates_view.refresh()
         self._update_page()
+        where = self._scope_note()
         if key is None:
-            self._status_label.setText("Showing all entries")
+            self._status_label.setText("Showing all entries" + where)
         elif dupes:
-            series, numbers = len(self._model.duplicate_series()), self._dupe_file_groups or 0
-            self._status_label.setText(f"Duplicates: {series} series in more than one folder, "
+            series, numbers = len(self._model.duplicate_series()), self._scoped_file_groups()
+            self._status_label.setText(f"Duplicates{where}: {series} series in more than one folder, "
                                        f"{numbers} number{'s' if numbers != 1 else ''} held by more than one file")
         else:
-            self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {chip_label(key)}")
+            self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {chip_label(key)}{where}")
+
+    # --- The Library picker ------------------------------------------------
+
+    def _scope_note(self) -> str:
+        """`` (Manhwa)`` while one library is picked, else nothing - for the footer's messages."""
+        return f" ({self._list.library_name()})" if self._library is not None else ""
+
+    def _refresh_libraries(self) -> None:
+        """Rebuild the picker and the Rescan menu from the library folders (when they changed) and re-pick the remembered
+        one; with fewer than two folders there is no picker and every series shows."""
+        roots = [r for r in self._roots() if getattr(r, "id", None) is not None]
+        key = tuple((r.id, r.name, r.path) for r in roots)
+        if key == self._libraries_key:
+            return
+        self._libraries_key = key
+        targets = [(r.id, r.name, r.path) for r in roots]
+        remembered = self._cfg.get(self._CFG_LIBRARY)
+        picked = next((r.id for r in roots if r.path == remembered), None) if len(roots) > 1 else None
+        self._model.set_root_names({r.id: r.name for r in roots})
+        self._top.set_rescan_targets(targets)
+        self._list.set_libraries(targets, picked)
+        self._apply_library(picked)
+
+    def _apply_library(self, root_id: Optional[int]) -> None:
+        """Make *root_id* (None: all) the library the table, the counts, the duplicates and the Download list show."""
+        self._library = root_id
+        self._model.set_scope(root_id)
+        self._proxy.refresh_scope()
+        if hasattr(self._duplicates_view, "set_library_scope"):
+            self._duplicates_view.set_library_scope(None if root_id is None else [root_id])
+
+    def _on_library_changed(self, root_id) -> None:
+        """The owner picked a library (or All libraries): remember it, then everything that follows the table follows."""
+        _log.info("Library picked: %s", self._list.library_name())
+        root = next((r for r in self._roots() if r.id == root_id), None) if root_id is not None else None
+        if root_id is not None and root is None:
+            root_id = None
+        # "" = all libraries (the settings store only writes keys, so a removed key would keep its old value)
+        self._cfg[self._CFG_LIBRARY] = root.path if root is not None else ""
+        config.save(self._cfg)
+        self._apply_library(root_id)
+        self._refresh_derived()
+        self._on_filter_changed(self._list.current_filter())
+
+    def _scoped_file_groups(self) -> int:
+        """How many numbers are held by more than one file, in the picked library (all of them when none is picked)."""
+        if self._library is None:
+            return self._dupe_file_groups or 0
+        folders = {str(self._model.entry_at(r).folder) for r in self._model.scope_rows()}
+        return sum(v + c for folder, (v, c) in self._dupe_per_folder.items() if folder in folders)
 
     def _update_page(self) -> None:
         """The table, the duplicates view, or the empty state (no library / scanning / nothing found)."""
@@ -490,12 +578,13 @@ class MainWindow(QMainWindow):
 
     def _update_counts(self) -> None:
         model = self._model
-        n = model.rowCount()
+        rows = model.scope_rows()       # the library picked
+        n = len(rows)
         keys = [k for k in all_filter_keys() if k is not None and k != DUPLICATES]
         counts: Dict[Optional[str], Optional[int]] = {None: n}
         for k in keys:
             counts[k] = 0
-        for row in range(n):
+        for row in rows:
             st = model.state_at(row)
             if st is None:
                 continue
@@ -503,9 +592,9 @@ class MainWindow(QMainWindow):
                 if state_matches(st, k):
                     counts[k] += 1
         series_dupes = len(model.duplicate_series())
-        counts[DUPLICATES] = series_dupes + (self._dupe_file_groups or 0)
+        counts[DUPLICATES] = series_dupes + self._scoped_file_groups()
         self._list.set_counts(counts)
-        entries = [model.entry_at(r) for r in range(n)]
+        entries = [model.entry_at(r) for r in rows]
         by_kind = {"Volumes": 0, "Chapters": 0, "Both": 0}
         for e in entries:
             if e is not None and e.verdict.value in by_kind:
@@ -525,12 +614,13 @@ class MainWindow(QMainWindow):
             return
         out: List[WantedSeries] = []
         model = self._model
-        for row in range(model.rowCount()):
+        for row in model.scope_rows():          # the library picked
             entry = model.entry_at(row)
             st = model.state_at(row)
             if entry is None or st is None or not st.gaps:
                 continue
-            volumes = self._volumes.availability(row) if self._volumes is not None and st.missing_volumes else None
+            volumes = (self._volumes.availability(row)
+                       if self._volumes is not None and (st.missing_volumes or st.upgrade_volumes) else None)
             series_id = self._volumes.series_id_for(entry) if self._volumes is not None else None
             out += wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title,
                                  state=st, knowledge=model.knowledge_at(row), held=model.held_volumes_at(row),
@@ -585,6 +675,13 @@ class MainWindow(QMainWindow):
         if row is not None:
             self._select_source_row(row)
 
+    def _on_replaced_chapters_moved(self, folders) -> None:
+        """The Download tab restored, moved or deleted replaced chapter files: rescan so the table and the database
+        follow."""
+        n = len(list(folders))
+        self._status_label.setText(f"Chapter files changed in {n} series - rescanning")
+        self._start_scan()
+
     def _on_files_deleted(self, paths) -> None:
         """Lane C's view deleted duplicate files: rescan so the table and the database follow."""
         self._status_label.setText(f"{len(paths)} duplicate file(s) deleted - rescanning")
@@ -605,6 +702,7 @@ class MainWindow(QMainWindow):
     def _on_duplicate_files_counted(self, counted) -> None:
         total, per_folder = counted
         self._dupe_file_groups = int(total)
+        self._dupe_per_folder = dict(per_folder)
         self._model.set_duplicate_file_counts(per_folder)
         self._update_counts()
 
@@ -669,6 +767,7 @@ class MainWindow(QMainWindow):
 
     def _show_roots(self) -> None:
         """The top bar's status: the library folder(s), the last scan, MangaPixer's last sync."""
+        self._refresh_libraries()
         roots = self._roots()
         if not roots:
             parts = ["No library folder"]
@@ -677,7 +776,7 @@ class MainWindow(QMainWindow):
             parts = [", ".join(r.name for r in roots) if len(roots) <= 2 else f"{len(roots)} library folders"]
             tip = "\n".join(f"{r.name}: {r.path}" for r in roots)
         if self._thread is not None:
-            parts.append("scanning…")
+            parts.append(self._scanning_text(len(roots)))
         elif self._last_scan is not None:
             parts.append(f"scanned {_when(self._last_scan)}")
         synced = self._mangapixer_synced()
@@ -685,6 +784,14 @@ class MainWindow(QMainWindow):
             parts.append(f"MangaPixer synced {_when(synced)}")
         self._top.set_status(" · ".join(parts), tip)
         self._update_page()
+
+    def _scanning_text(self, n_roots: int) -> str:
+        """What the top bar says while a scan runs: which library folder is being read (not its name when there is only
+        one), and which of how many when several are scanned."""
+        if self._scan_pos is None or n_roots < 2:
+            return "scanning…"
+        number, count, name = self._scan_pos
+        return f"scanning {name} ({number} of {count})…" if count > 1 else f"scanning {name}…"
 
     def start_initial_scan(self) -> bool:
         """At start: scan the library folders so the table fills without a click (never blocks the UI)."""
@@ -795,6 +902,14 @@ class MainWindow(QMainWindow):
             return
         self._start_scan()
 
+    def _on_rescan_root(self, root_id: int) -> None:
+        """The Rescan arrow: read only this library folder (the others' rows and database records stay as they were)."""
+        root = next((r for r in self._roots() if r.id == root_id), None)
+        if root is None:
+            return
+        _log.info("Rescan of one library folder: %s", root.name)
+        self._start_scan([root])
+
     def _start_scan(self, roots: Optional[Sequence[Root]] = None) -> None:
         if self._thread is not None:
             return  # scan already running
@@ -806,9 +921,12 @@ class MainWindow(QMainWindow):
                                 "Not a directory:\n" + "\n".join(r.path for r in roots))
             return
 
-        self._btn_rescan.setEnabled(False)
+        self._top.set_scanning(True)
         label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
         self._scan_label = label
+        self._scan_applied = set()
+        self._scan_pos = (1, len(roots), roots[0].name)
+        self._forget_vanished_roots()
         self._status_label.setText(f"Scanning {label}…")
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)  # busy until first progress update
@@ -818,6 +936,8 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_progress)
+        worker.root_started.connect(self._on_root_started)
+        worker.root_scanned.connect(self._on_root_scanned)
         worker.finished.connect(self._on_scan_finished)
         worker.failed.connect(self._on_scan_failed)
         worker.finished.connect(thread.quit)
@@ -840,14 +960,49 @@ class MainWindow(QMainWindow):
             self._status_label.setText(f"Scanning ({done}/{total}): {name}")
             self._list.empty_text.setText(f"{done} / {total}: {name}")
 
-    def _on_scan_finished(self, result) -> None:
-        if isinstance(result, LibraryScan):
-            entries: List[MangaEntry] = result.entries
-            loose = result.loose
-            errors = result.errors
-            renamed = getattr(result, "renamed", [])
-        else:  # a plain list of entries
-            entries, loose, errors, renamed = list(result), [], [], []
+    def _on_root_started(self, number: int, count: int, name: str) -> None:
+        """The next library folder is being read: the progress bar starts over, the top bar names it."""
+        self._scan_pos = (number, count, name)
+        self._progress.setRange(0, 0)
+        self._status_label.setText(f"Scanning {name}…")
+        self._list.empty_text.setText(name)
+        self._show_roots()
+
+    def _on_root_scanned(self, rs: RootScan, renamed) -> None:
+        """A library folder was read and recorded: its series replace its old rows now, before the next folder is read."""
+        self._apply_root_scan(rs, renamed)
+        if rs.error:
+            self._status_label.setText(f"{rs.root_name}: not reachable")
+        else:
+            self._status_label.setText(f"{rs.root_name}: {len(rs.entries)} series")
+        self._show_roots()
+
+    # --- The table's rows, root by root ------------------------------------
+
+    def _forget_vanished_roots(self) -> None:
+        """Rows of a library folder that is no longer one (removed in Settings) leave the table when a scan starts."""
+        known = {r.id for r in self._roots()}
+        rows = self._model.entries()
+        kept = [e for e in rows if e.root_id in known]
+        if len(kept) != len(rows):
+            self._set_rows(kept)
+
+    def _set_rows(self, entries: List[MangaEntry]) -> None:
+        """Put *entries* in the table, keeping the picked series and the scroll position (a reset drops both)."""
+        current = self._current_entry()
+        folder = str(current.folder) if current is not None else None
+        scroll = self._table.verticalScrollBar().value()
+        self._model.set_entries(entries)
+        row = self._row_for_folder(folder) if folder is not None else None
+        if row is not None:
+            idx = self._proxy.mapFromSource(self._model.index(row, COL_TITLE))
+            if idx.isValid():
+                self._table.selectRow(idx.row())
+        self._table.verticalScrollBar().setValue(scroll)
+
+    def _prepare_entries(self, entries: Sequence[MangaEntry], renamed) -> None:
+        """What a scan's entries need before they are shown: the examined marks (moved with renamed series), the
+        MangaUpdates data already cached."""
         self._reload_examined()                     # the scan may have carried marks with series
         if self._volumes is not None:
             self._volumes.forget_series_ids()
@@ -867,14 +1022,44 @@ class MainWindow(QMainWindow):
             cached = cached_all.get(str(e.folder))
             if cached:
                 _apply_cache(e, cached)
-
         self._mp_resolver = None  # folders may have been renamed or added
         self._mp_items = {}
-        self._model.set_entries(entries)
+
+    def _apply_root_scan(self, rs: RootScan, renamed=()) -> None:
+        """Show one library folder's scan: its series replace the folder's rows (the other folders' rows stay). A folder
+        that could not be read changes nothing here - the end of the scan drops its rows unless the whole scan failed."""
+        if rs.error:
+            return
+        self._scan_applied.add(rs.root_id)
+        self._prepare_entries(rs.entries, renamed)
+        order = {r.id: i for i, r in enumerate(self._roots())}
+        kept = [e for e in self._model.entries() if e.root_id != rs.root_id]
+        self._set_rows(sorted(kept + list(rs.entries), key=lambda e: order.get(e.root_id, len(order))))
+
+    def _on_scan_finished(self, result) -> None:
+        if isinstance(result, LibraryScan):
+            shown, self._scan_applied = self._scan_applied, set()      # this scan's roots; the next one starts empty
+            for rs in result.roots:         # normally all shown already, root by root
+                if rs.error:
+                    self._drop_root_rows(rs.root_id)
+                elif rs.root_id not in shown:
+                    self._apply_root_scan(rs, result.renamed if len(result.roots) == 1 else ())
+            self._scan_applied = set()
+            entries: List[MangaEntry] = result.entries
+            loose = result.loose
+            errors = result.errors
+            renamed = result.renamed
+            partial = len(result.roots) < len(self._roots())
+        else:  # a plain list of entries
+            entries, loose, errors, renamed, partial = list(result), [], [], [], False
+            self._prepare_entries(entries, renamed)
+            self._set_rows(entries)
         self._last_scan = datetime.datetime.now()
 
         # The counts are in the footer (_update_counts); the message says what else the scan found.
         text = f"Scanned {len(entries)} folder(s)"
+        if partial and isinstance(result, LibraryScan):
+            text += " in " + ", ".join(rs.root_name for rs in result.roots)
         tips = []
         if loose:
             text += f"  —  {len(loose)} archive(s) not in a series folder"
@@ -893,7 +1078,7 @@ class MainWindow(QMainWindow):
         self._status_label.setText(text)
         self._status_label.setToolTip("\n".join(tips))
         self._progress.setVisible(False)
-        self._mu_entries = list(entries)
+        self._mu_entries = self._model.entries()
         self._update_missing_count()
         self._refresh_derived()
         self._show_roots()
@@ -903,9 +1088,16 @@ class MainWindow(QMainWindow):
         self._start_signatures()
 
         if self._cfg.get("mu_autostart"):
-            self._start_mu_lookup(self._mu_entries)
+            self._start_mu_lookup(list(entries))
+
+    def _drop_root_rows(self, root_id: Optional[int]) -> None:
+        rows = self._model.entries()
+        kept = [e for e in rows if e.root_id != root_id]
+        if len(kept) != len(rows):
+            self._set_rows(kept)
 
     def _on_scan_failed(self, msg: str) -> None:
+        self._scan_applied = set()
         self._progress.setVisible(False)
         self._status_label.setText("Scan failed")
         QMessageBox.critical(self, "Scan failed", msg)
@@ -913,7 +1105,8 @@ class MainWindow(QMainWindow):
     def _on_thread_finished(self) -> None:
         self._thread = None
         self._worker = None
-        self._btn_rescan.setEnabled(True)
+        self._scan_pos = None
+        self._top.set_scanning(False)
         self._progress.setVisible(False)
         self._show_roots()
         if self._duplicates_view is not None and hasattr(self._duplicates_view, "set_blocked"):
@@ -1154,6 +1347,11 @@ class MainWindow(QMainWindow):
     def _select_source_row(self, src_row: int) -> None:
         """Select a series in the table (clearing the filters that hide it, leaving the duplicates view)."""
         src = self._model.index(src_row, COL_TITLE)
+        if not self._model.in_scope(src_row):       # another library is picked: go to the series' own
+            entry = self._model.entry_at(src_row)
+            own = entry.root_id if entry is not None and any(r.id == entry.root_id for r in self._roots()) else None
+            self._list.set_library(own)
+            self._on_library_changed(own)
         idx = self._proxy.mapFromSource(src)
         if not idx.isValid() or self._list.current_filter() == DUPLICATES:
             self._list.set_filter(None)
@@ -1227,7 +1425,10 @@ class MainWindow(QMainWindow):
         hidden = self._cfg.get(self._CFG_HIDDEN)
         if not isinstance(hidden, list):
             return {name for name in COLUMNS if name not in self._DEFAULT_SHOWN}
-        return set(hidden)
+        hidden = set(hidden)
+        if self._cfg.get(self._CFG_COLUMNS_VERSION, 1) < 2:
+            hidden.add("Library")           # a list saved before the column existed: it stays hidden until chosen
+        return hidden
 
     def _apply_hidden_columns(self) -> None:
         """Hide/show columns according to config."""
@@ -1258,9 +1459,12 @@ class MainWindow(QMainWindow):
         name = COLUMNS[col]
         if name in hidden:
             hidden.discard(name)
+            header = self._table.horizontalHeader()      # a column shown for the first time may be narrower than its default
+            header.resizeSection(col, max(header.sectionSize(col), self._DEFAULT_WIDTHS.get(col, 0)))
         else:
             hidden.add(name)
         self._cfg[self._CFG_HIDDEN] = sorted(hidden)
+        self._cfg[self._CFG_COLUMNS_VERSION] = 2
         config.save(self._cfg)
         self._apply_hidden_columns()
 

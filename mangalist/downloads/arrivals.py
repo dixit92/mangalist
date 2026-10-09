@@ -113,6 +113,15 @@ def _plain(values: Iterable[Decimal]) -> str:
 # --- the pass ------------------------------------------------------------------------------------------
 
 
+class RemoveRefused(RuntimeError):
+    """Remove now was refused; the message says why (nothing was deleted)."""
+
+
+def remove_now(client: TorrentClient, ledger: DownloadLedger, record_id: int, *, journal=None) -> DownloadRecord:
+    """Remove one filed download's torrent now, on the owner's word (see :meth:`_Pass.remove_now`)."""
+    return _Pass(client, ledger, journal, True, lambda: False).remove_now(record_id)
+
+
 def run_arrivals(client: TorrentClient, ledger: DownloadLedger, *, journal=None,
                  remove_completed: Optional[bool] = None,
                  should_stop: Callable[[], bool] = lambda: False) -> ArrivalsReport:
@@ -341,18 +350,23 @@ class _Pass:
             return
         if t.category != QBITTORRENT_CATEGORY:
             self._wait(rec, f"not removed: the torrent is in category {t.category!r}")
+            self._note(rec, f"not removed: it is in qBittorrent category {t.category!r}")
             return
         if not t.stopped_complete:
             self._wait(rec, f"seeding (qBittorrent state {t.state}); removed once stopped at its seed goal")
+            self._note(rec, None)                           # "seeding" is the plain FILED wording
             return
         if not t.seed_goal_reached:     # stopped by hand (or no goal set): the owner's pause is not a seed goal
-            self._wait(rec, f"stopped before its seed goal (ratio {t.ratio:.2f}"
-                            + (f" of {t.max_ratio:g}" if t.max_ratio is not None and t.max_ratio >= 0 else "")
-                            + "); not removed - resume it in qBittorrent, or remove it there yourself")
+            goal = f" of {t.max_ratio:g}" if t.max_ratio is not None and t.max_ratio >= 0 else ""
+            self._wait(rec, f"stopped before its seed goal (ratio {t.ratio:.2f}{goal}); not removed - resume it in "
+                            "qBittorrent, remove it there yourself, or use Remove now")
+            # kept on the record, so the downloads list says it (owner, 2026-10-09: the list kept saying "seeding")
+            self._note(rec, f"stopped before its seed goal (ratio {t.ratio:.2f}{goal})")
             return
         problem = self._library_problem(rec, t)
         if problem:
             self._wait(rec, f"not removed: {problem}")
+            self._note(rec, f"not removed: {problem}")
             _log.warning("Arrivals: download %d (%s) not removed: %s", rec.id, rec.title, problem)
             return
         self.client.delete(t.info_hash, delete_files=True)
@@ -413,3 +427,39 @@ class _Pass:
 
     def _wait(self, rec: DownloadRecord, why: str) -> None:
         self.report.waiting.append((rec.id, why))
+
+    def _note(self, rec: DownloadRecord, note: Optional[str]) -> None:
+        """Keep why a FILED record is not removed (or None: plainly seeding) on the record, for the downloads list."""
+        if rec.status != DownloadStatus.FILED or (rec.error or None) == (note or None):
+            return
+        try:
+            self.ledger.set_status(rec.id, DownloadStatus.FILED, expect=(DownloadStatus.FILED,), error=note)
+        except StatusConflict:      # changed meanwhile (e.g. removed by a pass at the same moment): nothing to note
+            pass
+
+    # --- Remove now (the owner's own decision for one filed download) ---------------------------------
+
+    def remove_now(self, record_id: int) -> DownloadRecord:
+        """The owner chose to remove a filed download's torrent now (e.g. one stopped by hand before its seed goal):
+        the same library check as Remove Completed, then qBittorrent deletes the torrent and its downloaded copy.
+        The library files stay. Raises :class:`RemoveRefused` with the reason when it cannot."""
+        rec = self.ledger.get(record_id)
+        if rec is None or rec.status != DownloadStatus.FILED:
+            raise RemoveRefused("only a filed download can be removed")
+        t = next((x for x in self.client.torrents(QBITTORRENT_CATEGORY)
+                  if x.info_hash.lower() == rec.info_hash.lower()), None)
+        if t is None:
+            out = self.ledger.set_status(rec.id, DownloadStatus.REMOVED, expect=(DownloadStatus.FILED,),
+                                         error="removed in qBittorrent, not by MangaList")
+            _log.info("Arrivals: download %d (%s): Remove now - already gone from qBittorrent", rec.id, rec.title)
+            return out
+        problem = self._library_problem(rec, t)
+        if problem:
+            _log.warning("Arrivals: download %d (%s): Remove now refused: %s", rec.id, rec.title, problem)
+            raise RemoveRefused(problem)
+        self.client.delete(t.info_hash, delete_files=True)
+        out = self.ledger.set_status(rec.id, DownloadStatus.REMOVED, expect=(DownloadStatus.FILED,),
+                                     error="removed by you (Remove now)")
+        _log.info("Arrivals: download %d (%s): Remove now - qBittorrent removed the torrent and its downloaded copy; "
+                  "the library files stay", rec.id, rec.title)
+        return out

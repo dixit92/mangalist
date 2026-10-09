@@ -1,4 +1,4 @@
-"""A polite client for nyaa's public RSS search. No Qt, no account, no cookies.
+"""A polite client for nyaa's public RSS search and its ``.torrent`` downloads. No Qt, no account, no cookies.
 
 Rules (nyaa is a free community site; be a good guest):
 
@@ -9,6 +9,9 @@ Rules (nyaa is a free community site; be a good guest):
 - HTTP 5xx and timeouts (nyaa's front end answers 502 / 503 / 504 now and then): ``max_retries`` more tries with a
   growing pause, then :class:`UnexpectedResponse` / :class:`Unreachable`.
 - Anything else that is not a feed (a maintenance page, a block page, HTML) -> :class:`UnexpectedResponse`.
+- :meth:`NyaaClient.torrent` (a pack's ``.torrent``, read before it is sent) follows the same rules - the same pause
+  between requests, the same retries - and takes only a link on the client's own host: it never fetches an address
+  a feed item happens to carry for another site.
 
 ``get`` is injectable (``get(url, params, timeout) -> response`` with ``status_code``, ``headers``, ``content``) so
 tests never touch the network; so are ``sleep`` and ``clock``.
@@ -19,6 +22,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import requests
 
@@ -36,6 +40,7 @@ DEFAULT_MIN_INTERVAL = 2.0
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_MAX_RETRY_AFTER = 60.0
 MAX_BODY_BYTES = 8 * 1024 * 1024
+TORRENT_ACCEPT = "application/x-bittorrent, */*"
 
 
 # --- errors -------------------------------------------------------------------------------------------
@@ -102,7 +107,8 @@ class NyaaClient:
 
     def _session_get(self, url: str, params: Dict[str, Any], timeout: float) -> requests.Response:
         assert self._session is not None
-        return self._session.get(url, params=params, timeout=timeout, allow_redirects=True)
+        headers = None if url == self.base_url else {"Accept": TORRENT_ACCEPT}     # a .torrent, not the feed
+        return self._session.get(url, params=params, timeout=timeout, allow_redirects=True, headers=headers)
 
     def close(self) -> None:
         if self._session is not None:
@@ -125,12 +131,13 @@ class NyaaClient:
 
     # --- requests ------------------------------------------------------------------------------------
 
-    def _fetch(self, params: Dict[str, Any]) -> bytes:
+    def _fetch(self, params: Dict[str, Any], url: Optional[str] = None) -> bytes:
+        url = url or self.base_url
         attempts = 0
         while True:
             self._pace()
             try:
-                resp = self._get(self.base_url, params, self.timeout)
+                resp = self._get(url, params, self.timeout)
             except requests.exceptions.Timeout:
                 resp, failure = None, Unreachable(f"nyaa did not answer in {self.timeout:.0f} s")
             except requests.exceptions.SSLError:
@@ -189,6 +196,23 @@ class NyaaClient:
             return parse_feed(body)
         except FeedError as exc:
             raise UnexpectedResponse(f"nyaa did not answer with its RSS feed ({exc})") from None
+
+    # --- a release's .torrent -------------------------------------------------------------------------
+
+    def torrent(self, url: str) -> bytes:
+        """The bytes of a release's ``.torrent`` (its ``torrent_url``): a link on this client's host only. The answer
+        must look like a torrent (a bencoded dictionary), not a block page."""
+        link = str(url or "").strip()
+        parts = urlsplit(link)
+        mine = urlsplit(self.base_url)
+        if (parts.scheme not in ("http", "https") or parts.netloc.lower() != mine.netloc.lower() or parts.username
+                or parts.password or any(c in link for c in "\r\n\t ")):
+            raise UnexpectedResponse("the release's torrent link is not on nyaa; not fetched")
+        _log.info("nyaa: fetching the .torrent of a release (%s)", parts.path)
+        body = self._fetch({}, link)
+        if not body.startswith(b"d"):
+            raise UnexpectedResponse("nyaa did not answer with a torrent file")
+        return body
 
 
 __all__ = ["BASE_URL", "CATEGORY_ENGLISH_TRANSLATED", "CATEGORY_RAW", "NyaaClient", "NyaaError", "RateLimited",

@@ -7,6 +7,33 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Upgrades from nyaa: chapters to volumes.** The Download tab's **Upgrades** group is no longer "coming later": a series
+  held as chapters whose English volumes are out gets the same nyaa search and send as missing volumes, picked by you.
+  The volumes are filed into the series folder (MangaList asks where when the chapters they replace sit in a subfolder).
+- **The chapters a filed volume replaces** (only those MangaPixer's volume list puts fully inside it) are handled the way
+  Settings > Automation says: **moved to a holding folder** outside every library (default
+  `/data/appdata/mangalist/replaced`; restorable; emptied after 30 days - choose the period), or **deleted after a
+  confirmation** that lists every file. A line in the Download tab and a Review dialog show what was moved or is waiting
+  (Restore, Move, Delete, Try again, Keep).
+- **Only the missing volumes of a pack.** Before sending, MangaList reads the release's `.torrent` and shows "Only the
+  missing volumes (3 of 23 files, 410 MB of 1.7 GB)" - ticked by default (Settings > Download sources sets the
+  default); qBittorrent then downloads only those files. Untick it for the whole pack. A torrent downloaded in part seeds
+  only what it downloaded. A release with only a magnet link, or whose files say no volume, is sent whole - and says why.
+- **Library picker:** with more than one library, a dropdown in the List's filter bar shows one library or all of them;
+  the table, the chip counts, the Duplicates view and the Download tab's list follow it, and it is remembered. An
+  optional **Library** column (hidden by default) for "All libraries".
+- **Rows appear library by library** while a rescan runs, and **Rescan ▾** rescans one library on its own. A window
+  closed mid-scan keeps the libraries already read.
+- **A download you stopped yourself says so:** "Filed v06-v07 - stopped before its seed goal (ratio 0.70 of 2)" instead of
+  "seeding" (MangaList still never removes it on its own). Right-click it: **Remove now…** removes the torrent and its
+  downloaded copy from qBittorrent after a confirmation and the same library check - the volumes stay in the library.
+- **Duplicates: apply to a chosen few series:** tick the series cards you want and use **Apply to selected (N series, M
+  files)** - next to the per-series Apply and Apply (all).
+- Fixed: the "series' group" tag no longer goes to a copy whose group appears nowhere else in the folder (the copy itself
+  was counted as evidence for its own group).
+- Clearer buttons in the Download tab's In progress list: **Reload list** (shows the latest saved state; asks neither
+  qBittorrent nor MangaPixer) and **Check qBittorrent now** (was "Refresh" and "Check now").
+
 ## [2026.10.8] - 2026-10-09
 
 The seventh MangaList release (testing build): new roots pair with their MangaPixer library on their first scan, Settings > Library shows each root's pairing, Sync now on the MangaPixer card, and a Windows lock-file fix.

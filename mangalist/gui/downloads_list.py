@@ -1,5 +1,5 @@
 """The "In progress" list: every download MangaList has sent to qBittorrent and where it stands (Sent, Downloaded,
-Filed v03-v05 - seeding, Failed: <reason>, ...), with Check now and the time of the next automatic check.
+Filed v03-v05 - seeding, Failed: <reason>, ...), with Check qBittorrent now and the time of the next automatic check.
 
 The records are read off the UI thread (``refresh``); the Download tab shows this list at the bottom and learns the
 records from :attr:`records_loaded`, the downloads dialog shows it alone.
@@ -10,10 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QProgressBar, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QVBoxLayout, QWidget
 
-from ..downloads.contracts import DownloadRecord
+from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .background import BackgroundCall, start_call
 from .download_rules import badge_kind, next_check_text, when_text
 from .download_style import set_tone
@@ -45,16 +45,18 @@ def load_snapshot(backend: DownloadsBackend) -> DownloadsSnapshot:
 
 class DownloadsList(QWidget):
     records_loaded = Signal(object)         # the records (a list of DownloadRecord), newest first
-    check_finished = Signal(bool)           # a "Check now" ended (True: it worked)
+    check_finished = Signal(bool)           # a "Check qBittorrent now" ended (True: it worked)
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None, autostart: bool = True,
-                 heading: str = "In progress", series_name: Optional[Callable[[int], str]] = None):
+                 heading: str = "In progress", series_name: Optional[Callable[[int], str]] = None,
+                 confirm_remove: Optional[Callable[[DownloadRecord], bool]] = None):
         super().__init__(parent)
+        self._confirm_remove = confirm_remove or self._ask_remove
         self.setObjectName("downloadsList")
         self._backend = backend
         self._series_name = series_name
         self._call: Optional[BackgroundCall] = None
-        self._note: Optional[str] = None            # the last "Check now" summary, kept across the reload
+        self._note: Optional[str] = None            # the last "Check qBittorrent now" summary, kept across the reload
         self._check_failed = False
         self._again = False                         # a refresh was asked for while one ran
         self._known_titles: Mapping[int, str] = {}  # names the host knows (the wanted series)
@@ -67,10 +69,15 @@ class DownloadsList(QWidget):
         outer.setSpacing(8)
         self.heading_label = label(heading, "h3")
         self.next_label = label(next_check_text(None), "muted")
-        self.btn_refresh = button("Refresh", link=True)
+        # Owner, 2026-10-09: "These labels need to be more clear" - one re-reads MangaList's own list, the other asks
+        # qBittorrent; neither talks to MangaPixer.
+        self.btn_refresh = button("Reload list", link=True)
+        self.btn_refresh.setToolTip("Show the latest saved state of these downloads (asks neither qBittorrent nor "
+                                    "MangaPixer)")
         self.btn_refresh.clicked.connect(self.refresh)
-        self.btn_check = button("Check now", tip="File finished downloads and remove completed torrents now - the same "
-                                                  "check that runs every hour on its own")
+        self.btn_check = button("Check qBittorrent now", tip="Ask qBittorrent now: file finished downloads and remove "
+                                                              "completed torrents - the same check that runs every hour "
+                                                              "on its own")
         self.btn_check.clicked.connect(self.check_now)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -85,6 +92,8 @@ class DownloadsList(QWidget):
         self.table.horizontalHeaderItem(COL_UPDATED).setTextAlignment(Qt.AlignmentFlag.AlignRight
                                                                      | Qt.AlignmentFlag.AlignVCenter)
         self.table.verticalHeader().setDefaultSectionSize(34)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
         outer.addWidget(self.table, 1)
 
         self.status_label = label("", wrap=True, selectable=True)
@@ -166,7 +175,7 @@ class DownloadsList(QWidget):
         self.btn_check.setEnabled(not busy)
         self.progress.setVisible(busy)
 
-    # --- Check now -------------------------------------------------------------------------------------
+    # --- Check qBittorrent now -------------------------------------------------------------------------------------
 
     def check_now(self) -> bool:
         """Run the downloads check once (off the UI thread), then reload the list."""
@@ -194,6 +203,60 @@ class DownloadsList(QWidget):
         self._on_call_finished()
         self._reload()                       # also after a failure: the list stays right, the message stays
         self.check_finished.emit(not failed)
+
+    # --- Remove now (one filed download, the owner's choice) --------------------------------------------
+
+    def _exec_menu(self, menu: QMenu, pos: QPoint):
+        return menu.exec(pos)
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        row = self.table.rowAt(pos.y())
+        shown = list(self.records)[:MAX_ROWS]
+        if row < 0 or row >= len(shown) or not hasattr(self._backend, "remove_now"):
+            return
+        record = shown[row]
+        menu = QMenu(self.table)
+        act = menu.addAction("Remove now…")
+        filed = record.status == DownloadStatus.FILED
+        act.setEnabled(filed and self._call is None)
+        act.setToolTip("Remove the torrent and its downloaded copy from qBittorrent now - the volumes stay in the "
+                       "library" if filed else "Only a filed download can be removed")
+        menu.setToolTipsVisible(True)
+        if self._exec_menu(menu, self.table.viewport().mapToGlobal(pos)) is act and filed:
+            self.remove_now(record)
+
+    def _ask_remove(self, record: DownloadRecord) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Question, "Remove now?",
+                          f"Remove \"{record.title}\" from qBittorrent, with its downloaded copy?\n\n"
+                          "The volumes MangaList filed stay in the library. The torrent stops seeding.", parent=self)
+        yes = box.addButton("Remove", QMessageBox.ButtonRole.DestructiveRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def remove_now(self, record: DownloadRecord) -> bool:
+        """After the owner's yes: qBittorrent removes this filed download's torrent and downloaded copy (off the UI
+        thread); the same library check as Remove Completed runs first."""
+        if self._call is not None or record.status != DownloadStatus.FILED or not self._confirm_remove(record):
+            return False
+        self._busy(True)
+        set_tone(self.status_label, "")
+        self.status_label.setText("Removing from qBittorrent...")
+        self._check_failed = False
+        backend = self._backend
+        self._call = start_call(lambda: backend.remove_now(record.id), self._on_removed, self._on_remove_error,
+                                self._after_check)
+        return True
+
+    def _on_removed(self, record: DownloadRecord) -> None:
+        self._note = f"Removed from qBittorrent: {record.title}. The volumes stay in the library."
+
+    def _on_remove_error(self, message: str) -> None:
+        self._note = None
+        set_tone(self.status_label, "bad")
+        self.status_label.setText(f"Could not remove it: {message}")
+        self._check_failed = True
 
     # --- closing ---------------------------------------------------------------------------------------
 

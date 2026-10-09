@@ -234,3 +234,10 @@ def test_a_series_that_changed_groups_follows_its_neighbours_not_the_majority(db
 def test_no_usual_group_without_group_information_or_on_a_tie(db, lib):
     build(lib, names("Series c001", "Series c001 [2]", "Series c002 [Alpha]", "Series c002 [Beta]"))
     assert [g.usual_group for g in find_duplicate_files(db)] == [None, None]
+
+
+def test_a_group_only_the_copy_itself_names_is_not_the_series_group(db, lib):
+    # 2026.10.7 picked "Beta" here: the folder favourite counted the duplicate's own file
+    build(lib, names("Series c001", "Series c002", "Series c003", "Series c003 [Beta]", "Series c004"))
+    (group,) = find_duplicate_files(db)
+    assert group.usual_group is None

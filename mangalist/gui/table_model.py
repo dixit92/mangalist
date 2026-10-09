@@ -39,6 +39,7 @@ COLUMNS = [
     "Gaps",
     "Official source",
     "English",
+    "Library",  # the root the series lies in (hidden by default; useful under "All libraries")
 ]
 
 # What the header shows where it differs from the column's name (the name is what the settings remember).
@@ -65,6 +66,7 @@ COL_STATE = 15
 COL_GAPS = 16
 COL_OFFICIAL = 17
 COL_ENGLISH = 18
+COL_LIBRARY = 19
 STATE_COLUMNS = (COL_STATE, COL_GAPS, COL_OFFICIAL)
 
 # Extra roles for the List tab's delegates (list_delegates.py).
@@ -112,6 +114,9 @@ class MangaTableModel(QAbstractTableModel):
         self._mu_processing_row: Optional[int] = None
         # Map of mu_title -> list of row indices (for duplicate detection)
         self._dupe_map: dict[str, List[int]] = {}
+        # The library picked in the List tab (a root id; None = all libraries): duplicates are looked for inside it.
+        self._scope: Optional[int] = None
+        self._root_names: Dict[int, str] = {}
         # series folder -> (volume numbers, chapter numbers) held by more than one file (lane C's finder, counted by
         # the window off the UI thread)
         self._dupe_files: Dict[str, Tuple[int, int]] = {}
@@ -234,20 +239,53 @@ class MangaTableModel(QAbstractTableModel):
             return e
         return mangapixer_view(e, got[2])
 
+    # --- library scope ---------------------------------------------------------------------------------------
+
+    def set_root_names(self, names: Dict[int, str]) -> None:
+        """Root id -> the name the Library column shows."""
+        self._root_names = dict(names)
+        if self._entries:
+            self.dataChanged.emit(self.index(0, COL_LIBRARY), self.index(len(self._entries) - 1, COL_LIBRARY),
+                                  [Qt.DisplayRole, Qt.UserRole])
+
+    def library_name(self, root_id: Optional[int]) -> str:
+        return self._root_names.get(root_id, "") if root_id is not None else ""
+
+    def scope(self) -> Optional[int]:
+        return self._scope
+
+    def set_scope(self, root_id: Optional[int]) -> None:
+        """Look at one library (a root id) or all (None): a series counts as a duplicate when its twin lies in the
+        same library, so the Dupe column and the Duplicates chip agree with the rows the picker lets through."""
+        if root_id == self._scope:
+            return
+        self._scope = root_id
+        self._rebuild_dupe_map()
+        if self._entries:
+            self.dataChanged.emit(self.index(0, COL_DUPE), self.index(len(self._entries) - 1, COL_DUPE),
+                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def in_scope(self, row: int) -> bool:
+        e = self.entry_at(row)
+        return e is not None and (self._scope is None or e.root_id == self._scope)
+
+    def scope_rows(self) -> List[int]:
+        return [r for r in range(len(self._entries)) if self.in_scope(r)]
+
+    def entries(self) -> List[MangaEntry]:
+        return list(self._entries)
+
     def _rebuild_dupe_map(self) -> None:
-        """Build a map of mu_title -> list of row indices with that MU title."""
+        """Build a map of mu_title -> list of row indices with that MU title (inside the library picked, if any)."""
         self._dupe_map.clear()
         for i, e in enumerate(self._entries):
-            if e.mu_title is not None:
+            if e.mu_title is not None and (self._scope is None or e.root_id == self._scope):
                 # Normalize for comparison (case-insensitive, strip whitespace)
-                key = e.mu_title.strip().lower()
-                if key not in self._dupe_map:
-                    self._dupe_map[key] = []
-                self._dupe_map[key].append(i)
+                self._dupe_map.setdefault(e.mu_title.strip().lower(), []).append(i)
 
     def is_duplicate(self, row: int) -> bool:
-        """Return True if this row shares an MU title with another row."""
-        if row < 0 or row >= len(self._entries):
+        """Return True if this row shares an MU title with another row (of the library picked, if any)."""
+        if row < 0 or row >= len(self._entries) or not self.in_scope(row):
             return False
         e = self._entries[row]
         if e.mu_title is None:
@@ -257,7 +295,7 @@ class MangaTableModel(QAbstractTableModel):
 
     def get_duplicate_rows(self, row: int) -> List[int]:
         """Return list of other row indices that share the same MU title."""
-        if row < 0 or row >= len(self._entries):
+        if row < 0 or row >= len(self._entries) or not self.in_scope(row):
             return []
         e = self._entries[row]
         if e.mu_title is None:
@@ -410,6 +448,8 @@ class MangaTableModel(QAbstractTableModel):
                 return e.title
             if col == COL_ENG:
                 return e.english_title or ""
+            if col == COL_LIBRARY:
+                return self.library_name(e.root_id)
             if col == COL_FILES:
                 return e.n_files
             if col == COL_SUBS:
@@ -534,6 +574,8 @@ class MangaTableModel(QAbstractTableModel):
                 return e.title.lower()
             if col == COL_ENG:
                 return (e.english_title or "").lower()
+            if col == COL_LIBRARY:
+                return self.library_name(e.root_id).lower()
             if col == COL_MTIME:
                 return e.last_modified
             if col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED):

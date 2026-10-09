@@ -2,5 +2,6 @@
 -r requirements.txt
 
 pytest>=8.0
+pytest-xdist>=3.5    # parallel test workers (CI and the dev box's verify)
 pyinstaller>=6.0
 pillow>=10.0          # packaging/make_icon.py (installer icons)
