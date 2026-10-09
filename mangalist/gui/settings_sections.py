@@ -32,6 +32,7 @@ from .downloads_backend import BackendError, DownloadsBackend
 from .settings_common import SectionPage, placeholder
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
 from .shell import SECTION_SERVICES
+from ..downloads.options import KEY_PARTIAL_DOWNLOADS
 
 SOURCES_LEAD = "Where releases come from. A source works only when the service it needs is connected."
 MATCHING_LEAD = "Where series information comes from. Not download sources."
@@ -72,6 +73,13 @@ class SourcesPage(SectionPage):
                                  self.trusted_check, self.seeders_check)):
             grid.addWidget(box, i // 2, i % 2)
         nv.addLayout(grid)
+        self.partial_check = checkbox("Download only the missing volumes of a pack", True,
+                                      tip="New sends start with \"Only the missing volumes\" ticked; untick it for one "
+                                          "send to download the whole pack. A torrent that skips files seeds only what "
+                                          "it downloaded.")
+        nv.addWidget(self.partial_check)
+        nv.addWidget(label("qBittorrent skips the files of a pack that hold no missing volume. You choose again "
+                           "for every send.", "muted", wrap=True))
         self.body.addWidget(nyaa)
 
         suwayomi = card("quiet")
@@ -98,10 +106,13 @@ class SourcesPage(SectionPage):
         self.refresh()
         for box in (self.on_check, self.english_check, self.raw_check, self.novels_check, self.trusted_check):
             box.toggled.connect(self._changed)
+        self.partial_check.toggled.connect(self._partial_changed)
 
     def refresh(self) -> None:
         self._loading = True
         opts = load_nyaa_options(self._db)
+        self.partial_check.setChecked(get_flag(self._db, KEY_PARTIAL_DOWNLOADS))
+        self.partial_check.setEnabled(self._backend is not None)
         self.on_check.setChecked(opts.enabled)
         self.english_check.setChecked(opts.english)
         self.raw_check.setChecked(opts.raw)
@@ -131,6 +142,11 @@ class SourcesPage(SectionPage):
             text, kind = ("Ready", "ok") if configured else ("Needs qBittorrent", "warn")
         self.nyaa_badge.setText(text)
         set_prop(self.nyaa_badge, "badge", kind)
+
+    def _partial_changed(self, on: bool) -> None:
+        if self._loading:
+            return
+        set_flag(self._db, KEY_PARTIAL_DOWNLOADS, on)       # read when a release is selected: nothing to reload
 
     def _changed(self, *_args) -> None:
         if self._loading:

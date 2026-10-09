@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional, Sequence, Tuple
 
+from ..classifier import _human
 from ..parsing import Kind, ParseContext, parse_name
 from ..parsing.model import plain
 from ..scanner import ARCHIVE_EXTS
@@ -105,6 +106,35 @@ class PackOutcome:
     partial: bool
     selection: PackSelection
     note: str = ""                      # why the whole pack was sent, when it was
+
+
+def size_text(size: int) -> str:
+    """``410 MB``, ``1.7 GB`` (the classifier's size text, without a useless ``.0``)."""
+    return _human(size).replace(".0 ", " ")
+
+
+def describe(selection: PackSelection) -> str:
+    """``3 of 23 files, 410 MB of 1.7 GB`` - what a partial download keeps of the pack."""
+    return (f"{selection.kept_files} of {selection.total_files} files, "
+            f"{size_text(selection.kept_bytes)} of {size_text(selection.total_bytes)}")
+
+
+def describe_whole(selection: PackSelection) -> str:
+    """``23 files, 1.7 GB`` - the whole pack."""
+    return f"{selection.total_files} file{'s' if selection.total_files != 1 else ''}, {size_text(selection.total_bytes)}"
+
+
+def file_lines(selection: PackSelection, limit: int = 12) -> str:
+    """A short list for a tooltip: the files kept, then the files skipped (each capped at *limit*)."""
+    out = []
+    for title, keep in (("Downloaded:", True), ("Not downloaded:", False)):
+        rows = [f for f in selection.files if f.keep == keep]
+        if rows:
+            out.append(title)
+            out.extend(f"  {posixpath.basename(f.name)}" for f in rows[:limit])
+            if len(rows) > limit:
+                out.append(f"  ... and {len(rows) - limit} more")
+    return "\n".join(out)
 
 
 def hint_for(candidate: NyaaCandidate) -> Optional[str]:
@@ -189,4 +219,4 @@ def log_selection(title: str, selection: PackSelection, where: str) -> None:
 
 
 __all__ = ["FileChoice", "MAX_LOGGED_FILES", "PackOutcome", "PackSelection", "choose_files", "choose_from_live",
-           "hint_for", "log_selection", "priority_changes"]
+           "describe", "describe_whole", "file_lines", "hint_for", "log_selection", "priority_changes", "size_text"]
