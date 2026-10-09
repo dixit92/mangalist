@@ -11,7 +11,6 @@ folder is chosen. Nothing is sent without a confirmation that names the series, 
 from __future__ import annotations
 
 import html
-import webbrowser
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Callable, List, Optional, Sequence
@@ -37,6 +36,7 @@ from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, 
 from .downloads_backend import DownloadsBackend
 from .tables import resizable_columns
 from .volumes_target import VolumeTarget, numbers_text, volume_label
+from .links import open_link
 
 ConfirmFn = Callable[[QWidget, str], bool]
 
@@ -111,7 +111,7 @@ class ReleasesPanel(QWidget):
         self.setObjectName("releasesPanel")
         self._backend = backend
         self._confirm = confirm or _default_confirm
-        self._open_url = open_url or webbrowser.open
+        self._open_url = open_url or open_link
         self.managed = managed
         self.source_label = source_label
         self.target: Optional[VolumeTarget] = None

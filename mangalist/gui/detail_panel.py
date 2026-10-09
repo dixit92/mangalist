@@ -28,6 +28,7 @@ from ..models import MangaEntry
 from ..states import ATTENTION_LABELS, SeriesState
 from . import theme
 from .list_text import english_text, holds_text, match_text
+from .links import open_link
 
 MAX_SAMPLE_FILES = 30
 LABEL_WIDTH = 96
@@ -141,7 +142,8 @@ class DetailPanel(QWidget):
         self._links_label = QLabel("-")
         self._links_label.setWordWrap(True)
         self._links_label.setTextFormat(Qt.TextFormat.RichText)
-        self._links_label.setOpenExternalLinks(True)
+        self._links_label.setOpenExternalLinks(False)
+        self._links_label.linkActivated.connect(open_link)       # copied where there is no browser (the container)
         self._links_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         lb.addWidget(self._links_label)
         root.addWidget(self._links_box)

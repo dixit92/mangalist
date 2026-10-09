@@ -133,7 +133,10 @@ The List tab's **Duplicates** chip shows series held in more than one folder (to
 duplicate files: the same chapter or volume number in two files of one folder, by MangaPixer's rule. Mark each
 file **Keep** or **Discard** (by default the newest is kept), then **Apply**: MangaList lists every file it is
 about to delete and deletes them only after you confirm. There is no holding folder - the files are gone - and at
-least one copy of each number always stays.
+least one copy of each number always stays. Each series also has its own **Apply for this series**, and right-clicking
+a series in the List offers **Review duplicate files** for that series alone. **Open in MangaPixer** opens a series'
+page there, to compare the copies in its reader. (In the container, which has no browser, links are copied to the
+clipboard instead.)
 
 ## Build and release
 

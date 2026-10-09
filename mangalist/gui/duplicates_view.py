@@ -49,6 +49,7 @@ from ..duplicates import (
     newest,
 )
 from .background import BackgroundCall, start_call
+from .links import open_link
 from .shell import DuplicateFile, DuplicateGroup, DuplicateSeries
 
 _log = logging.getLogger(__name__)
@@ -250,6 +251,9 @@ class DuplicatesView(QWidget):
 
     ``show_in_list(folder)``: the owner wants that series in the List. ``files_deleted(paths)``: these files were deleted
     (the shell rescans). ``groups_found(n)``: the number of duplicate numbers the last scan found (for a chip's count).
+
+    Each series card has its own Apply (that series only) and, when the shell gives :meth:`set_series_link`, "Open in
+    MangaPixer" (the series' page there, to judge the copies in its reader). :meth:`focus_series` shows one series only.
     """
 
     show_in_list = Signal(str)
@@ -275,6 +279,9 @@ class DuplicatesView(QWidget):
         self._applying = False
         self._blocked: Optional[str] = None
         self._scan_error = ""
+        self._series_link: Optional[Callable[[str], Optional[str]]] = None
+        self._focus: Optional[str] = None                   # a series folder: show only its duplicate files
+        self._card_apply: Dict[Tuple[Optional[int], str], QPushButton] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -294,12 +301,18 @@ class DuplicatesView(QWidget):
         self.series_box = QVBoxLayout()
         self.series_box.setSpacing(10)
         self.files_heading = _label("", "heading")
+        self.show_all_button = _button("Show all series", "link")
+        self.show_all_button.clicked.connect(lambda: self.focus_series(None))
+        self.show_all_button.hide()
         self.files_box = QVBoxLayout()
         self.files_box.setSpacing(10)
         self._body_layout.addWidget(self.series_heading)
         self._body_layout.addLayout(self.series_box)
         self._body_layout.addSpacing(14)
-        self._body_layout.addWidget(self.files_heading)
+        files_head = QHBoxLayout()
+        files_head.addWidget(self.files_heading, 1)
+        files_head.addWidget(self.show_all_button)
+        self._body_layout.addLayout(files_head)
         self._body_layout.addLayout(self.files_box)
         self._body_layout.addStretch(1)
 
@@ -438,23 +451,33 @@ class DuplicatesView(QWidget):
         self._scan_error = message
         self._update_summary()
 
+    def _shown_groups(self) -> List[DuplicateGroup]:
+        if self._focus is None:
+            return self._groups
+        return [g for g in self._groups if os.path.normpath(g.folder) == os.path.normpath(self._focus)]
+
     def _render_files(self) -> None:
         _clear(self.files_box)
         self._rows.clear()
         self._by_group.clear()
-        n_groups = len(self._groups)
-        n_series = len({(g.series_id, g.folder) for g in self._groups})
-        self.files_heading.setText("DUPLICATE FILES WITHIN A SERIES"
-                                   + (f"  ·  {n_groups} number{'s' if n_groups != 1 else ''} in "
-                                      f"{n_series} series" if n_groups else ""))
+        self._card_apply.clear()
+        groups = self._shown_groups()
+        n_groups = len(groups)
+        n_series = len({(g.series_id, g.folder) for g in groups})
+        self.show_all_button.setVisible(self._focus is not None)
+        heading = "DUPLICATE FILES WITHIN A SERIES" if self._focus is None else "DUPLICATE FILES IN THIS SERIES"
+        self.files_heading.setText(heading + (f"  ·  {n_groups} number{'s' if n_groups != 1 else ''} in "
+                                              f"{n_series} series" if n_groups else ""))
         if not n_groups:
-            self.files_box.addWidget(_label("No number is held by more than one file of a folder."
-                                            if not self._scanning else "Looking for duplicate files...", "muted"))
+            empty = ("Looking for duplicate files..." if self._scanning
+                     else "No number is held by more than one file of a folder." if self._focus is None
+                     else "This series has no duplicate files.")
+            self.files_box.addWidget(_label(empty, "muted"))
             return
         card: Optional[QFrame] = None
         card_box: Optional[QVBoxLayout] = None
         current = None
-        for group in self._groups:
+        for group in groups:
             key = (group.series_id, group.folder)
             if key != current:
                 current = key
@@ -466,9 +489,20 @@ class DuplicatesView(QWidget):
                 head.addWidget(_label(group.title, "title"))
                 head.addSpacing(8)
                 head.addWidget(_Elided(group.folder, tone="muted"), 1)
+                url = self._link_for(group.folder)
+                if url:
+                    mp = _button("Open in MangaPixer", "link")
+                    mp.setToolTip(f"The series in MangaPixer, to compare the copies in its reader\n{url}")
+                    mp.clicked.connect(lambda _=False, u=url: self.open_link(u))
+                    head.addWidget(mp)
                 show = _button("Show in list", "link")
                 show.clicked.connect(lambda _=False, f=group.folder: self.show_in_list.emit(f))
                 head.addWidget(show)
+                only = _button("Apply for this series", "link")
+                only.setToolTip("Delete the files marked Discard in this series only (after you confirm)")
+                only.clicked.connect(lambda _=False, k=key: self.apply(series=k))
+                head.addWidget(only)
+                self._card_apply[key] = only
                 card_box.addLayout(head)
                 self.files_box.addWidget(card)
             card_box.addLayout(self._group_block(group))
@@ -533,6 +567,10 @@ class DuplicatesView(QWidget):
         busy = self._applying or self._scanning
         self.apply_button.setText(f"Apply ({len(discards)})" if discards else "Apply")
         self.apply_button.setEnabled(bool(discards) and not busy and not self._blocked)
+        for key, button in self._card_apply.items():
+            n = sum(1 for g, rows in self._by_group if (g.series_id, g.folder) == key for r in rows if r.discard)
+            button.setText(f"Apply for this series ({n})" if n else "Apply for this series")
+            button.setEnabled(bool(n) and not busy and not self._blocked)
         self.refresh_button.setEnabled(not self._applying)
         if self._scan_error:
             self.status.setText(f"Could not look for duplicates: {self._scan_error}")
@@ -548,13 +586,45 @@ class DuplicatesView(QWidget):
         else:
             self.status.setText("")
 
+    # --- one series, MangaPixer links -----------------------------------------------------------------------
+
+    def focus_series(self, folder: Optional[str]) -> None:
+        """Show only *folder*'s duplicate files (the List's "Review duplicate files"), or every series (None). The
+        Keep / Discard choices of the other series are kept."""
+        self._focus = folder
+        self._render_files()
+        self._update_summary()
+        self._scroll.verticalScrollBar().setValue(0)
+
+    def set_series_link(self, link: Optional[Callable[[str], Optional[str]]]) -> None:
+        """*link(series folder)* -> the series' page in MangaPixer, or None (not known there / not connected)."""
+        self._series_link = link
+        self._render_files()
+        self._update_summary()
+
+    def _link_for(self, folder: str) -> Optional[str]:
+        if self._series_link is None:
+            return None
+        try:
+            return self._series_link(folder) or None
+        except Exception:  # noqa: BLE001 - a link is a convenience; it must not break the list
+            _log.warning("No MangaPixer link for %s", folder, exc_info=True)
+            return None
+
+    def open_link(self, url: str) -> None:
+        """Open *url* in the browser. Where there is none (the container's desktop), copy it and say so."""
+        if not open_link(url):
+            self._show_report([f"No browser here, so the link is copied - paste it into your browser: {url}"], error=False)
+
     # --- apply --------------------------------------------------------------------------------------------
 
-    def apply(self) -> None:
-        """Delete the files marked Discard - after the owner has seen every one of them and said yes."""
+    def apply(self, series: Optional[Tuple[Optional[int], str]] = None) -> None:
+        """Delete the files marked Discard - after the owner has seen every one of them and said yes. *series*
+        ``(series id, folder)``: that series' files only (its card's own Apply)."""
         if self._applying or self._scanning:
             return
-        selections = [(group, [r.file.path for r in rows if r.discard]) for group, rows in self._by_group]
+        selections = [(group, [r.file.path for r in rows if r.discard]) for group, rows in self._by_group
+                      if series is None or (group.series_id, group.folder) == series]
         selections = [(g, paths) for g, paths in selections if paths]
         files = [f for g, paths in selections for f in g.files if f.path in set(paths)]
         if not files:
