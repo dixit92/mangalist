@@ -40,7 +40,7 @@ from ..downloads.contracts import DownloadRecord, NyaaCandidate, Placement
 from ..downloads.partial import PackSelection, describe, describe_whole, file_lines
 from .background import BackgroundCall, start_call
 from .download_rules import release_why
-from .download_style import FONT_MONO, set_tone
+from .download_style import FONT_MONO, set_prop, set_tone
 from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, flat_table, hbox, label
 from .downloads_backend import DownloadsBackend
 from .tables import resizable_columns
@@ -698,6 +698,7 @@ class ReleasesPanel(QWidget):
         self.partial_check.blockSignals(False)
         self.partial_note.setText(note)
         self.partial_note.setToolTip(tip)
+        set_prop(self.partial_note, "role", "" if tone else "muted")         # the muted colour would hide the tone
         set_tone(self.partial_note, tone)
 
     def _failed_reason(self) -> str:
