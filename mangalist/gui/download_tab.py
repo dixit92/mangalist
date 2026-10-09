@@ -1,0 +1,607 @@
+"""The Download tab: what to get (left), the selected series' releases (right) and what is in progress (bottom right).
+
+**To get** lists the shell's :class:`~mangalist.gui.shell.WantedSeries` in three groups - Missing volumes (nyaa), Missing
+chapters (needs Suwayomi), Upgrades (later) - with a filter, a checkbox per series, each series' gaps and what is going
+on with it (a search, a download). **Releases** is the find-volumes panel for the selected series
+(:class:`~mangalist.gui.releases_panel.ReleasesPanel`): selecting a series searches nyaa for it (a short pause first, so
+arrowing through the list asks nothing) and keeps the result for the session; a series that cannot be searched says why.
+**Find releases for selected** searches every checked series one after another - the backend keeps nyaa's politeness
+delay - and marks each "Releases ready"; there is no "send all". **In progress** is the downloads list with Check now.
+
+Every backend call runs off the UI thread (:mod:`.background`); the search queue runs one series at a time.
+"""
+
+from __future__ import annotations
+
+from collections import deque
+from typing import Callable, Deque, Dict, List, Optional, Sequence
+
+from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QFrame,
+    QHBoxLayout,
+    QLineEdit,
+    QStyle,
+    QStyleOptionViewItem,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..downloads.contracts import DownloadRecord
+from .background import describe_error, start_call
+from .download_rules import (
+    GROUP_NOTES,
+    GROUP_TITLES,
+    SEARCH_FAILED,
+    SEARCH_NONE,
+    SEARCH_QUEUED,
+    SEARCH_READY,
+    SEARCH_RUNNING,
+    count_text,
+    grouped,
+    not_findable_reason,
+    row_status,
+)
+from .download_style import FONT_MONO, apply_style, set_tone
+from .download_widgets import ROLE_ASIDE, ROLE_SUB, TwoLineDelegate, button, hbox, label
+from .downloads_backend import DownloadsBackend
+from .downloads_list import DownloadsList
+from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
+from .shell import GROUP_CHAPTERS, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
+from .volumes_target import VolumeTarget, latest_by_series
+
+ROLE_FOLDER = Qt.ItemDataRole.UserRole + 10
+ROLE_HEADER = Qt.ItemDataRole.UserRole + 11       # a group header's text
+ROLE_NOTE_TONE = Qt.ItemDataRole.UserRole + 12
+
+REFRESH_MS = 60_000
+SEARCH_DELAY_MS = 350          # a pause after selecting a series, before it is searched
+_NOTE_COLORS = {"muted": "#5a5a57", "warn": "#8a3f00"}
+
+
+def run_lookup(backend: DownloadsBackend, target: VolumeTarget) -> SearchOutcome:
+    """The target folder and the nyaa search for one series (runs off the UI thread; a failure of either is part of the
+    outcome, shown in the panel)."""
+    outcome = SearchOutcome(target)
+    try:
+        outcome.placement = backend.placement(target.series_id)
+    except Exception as exc:  # noqa: BLE001 - shown to the owner
+        outcome.placement_error = describe_error(exc)
+    try:
+        outcome.candidates = list(backend.search(target.titles, target.missing, target.held))
+    except Exception as exc:  # noqa: BLE001
+        outcome.error = describe_error(exc)
+    return outcome
+
+
+class _ToGetDelegate(TwoLineDelegate):
+    """Series rows as the two-line cell; a group header as small caps-like text with its note at the right."""
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        if index.data(ROLE_HEADER):
+            return QSize(option.rect.width(), 36)
+        return super().sizeHint(option, index)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        header = index.data(ROLE_HEADER)
+        if not header:
+            return super().paint(painter, option, index)
+        painter.save()
+        rect = option.rect.adjusted(16, 8, -16, 0)
+        font = QFont(option.font)
+        font.setPointSizeF(max(option.font.pointSizeF() - 2, 7.0))
+        font.setWeight(QFont.Weight.DemiBold)
+        font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 104)
+        painter.setFont(font)
+        painter.setPen(QColor("#3a3a38"))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, str(header))
+        note = index.data(ROLE_ASIDE) or ""
+        if note:
+            font.setWeight(QFont.Weight.Normal)
+            painter.setFont(font)
+            painter.setPen(QColor(_NOTE_COLORS.get(index.data(ROLE_NOTE_TONE) or "muted", "#5a5a57")))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, str(note))
+        painter.restore()
+
+
+class DownloadTab(QWidget):
+    count_changed = Signal(int)             # how many series are to get (the tab's badge)
+    show_in_list = Signal(str)              # a series folder: show it in the List tab
+    settings_requested = Signal(str)        # a section of the Settings dialog (SECTION_*)
+
+    def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
+                 confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
+                 autostart: bool = True, refresh_ms: int = REFRESH_MS, search_delay_ms: int = SEARCH_DELAY_MS):
+        super().__init__(parent)
+        self.setObjectName("downloadTab")
+        self._backend = backend
+        self._wanted: List[WantedSeries] = []
+        self._by_folder: Dict[str, WantedSeries] = {}
+        self._series_ids: Dict[str, Optional[int]] = {}
+        self._checked: set = set()
+        self._results: Dict[str, SearchOutcome] = {}
+        self._signatures: Dict[str, tuple] = {}
+        self._states: Dict[str, str] = {}
+        self._queue: Deque[str] = deque()
+        self._running: Optional[str] = None
+        self._calls: list = []
+        self._bulk_total = 0
+        self._bulk_done = 0
+        self._bulk_notes = ""
+        self._latest: Dict[int, DownloadRecord] = {}
+        self._items: Dict[str, QTreeWidgetItem] = {}
+        self._header_items: Dict[str, QTreeWidgetItem] = {}
+        self._current: Optional[str] = None
+        self._pending_focus: Optional[str] = None
+        self._rebuilding = False
+        self._stopped = False
+        self._build_ui(confirm, open_url)
+        self._delay = QTimer(self)
+        self._delay.setSingleShot(True)
+        self._delay.setInterval(search_delay_ms)
+        self._delay.timeout.connect(self._search_selected)
+        self._refresh_timer: Optional[QTimer] = None
+        if refresh_ms > 0:
+            self._refresh_timer = QTimer(self)
+            self._refresh_timer.setInterval(refresh_ms)
+            self._refresh_timer.timeout.connect(self.downloads.refresh)
+            self._refresh_timer.start()
+        apply_style(self)
+        if autostart:
+            self.downloads.refresh()
+
+    # --- UI ------------------------------------------------------------------------------------------
+
+    def _build_ui(self, confirm, open_url) -> None:
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        left = QFrame()
+        left.setObjectName("toGetPanel")
+        left.setFixedWidth(400)
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.setSpacing(0)
+
+        head = QFrame()
+        head.setObjectName("toGetHeader")
+        hv = QVBoxLayout(head)
+        hv.setContentsMargins(16, 16, 16, 10)
+        hv.setSpacing(10)
+        self.count_label = label("0 series", "muted")
+        hv.addLayout(hbox(label("To get", "h1"), None, self.count_label))
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("Filter")
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.setAccessibleName("Filter series to get")
+        self.filter_edit.textChanged.connect(self._rebuild)
+        hv.addWidget(self.filter_edit)
+        lv.addWidget(head)
+
+        self.tree = QTreeWidget()
+        self.tree.setObjectName("toGetTree")
+        self.tree.setHeaderHidden(True)
+        self.tree.setColumnCount(1)
+        self.tree.setRootIsDecorated(False)
+        self.tree.setIndentation(0)
+        self.tree.setItemsExpandable(False)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tree.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.tree.setFrameShape(QFrame.Shape.NoFrame)
+        self.tree.setItemDelegate(_ToGetDelegate(self.tree, mono_sub=True, row_height=46, left_pad=12))
+        self.tree.currentItemChanged.connect(self._on_current_changed)
+        self.tree.itemChanged.connect(self._on_item_changed)
+        lv.addWidget(self.tree, 1)
+
+        foot = QFrame()
+        foot.setObjectName("toGetFooter")
+        fv = QVBoxLayout(foot)
+        fv.setContentsMargins(16, 12, 16, 12)
+        fv.setSpacing(6)
+        self.selected_label = label("0 selected", "lead")
+        self.btn_find = button("Find releases for selected", primary=True)
+        self.btn_find.setMinimumHeight(36)
+        self.btn_find.clicked.connect(self.find_selected)
+        fv.addLayout(hbox(self.selected_label, None, self.btn_find))
+        self.bulk_label = label("", "muted", wrap=True)
+        self.bulk_label.setVisible(False)
+        fv.addWidget(self.bulk_label)
+        lv.addWidget(foot)
+        root.addWidget(left)
+
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(0)
+        top = QWidget()
+        tv = QVBoxLayout(top)
+        tv.setContentsMargins(20, 18, 20, 18)
+        self.releases = ReleasesPanel(self._backend, top, confirm=confirm, open_url=open_url, managed=True,
+                                      source_label=self._source_label())
+        self.releases.search_again.connect(self._search_again)
+        self.releases.sent.connect(self._on_sent)
+        self.releases.settings_requested.connect(self.settings_requested)
+        tv.addWidget(self.releases)
+        right.addWidget(top, 1)
+
+        bottom = QFrame()
+        bottom.setObjectName("inProgressPanel")
+        bottom.setFixedHeight(270)
+        bv = QVBoxLayout(bottom)
+        bv.setContentsMargins(20, 14, 20, 14)
+        self.downloads = DownloadsList(self._backend, bottom, autostart=False)
+        self.downloads.records_loaded.connect(self._on_records)
+        bv.addWidget(self.downloads)
+        right.addWidget(bottom)
+        root.addLayout(right, 1)
+
+    def _source_label(self) -> str:
+        options_fn = getattr(self._backend, "nyaa_options", None)
+        try:
+            options = options_fn() if options_fn else None
+        except Exception:  # noqa: BLE001 - a label only
+            options = None
+        if options is None or (options.english and not options.raw) or not (options.english or options.raw):
+            return "nyaa · English"
+        return "nyaa · Raw" if not options.english else "nyaa · English + Raw"
+
+    # --- the shell's data -------------------------------------------------------------------------------
+
+    def set_wanted(self, series: Sequence[WantedSeries]) -> None:
+        """The "To get" list (the shell sends it after every scan / sync). Results of an earlier search are kept for a
+        series whose wanted volumes did not change."""
+        self._wanted = list(series)
+        self._by_folder = {s.folder: s for s in self._wanted}
+        self._series_ids = {s.folder: s.series_id if s.series_id is not None else self._backend.series_id_for(s.folder)
+                            for s in self._wanted}
+        for folder in list(self._results):
+            if folder not in self._by_folder or self._signatures.get(folder) != self._signature(self._by_folder[folder]):
+                self._results.pop(folder, None)
+                self._states.pop(folder, None)
+        self._checked &= set(self._by_folder)
+        self._queue = deque(f for f in self._queue if f in self._by_folder)
+        self._rebuild()
+        self.downloads.set_known_titles({sid: self._by_folder[f].title for f, sid in self._series_ids.items()
+                                         if sid is not None})
+        if self._current in self._by_folder and self._current not in self._results:
+            self._show_series(self._current, now=False)      # its wanted volumes changed: look again
+        self.count_changed.emit(len(self._wanted))
+
+    @staticmethod
+    def _signature(item: WantedSeries) -> tuple:
+        return (item.missing, item.held, item.titles, item.findable)
+
+    # --- the list ---------------------------------------------------------------------------------------
+
+    def _rebuild(self, *_args) -> None:
+        current = self._current
+        self._rebuilding = True
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        self._items.clear()
+        self._header_items.clear()
+        shown_total = 0
+        for group, items in grouped(self._wanted, self.filter_edit.text()):
+            header = QTreeWidgetItem(self.tree)
+            header.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            note, tone = GROUP_NOTES[group]
+            header.setData(0, ROLE_HEADER, f"{GROUP_TITLES[group].upper()} · {len(items)}")
+            header.setData(0, ROLE_ASIDE, note)
+            header.setData(0, ROLE_NOTE_TONE, tone)
+            header.setSizeHint(0, QSize(100, 36))
+            self._header_items[group] = header
+            for series in items:
+                shown_total += 1
+                row = QTreeWidgetItem(self.tree)
+                row.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
+                row.setText(0, series.title)
+                row.setData(0, ROLE_SUB, series.gaps)
+                row.setData(0, ROLE_FOLDER, series.folder)
+                row.setCheckState(0, Qt.CheckState.Checked if series.folder in self._checked else Qt.CheckState.Unchecked)
+                row.setToolTip(0, f"{series.title}\n{series.folder}")
+                self._items[series.folder] = row
+        self.tree.blockSignals(False)
+        self._rebuilding = False
+        self._refresh_statuses()
+        self.count_label.setText(count_text(shown_total, len(self._wanted)))
+        self._update_selected()
+        if current in self._items:
+            self.tree.blockSignals(True)
+            self.tree.setCurrentItem(self._items[current])
+            self.tree.blockSignals(False)
+        elif current is not None:
+            # the series is filtered out or gone: the panel keeps what it shows only while the series exists
+            if current not in self._by_folder:
+                self._current = None
+                self.releases.show_message("", "Select a series to see its releases.")
+
+    def _refresh_statuses(self) -> None:
+        for folder, row in self._items.items():
+            sid = self._series_ids.get(folder)
+            record = self._latest.get(sid) if sid is not None else None
+            row.setData(0, ROLE_ASIDE, row_status(record, self._states.get(folder)))
+
+    def visible_folders(self) -> List[str]:
+        """The folders in the list, top to bottom (after the filter)."""
+        out = []
+        for i in range(self.tree.topLevelItemCount()):
+            folder = self.tree.topLevelItem(i).data(0, ROLE_FOLDER)
+            if folder:
+                out.append(folder)
+        return out
+
+    def status_of(self, folder: str) -> str:
+        item = self._items.get(folder)
+        return (item.data(0, ROLE_ASIDE) or "") if item is not None else ""
+
+    def checked_folders(self) -> List[str]:
+        return [f for f in self.visible_folders() if f in self._checked] + \
+               [f for f in self._checked if f not in self.visible_folders()]
+
+    def set_checked(self, folder: str, checked: bool = True) -> None:
+        item = self._items.get(folder)
+        if item is not None:
+            item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+
+    def _on_item_changed(self, item: QTreeWidgetItem, _col: int) -> None:
+        if self._rebuilding:
+            return
+        folder = item.data(0, ROLE_FOLDER)
+        if not folder:
+            return
+        if item.checkState(0) == Qt.CheckState.Checked:
+            self._checked.add(folder)
+        else:
+            self._checked.discard(folder)
+        self._update_selected()
+
+    def _update_selected(self) -> None:
+        n = len(self._checked)
+        self.selected_label.setText(f"{n} selected")
+        self.btn_find.setEnabled(n > 0 and not self._stopped)
+
+    # --- selecting a series -------------------------------------------------------------------------------
+
+    def focus(self, folder: str) -> None:
+        """Select that series and search it now ("Get the missing volumes" in the List tab)."""
+        if folder not in self._by_folder:
+            return
+        if folder not in self._items and self.filter_edit.text():
+            self.filter_edit.clear()                     # the filter hid it
+        item = self._items.get(folder)
+        if item is None:
+            return
+        self._pending_focus = folder
+        if self.tree.currentItem() is item:
+            self._show_series(folder, now=True)
+        else:
+            self.tree.setCurrentItem(item)
+        self.tree.scrollToItem(item)
+
+    def current_folder(self) -> Optional[str]:
+        return self._current
+
+    def _on_current_changed(self, item: Optional[QTreeWidgetItem], _prev) -> None:
+        folder = item.data(0, ROLE_FOLDER) if item is not None else None
+        if not folder:
+            return
+        now = self._pending_focus == folder
+        self._pending_focus = None
+        self._show_series(folder, now=now)
+
+    def _target_for(self, series: WantedSeries) -> Optional[VolumeTarget]:
+        sid = self._series_ids.get(series.folder)
+        if sid is None:
+            return None
+        return VolumeTarget(series_id=sid, folder=series.folder, title=series.title,
+                            titles=series.titles or (series.title,), missing=series.missing, held=series.held)
+
+    def _show_series(self, folder: str, *, now: bool) -> None:
+        series = self._by_folder.get(folder)
+        if series is None:
+            return
+        self._current = folder
+        self._delay.stop()
+        reason = not_findable_reason(series)
+        if reason:
+            self._show_unavailable(series, reason)
+            return
+        target = self._target_for(series)
+        if target is None:
+            self.releases.show_message(series.title, "MangaList has not scanned this folder yet: rescan first.")
+            return
+        result = self._results.get(folder)
+        if result is not None:
+            self.releases.show_outcome(result)
+            return
+        self.releases.show_searching(target)
+        if self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
+            if self._states.get(folder) == SEARCH_QUEUED:
+                self._enqueue(folder, front=True)
+            return
+        if now:
+            self._search_selected()
+        else:
+            self._delay.start()
+
+    def _show_unavailable(self, series: WantedSeries, reason: str) -> None:
+        needs_suwayomi = series.group == GROUP_CHAPTERS
+        self.releases.show_message(series.title, reason, "Open Settings" if needs_suwayomi else None,
+                                   SECTION_SERVICES if needs_suwayomi else None)
+        self.releases.subtitle_label.setText(f"Wanted: {series.gaps}")
+
+    def _search_selected(self) -> None:
+        folder = self._current
+        if folder is None or folder in self._results or self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
+            return
+        series = self._by_folder.get(folder)
+        if series is None or not_findable_reason(series) or self._target_for(series) is None:
+            return
+        self._enqueue(folder, front=True)
+
+    def _search_again(self) -> None:
+        folder = self._current
+        if folder is None or self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
+            return
+        self._results.pop(folder, None)
+        self._states.pop(folder, None)
+        series = self._by_folder.get(folder)
+        target = self._target_for(series) if series else None
+        if target is not None:
+            self.releases.show_searching(target)
+            self._enqueue(folder, front=True)
+        self._refresh_statuses()
+
+    # --- the search queue ---------------------------------------------------------------------------------
+
+    def _enqueue(self, folder: str, *, front: bool = False) -> None:
+        if folder == self._running:
+            return
+        if folder in self._queue:
+            if front:
+                self._queue.remove(folder)
+                self._queue.appendleft(folder)
+            return
+        (self._queue.appendleft if front else self._queue.append)(folder)
+        self._states[folder] = SEARCH_QUEUED
+        self._refresh_statuses()
+        self._pump()
+
+    def _pump(self) -> None:
+        if self._running is not None or self._stopped:
+            return
+        while self._queue:
+            folder = self._queue.popleft()
+            series = self._by_folder.get(folder)
+            target = self._target_for(series) if series else None
+            if series is None or target is None:
+                self._states.pop(folder, None)
+                continue
+            self._start_lookup(folder, series, target)
+            return
+        self._end_bulk()
+
+    def _start_lookup(self, folder: str, series: WantedSeries, target: VolumeTarget) -> None:
+        self._running = folder
+        self._states[folder] = SEARCH_RUNNING
+        self._signatures[folder] = self._signature(series)
+        self._refresh_statuses()
+        self._show_bulk_progress()
+        if folder == self._current:
+            self.releases.show_searching(target)
+        backend = self._backend
+        made: list = []
+        call = start_call(lambda: run_lookup(backend, target), lambda outcome, f=folder: self._on_outcome(f, outcome),
+                          lambda message, f=folder, t=target: self._on_outcome(
+                              f, SearchOutcome(t, candidates=None, error=message)),
+                          lambda: self._lookup_finished(made[0] if made else None))
+        made.append(call)
+        self._calls.append(call)
+
+    def _on_outcome(self, folder: str, outcome: SearchOutcome) -> None:
+        series = self._by_folder.get(folder)
+        if series is None or self._signatures.get(folder) != self._signature(series):
+            return                                           # the series changed meanwhile: the result is stale
+        self._results[folder] = outcome
+        if outcome.candidates is None:
+            self._states[folder] = SEARCH_FAILED
+        else:
+            self._states[folder] = SEARCH_READY if outcome.candidates else SEARCH_NONE
+        self._bulk_done += 1 if self._bulk_total else 0
+        self._refresh_statuses()
+        if folder == self._current:
+            self.releases.show_outcome(outcome)
+
+    def _lookup_finished(self, call) -> None:
+        if call in self._calls:
+            self._calls.remove(call)
+        self._running = None
+        self._pump()
+
+    # --- bulk ---------------------------------------------------------------------------------------------
+
+    def find_selected(self) -> int:
+        """Search every checked series, one after another. Returns how many were queued."""
+        queued = skipped = ready = 0
+        reasons: List[str] = []
+        for folder in self.checked_folders():
+            series = self._by_folder.get(folder)
+            if series is None:
+                continue
+            reason = not_findable_reason(series)
+            if reason or self._target_for(series) is None:
+                skipped += 1
+                reasons.append(reason or "not scanned yet")
+                continue
+            if folder in self._results:
+                ready += 1
+                continue
+            if self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
+                continue
+            self._enqueue(folder)
+            queued += 1
+        if queued:
+            self._bulk_total += queued
+        notes = []
+        if skipped:
+            notes.append(f"{skipped} skipped ({reasons[0].rstrip('.')})" if len(set(reasons)) == 1 else f"{skipped} skipped")
+        if ready:
+            notes.append(f"{ready} already searched")
+        if not queued:
+            self._set_bulk_text("; ".join(notes) or "Nothing to search.")
+        elif notes:
+            self._bulk_notes = "; ".join(notes)
+        return queued
+
+    def _show_bulk_progress(self) -> None:
+        if not self._bulk_total:
+            return
+        done = min(self._bulk_done + 1, self._bulk_total)
+        text = f"Searching {done} of {self._bulk_total}..."
+        self._set_bulk_text(text + (f" ({self._bulk_notes})" if self._bulk_notes else ""))
+
+    def _end_bulk(self) -> None:
+        if self._bulk_total:
+            text = f"Searched {self._bulk_total}: pick a series to see its releases."
+            if self._bulk_notes:
+                text += f" ({self._bulk_notes})"
+            self._set_bulk_text(text)
+        self._bulk_total = self._bulk_done = 0
+        self._bulk_notes = ""
+
+    def _set_bulk_text(self, text: str) -> None:
+        self.bulk_label.setText(text)
+        self.bulk_label.setVisible(bool(text))
+
+    # --- records -------------------------------------------------------------------------------------------
+
+    def _on_records(self, records: Sequence[DownloadRecord]) -> None:
+        self._latest = latest_by_series(records)
+        self._refresh_statuses()
+
+    def _on_sent(self, _record: DownloadRecord) -> None:
+        self.downloads.refresh()
+
+    def refresh(self) -> None:
+        """Reload the downloads (the hourly timer does this too)."""
+        self.downloads.refresh()
+
+    # --- closing --------------------------------------------------------------------------------------------
+
+    def stop(self) -> None:
+        """On close: abandon the background calls (their results are dropped)."""
+        self._stopped = True
+        self._delay.stop()
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+        self._queue.clear()
+        for call in list(self._calls):
+            call.abandon()
+        self._calls.clear()
+        self.releases.stop()
+        self.downloads.stop()
+        self._update_selected()

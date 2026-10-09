@@ -67,7 +67,7 @@ QLabel[role="muted"] {{ color: {MUTED}; font-size: 13px; }}
 QLabel[role="lead"] {{ color: {MUTED}; }}
 QLabel[role="mono"] {{ font-family: {FONT_MONO}; color: {MUTED}; font-size: 13px; }}
 QLabel[role="name"] {{ font-weight: 700; font-size: 15px; }}
-QLabel[badge] {{ border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; }}
+QLabel[badge] {{ border-radius: 8px; padding: 3px 9px; font-size: 12px; font-weight: 600; }}
 {_badge_rules()}
 {_tone_rules()}
 
@@ -95,10 +95,11 @@ QFrame[card="dashed"] {{ border: 1px dashed {FIELD_LINE}; border-radius: 8px; ba
 QFrame[card="quiet"] {{ border: 1px solid {LINE}; border-radius: 8px; background: #fafaf8; }}
 QFrame[card] QLabel {{ border: none; background: transparent; }}
 QFrame[card] QCheckBox {{ border: none; background: transparent; }}
-QFrame[card] QLabel[badge] {{ border-radius: 10px; }}
 QFrame[card="dashed"] QLabel {{ color: {MUTED}; }}
 
-QTreeWidget#toGetTree {{ border: none; background: #ffffff; outline: 0; }}
+QTreeWidget#toGetTree {{ border: none; background: #ffffff; outline: 0; selection-background-color: {SELECTED};
+                         selection-color: {INK}; }}
+QTreeWidget#toGetTree::item {{ border: none; }}
 QTableWidget#releasesTable, QTableWidget#progressTable {{ border: none; background: #ffffff; gridline-color: #efefec;
                                                           outline: 0; selection-background-color: {SELECTED};
                                                           selection-color: {INK}; alternate-background-color: #ffffff; }}

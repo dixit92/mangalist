@@ -107,7 +107,7 @@ def flat_table(name: str, columns, *, select_rows: bool = True) -> QTableWidget:
     """A read-only table without a grid or row numbers, the look of the mockup's lists."""
     table = QTableWidget(0, len(columns))
     table.setObjectName(name)
-    table.setHorizontalHeaderLabels(list(columns))
+    table.setHorizontalHeaderLabels([c.upper() for c in columns])      # QSS cannot upper-case
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection if select_rows
@@ -127,10 +127,11 @@ class TwoLineDelegate(QStyledItemDelegate):
     """A cell with the text on top (medium weight) and ``ROLE_SUB`` under it (smaller, grey; monospace when
     ``mono_sub``), as the mockup's "To get" rows and release names."""
 
-    def __init__(self, parent=None, *, mono_sub: bool = False, row_height: int = 46):
+    def __init__(self, parent=None, *, mono_sub: bool = False, row_height: int = 46, left_pad: int = 0):
         super().__init__(parent)
         self._mono_sub = mono_sub
         self._height = row_height
+        self._left_pad = left_pad
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         base = super().sizeHint(option, index)
@@ -145,6 +146,10 @@ class TwoLineDelegate(QStyledItemDelegate):
         style = widget.style() if widget is not None else None
         if style is None:
             return super().paint(painter, option, index)
+        if opt.state & QStyle.StateFlag.State_Selected:      # the highlight spans the whole row, the content is padded
+            painter.fillRect(option.rect, option.palette.highlight())
+            opt.state &= ~QStyle.StateFlag.State_Selected
+        opt.rect = opt.rect.adjusted(self._left_pad, 0, 0, 0)
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
         rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, widget).adjusted(4, 0, -4, 0)
         painter.save()
@@ -154,6 +159,18 @@ class TwoLineDelegate(QStyledItemDelegate):
         sub_font.setPointSizeF(max(opt.font.pointSizeF() - 1.5, 7.0))
         if self._mono_sub:
             sub_font.setFamilies([f.strip("' ") for f in FONT_MONO.split(",")])
+        aside = index.data(ROLE_ASIDE) or ""
+        if aside:
+            aside_font = QFont(opt.font)
+            aside_font.setPointSizeF(max(opt.font.pointSizeF() - 1.5, 7.0))
+            aside_fm = QFontMetrics(aside_font)
+            aside_w = min(aside_fm.horizontalAdvance(aside), max(rect.width() // 2, 60))
+            painter.setFont(aside_font)
+            painter.setPen(QColor("#5a5a57"))
+            painter.drawText(QRect(rect.right() - aside_w, rect.top(), aside_w, rect.height()),
+                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                             aside_fm.elidedText(aside, Qt.TextElideMode.ElideRight, aside_w))
+            rect = rect.adjusted(0, 0, -(aside_w + 8), 0)
         top_h = QFontMetrics(top).height()
         sub_h = QFontMetrics(sub_font).height()
         y = rect.top() + (rect.height() - top_h - (sub_h if sub else 0)) // 2
