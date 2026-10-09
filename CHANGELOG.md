@@ -11,6 +11,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
   files)** - next to the per-series Apply and Apply (all).
 - Fixed: the "series' group" tag no longer goes to a copy whose group appears nowhere else in the folder (the copy itself
   was counted as evidence for its own group).
+- Clearer buttons in the Download tab's In progress list: **Reload list** (shows the latest saved state; asks neither
+  qBittorrent nor MangaPixer) and **Check qBittorrent now** (was "Refresh" and "Check now").
 
 ## [2026.10.8] - 2026-10-09
 
