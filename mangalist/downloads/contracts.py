@@ -29,6 +29,9 @@ QBITTORRENT_CATEGORY = "mangalist"
 #: qBittorrent states that mean "finished downloading and stopped" - v5 names, plus v4's for older clients.
 STOPPED_COMPLETE_STATES = frozenset({"stoppedUP", "pausedUP"})
 
+#: ... and "stopped, not finished": what a torrent added stopped (to be configured) shows until it is started.
+STOPPED_DOWNLOADING_STATES = frozenset({"stoppedDL", "pausedDL"})
+
 
 def downloads_enabled(env: Optional[Mapping[str, str]] = None) -> bool:
     """True when downloads are switched on (``MANGALIST_DOWNLOADS``; the Unraid container only, for the MVP)."""
@@ -121,6 +124,8 @@ class TorrentFile:
     name: str                           # path inside the torrent, '/'-separated, as qBittorrent reports it
     size: int
     progress: float
+    index: int = -1                     # qBittorrent's file id (what ``filePrio`` takes); -1: not reported
+    priority: int = 1                   # 0 = do not download; 1 and up = download
 
 
 class TorrentClient(Protocol):
@@ -130,13 +135,28 @@ class TorrentClient(Protocol):
 
     def ensure_category(self, name: str, save_path: str) -> None: ...
 
-    def add(self, url: str, *, category: str) -> None:
-        """Add a torrent by ``.torrent`` URL or magnet link into ``category``."""
+    def add(self, url: str, *, category: str, stopped: bool = False) -> None:
+        """Add a torrent by ``.torrent`` URL or magnet link into ``category`` (``stopped``: added stopped, to be
+        configured before it starts)."""
         ...
 
     def torrents(self, category: str) -> Sequence[TorrentInfo]: ...
 
     def files(self, info_hash: str) -> Sequence[TorrentFile]: ...
+
+    # A partial download (only a pack's missing volumes) is the only user of these three:
+
+    def set_file_priority(self, info_hash: str, file_ids: Sequence[int], priority: int) -> None:
+        """Set the priority of the files with these ids (0 = do not download, 1 = normal)."""
+        ...
+
+    def start(self, info_hash: str) -> None:
+        """Start the torrent (qBittorrent 5's ``start``; 4.x's ``resume``)."""
+        ...
+
+    def stop(self, info_hash: str) -> None:
+        """Stop the torrent (qBittorrent 5's ``stop``; 4.x's ``pause``)."""
+        ...
 
     def delete(self, info_hash: str, *, delete_files: bool) -> None: ...
 
