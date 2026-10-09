@@ -278,6 +278,6 @@ def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, st
         else:
             when = schedule_text(parsed.describe()) if parsed is not None else "off"
             if name == "MANGALIST_DOWNLOADS_SCHEDULE" and parsed is not None:
-                when += " (and Check now)"
+                when += " (and Check qBittorrent now)"
         rows.append((label, when, raw is not None))
     return rows
