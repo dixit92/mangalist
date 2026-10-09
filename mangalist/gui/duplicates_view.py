@@ -539,6 +539,8 @@ class DuplicatesView(QWidget):
         rows: List[_FileRow] = []
         for f in sorted(group.files, key=lambda f: (f.modified, f.size, f.path), reverse=True):
             tags = [t for t, best in (("newest", newest(group)), ("largest", largest(group))) if best is f]
+            if group.usual_group and (f.group or "").strip().casefold() == group.usual_group.strip().casefold():
+                tags.insert(0, "series' group")
             discard = self._choice[f.path] if remembered else f.path != keep.path
             row = _FileRow(f, os.path.relpath(f.path, group.folder), tags, discard)
             row.chosen.connect(lambda path, discard, g=group: self._chose(g, path, discard))

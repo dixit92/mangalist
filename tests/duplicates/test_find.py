@@ -183,3 +183,54 @@ def test_stated_unit_reads_stored_unit_rows():
     assert stated_unit([row(kind="volume", vol_from="2", vol_to="4")]) is None
     chapter = stated_unit([row(kind="volume", vol_from="3"), row(kind="chapter", ch_from="12", ch_to="12", group_name="G")])
     assert (chapter.kind, str(chapter.number), chapter.group) == ("chapter", "12", "G")
+
+
+# --- MangaList's safety rule: copies differ by tags only (owner, 2026-10-09) ---------------------------------------
+
+def test_chapters_named_before_their_volume_are_not_copies_of_the_volume(db, lib):
+    # "009 Vol 01 Title": the parser reads volume 1 only - nine chapters must not become nine copies of volume 1
+    build(lib, names("Sea Series 001 Vol 01 First", "Sea Series 002 Vol 01 Second", "Sea Series 003 Vol 01 Third"))
+    assert find_duplicate_files(db) == []
+
+
+def test_seasons_with_the_same_volume_numbers_are_not_copies(db, lib):
+    build(lib, names("Vamp Series Season 1 v01", "Vamp Series Season 2 v01", "Vamp Series Season 1 v02",
+                     "Vamp Series Season 2 v02"))
+    assert find_duplicate_files(db) == []
+
+
+def test_tags_years_groups_and_fmd2_indexes_still_make_copies(db, lib):
+    build(lib, names("Two.5 Series v08 (2023) (Digital) (GroupA)", "Two.5 Series v08 (2023) (Digital) (GroupB)",
+                     "0002 [Vol. 0001 Ch. 1]", "0001 [Vol. 0001 Ch. 1]"))
+    assert found(find_duplicate_files(db)) == [("volume", "8", 2), ("chapter", "1", 2)]
+
+
+def test_a_real_copy_next_to_a_differently_numbered_name_is_still_found(db, lib):
+    build(lib, names("Sea Series 009 Vol 01 Title", "Sea Series 009 Vol 01 Title (1)", "Sea Series 008 Vol 01 Other"))
+    (group,) = find_duplicate_files(db)
+    assert len(group.files) == 2 and all("009" in os.path.basename(f.path) for f in group.files)
+
+
+# --- the usual group ---------------------------------------------------------------------------------------------
+
+def test_the_copy_from_the_neighbours_group_is_kept_even_when_older(db, lib):
+    for rel, t in (("Series c004 [Alpha].cbz", 1), ("Series c005 [Alpha].cbz", 2), ("Series c005 [Beta].cbz", 9),
+                   ("Series c006 [Alpha].cbz", 3)):
+        lib.add(S, rel, mtime_ns=1_700_000_000_000_000_000 + t * 1_000_000_000)
+    lib.scan()
+    (group,) = find_duplicate_files(db)
+    assert group.usual_group == "Alpha"
+    assert default_keep(group).group == "Alpha" and newest(group).group == "Beta"
+
+
+def test_a_series_that_changed_groups_follows_its_neighbours_not_the_majority(db, lib):
+    rels = [f"Series c{n:03d} [Alpha].cbz" for n in range(1, 8)] + \
+           ["Series c008 [Beta].cbz", "Series c009 [Alpha].cbz", "Series c009 [Beta].cbz", "Series c010 [Beta].cbz"]
+    build(lib, rels)
+    (group,) = find_duplicate_files(db)
+    assert group.number == "9" and group.usual_group == "Beta"          # Beta took over at chapter 8
+
+
+def test_no_usual_group_without_group_information_or_on_a_tie(db, lib):
+    build(lib, names("Series c001", "Series c001 [2]", "Series c002 [Alpha]", "Series c002 [Beta]"))
+    assert [g.usual_group for g in find_duplicate_files(db)] == [None, None]

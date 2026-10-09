@@ -7,6 +7,20 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Fewer false duplicates (safety):** files only count as copies when their names differ by tags alone (`[group]`,
+  `(Digital)`, a year, a copy marker). Names that differ by another number - chapters written before their volume
+  (`009 Vol 01 Title` next to `008 Vol 01 Title`), or `Season 1 v01` next to `Season 2 v01` - are different units and
+  no longer listed (they were, with all but one pre-marked Discard).
+- **The series' group:** when copies come from different scanlation groups, the default Keep is the copy from the group
+  the neighbouring chapters come from (else the folder's most used group), tagged "series' group" - a series keeps
+  one translation style, even when it changed groups along the way.
+- **The Duplicates view shows it is working:** a moving bar, "Deleting N files...", "Rescanning the library...",
+  "Looking for duplicate files...", with the list greyed out until it is up to date again.
+- **Excluding a folder no longer asks whether it is missing:** a series folder you add to a library's exclusions is
+  let go quietly (its MangaUpdates link is kept, so removing the exclusion brings it back as it was).
+- The library editor no longer shows **Origin hint**, **Enforce naming** and **Staging folder**: nothing used them yet
+  (finished downloads wait in qBittorrent's download folder, one for every library). They come back with the renamer.
+
 ## [2026.10.6] - 2026-10-09
 
 The fifth MangaList release (testing build): duplicates one series at a time, Open in MangaPixer, a Duplicates column that counts files, and links that work in the Unraid container.

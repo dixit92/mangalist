@@ -101,6 +101,7 @@ class DuplicateGroup:
     kind: str                           # "chapter" | "volume"
     number: str                         # exact, e.g. "12", "12.5"
     files: Tuple[DuplicateFile, ...]
+    usual_group: Optional[str] = None   # the group the neighbouring numbers come from, when the copies differ by group
 
 
 @dataclass(frozen=True)

@@ -137,6 +137,11 @@ class RootsEditor(QWidget):
         btn_staging = self._button("Browse")
         btn_staging.clicked.connect(self._on_browse_staging)
         form.addRow("Staging folder:", self._with_button(self.staging_edit, btn_staging))
+        # Origin hint, Enforce naming and Staging folder are kept and saved, but nothing uses them yet (the renamer and
+        # the origin evidence are later phases; finished downloads wait in qBittorrent's download folder): hidden
+        # until then, so no field here does nothing (owner, 2026-10-09).
+        for row in (2, 3, 4):
+            form.setRowVisible(row, False)
         rv.addWidget(settings)
 
         excl = QGroupBox("Exclusions")

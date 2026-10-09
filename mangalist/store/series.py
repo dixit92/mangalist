@@ -61,6 +61,7 @@ class ScanRecord:
     added: List[str] = field(default_factory=list)
     relinked: List[Tuple[str, str]] = field(default_factory=list)  # (old rel, new rel); always empty since schema 4
     missing: List[str] = field(default_factory=list)
+    excluded: List[str] = field(default_factory=list)     # known folders the root now excludes: let go, not missing
 
 
 def _row(r: sqlite3.Row) -> Series:
@@ -112,7 +113,10 @@ class SeriesMixin:
         walked, resolved).
 
         - A known folder: fingerprint / count / last seen refreshed.
-        - New folders: new rows. Vanished folders: kept, marked ``missing`` (``missing_since`` set).
+        - New folders: new rows. Vanished folders: kept, marked ``missing`` (``missing_since`` set) - unless the root
+          now EXCLUDES the folder (the owner chose not to track it; owner 2026-10-09: excluding must not ask "missing,
+          forget it?"): the row is let go like a forget, but the folder's MangaUpdates link and examined mark stay,
+          so lifting the exclusion brings the series back as it was. A series with download records stays missing.
           Whether a vanished series moved is decided by its archives, across all roots
           (:mod:`mangalist.identity`), after this.
         - No re-link here any more: the folder fingerprint (the multiset of archive sizes) is still stored,
@@ -122,6 +126,8 @@ class SeriesMixin:
         seen = {s.rel_path: s for s in seen}
         now = utcnow()
         rec = ScanRecord()
+        root = self.get_root(root_id)
+        excl = root.exclusion_set() if root is not None else None
         with self.connect() as con:
             rows = {r["rel_path"]: _row(r) for r in
                     con.execute("SELECT * FROM series WHERE root_id = ?", (root_id,))}
@@ -137,6 +143,12 @@ class SeriesMixin:
                                 (root_id, s.rel_path, s.fingerprint, s.n_archives, now, now))
                     rec.added.append(s.rel_path)
             for s in gone:
+                if excl and excl.excludes(s.rel_path, True) and not con.execute(
+                        "SELECT 1 FROM ledger WHERE series_id = ? LIMIT 1", (s.id,)).fetchone():
+                    con.execute("UPDATE archives SET series_id = NULL WHERE series_id = ?", (s.id,))
+                    con.execute("DELETE FROM series WHERE id = ?", (s.id,))
+                    rec.excluded.append(s.rel_path)
+                    continue
                 con.execute("UPDATE series SET status='missing', missing_since=COALESCE(missing_since, ?)"
                             " WHERE id=?", (now, s.id))
                 rec.missing.append(s.rel_path)
