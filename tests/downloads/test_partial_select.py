@@ -120,7 +120,7 @@ def test_the_hint_is_arrivals():
 def test_texts_for_the_panel():
     sel = choose_files(pack("Series A v01.cbz", "Series A v02.cbz", "Series A v03.cbz", "cover.jpg"), ["2"], "volumes")
     assert describe(sel) == "1 of 4 files, 10 MB of 40 MB" and describe_whole(sel) == "4 files, 40 MB"
-    big = choose_files([("Pack/Series A v01.cbz", 1_800_000_000), ("Pack/Series A v02.cbz", 410 * MB)], ["2"], "volumes")
+    big = choose_files([("Pack/Series A v01.cbz", 1_400_000_000), ("Pack/Series A v02.cbz", 410 * MB)], ["2"], "volumes")
     assert describe(big) == "1 of 2 files, 410 MB of 1.7 GB" and describe_whole(big) == "2 files, 1.7 GB"
     assert size_text(1) == "1 B" and size_text(1024 ** 3) == "1 GB"
     one = choose_files([("Series A v02.cbz", 5 * MB)], ["2"], "volumes")
