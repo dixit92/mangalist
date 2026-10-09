@@ -6,6 +6,7 @@ import json
 import os
 import stat
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -144,3 +145,44 @@ def test_files_written_by_other_tools_do_not_matter(library):
         (library / "Series A").mkdir()
         (library / "Series A" / "new chapter.cbz").write_bytes(b"x")  # e.g. FFS adding a file
     assert (library / "Series A" / "new chapter.cbz").is_file()
+
+
+def test_a_lock_file_in_use_for_a_moment_is_read_again_not_taken_for_free(library, monkeypatch):
+    # Windows: a reader opening the file while the holder's heartbeat replaces it gets a sharing violation
+    # (PermissionError); read() returned None ("free") and the holder's own refresh() then thought it was taken over.
+    from mangalist.store import lock as lock_mod
+
+    monkeypatch.setattr(lock_mod, "IN_USE_WAIT", 0)
+    with RootLock(library) as lock:
+        real_read, real_replace = Path.read_text, os.replace
+        busy = {"read": 2, "replace": 1}
+
+        def read_text(self, *a, **kw):
+            if self.name == LOCK_NAME and busy["read"]:
+                busy["read"] -= 1
+                raise PermissionError(32, "The process cannot access the file because it is being used")
+            return real_read(self, *a, **kw)
+
+        def replace(src, dst):
+            if busy["replace"]:
+                busy["replace"] -= 1
+                raise PermissionError(5, "Access is denied")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+        monkeypatch.setattr(lock_mod.os, "replace", replace)
+        assert lock.read() is not None and lock.read().token == lock.token
+        busy["read"] = 1
+        lock.refresh()                                      # neither the read nor the replace makes it "lost"
+        assert not lock.lost and busy == {"read": 0, "replace": 0}
+
+
+def test_a_file_that_stays_unreadable_is_still_none(library, monkeypatch):
+    from mangalist.store import lock as lock_mod
+
+    monkeypatch.setattr(lock_mod, "IN_USE_WAIT", 0)
+    with RootLock(library) as lock:
+        def read_text(self, *a, **kw):
+            raise PermissionError(13, "Permission denied")
+        monkeypatch.setattr(Path, "read_text", read_text)
+        assert lock.read() is None
