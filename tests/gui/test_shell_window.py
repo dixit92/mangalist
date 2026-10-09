@@ -314,9 +314,10 @@ def test_start_scans_the_library_in_the_background(make_window, qapp, tmp_path):
 def test_a_scan_stopped_on_close_records_nothing(qapp, monkeypatch):
     from mangalist.gui import main_window as mw
 
-    recorded, seen = [], []
+    seen, shown = [], []
 
-    def fake_scan(roots, progress=None):
+    def fake_scan(roots, db=None, *, progress=None, on_start=None, on_root=None):
+        on_start(1, 1, "Library")
         for i, name in enumerate(("Series A", "Series B", "Series C"), 1):
             progress(i, 3, name)
             seen.append(name)
@@ -324,14 +325,14 @@ def test_a_scan_stopped_on_close_records_nothing(qapp, monkeypatch):
                 worker.stop()                   # the window closes while the first folder is read
         raise AssertionError("not reached")
 
-    monkeypatch.setattr(mw, "scan_library", fake_scan)
-    monkeypatch.setattr(mw, "record_library_scan", lambda db, result: recorded.append(result))
+    monkeypatch.setattr(mw, "scan_and_record_library", fake_scan)
     worker = mw.ScanWorker(["a root"], db=object())
     got = []
-    worker.finished.connect(got.append)
-    worker.failed.connect(got.append)
+    for signal in (worker.finished, worker.failed, worker.root_scanned):
+        signal.connect(lambda *a: got.append(a))
+    worker.root_started.connect(lambda *a: shown.append(a))
     worker.run()
-    assert seen == ["Series A"] and got == [] and recorded == []
+    assert seen == ["Series A"] and got == [] and shown == [(1, 1, "Library")]
 
 
 def test_mu_lookup_button_turns_into_stop_while_running(make_window):

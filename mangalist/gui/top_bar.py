@@ -1,15 +1,15 @@
 """The window's top bar (mockup header): the app icon and name, the List / Download tabs (Download with its "To get"
-count), the library status (roots, last scan, MangaPixer sync), Missing series (only when there are any), Rescan and
-Settings."""
+count), the library status (roots, last scan, MangaPixer sync), Missing series (only when there are any), Rescan (with
+an arrow that rescans one library folder) and Settings."""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence, Tuple
 
 from PySide6.QtCore import QByteArray, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QWidget
 
 from . import theme
 from .app_icon import render_app_icon
@@ -51,7 +51,8 @@ def gear_icon() -> QIcon:
 
 class TopBar(QWidget):
     tab_changed = Signal(int)           # TAB_LIST / TAB_DOWNLOAD
-    rescan_clicked = Signal()
+    rescan_clicked = Signal()           # every library folder
+    rescan_root_clicked = Signal(int)   # one library folder (its root id)
     settings_clicked = Signal()
     missing_clicked = Signal()
 
@@ -108,6 +109,14 @@ class TopBar(QWidget):
         self.btn_rescan = QPushButton("Rescan")
         self.btn_rescan.setToolTip("Scan every library folder again")
         self.btn_rescan.clicked.connect(self.rescan_clicked)
+        # The arrow beside it: "All libraries" / each library folder. Shown only when there is more than one.
+        self.btn_rescan_menu = QPushButton("▾")
+        self.btn_rescan_menu.setProperty("variant", "icon")
+        self.btn_rescan_menu.setToolTip("Rescan one library folder")
+        self.btn_rescan_menu.setAccessibleName("Rescan one library folder")
+        self.btn_rescan_menu.setVisible(False)
+        self.rescan_menu = QMenu(self.btn_rescan_menu)
+        self.btn_rescan_menu.clicked.connect(self._open_rescan_menu)
         self.btn_settings = QPushButton()
         self.btn_settings.setProperty("variant", "icon")
         self.btn_settings.setIcon(gear_icon())
@@ -115,8 +124,13 @@ class TopBar(QWidget):
         self.btn_settings.setToolTip("Settings")
         self.btn_settings.setAccessibleName("Settings")
         self.btn_settings.clicked.connect(self.settings_clicked)
-        for b in (self.btn_missing, self.btn_rescan, self.btn_settings):
-            right.addWidget(b)
+        rescan = QHBoxLayout()
+        rescan.setSpacing(4)
+        rescan.addWidget(self.btn_rescan)
+        rescan.addWidget(self.btn_rescan_menu)
+        right.addWidget(self.btn_missing)
+        right.addLayout(rescan)
+        right.addWidget(self.btn_settings)
         row.addLayout(right)
 
     # ------------------------------------------------------------------
@@ -138,6 +152,28 @@ class TopBar(QWidget):
     def set_status(self, text: str, tooltip: str = "") -> None:
         self.status.setText(text)
         self.status.setToolTip(tooltip)
+
+    def set_rescan_targets(self, roots: Sequence[Tuple[int, str, str]]) -> None:
+        """The Rescan arrow's menu from ``(root id, name, path)`` of every library folder."""
+        self.rescan_menu.clear()
+        everything = self.rescan_menu.addAction("All libraries")
+        everything.triggered.connect(lambda _c=False: self.rescan_clicked.emit())
+        self.rescan_menu.addSeparator()
+        for root_id, name, path in roots:
+            act = self.rescan_menu.addAction(name)
+            act.setToolTip(path)
+            act.setData(root_id)
+            act.triggered.connect(lambda _c=False, rid=root_id: self.rescan_root_clicked.emit(rid))
+        self.btn_rescan_menu.setVisible(len(roots) > 1)
+
+    def _open_rescan_menu(self) -> None:
+        self.rescan_menu.setToolTipsVisible(True)
+        self.rescan_menu.popup(self.btn_rescan_menu.mapToGlobal(self.btn_rescan_menu.rect().bottomLeft()))
+
+    def set_scanning(self, scanning: bool) -> None:
+        """Rescan (and its arrow) wait while a scan runs."""
+        self.btn_rescan.setEnabled(not scanning)
+        self.btn_rescan_menu.setEnabled(not scanning)
 
     def set_missing(self, n: int) -> None:
         self.btn_missing.setText(f"Missing ({n})")
