@@ -391,3 +391,41 @@ def test_without_a_browser_the_link_is_copied_and_said(views, pair, monkeypatch)
     view.open_link("http://mangapixer.example:8080/series/abc123")
     assert QApplication.clipboard().text() == "http://mangapixer.example:8080/series/abc123"
     assert any("link is copied" in t for t in texts(view))
+
+
+def test_apply_shows_it_is_working_until_the_rescan_and_the_reread_are_done(views, pair, monkeypatch):
+    _lib, older, _newer = pair
+    gate = threading.Event()
+    real = duplicates_view.discard_duplicates
+
+    def held(db, selections):
+        gate.wait(5)
+        return real(db, selections)
+    monkeypatch.setattr(duplicates_view, "discard_duplicates", held)
+    view = views.scanned()
+    view.show()
+    deleted = []
+    view.files_deleted.connect(lambda paths: (deleted.append(paths), view.set_blocked("the library is being rescanned")))
+    assert not view.busy_bar.isVisibleTo(view) and view._body.isEnabled()
+    view.apply()                                                   # confirmed by the fixture
+    assert view.busy_bar.isVisibleTo(view) and not view._body.isEnabled()
+    assert view.status.text() == "Deleting 1 file..." and not view.apply_button.isEnabled()
+    gate.set()
+    wait_until(views.qapp, lambda: deleted and not view._scanning)
+    assert view.status.text() == "Rescanning the library..." and view.busy_bar.isVisibleTo(view)  # the shell's rescan
+    assert not view._body.isEnabled() and not older.exists()
+    view.set_blocked(None)                                         # the rescan finished; the shell re-reads
+    view.refresh()
+    assert view.status.text() == "Looking for duplicate files..." and view.busy_bar.isVisibleTo(view)
+    wait_until(views.qapp, lambda: not view._scanning)
+    assert not view.busy_bar.isVisibleTo(view) and view._body.isEnabled() and view.status.text() == ""
+
+
+def test_an_apply_that_deletes_nothing_does_not_stay_busy(views, pair):
+    lib, older, _newer = pair
+    view = views.scanned()
+    view.show()
+    older.write_bytes(b"changed")                                  # refused: it changed since the list was made
+    view.apply()
+    wait_until(views.qapp, lambda: not view._applying and not view._scanning)
+    assert not view.busy_bar.isVisibleTo(view) and view._body.isEnabled()
