@@ -33,6 +33,14 @@ Optional extras (the Download tab and Settings use them when the backend has the
 ``series_titles(series_ids)`` (names for the downloads list) and ``next_check()`` (the next scheduled downloads
 check, ISO 8601 UTC, or None).
 
+Partial downloads (only a pack's missing volumes) add four more, all optional - a backend without ``inspect_pack`` simply
+never shows the "Only the missing volumes" box: ``inspect_pack(candidate, wanted_volumes)`` (blocking; reads the release's
+``.torrent`` and returns a :class:`~mangalist.downloads.partial.PackSelection`, with ``problem`` set - not raised - when
+the file list cannot be read), ``partial_default()`` / ``set_partial_default(on)`` (the Settings default; quick) and
+``take_pack_outcome(info_hash)`` (what the last send did with the pack, once). ``send`` then takes ``only_missing=True``
+(the panel passes it only when the box is ticked and the pack can be narrowed; otherwise it is called with the four
+arguments above, so older backends keep working).
+
 Every method may block (network, database): the GUI calls them off the UI thread, except ``series_id_for`` and
 the settings getter / setter, which must be quick. A failure the owner should read raises :class:`BackendError`
 with a message that is safe to show (never a password, token or URL with credentials); anything else is shown
@@ -81,7 +89,9 @@ class DownloadsBackend(Protocol):
     def search(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> Sequence[NyaaCandidate]: ...
 
     def send(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
-             target_dir: str) -> DownloadRecord: ...
+             target_dir: str) -> DownloadRecord:
+        """Add the release to qBittorrent and record it. Backends that read file lists also take ``only_missing``."""
+        ...
 
     def records(self, series_id: Optional[int] = None) -> Sequence[DownloadRecord]: ...
 

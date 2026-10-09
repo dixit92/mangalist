@@ -12,8 +12,9 @@ from typing import Any, Dict
 KEY_NYAA = "downloads.nyaa"                        # dict of the NyaaOptions fields
 KEY_MU_AUTOSTART = "mu_autostart"                  # the old "Auto-start MU" (config.py's key): look new series up
 KEY_SCAN_AFTER_FILING = "mangapixer.scan_after_filing"   # ask MangaPixer to rescan a library after filing into it
+KEY_PARTIAL_DOWNLOADS = "downloads.partial"        # a pack's release panel starts with "only the missing volumes" ticked
 
-DEFAULTS: Dict[str, bool] = {KEY_MU_AUTOSTART: False, KEY_SCAN_AFTER_FILING: True}
+DEFAULTS: Dict[str, bool] = {KEY_MU_AUTOSTART: False, KEY_SCAN_AFTER_FILING: True, KEY_PARTIAL_DOWNLOADS: True}
 
 
 @dataclass(frozen=True)

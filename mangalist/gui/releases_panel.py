@@ -6,6 +6,13 @@ Everything slow (the placement lookup, the nyaa search, the send) runs off the U
 The backend's rank order is kept (sorting is off); a release's ranking reasons are the small line under its name.
 When the series' folder layout is ambiguous the owner picks one of the offered folders first: Send stays disabled until a
 folder is chosen. Nothing is sent without a confirmation that names the series, the volumes and the target folder.
+
+**Only the missing volumes.** Under the table a ticked box (the default comes from Settings > Download sources) says how
+much of the selected pack MangaList will download: "Only the missing volumes (3 of 23 files, 410 MB of 1.7 GB)". The file
+list is read from the release's ``.torrent`` off the UI thread (a short pause after the selection settles, so arrowing
+through the table does not hit nyaa for every row); Send waits for it only while the box is ticked. When it cannot be
+read, or no file names a missing volume, the box says so and the whole pack is what is sent. Unticking sends the whole
+pack. The box is hidden for a release that has nothing to leave out, and for a backend that cannot read file lists.
 """
 
 from __future__ import annotations
@@ -13,10 +20,11 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 from pathlib import PurePath
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QMessageBox,
@@ -29,9 +37,10 @@ from PySide6.QtWidgets import (
 
 from ..classifier import _human
 from ..downloads.contracts import DownloadRecord, NyaaCandidate, Placement
+from ..downloads.partial import PackSelection, describe, describe_whole, file_lines
 from .background import BackgroundCall, start_call
 from .download_rules import release_why
-from .download_style import FONT_MONO, set_tone
+from .download_style import FONT_MONO, set_prop, set_tone
 from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, flat_table, hbox, label
 from .downloads_backend import DownloadsBackend
 from .tables import resizable_columns
@@ -44,9 +53,13 @@ COLUMNS = ("", "Release", "Fills", "You have", "Source", "Size", "Seeders")
 COL_PICK, COL_RELEASE, COL_FILLS, COL_HELD, COL_SOURCE, COL_SIZE, COL_SEEDERS = range(len(COLUMNS))
 PAGE_MESSAGE, PAGE_RESULTS = 0, 1
 ROW_HEIGHT = 48
+PACK_DELAY_MS = 400                 # the selection must settle this long before a release's file list is fetched
 
 NO_FOLDER_CHOSEN = "Choose a folder..."
 FOOTER_NOTE = "MangaList links only the missing volumes into the series folder; nothing there is replaced."
+PARTIAL_TEXT = "Only the missing volumes"
+PARTIAL_TIP = ("Only the files that hold a missing volume are downloaded; qBittorrent skips the rest of the pack. "
+               "The torrent then seeds only what it downloaded, not the whole pack. Untick to download everything.")
 
 
 def _default_confirm(parent: QWidget, text: str) -> bool:
@@ -125,6 +138,13 @@ class ReleasesPanel(QWidget):
         self.sent_records: List[DownloadRecord] = []
         self._settings_section: Optional[str] = None
         self._fitted = False
+        self._packs: Dict[str, PackSelection] = {}       # file lists read for this target, by info hash
+        self._pack_failed: Dict[str, str] = {}           # ... and why one could not be read
+        self._pack_reading: set = set()
+        self._partial_on = True                          # the box: ticked unless the owner unticked it for this release
+        self._pack_timer = QTimer(self)
+        self._pack_timer.setSingleShot(True)
+        self._pack_timer.timeout.connect(self._read_pack)
         self._build_ui()
 
     # --- UI ------------------------------------------------------------------------------------------
@@ -205,10 +225,23 @@ class ReleasesPanel(QWidget):
                                        COL_SIZE: 90, COL_SEEDERS: 80})        # every column can be dragged
         for col in (COL_SIZE, COL_SEEDERS):
             self.table.horizontalHeaderItem(col).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.table.itemSelectionChanged.connect(self._update_send)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.itemDoubleClicked.connect(lambda *_: self.open_selected_page())
         cv.addWidget(self.table)
         rp.addWidget(self.results_card)
+        self.partial_row = QWidget()
+        pr = QVBoxLayout(self.partial_row)
+        pr.setContentsMargins(0, 8, 0, 0)
+        pr.setSpacing(2)
+        self.partial_check = QCheckBox(PARTIAL_TEXT)
+        self.partial_check.setChecked(True)
+        self.partial_check.setToolTip(PARTIAL_TIP)
+        self.partial_check.toggled.connect(self._on_partial_toggled)
+        self.partial_note = label("", "muted", wrap=True)
+        pr.addWidget(self.partial_check)
+        pr.addWidget(self.partial_note)
+        self.partial_row.setVisible(False)
+        rp.addWidget(self.partial_row)
         self.status_label = label("", wrap=True, selectable=True)
         self.footer = QWidget()
         foot = hbox(spacing=12)
@@ -293,11 +326,15 @@ class ReleasesPanel(QWidget):
 
     def _reset(self, target: Optional[VolumeTarget]) -> None:
         self.target = target
+        self._pack_timer.stop()
+        self._packs, self._pack_failed, self._pack_reading = {}, {}, set()
         self._candidates = []
         self._placement = None
         self._placement_error = None
         self._search_state = "idle"
         self.table.setRowCount(0)
+        self._partial_on = self._partial_default()
+        self._show_pack()
         self.progress.setVisible(False)
         self.btn_retry.setEnabled(target is not None)
         self.folder_row.setVisible(False)
@@ -506,6 +543,8 @@ class ReleasesPanel(QWidget):
             return "Select a release."
         if candidate.info_hash in self._sent_hashes:
             return "This release was already sent."
+        if self._partial_on and self.pack_state() in ("waiting", "reading"):
+            return "Reading the release's file list... (or untick the box to send the whole pack)"
         if not wanted_volumes_for(candidate, self.target.missing):
             if candidate.vol_from is None:
                 return "The title does not say which volumes this release holds, and the missing volumes are not known."
@@ -518,6 +557,166 @@ class ReleasesPanel(QWidget):
         self.btn_send.setEnabled(blocker is None)
         self.btn_send.setToolTip(blocker or "Add the selected release to qBittorrent")
         self.btn_page.setEnabled(self.selected_candidate() is not None)
+
+    # --- only the missing volumes ------------------------------------------------------------------------
+
+    def _can_inspect(self) -> bool:
+        return callable(getattr(self._backend, "inspect_pack", None))
+
+    def _partial_default(self) -> bool:
+        getter = getattr(self._backend, "partial_default", None)
+        try:
+            return bool(getter()) if callable(getter) else True
+        except Exception:  # noqa: BLE001 - the box starts ticked, the documented default
+            return True
+
+    def _pack_wanted(self) -> Sequence[str]:
+        candidate = self.selected_candidate()
+        return tuple(wanted_volumes_for(candidate, self.target.missing)) if candidate and self.target else ()
+
+    def pack_selection(self) -> Optional[PackSelection]:
+        """The file list read for the selected release (None until it has been read; a selection with ``problem`` set
+        when it could not be)."""
+        candidate = self.selected_candidate()
+        return self._packs.get(candidate.info_hash) if candidate is not None else None
+
+    def pack_state(self) -> str:
+        """``none`` (nothing to show), ``waiting`` / ``reading`` (a file list is on its way), ``failed`` (not readable),
+        ``whole`` (readable, but nothing to leave out), ``partial`` (some files can be left out)."""
+        candidate = self.selected_candidate()
+        if candidate is None or self.target is None or not self._can_inspect():
+            return "none"
+        sel = self._packs.get(candidate.info_hash)
+        if sel is None:
+            if candidate.info_hash in self._pack_failed:
+                return "failed"
+            return "reading" if candidate.info_hash in self._pack_reading else "waiting"
+        if not sel.readable:
+            return "failed"
+        return "partial" if sel.narrows else "whole"
+
+    def partial_requested(self) -> bool:
+        """True when this send downloads only the missing volumes: the box is ticked and there is something to leave out."""
+        return self._partial_on and self.pack_state() == "partial"
+
+    def _on_selection_changed(self) -> None:
+        self._partial_on = self._partial_default()          # "untick per send": every release starts from the default
+        self._pack_timer.stop()
+        candidate = self.selected_candidate()
+        if candidate is not None and candidate.info_hash in self._pack_failed:      # selecting it again tries again
+            self._pack_failed.pop(candidate.info_hash, None)
+            self._packs.pop(candidate.info_hash, None)
+        if (candidate is not None and self._can_inspect() and candidate.info_hash not in self._packs
+                and candidate.info_hash not in self._pack_reading):
+            self._pack_timer.start(PACK_DELAY_MS)
+        self._show_pack()
+        self._update_send()
+
+    def _read_pack(self) -> None:
+        candidate, target = self.selected_candidate(), self.target
+        if candidate is None or target is None or not self._can_inspect():
+            return
+        key, wanted, series_id = candidate.info_hash, tuple(self._pack_wanted()), target.series_id
+        if key in self._packs or key in self._pack_reading:
+            return
+        self._pack_reading.add(key)
+        self._show_pack()
+        self._update_send()
+        self._spawn(lambda: self._backend.inspect_pack(candidate, wanted),
+                    lambda sel, k=key, sid=series_id: self._on_pack(k, sid, sel),
+                    lambda message, k=key, sid=series_id: self._on_pack_error(k, sid, message))
+
+    def _same_target(self, series_id: int) -> bool:
+        return self.target is not None and self.target.series_id == series_id
+
+    def _on_pack(self, key: str, series_id: int, selection: PackSelection) -> None:
+        if not self._same_target(series_id):
+            return                                          # the owner moved to another series meanwhile
+        self._pack_reading.discard(key)
+        self._packs[key] = selection
+        if not selection.readable:                          # selecting the release again tries again
+            self._pack_failed[key] = selection.problem or "the file list is not available"
+        self._show_pack()
+        self._update_send()
+
+    def _on_pack_error(self, key: str, series_id: int, message: str) -> None:
+        if not self._same_target(series_id):
+            return
+        self._pack_reading.discard(key)
+        self._packs[key] = PackSelection(problem=message)
+        self._pack_failed[key] = message
+        self._show_pack()
+        self._update_send()
+
+    def _on_partial_toggled(self, on: bool) -> None:
+        self._partial_on = bool(on)
+        self._show_pack()
+        self._update_send()
+
+    def _show_pack(self) -> None:
+        """Set the box and its line for the selected release."""
+        state = self.pack_state()
+        sel = self.pack_selection()
+        self.partial_row.setVisible(state in ("waiting", "reading", "failed", "partial")
+                                    or (state == "whole" and bool(sel and (sel.whole_reason or sel.unknown_kept))))
+        self.partial_check.blockSignals(True)
+        tone, note, tip = "", "", ""
+        text, checked, enabled = PARTIAL_TEXT, self._partial_on, False
+        if state in ("waiting", "reading"):
+            enabled = True                                  # unticking now sends the whole pack without waiting
+            note = "Reading the release's file list..."
+        elif state == "failed":
+            checked = False
+            reason = (sel.problem if sel is not None and sel.problem else None) or self._failed_reason()
+            note, tone = f"The file list could not be read ({reason}). The whole pack will be downloaded.", "warn"
+        elif state == "whole" and sel is not None:
+            checked = False
+            if sel.whole_reason:
+                note, tone = f"{sel.whole_reason[:1].upper()}{sel.whole_reason[1:]}.", "warn"
+            else:
+                note = f"{sel.unknown_kept} file name{'s do' if sel.unknown_kept != 1 else ' does'} not say a volume, so all {sel.total_files} files are kept."
+                tone = "warn"
+            tip = file_lines(sel)
+        elif state == "partial" and sel is not None:
+            enabled = True
+            text = f"{PARTIAL_TEXT} ({describe(sel)})"
+            tip = file_lines(sel)
+            bits = []
+            if self._partial_on:
+                bits.append("The torrent seeds only what it downloaded.")
+                if sel.unknown_kept:
+                    bits.append(f"{sel.unknown_kept} file{'s' if sel.unknown_kept != 1 else ''} kept because "
+                                f"{'their names do' if sel.unknown_kept != 1 else 'its name does'} not say a volume.")
+                if sel.not_found and not sel.unknown_kept:
+                    bits.append(f"Not in this pack: {numbers_text(sel.not_found, pad=True)}.")
+            else:
+                bits.append(f"The whole pack will be downloaded ({describe_whole(sel)}).")
+            note = " ".join(bits)
+        self.partial_check.setText(text)
+        self.partial_check.setChecked(bool(checked))
+        self.partial_check.setEnabled(enabled)
+        self.partial_check.blockSignals(False)
+        self.partial_note.setText(note)
+        self.partial_note.setToolTip(tip)
+        set_prop(self.partial_note, "role", "" if tone else "muted")         # the muted colour would hide the tone
+        set_tone(self.partial_note, tone)
+
+    def _failed_reason(self) -> str:
+        candidate = self.selected_candidate()
+        return self._pack_failed.get(candidate.info_hash, "") if candidate is not None else ""
+
+    def _pack_line(self, candidate: NyaaCandidate) -> str:
+        """The confirmation's line about what is downloaded ('' when the backend does not read file lists)."""
+        if not self._can_inspect():
+            return ""
+        sel = self._packs.get(candidate.info_hash)
+        if self.partial_requested() and sel is not None:
+            return f"Download: only the missing volumes ({describe(sel)})\n"
+        if sel is not None and sel.readable:
+            return f"Download: the whole pack ({describe_whole(sel)})\n"
+        if sel is None:
+            return "Download: the whole pack\n"                  # unticked before the list was read
+        return "Download: the whole pack (its file list could not be read)\n"
 
     # --- actions ---------------------------------------------------------------------------------------
 
@@ -536,7 +735,7 @@ class ReleasesPanel(QWidget):
         else:
             vols = numbers_text(wanted, pad=True)
         return (f"Send this release to qBittorrent?\n\n{candidate.title}\n\n"
-                f"Series: {title}\nVolumes: {vols}\nTarget folder: {target_dir}\n\n"
+                f"Series: {title}\nVolumes: {vols}\n{self._pack_line(candidate)}Target folder: {target_dir}\n\n"
                 "qBittorrent downloads it; MangaList files these volumes into the target folder when it has finished.")
 
     def send_selected(self) -> bool:
@@ -554,7 +753,8 @@ class ReleasesPanel(QWidget):
         set_tone(self.status_label, "")
         self.status_label.setText("Sending to qBittorrent...")
         series_id = self.target.series_id
-        self._spawn(lambda: self._backend.send(series_id, candidate, wanted, target_dir),
+        extra = {"only_missing": True} if self.partial_requested() else {}
+        self._spawn(lambda: self._backend.send(series_id, candidate, wanted, target_dir, **extra),
                     lambda record, c=candidate: self._on_sent(c, record), self._on_send_error)
         return True
 
@@ -564,10 +764,20 @@ class ReleasesPanel(QWidget):
         self.sent_records.append(record)
         if self.target is not None and self.target.series_id == record.series_id:     # not after a switch of series
             set_tone(self.status_label, "ok")
-            self.status_label.setText(f"Sent to qBittorrent: {candidate.title}. MangaList files the volumes when "
-                                      "the download has finished.")
+            self.status_label.setText(f"Sent to qBittorrent: {candidate.title}. {self._sent_what(candidate)}MangaList "
+                                      "files the volumes when the download has finished.")
         self._update_send()
         self.sent.emit(record)
+
+    def _sent_what(self, candidate: NyaaCandidate) -> str:
+        """What the send did with the pack, in a sentence ('' when the backend does not say)."""
+        taker = getattr(self._backend, "take_pack_outcome", None)
+        outcome = taker(candidate.info_hash) if callable(taker) else None
+        if outcome is None:
+            return ""
+        if outcome.partial:
+            return f"Only the missing volumes are downloaded ({describe(outcome.selection)}). "
+        return f"The whole pack is downloaded{f' ({outcome.note})' if outcome.note else ''}. "
 
     def _on_send_error(self, message: str) -> None:
         self._sending = False
@@ -579,6 +789,7 @@ class ReleasesPanel(QWidget):
 
     def stop(self) -> None:
         """Abandon the calls in flight (their results are dropped)."""
+        self._pack_timer.stop()
         for call in list(self._calls):
             call.abandon()
         self._calls.clear()
