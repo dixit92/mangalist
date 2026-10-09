@@ -288,6 +288,7 @@ class DuplicatesView(QWidget):
         self._after_apply = False                           # busy until the rescan + re-read that follow an Apply
         self._series_link: Optional[Callable[[str], Optional[str]]] = None
         self._focus: Optional[str] = None                   # a series folder: show only its duplicate files
+        self._root_ids: Optional[List[int]] = None          # the List's Library picker (None: every library)
         self._card_apply: Dict[Tuple[Optional[int], str], QPushButton] = {}
         # series cards ticked for "Apply to selected" (owner, 2026-10-09: "select some series cards and do it on a subset")
         self._picked: set = set()
@@ -452,8 +453,8 @@ class DuplicatesView(QWidget):
         self._scanning = True
         self._scan_error = ""
         self._update_summary()
-        db = self._db
-        self._start(lambda: find_duplicate_files(db),
+        db, root_ids = self._db, self._root_ids
+        self._start(lambda: find_duplicate_files(db, root_ids=root_ids),
                     lambda groups: self._scanned(generation, groups),
                     lambda message: self._scan_failed(generation, message))
 
@@ -667,6 +668,15 @@ class DuplicatesView(QWidget):
         self._render_files()
         self._update_summary()
         self._scroll.verticalScrollBar().setValue(0)
+
+    def set_library_scope(self, root_ids: Optional[Sequence[int]]) -> None:
+        """Only these roots' duplicate files (the List's Library picker; None: every library). Re-reads when shown."""
+        scope = None if root_ids is None else sorted(int(r) for r in root_ids)
+        if scope == self._root_ids:
+            return
+        self._root_ids = scope
+        if self.isVisible():
+            self.refresh()
 
     def set_series_link(self, link: Optional[Callable[[str], Optional[str]]]) -> None:
         """*link(series folder)* -> the series' page in MangaPixer, or None (not known there / not connected)."""
