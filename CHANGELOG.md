@@ -7,6 +7,17 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Download tab, one group at a time:** chips above the "To get" list - **Missing volumes**, **Upgrades**, **Missing
+  chapters**, each with its count - show one group (remembered); "Get the volume upgrades" in the List opens the
+  Upgrades group. The "To get" panel and the **In progress** panel are resizable (remembered).
+- An upgrade's release panel now says **"Upgrade v23-v24"** and what happens to the chapter files they replace (it said
+  "Missing ... nothing there is replaced").
+- **Empty the holding folder now:** "Empty now..." for a held batch in the replaced-chapters review, and "Empty the
+  holding folder now..." in Settings > Automation - after a confirmation, and only for batches whose volumes are still in
+  the library.
+- **Exclude from its library...** in the List's right-click menu: adds the folder to its library's exclusions (after a
+  confirmation; files untouched; Settings > Library undoes it) and rescans that library.
+
 ## [2026.10.9] - 2026-10-09
 
 The eighth MangaList release (testing build): upgrades from chapters to volumes, partial pack downloads (only the missing volumes), a Library picker with per-library rescans, Remove now for a download you stopped, and Apply to selected in Duplicates.
