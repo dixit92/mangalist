@@ -125,7 +125,6 @@ class ListTab(QWidget):
         # The search takes spare width first (up to the mockup's 320 px); the chips wrap only when it is short.
         chip_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         row.addWidget(chip_box)
-        row.addStretch(1)
 
         # Shown only while the details panel is collapsed (its own × hides it).
         self.btn_details = QPushButton("Details")

@@ -461,7 +461,7 @@ class MainWindow(QMainWindow):
             self._after_roots_changed(rescan=True)
         if getattr(result, "downloads_changed", False) and self._volumes is not None:
             self._volumes.refresh_records()
-            self._rebuild_wanted()
+            self._rebuild_wanted(force=True)
 
     def _on_details_toggled(self, visible: bool) -> None:
         self._cfg[self._CFG_DETAILS] = visible
@@ -543,8 +543,9 @@ class MainWindow(QMainWindow):
 
     # --- The Download tab's "To get" list ----------------------------------
 
-    def _rebuild_wanted(self) -> None:
-        """Hand the Download tab every series with gaps (after every scan / MangaPixer sync / state change)."""
+    def _rebuild_wanted(self, force: bool = False) -> None:
+        """Hand the Download tab every series with gaps (after every scan / MangaPixer sync / state change; an
+        unchanged list is not sent again, so the tab keeps its selection while MangaUpdates rows come in)."""
         if self._download_tab is None:
             return
         out: List[WantedSeries] = []
@@ -559,6 +560,8 @@ class MainWindow(QMainWindow):
             out += wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title,
                                  state=st, knowledge=model.knowledge_at(row), held=model.held_volumes_at(row),
                                  series_id=series_id, volumes=volumes)
+        if out == self._wanted_series and not force:
+            return
         self._wanted_series = out
         self._download_tab.set_wanted(out)
 

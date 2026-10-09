@@ -140,6 +140,10 @@ def test_lane_bs_download_tab_gets_the_list_and_the_badge(make_window):
     assert win._top.tab_download.isVisibleTo(win)
     assert [(w.title, w.group, w.findable) for w in tab.wanted] == [(QUEST, "volumes", True)]
     assert win._top.tab_download.badge == 1
+    sent = tab.wanted
+    win._model.refresh_states()                                      # nothing changed: not sent again
+    win._refresh_derived()
+    assert tab.wanted is sent
     win._select_source_row(_row(win, QUEST))
     assert win._detail.btn_get.isVisibleTo(win._detail) and win._detail.btn_get.text() == "Get the missing volumes"
     win._detail.btn_get.click()
