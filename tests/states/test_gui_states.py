@@ -212,7 +212,7 @@ def test_detail_panel_shows_state_gaps_holds_and_links(window):
     assert d._eng_label.text() == "Bravo Chapters · MangaUpdates: matched"
     assert '<a href="https://www.amazon.com/s?k=Bravo+Chapters&amp;i=stripbooks">Amazon (search)</a>' in \
         d._links_label.text()
-    assert d._links_label.openExternalLinks()
+    assert not d._links_label.openExternalLinks()          # through gui.links: copied where there is no browser
     assert not d.btn_get.isVisibleTo(d)             # downloads are off: no Download tab to go to
     d.show_entry(None)
     assert d._lbl_state.text() == "-" and d._links_label.text() == "-"
@@ -234,7 +234,8 @@ def test_default_columns_are_the_mockups_and_the_header_menu_remembers(window):
     win._exec_menu = lambda menu, pos: menus.append(menu) or None
     win._on_header_context_menu(header.rect().center())
     texts = {a.text(): a for a in menus[0].actions()}
-    assert not texts["Title"].isEnabled() and texts["Kind"].isChecked() and not texts["Dupe"].isChecked()
+    assert not texts["Title"].isEnabled() and texts["Kind"].isChecked() and not texts["Duplicates"].isChecked()
+    assert "Examined" in texts and "✓" not in texts
 
 
 def test_main_window_uses_mangapixer_for_known_folders_and_skips_their_mu_lookup(window):

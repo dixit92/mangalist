@@ -10,9 +10,9 @@ from __future__ import annotations
 import datetime
 import logging
 import subprocess
-import webbrowser
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
+from urllib.parse import quote
 
 from PySide6.QtCore import (
     QByteArray,
@@ -50,10 +50,11 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
-    COL_BEHIND, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LICENSED, COL_MU_TITLE, COL_OFFICIAL, COL_STATE,
-    COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
+    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LICENSED, COL_MU_TITLE, COL_OFFICIAL,
+    COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
+from .links import open_link
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +229,7 @@ class MainWindow(QMainWindow):
     ]
     _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
     _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 170, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
-                       COL_FILES: 80, COL_EXAMINED: 32, COL_MU_TITLE: 260, COL_OFFICIAL: 180}
+                       COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
     _CFG_SPLITTER = "list_splitter_sizes"
@@ -264,6 +265,7 @@ class MainWindow(QMainWindow):
         self._download_tab = None
         self._duplicates_view = None
         self._dupe_file_groups: Optional[int] = None
+        self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
         self._dupe_call = None
         self._wanted_series: List[WantedSeries] = []
         self._last_scan: Optional[datetime.datetime] = None
@@ -362,6 +364,8 @@ class MainWindow(QMainWindow):
         view = lanes.duplicates_view_class()(self._db, self)
         view.show_in_list.connect(self.show_folder_in_list)
         view.files_deleted.connect(self._on_files_deleted)
+        if hasattr(view, "set_series_link"):
+            view.set_series_link(self.mangapixer_series_url)
         lst.set_duplicates_widget(view)
         self._duplicates_view = view
 
@@ -441,6 +445,9 @@ class MainWindow(QMainWindow):
         self._proxy.set_dupes_only(dupes and self._duplicates_view is None)
         if dupes and self._duplicates_view is not None:
             self._duplicates_view.set_series_duplicates(self._model.duplicate_series())
+            if hasattr(self._duplicates_view, "focus_series"):
+                self._duplicates_view.focus_series(self._dupe_focus)     # the chip itself: every series
+            self._dupe_focus = None
             self._duplicates_view.refresh()
         self._update_page()
         if key is None:
@@ -591,13 +598,39 @@ class MainWindow(QMainWindow):
         from .background import start_call
 
         db = self._db
-        self._dupe_call = start_call(lambda: len(finder(db)), self._on_duplicate_files_counted,
+        self._dupe_call = start_call(lambda: _count_by_folder(finder(db)), self._on_duplicate_files_counted,
                                      lambda msg: _log.warning("Counting duplicate files failed: %s", msg),
                                      self._on_duplicate_count_finished)
 
-    def _on_duplicate_files_counted(self, n: int) -> None:
-        self._dupe_file_groups = int(n)
+    def _on_duplicate_files_counted(self, counted) -> None:
+        total, per_folder = counted
+        self._dupe_file_groups = int(total)
+        self._model.set_duplicate_file_counts(per_folder)
         self._update_counts()
+
+    def review_duplicates(self, folder: str) -> None:
+        """The Duplicates view on *folder*'s series only (its own Apply deletes nothing elsewhere)."""
+        self._dupe_focus = folder
+        self.show_tab(TAB_LIST)
+        self._list.set_filter(DUPLICATES, emit=True)
+
+    def mangapixer_series_url(self, folder: str) -> Optional[str]:
+        """The series' page in MangaPixer's web UI (``/series/{nodeId}``, the export item's node), or None when
+        MangaPixer does not know the folder or is not connected."""
+        row = self._row_for_folder(folder)
+        entry = self._model.entry_at(row) if row is not None else None
+        item = self._mp_item_for(entry) if entry is not None else None
+        node = (item or {}).get("nodeId") if isinstance(item, dict) else None
+        if not node:
+            return None
+        from ..services.mangapixer import open_cache
+        from ..services.mangapixer.client import normalize_base_url
+
+        try:
+            base = normalize_base_url(open_cache(self._db).connection().base_url)
+        except ValueError:
+            return None
+        return f"{base}/series/{quote(str(node), safe='')}"
 
     def _on_duplicate_count_finished(self) -> None:
         self._dupe_call = None
@@ -1128,7 +1161,8 @@ class MainWindow(QMainWindow):
             self._table.scrollTo(idx)
 
     def _open_url(self, url: str) -> None:
-        webbrowser.open(url)
+        if not open_link(url):
+            self._status_label.setText(f"No browser here - link copied: {url}")
 
     # --- Column order & state --------------------------------------------
 
@@ -1205,7 +1239,7 @@ class MainWindow(QMainWindow):
         order = sorted(range(len(COLUMNS)), key=self._table.horizontalHeader().visualIndex)
         for col in order:
             name = COLUMNS[col]
-            act = menu.addAction(column_label(col))
+            act = menu.addAction(column_label(col, menu=True))
             act.setEnabled(col != COL_TITLE)
             act.setCheckable(True)
             act.setChecked(name not in hidden)
@@ -1292,6 +1326,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self._table)
         act_kind = None
         act_get = None
+        act_dupes = act_mangapixer = None
 
         if n == 1:
             if getattr(entries[0], "needs_kind", False):
@@ -1315,6 +1350,13 @@ class MainWindow(QMainWindow):
                 act_get.setToolTip("Open this series in the Download tab" if groups else
                                    "Nothing missing: no gaps to download")
                 menu.setToolTipsVisible(True)
+            vols, chs = self._model.duplicate_files_at(rows[0])
+            if vols or chs:
+                act_dupes = menu.addAction(f"Review duplicate files ({vols + chs})…")
+                act_dupes.setToolTip("The Duplicates view on this series only: keep or discard its extra copies")
+            mp_url = self.mangapixer_series_url(str(entry0.folder))
+            if mp_url:
+                act_mangapixer = menu.addAction("Open in MangaPixer")
             links_menu = menu.addMenu("Official sources")
             link_actions = {}
             for link in self._model.links_at(rows[0]):
@@ -1375,6 +1417,10 @@ class MainWindow(QMainWindow):
 
             if ask_series_kind(self, entries[0], db=self._db):
                 self._model.refresh_states()
+        elif act_dupes is not None and chosen is act_dupes:
+            self.review_duplicates(str(entries[0].folder))
+        elif act_mangapixer is not None and chosen is act_mangapixer:
+            self._open_url(self.mangapixer_series_url(str(entries[0].folder)) or "")
         elif chosen in link_actions and link_actions[chosen]:
             self._open_url(link_actions[chosen])
         elif chosen is act_open and entries:
@@ -1421,8 +1467,7 @@ class MainWindow(QMainWindow):
         elif chosen is act_fix_mu and entries:
             self._on_fix_mu_match(rows[0], entries[0])
         elif chosen is act_open_mu and entries and entries[0].mu_url:
-            import webbrowser
-            webbrowser.open(entries[0].mu_url)
+            self._open_url(entries[0].mu_url)
         elif chosen is act_copy_path and entries:
             QGuiApplication.clipboard().setText(str(entries[0].folder))
             self._status_label.setText(f"Copied path: {entries[0].folder}")
@@ -1585,3 +1630,16 @@ class MainWindow(QMainWindow):
         self._cfg["window"] = {"w": self.width(), "h": self.height()}
         self._save_column_state()
         super().closeEvent(event)
+
+
+def _count_by_folder(groups) -> Tuple[int, Dict[str, Tuple[int, int]]]:
+    """Lane C's duplicate groups -> (how many, per series folder (volume numbers, chapter numbers))."""
+    groups = list(groups)
+    per_folder: Dict[str, List[int]] = {}
+    for g in groups:
+        folder = getattr(g, "folder", None)
+        if folder is None:
+            continue
+        counts = per_folder.setdefault(str(folder), [0, 0])
+        counts[0 if getattr(g, "kind", "") == "volume" else 1] += 1
+    return len(groups), {k: (v[0], v[1]) for k, v in per_folder.items()}

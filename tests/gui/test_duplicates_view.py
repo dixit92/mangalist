@@ -325,3 +325,69 @@ def test_a_file_in_a_subfolder_shows_its_place(views, lib):
     assert "in Season 2" in shown
     assert os.path.join("Season 2", "Series c003.cbz") in " ".join(
         row.name.full_text() for row in view._rows.values())
+
+
+# --- one series at a time, MangaPixer links -----------------------------------------------------------------------
+
+@pytest.fixture
+def two_series(lib):
+    a_old = lib.add(S, "Series c001.cbz", size=10, mtime_ns=T0)
+    a_new = lib.add(S, "Series c001 [2].cbz", size=20, mtime_ns=T0 + 5_000_000_000)
+    b_old = lib.add("Other Series", "Other v01.cbz", size=10, mtime_ns=T0)
+    b_new = lib.add("Other Series", "Other v01 [2].cbz", size=20, mtime_ns=T0 + 5_000_000_000)
+    lib.scan()
+    return lib, (a_old, a_new), (b_old, b_new)
+
+
+def test_a_series_own_apply_deletes_only_that_series(views, two_series):
+    _lib, (a_old, a_new), (b_old, b_new) = two_series
+    view = views.scanned()
+    assert view.apply_button.text() == "Apply (2)"
+    own = [b for b in view.findChildren(QPushButton) if b.text() == "Apply for this series (1)"]
+    assert len(own) == 2                                            # one per series card
+    deleted = []
+    view.files_deleted.connect(deleted.append)
+    own[0].click()                                                  # the cards follow the series titles
+    wait_until(views.qapp, lambda: deleted)
+    assert [len(f) for f in views.asked] == [1]                     # the confirmation listed that series' file only
+    assert deleted == [[str(a_old)]] and not a_old.exists()         # "Example Series" sorts first
+    assert b_old.exists() and a_new.exists() and b_new.exists()
+
+
+def test_focus_shows_one_series_and_its_apply_stays_inside_it(views, two_series):
+    _lib, (a_old, _a_new), (b_old, _b_new) = two_series
+    view = views.scanned()
+    view.focus_series(str(a_old.parent))
+    assert {g.folder for g, _rows in view._by_group} == {str(a_old.parent)}
+    assert view.apply_button.text() == "Apply (1)" and view.show_all_button.isVisibleTo(view)
+    assert any("IN THIS SERIES" in t for t in texts(view))
+    view.apply()
+    wait_until(views.qapp, lambda: not view._applying and not view._scanning)
+    assert not a_old.exists() and b_old.exists()
+    assert view._by_group == [] and any("This series has no duplicate files." in t for t in texts(view))
+    view.show_all_button.click()
+    assert {g.folder for g, _rows in view._by_group} == {str(b_old.parent)}  # the other series is back
+
+
+def test_open_in_mangapixer_on_a_known_series_only(views, two_series, monkeypatch):
+    _lib, (a_old, _a), (_b, _b2) = two_series
+    known = str(a_old.parent)
+    view = views.scanned()
+    assert not [b for b in view.findChildren(QPushButton) if b.text() == "Open in MangaPixer"]
+    view.set_series_link(lambda folder: "http://mangapixer.example:8080/series/abc123" if folder == known else None)
+    links = [b for b in view.findChildren(QPushButton) if b.text() == "Open in MangaPixer"]
+    assert len(links) == 1 and "/series/abc123" in links[0].toolTip()
+    opened = []
+    monkeypatch.setattr(duplicates_view, "open_link", lambda url: opened.append(url) or True)
+    links[0].click()
+    assert opened == ["http://mangapixer.example:8080/series/abc123"]
+
+
+def test_without_a_browser_the_link_is_copied_and_said(views, pair, monkeypatch):
+    from mangalist.gui import links
+
+    monkeypatch.setattr(links.QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    view = views.scanned()
+    view.open_link("http://mangapixer.example:8080/series/abc123")
+    assert QApplication.clipboard().text() == "http://mangapixer.example:8080/series/abc123"
+    assert any("link is copied" in t for t in texts(view))

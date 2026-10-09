@@ -11,8 +11,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Signal  # noqa: E402
-from PySide6.QtWidgets import QWidget  # noqa: E402
+from PySide6.QtCore import Qt, Signal  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from mangalist import config  # noqa: E402
 from mangalist.gui import lanes  # noqa: E402
@@ -198,6 +198,71 @@ def test_lane_cs_view_takes_the_tables_place(make_window, qapp):
     win._start_scan = lambda roots=None: scans.append(roots)
     view.files_deleted.emit(["/lib/Twin Series/Twin v01 (copy).cbz"])
     assert scans == [None] and "1 duplicate file(s) deleted" in win._status_label.text()
+
+
+class FocusingDuplicatesView(FakeDuplicatesView):
+    """Lane C's view with its 2026.10.6 extras: one series at a time, MangaPixer links."""
+
+    def __init__(self, db, parent=None):
+        super().__init__(db, parent)
+        self.focus = []
+        self.link = None
+
+    def focus_series(self, folder):
+        self.focus.append(folder)
+
+    def set_series_link(self, link):
+        self.link = link
+
+
+def _group(folder, kind):
+    from mangalist.gui.shell import DuplicateFile, DuplicateGroup
+
+    f = DuplicateFile(path=str(Path(folder) / "x.cbz"), size=1, modified="2026-01-01T00:00:00.000000+00:00", group=None)
+    return DuplicateGroup(series_id=1, folder=str(folder), title=Path(folder).name, kind=kind, number="1", files=(f, f))
+
+
+def test_the_duplicates_column_counts_each_series_and_review_opens_on_it(make_window, qapp):
+    from mangalist.gui.table_model import COL_DUPE, column_label
+
+    quest = LIB / QUEST
+    groups = [_group(quest, "volume"), _group(quest, "chapter"), _group(quest, "chapter")]
+    win = make_window(dupes=FocusingDuplicatesView, finder=lambda db: groups)
+    wait_until(qapp, lambda: win._dupe_file_groups == 3)
+    model = win._model
+    text = {model.entry_at(r).title: model.data(model.index(r, COL_DUPE)) for r in range(model.rowCount())}
+    assert text[QUEST] == "1 vol. · 2 ch." and text[PLAIN] == ""
+    assert text[TWIN_A] == "+1 folder"                                    # the same series in another folder
+    assert "held by more than one file" in model.data(model.index(_row(win, QUEST), COL_DUPE), Qt.ToolTipRole)
+    assert column_label(COL_DUPE) == "Duplicates" and column_label(0, menu=True) == "Examined"
+    view = win._duplicates_view
+    assert view.link == win.mangapixer_series_url
+    win.review_duplicates(str(quest))
+    assert win._list.current_filter() == "duplicates" and view.focus == [str(quest)]
+    win._list.set_filter(None, emit=True)
+    win._list.chips["duplicates"].click()                                 # the chip itself: every series again
+    assert view.focus == [str(quest), None]
+
+
+def test_the_mangapixer_link_is_the_series_node_on_the_connected_server(make_window, monkeypatch):
+    from mangalist.services.mangapixer import open_cache
+
+    win = make_window()
+    open_cache(win._db).set_connection(base_url="mangapixer.example:8080")
+    monkeypatch.setattr(win, "_mp_item_for", lambda e: {"nodeId": "a1b2c3"} if e.title == QUEST else None)
+    assert win.mangapixer_series_url(str(LIB / QUEST)) == "http://mangapixer.example:8080/series/a1b2c3"
+    assert win.mangapixer_series_url(str(LIB / PLAIN)) is None            # MangaPixer does not know it
+    assert win.mangapixer_series_url("/elsewhere") is None
+
+
+def test_links_without_a_browser_are_copied(make_window, monkeypatch):
+    from mangalist.gui import links
+
+    monkeypatch.setattr(links.QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    win = make_window()
+    win._open_url("https://www.mangaupdates.com/series/abc")
+    assert QApplication.clipboard().text() == "https://www.mangaupdates.com/series/abc"
+    assert "link copied" in win._status_label.text()
 
 
 def test_details_panel_collapses_and_is_remembered(make_window):

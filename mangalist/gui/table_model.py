@@ -21,7 +21,7 @@ from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, St
 
 COLUMNS = [
     "✓",
-    "Dupe",  # Duplicate indicator
+    "Dupe",  # Duplicates: numbers held by more than one file, and the series in more than one folder
     "Title",
     "Alternative Title",
     "Files",
@@ -42,7 +42,9 @@ COLUMNS = [
 ]
 
 # What the header shows where it differs from the column's name (the name is what the settings remember).
-HEADER_LABELS = {"Verdict": "Kind"}
+HEADER_LABELS = {"Verdict": "Kind", "Dupe": "Duplicates"}
+# What the show / hide menu calls a column whose header is a symbol.
+MENU_LABELS = {"✓": "Examined"}
 
 COL_EXAMINED = 0
 COL_DUPE = 1
@@ -110,6 +112,9 @@ class MangaTableModel(QAbstractTableModel):
         self._mu_processing_row: Optional[int] = None
         # Map of mu_title -> list of row indices (for duplicate detection)
         self._dupe_map: dict[str, List[int]] = {}
+        # series folder -> (volume numbers, chapter numbers) held by more than one file (lane C's finder, counted by
+        # the window off the UI thread)
+        self._dupe_files: Dict[str, Tuple[int, int]] = {}
         # Rescan state + official sources per row, computed on first use and dropped when the row changes.
         self._state_cache: Dict[int, Tuple[SeriesState, List[OfficialLink]]] = {}
         self._today: Optional[datetime.date] = None
@@ -261,6 +266,39 @@ class MangaTableModel(QAbstractTableModel):
         all_dups = self._dupe_map.get(key, [])
         return [r for r in all_dups if r != row]
 
+    def set_duplicate_file_counts(self, counts: Dict[str, Tuple[int, int]]) -> None:
+        """Per series folder: how many volume and chapter numbers are held by more than one file."""
+        self._dupe_files = {str(k): (int(v[0]), int(v[1])) for k, v in counts.items()}
+        if self._entries:
+            self.dataChanged.emit(self.index(0, COL_DUPE), self.index(len(self._entries) - 1, COL_DUPE),
+                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def duplicate_files_at(self, row: int) -> Tuple[int, int]:
+        """(volume numbers, chapter numbers) of row *row*'s folder held by more than one file."""
+        if row < 0 or row >= len(self._entries):
+            return (0, 0)
+        return self._dupe_files.get(str(self._entries[row].folder), (0, 0))
+
+    def _duplicates_text(self, row: int) -> str:
+        vols, chs = self.duplicate_files_at(row)
+        parts = [f"{vols} vol." if vols else "", f"{chs} ch." if chs else ""]
+        if self.is_duplicate(row):
+            others = len(self.get_duplicate_rows(row))
+            parts.append(f"+{others} folder{'s' if others != 1 else ''}")
+        return " · ".join(p for p in parts if p)
+
+    def _duplicates_tip(self, row: int) -> Optional[str]:
+        vols, chs = self.duplicate_files_at(row)
+        lines = []
+        if vols or chs:
+            what = " and ".join(t for t in (f"{vols} volume number{'s' if vols != 1 else ''}" if vols else "",
+                                             f"{chs} chapter number{'s' if chs != 1 else ''}" if chs else "") if t)
+            lines.append(f"{what} held by more than one file (right-click: Review duplicate files)")
+        if self.is_duplicate(row):
+            other_folders = [str(self._entries[r].folder.name) for r in self.get_duplicate_rows(row)]
+            lines.append(f"The same series (MangaUpdates match) is also in: {', '.join(other_folders)}")
+        return "\n".join(lines) or None
+
     def duplicate_series(self) -> List[DuplicateSeries]:
         """The series held in more than one folder (the same MangaUpdates title), for the Duplicates view."""
         out = []
@@ -365,9 +403,7 @@ class MangaTableModel(QAbstractTableModel):
             if col == COL_EXAMINED:
                 return "✓" if e.examined else ""
             if col == COL_DUPE:
-                if self.is_duplicate(index.row()):
-                    return "⚠"
-                return ""
+                return self._duplicates_text(index.row())
             if col == COL_TITLE:
                 if e.parent_folder is not None:
                     return f"{e.parent_folder.name} / {e.title}"
@@ -443,11 +479,7 @@ class MangaTableModel(QAbstractTableModel):
             if col == COL_EXAMINED:
                 return "Examined" if e.examined else "Not examined"
             if col == COL_DUPE:
-                if self.is_duplicate(index.row()):
-                    dupes = self.get_duplicate_rows(index.row())
-                    other_folders = [str(self._entries[r].folder.name) for r in dupes]
-                    return f"Duplicate MU match\nAlso found in: {', '.join(other_folders)}"
-                return None
+                return self._duplicates_tip(index.row())
             if col == COL_MU_TITLE:
                 tip = match_tooltip(e)
                 if tip is not None:
@@ -480,8 +512,9 @@ class MangaTableModel(QAbstractTableModel):
             if col == COL_EXAMINED:
                 return 1 if e.examined else 0
             if col == COL_DUPE:
-                # Sort duplicates first (1), non-duplicates last (0)
-                return 1 if self.is_duplicate(index.row()) else 0
+                # the most duplicated first: numbers held twice, plus the other folders of the same series
+                vols, chs = self.duplicate_files_at(index.row())
+                return vols + chs + (len(self.get_duplicate_rows(index.row())) if self.is_duplicate(index.row()) else 0)
             if col == COL_FILES:
                 return e.n_files
             if col == COL_SUBS:
@@ -536,9 +569,11 @@ class MangaTableModel(QAbstractTableModel):
         return None
 
 
-def column_label(col: int) -> str:
-    """What the header and its show / hide menu call column *col*."""
+def column_label(col: int, menu: bool = False) -> str:
+    """What the header (or, with *menu*, its show / hide menu) calls column *col*."""
     name = COLUMNS[col]
+    if menu and name in MENU_LABELS:
+        return MENU_LABELS[name]
     return HEADER_LABELS.get(name, name)
 
 

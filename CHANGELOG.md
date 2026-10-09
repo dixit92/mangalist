@@ -7,6 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Duplicates, one series at a time:** each series in the Duplicates view has its own **Apply for this series**, and
+  right-clicking a series in the List offers **Review duplicate files**, which opens the view on that series only.
+- **Open in MangaPixer:** a series MangaPixer knows has a link to its MangaPixer page (from the Duplicates view and the
+  row menu), to compare the copies in MangaPixer's reader.
+- The List's **Dupe** column is now **Duplicates**: per series, how many volume and chapter numbers are held twice
+  (e.g. "1 vol. · 2 ch."), plus "+1 folder" when the same series is in another folder. The column menu says
+  "Examined" for the ✓ column.
+- Links in the Unraid container (which has no browser) are now copied to the clipboard, with a note, instead of doing
+  nothing.
+
 ## [2026.10.5] - 2026-10-08
 
 The fourth MangaList release (testing build): a new look in two tabs (List and Download), one Settings dialog, a Duplicates view, MangaPixer library scans after filing, and a new icon.
