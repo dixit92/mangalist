@@ -81,8 +81,6 @@ class PartialQbt(FakeQbt):
         self.calls.append(("add", url, category, stopped))
         if "add" in self.fail:
             raise self.fail["add"]
-        if url.startswith("magnet:"):
-            raise RuntimeError("a magnet link is not offered by this fake")
         h, name, files = self.packs[url]
         if h in self.infos:
             raise RuntimeError("qBittorrent did not add the torrent: already in qBittorrent")
@@ -136,6 +134,8 @@ class PartialQbt(FakeQbt):
             self.infos[info_hash] = replace(self.infos[info_hash], state="stoppedDL")
 
     def delete(self, info_hash: str, *, delete_files: bool) -> None:
+        if "delete" in self.fail:
+            raise self.fail["delete"]
         self.rows.pop(info_hash, None)
         super().delete(info_hash, delete_files=delete_files)
 
