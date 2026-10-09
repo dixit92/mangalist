@@ -68,7 +68,7 @@ class Lib:
         from mangalist.gui import main_window as mw
 
         roots = list(roots) if roots is not None else win._roots()
-        win._scan_roots, win._scan_applied, win._scan_pos = roots, set(), (1, len(roots), roots[0].name)
+        win._scan_applied, win._scan_pos = set(), (1, len(roots), roots[0].name)
         win._forget_vanished_roots()
         worker = mw.ScanWorker(roots, win._db)
         worker.root_started.connect(win._on_root_started)
@@ -308,7 +308,7 @@ def test_each_roots_rows_appear_before_the_next_root_is_read(lib):
     from mangalist.gui import main_window as mw
 
     worker = mw.ScanWorker(win._roots(), win._db)
-    win._scan_roots, win._scan_applied = win._roots(), set()
+    win._scan_applied = set()
     worker.root_started.connect(win._on_root_started)
     worker.root_scanned.connect(win._on_root_scanned)
     # connected after the window's slots: it sees the table right after each step
@@ -347,7 +347,6 @@ def test_the_top_bar_names_the_root_being_read(lib):
     win = _two_libraries(lib)
     win._thread = object()                                         # a scan is "running" (this test drives the slots)
     try:
-        win._scan_roots = win._roots()
         win._on_root_started(1, 2, MANGA)
         assert win._top.status.text() == "Manga, Manhwa · scanning Manga (1 of 2)…"
         assert win._status_label.text() == "Scanning Manga…"
@@ -388,7 +387,7 @@ def test_a_root_replaces_only_its_own_rows_and_keeps_the_selection(lib):
     _series(lib.dirs[MANHWA], "Brand New Series")
     (lib.dirs[MANHWA] / "Twin Series (old)" / "Twin Series (old) v01.cbz").unlink()
     (lib.dirs[MANHWA] / "Twin Series (old)").rmdir()
-    win._scan_roots, win._scan_applied = [lib.root(win, MANHWA)], set()
+    win._scan_applied = set()
     rs = scan_one_root(lib.root(win, MANHWA))
     win._on_root_scanned(rs, [])
     assert lib.titles(win) == sorted(set(before) - {"Twin Series (old)"} | {"Brand New Series"})
@@ -409,7 +408,7 @@ def test_an_unreadable_root_keeps_its_old_rows_until_the_scan_ends(lib):
     lib.dirs[MANHWA].rmdir()                                       # the share went away
     rs = scan_one_root(manhwa)
     assert rs.error
-    win._scan_roots, win._scan_applied = [manhwa], set()
+    win._scan_applied = set()
     win._on_root_scanned(rs, [])
     assert "Korean Quest" in lib.titles(win)                       # not dropped while the scan is still going
     assert win._status_label.text() == "Manhwa: not reachable"

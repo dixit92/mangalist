@@ -285,7 +285,6 @@ class MainWindow(QMainWindow):
         self._scan_label = ""
         self._library: Optional[int] = None          # the picked library folder (root id); None = all libraries
         self._libraries_key: Optional[tuple] = None
-        self._scan_roots: List[Root] = []            # the roots the running scan reads
         self._scan_applied: set = set()              # root ids whose rows the running scan has put in the table
         self._scan_pos: Optional[Tuple[int, int, str]] = None   # (which root, how many, its name) being read
 
@@ -899,7 +898,6 @@ class MainWindow(QMainWindow):
         self._top.set_scanning(True)
         label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
         self._scan_label = label
-        self._scan_roots = roots
         self._scan_applied = set()
         self._scan_pos = (1, len(roots), roots[0].name)
         self._forget_vanished_roots()
