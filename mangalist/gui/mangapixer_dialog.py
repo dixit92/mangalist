@@ -1,11 +1,14 @@
-"""Settings dialog of the MangaPixer source: address, API token, certificate choice, test, libraries,
+"""Settings of the MangaPixer source: address, API token, certificate choice, test, libraries,
 the root -> library mapping (automatic, with a manual override per root), and "Sync now".
+
+:class:`MangaPixerPanel` is the content as a widget (the Settings dialog's Connected services section embeds it);
+:class:`MangaPixerDialog` wraps it with a Close button.
 
 The token is typed into a password field that shows the characters only while it is being edited. Once
 saved it is never shown again: the field stays empty, and its placeholder says a token is stored. The
 token is never logged.
 
-The main window opens it with :func:`open_mangapixer_dialog` (wired by the integrator).
+The main window opens the dialog with :func:`open_mangapixer_dialog` (wired by the integrator).
 """
 
 from __future__ import annotations
@@ -42,6 +45,8 @@ ClientFactory = Callable[[str, Optional[str], object], mpc.MangaPixerClient]
 
 TOKEN_STORED_HINT = "A token is stored (hidden). Paste a new one to replace it."
 TOKEN_EMPTY_HINT = "mpx_... (MangaPixer > Administration > API tokens)"
+SCAN_FORBIDDEN_TEXT = ("This token cannot request library scans, so MangaList cannot ask MangaPixer to rescan after "
+                       "filing. Create a new token with \"Request library scans\" ticked and enter it here.")
 AUTO = "__auto__"
 NONE = "__none__"
 
@@ -75,12 +80,13 @@ class _SyncWorker(QObject):
         self.finished.emit(result)
 
 
-class MangaPixerDialog(QDialog):
+class MangaPixerPanel(QWidget):
+    changed = Signal()          # the connection, the mappings or the synced data changed
+
     def __init__(self, cache: MangaPixerCache, parent: Optional[QWidget] = None,
                  client_factory: Optional[ClientFactory] = None):
         super().__init__(parent)
-        self.setWindowTitle("MangaPixer source")
-        self.resize(900, 640)
+        self.setObjectName("mangapixerPanel")
         self._cache = cache
         self._client_factory = client_factory or _default_client_factory
         self._thread: Optional[QThread] = None
@@ -93,6 +99,7 @@ class MangaPixerDialog(QDialog):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
         intro = QLabel("MangaList reads what MangaPixer (1.33.0 or newer) already knows about your series through "
                        "its read-only metadata export. Folders MangaPixer links are not looked up again.")
         intro.setWordWrap(True)
@@ -132,6 +139,11 @@ class MangaPixerDialog(QDialog):
         self.status_label.setWordWrap(True)
         self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         form.addRow("", self.status_label)
+        self.scan_label = QLabel("")
+        self.scan_label.setWordWrap(True)
+        self.scan_label.setProperty("tone", "warn")
+        self.scan_label.setVisible(False)
+        form.addRow("", self.scan_label)
         outer.addWidget(conn)
 
         libs = QGroupBox("Libraries")
@@ -182,10 +194,6 @@ class MangaPixerDialog(QDialog):
         sync_row.addWidget(self.sync_label, 1)
         outer.addLayout(sync_row)
 
-        box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        box.rejected.connect(self.reject)
-        outer.addWidget(box)
-
     def _browse_ca(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "CA file", "", "Certificates (*.pem *.crt *.cer);;All files (*)")
         if path:
@@ -204,6 +212,10 @@ class MangaPixerDialog(QDialog):
         if conn.token_rejected_at:
             self.status_label.setText("MangaPixer refused the stored token (wrong, revoked or expired). Enter a new "
                                       "token; MangaList does not try again on its own.")
+        forbidden = getattr(self._cache, "scan_forbidden_at", None)
+        cannot_scan = bool(forbidden and forbidden())
+        self.scan_label.setText(SCAN_FORBIDDEN_TEXT if cannot_scan else "")
+        self.scan_label.setVisible(cannot_scan)
         self._refresh_tables()
 
     def _verify(self):
@@ -228,12 +240,14 @@ class MangaPixerDialog(QDialog):
         self.token_edit.clear()           # never shown again
         self.status_label.setText("Saved.")
         self._load()
+        self.changed.emit()
         return True
 
     def forget_token(self) -> None:
         self._cache.set_connection(token=None)
         self.status_label.setText("Token removed.")
         self._load()
+        self.changed.emit()
 
     def _client(self) -> Optional[mpc.MangaPixerClient]:
         try:
@@ -344,6 +358,7 @@ class MangaPixerDialog(QDialog):
         row = self._root_ids.index(root_id)
         self._refresh_tables()
         self.map_table.selectRow(row)
+        self.changed.emit()
         return True
 
     # --- sync ----------------------------------------------------------------------------------------
@@ -397,13 +412,32 @@ class MangaPixerDialog(QDialog):
                                       "MangaList does not try again on its own.")
         else:
             self.status_label.setText(f"Sync: {result.message}")
+        self.changed.emit()
 
-    def reject(self) -> None:
+    def stop(self) -> None:
+        """Stop a running sync and wait for its thread (on close)."""
         if self._worker is not None:
             self._worker.stop()
         if self._thread is not None:
             self._thread.quit()
             self._thread.wait(10_000)
+
+
+class MangaPixerDialog(QDialog):
+    def __init__(self, cache: MangaPixerCache, parent: Optional[QWidget] = None,
+                 client_factory: Optional[ClientFactory] = None):
+        super().__init__(parent)
+        self.setWindowTitle("MangaPixer source")
+        self.resize(900, 640)
+        self.panel = MangaPixerPanel(cache, self, client_factory)
+        outer = QVBoxLayout(self)
+        outer.addWidget(self.panel, 1)
+        box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        box.rejected.connect(self.reject)
+        outer.addWidget(box)
+
+    def reject(self) -> None:
+        self.panel.stop()
         super().reject()
 
 

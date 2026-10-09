@@ -151,7 +151,8 @@ class TwoLineDelegate(QStyledItemDelegate):
             opt.state &= ~QStyle.StateFlag.State_Selected
         opt.rect = opt.rect.adjusted(self._left_pad, 0, 0, 0)
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
-        rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, widget).adjusted(4, 0, -4, 0)
+        rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, widget).adjusted(
+            4, 0, -4 - self._left_pad, 0)
         painter.save()
         top = QFont(opt.font)
         top.setWeight(QFont.Weight.Medium)
