@@ -34,13 +34,13 @@ _log = logging.getLogger(__name__)
 
 
 class Backend:
-    def __init__(self, db, *, search: Optional[NyaaSearch] = None,
+    def __init__(self, db, *, search: Optional[NyaaSearch] = None, nyaa_client: Optional[NyaaClient] = None,
                  client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection):
         self.db = db
         self.ledger = DownloadLedger(db)
         self._search = search                   # given: used as it is (tests); else one NyaaSearch per category
         self._searches: Dict[tuple, NyaaSearch] = {}
-        self._nyaa_client: Optional[NyaaClient] = None
+        self._nyaa_client = nyaa_client            # one client for every category: nyaa's politeness delay is per client
         self._search_lock = threading.Lock()    # one search at a time: nyaa's politeness delay is per client
         self._client_factory = client_factory
 

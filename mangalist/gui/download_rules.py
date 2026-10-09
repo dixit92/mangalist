@@ -184,10 +184,11 @@ def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, st
         text = default if raw is None else raw
         try:
             parsed = parse_schedule(text)
-            when = schedule_text(parsed.describe()) if parsed is not None else "off"
         except ValueError:
             when = f"{text} (not understood)"
-        if name == "MANGALIST_DOWNLOADS_SCHEDULE" and when != "off":
-            when += " (and Check now)"
+        else:
+            when = schedule_text(parsed.describe()) if parsed is not None else "off"
+            if name == "MANGALIST_DOWNLOADS_SCHEDULE" and parsed is not None:
+                when += " (and Check now)"
         rows.append((label, when, raw is not None))
     return rows
