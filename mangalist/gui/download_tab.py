@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLineEdit,
+    QSplitter,
     QStyle,
     QStyleOptionViewItem,
     QTreeWidget,
@@ -38,7 +39,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..downloads.contracts import DownloadRecord
+from .. import config
 from .background import describe_error, start_call
+from .chips import ChipButton
 from .download_rules import (
     GROUP_NOTES,
     GROUP_TITLES,
@@ -61,7 +64,7 @@ from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList
 from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
 from .replaced_chapters import ConfirmDeleteFn, ReplacedBar, ReplacedDialog
-from .shell import GROUP_CHAPTERS, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
+from .shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
 from .volumes_target import VolumeTarget, latest_by_series
 
 ROLE_FOLDER = Qt.ItemDataRole.UserRole + 10
@@ -156,6 +159,11 @@ class DownloadTab(QWidget):
         self._by_folder: Dict[str, WantedSeries] = {}
         self._series_ids: Dict[str, Optional[int]] = {}
         self._checked: set = set()
+        # One group at a time, picked with the chips above the list (owner, 2026-10-09: "I shouldn't need to scroll down
+        # to get to 'upgrades'"); remembered, like the panel's width.
+        cfg = config.load()
+        self._group = cfg.get(CFG_GROUP) if cfg.get(CFG_GROUP) in TAB_GROUPS else GROUP_VOLUMES
+        self._group_chosen = False          # the owner picked a group this session: keep it even when it is empty
         self._results: Dict[str, SearchOutcome] = {}
         self._signatures: Dict[str, tuple] = {}
         self._states: Dict[str, str] = {}
@@ -193,13 +201,17 @@ class DownloadTab(QWidget):
     # --- UI ------------------------------------------------------------------------------------------
 
     def _build_ui(self, confirm, open_url) -> None:
-        root = QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)       # the "To get" panel is resizable (owner, 2026-10-09)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setHandleWidth(5)
+        outer.addWidget(self.splitter)
 
         left = QFrame()
         left.setObjectName("toGetPanel")
-        left.setFixedWidth(400)
+        left.setMinimumWidth(260)
         lv = QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 0, 0)
         lv.setSpacing(0)
@@ -217,6 +229,17 @@ class DownloadTab(QWidget):
         self.filter_edit.setAccessibleName("Filter series to get")
         self.filter_edit.textChanged.connect(self._rebuild)
         hv.addWidget(self.filter_edit)
+        self.group_chips: Dict[str, ChipButton] = {}
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        for group in TAB_GROUPS:
+            chip = ChipButton(GROUP_TITLES[group], group)
+            chip.setCheckable(True)
+            chip.clicked.connect(lambda _=False, g=group: self.show_group(g))
+            self.group_chips[group] = chip
+            chips.addWidget(chip)
+        chips.addStretch(1)
+        hv.addLayout(chips)
         lv.addWidget(head)
 
         self.tree = QTreeWidget()
@@ -248,9 +271,10 @@ class DownloadTab(QWidget):
         self.bulk_label.setVisible(False)
         fv.addWidget(self.bulk_label)
         lv.addWidget(foot)
-        root.addWidget(left)
+        self.splitter.addWidget(left)
 
-        right = QVBoxLayout()
+        right_widget = QWidget()
+        right = QVBoxLayout(right_widget)
         right.setContentsMargins(0, 0, 0, 0)
         right.setSpacing(0)
         top = QWidget()
@@ -266,22 +290,45 @@ class DownloadTab(QWidget):
         self.releases.sent.connect(self._on_sent)
         self.releases.settings_requested.connect(self.settings_requested)
         tv.addWidget(self.releases)
-        right.addWidget(top, 1)
+        upper = QWidget()                       # the releases and the replaced-chapters line, above the divider
+        uv = QVBoxLayout(upper)
+        uv.setContentsMargins(0, 0, 0, 0)
+        uv.setSpacing(0)
+        uv.addWidget(top, 1)
 
         self.replaced_bar = ReplacedBar()
         self.replaced_bar.review_requested.connect(self.open_replaced)
-        right.addWidget(self.replaced_bar)
+        uv.addWidget(self.replaced_bar)
+
+        # The In progress panel's height is the owner's too (owner, 2026-10-09: "should also be resizable").
+        self.vsplitter = QSplitter(Qt.Orientation.Vertical)
+        self.vsplitter.setChildrenCollapsible(False)
+        self.vsplitter.setHandleWidth(5)
+        self.vsplitter.addWidget(upper)
+        right.addWidget(self.vsplitter)
 
         bottom = QFrame()
         bottom.setObjectName("inProgressPanel")
-        bottom.setFixedHeight(270)
+        bottom.setMinimumHeight(150)
         bv = QVBoxLayout(bottom)
         bv.setContentsMargins(20, 14, 20, 14)
         self.downloads = DownloadsList(self._backend, bottom, autostart=False)
         self.downloads.records_loaded.connect(self._on_records)
         bv.addWidget(self.downloads)
-        right.addWidget(bottom)
-        root.addLayout(right, 1)
+        self.vsplitter.addWidget(bottom)
+        self.vsplitter.setStretchFactor(0, 1)
+        self.vsplitter.setStretchFactor(1, 0)
+        vsaved = config.load().get(CFG_VSPLIT)
+        self.vsplitter.setSizes([int(vsaved[0]), int(vsaved[1])] if isinstance(vsaved, list) and len(vsaved) == 2
+                                else [600, 270])
+        self.vsplitter.splitterMoved.connect(self._remember_vsplit)
+        self.splitter.addWidget(right_widget)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        saved = config.load().get(CFG_SPLIT)
+        self.splitter.setSizes([int(saved[0]), int(saved[1])] if isinstance(saved, list) and len(saved) == 2
+                               else [400, 1000])
+        self.splitter.splitterMoved.connect(self._remember_split)
 
     def _source_label(self) -> str:
         options_fn = getattr(self._backend, "nyaa_options", None)
@@ -333,7 +380,16 @@ class DownloadTab(QWidget):
         self._items.clear()
         self._rows.clear()
         self._header_items.clear()
-        for group, items in grouped(self._wanted, self.filter_edit.text()):
+        groups = grouped(self._wanted, self.filter_edit.text())
+        counts = {g: len(items) for g, items in groups}
+        if not counts.get(self._group) and not self._group_chosen:     # nothing in the remembered group: the first with any
+            self._group = next((g for g in TAB_GROUPS if counts.get(g)), self._group)
+        for g, chip in self.group_chips.items():
+            chip.set_count(counts.get(g, 0))
+            chip.setChecked(g == self._group)
+        for group, items in groups:
+            if group != self._group:
+                continue
             header = QTreeWidgetItem(self.tree)
             header.setFlags(Qt.ItemFlag.ItemIsEnabled)
             note, tone = GROUP_NOTES[group]
@@ -355,7 +411,8 @@ class DownloadTab(QWidget):
         self.tree.blockSignals(False)
         self._rebuilding = False
         self._refresh_statuses()
-        self.count_label.setText(count_text(len(self._rows), len(self._by_folder)))
+        matching = {item.folder for _g, items in groups for item in items}       # every group, the filter applied
+        self.count_label.setText(count_text(len(matching), len(self._by_folder)))
         self._update_selected()
         if current in self._items:
             self.tree.blockSignals(True)
@@ -393,9 +450,13 @@ class DownloadTab(QWidget):
                [f for f in self._checked if f not in self.visible_folders()]
 
     def set_checked(self, folder: str, checked: bool = True) -> None:
+        """Tick (or untick) a series - also one in a group not shown now (the selection spans the groups)."""
         item = self._items.get(folder)
         if item is not None:
             item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        elif folder in self._by_folder:
+            (self._checked.add if checked else self._checked.discard)(folder)
+            self._update_selected()
 
     def _on_item_changed(self, item: QTreeWidgetItem, _col: int) -> None:
         if self._rebuilding:
@@ -422,10 +483,37 @@ class DownloadTab(QWidget):
 
     # --- selecting a series -------------------------------------------------------------------------------
 
+    def show_group(self, group: str) -> None:
+        """Show one group of the "To get" list (Volumes / Upgrades / Chapters); remembered."""
+        if group not in TAB_GROUPS:
+            return
+        self._group = group
+        self._group_chosen = True
+        cfg = config.load()
+        cfg[CFG_GROUP] = group
+        config.save(cfg)
+        self._rebuild()
+
+    def current_group(self) -> str:
+        return self._group
+
+    def _remember_split(self, *_args) -> None:
+        cfg = config.load()
+        cfg[CFG_SPLIT] = [int(x) for x in self.splitter.sizes()]
+        config.save(cfg)
+
+    def _remember_vsplit(self, *_args) -> None:
+        cfg = config.load()
+        cfg[CFG_VSPLIT] = [int(x) for x in self.vsplitter.sizes()]
+        config.save(cfg)
+
     def focus(self, folder: str) -> None:
         """Select that series and search it now ("Get the missing volumes" in the List tab)."""
         if folder not in self._by_folder:
             return
+        groups = [e.group for e in self._entries.get(folder, ())] or [self._by_folder[folder].group]
+        if self._group not in groups:                    # show the group that holds it
+            self.show_group(next((g for g in TAB_GROUPS if g in groups), groups[0]))
         if folder not in self._items and self.filter_edit.text():
             self.filter_edit.clear()                     # the filter hid it
         item = self._items.get(folder)
@@ -453,8 +541,10 @@ class DownloadTab(QWidget):
         sid = self._series_ids.get(series.folder)
         if sid is None:
             return None
+        upgrade = tuple(v for v in upgrade_volumes_of(self._entries.get(series.folder, ())) if v in series.missing)
         return VolumeTarget(series_id=sid, folder=series.folder, title=series.title,
-                            titles=series.titles or (series.title,), missing=series.missing, held=series.held)
+                            titles=series.titles or (series.title,), missing=series.missing, held=series.held,
+                            upgrade=upgrade)
 
     def _show_series(self, folder: str, *, now: bool) -> None:
         series = self._by_folder.get(folder)
@@ -722,3 +812,10 @@ class DownloadTab(QWidget):
         self.releases.stop()
         self.downloads.stop()
         self._update_selected()
+
+
+# The group chips, in the order the owner works through them: what nyaa can get first, chapters (Suwayomi, later) last.
+TAB_GROUPS = (GROUP_VOLUMES, GROUP_UPGRADES, GROUP_CHAPTERS)
+CFG_GROUP = "download_tab_group"
+CFG_SPLIT = "download_tab_split"
+CFG_VSPLIT = "download_tab_progress_split"

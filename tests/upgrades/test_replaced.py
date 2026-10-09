@@ -381,3 +381,38 @@ def test_a_root_no_longer_configured_is_never_written(db, ledger, library, holdi
     after = upgrades.hold_batch(db, batch.id)
     assert after.status == "failed" and "no longer configured" in after.error and len(names(sdir)) == 6
     assert upgrades.keep_batch(db, batch.id).status == "declined"
+
+
+# --- Empty now (owner, 2026-10-09: "as long as the contents are filled in the real roots") ---------------------
+
+def test_empty_now_empties_a_held_batch_while_its_volumes_are_in_the_library(db, ledger, library, holding, known,
+                                                                             tmp_path):
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    library_before = names(sdir)
+    after = upgrades.empty_now(db, batch.id)                          # well before its 30 days
+    assert after.status == "purged" and not os.path.exists(batch.holding_dir) and names(sdir) == library_before
+    with pytest.raises(ReplacementConflict):                          # not held any more
+        upgrades.empty_now(db, batch.id)
+
+
+def test_empty_now_refuses_when_a_volume_left_or_changed_and_deletes_nothing(db, ledger, library, holding, known,
+                                                                             tmp_path):
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    held_before = names(holding)
+    volume = batch.volume_files[0][0]
+    with open(volume, "ab") as f:                                     # the filed volume changed
+        f.write(b"more")
+    with pytest.raises(ReplacementConflict, match="changed since it was filed"):
+        upgrades.empty_now(db, batch.id)
+    os.remove(volume)                                                 # ... or is gone
+    with pytest.raises(ReplacementConflict, match="no longer in the library"):
+        upgrades.empty_now(db, batch.id)
+    assert names(holding) == held_before and ReplacementStore(db).get(batch.id).status == "held"
+    emptied, refused = upgrades.empty_all_now(db)
+    assert emptied == [] and refused == [(batch.id, "not emptied: " + os.path.basename(volume) + " is no longer in the library")]

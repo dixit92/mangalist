@@ -544,3 +544,46 @@ def test_sync_now_is_on_the_mangapixer_card_not_only_under_edit(qapp, db, cache,
     wait_until(qapp, lambda: not page._syncing)
     assert synced == [(True, True)] and changed == [1]
     assert page.mp_sync.isEnabled() and "Sync: 2 libraries, 5 items" in page.mp_card.note_label.text()
+
+
+def test_automation_empties_the_holding_folder_now_after_a_yes(qapp, db, cache, monkeypatch):
+    from mangalist import upgrades
+
+    dlg, _ = make(qapp, db, cache, section=SECTION_AUTOMATION)
+    page = dlg.pages[SECTION_AUTOMATION]
+    assert page.held_label.text() == "Nothing is held" and not page.btn_empty_holding.isEnabled()
+    held = [type("B", (), {"files": (1, 2, 3)})()]
+    monkeypatch.setattr(page, "_held", lambda: held)
+    page._show_held()
+    assert page.held_label.text() == "1 batch, 3 files held" and page.btn_empty_holding.isEnabled()
+    calls = []
+    monkeypatch.setattr(upgrades, "empty_all_now", lambda db: calls.append(1) or ([7], [(8, "not emptied: v02.cbz is no longer in the library")]))
+    page.confirm_empty_all = lambda h: False
+    assert not page.empty_holding_now() and calls == []                     # Cancel: nothing
+    page.confirm_empty_all = lambda h: True
+    assert page.empty_holding_now()
+    wait_until(qapp, lambda: page._empty_call is None)
+    assert calls == [1] and "Emptied 1 batch." in page.replaced_status.text()
+    assert "v02.cbz is no longer in the library" in page.replaced_status.text()
+
+
+def test_automation_empties_the_holding_folder_now_after_a_yes(qapp, db, cache, monkeypatch):
+    from mangalist import upgrades
+
+    dlg, _ = make(qapp, db, cache, section=SECTION_AUTOMATION)
+    page = dlg.pages[SECTION_AUTOMATION]
+    assert page.held_label.text() == "Nothing is held" and not page.btn_empty_holding.isEnabled()
+    held = [type("B", (), {"files": (1, 2, 3)})()]
+    monkeypatch.setattr(page, "_held", lambda: held)
+    page._show_held()
+    assert page.held_label.text() == "1 batch, 3 files held" and page.btn_empty_holding.isEnabled()
+    calls = []
+    monkeypatch.setattr(upgrades, "empty_all_now",
+                        lambda db: calls.append(1) or ([7], [(8, "not emptied: v02.cbz is no longer in the library")]))
+    page.confirm_empty_all = lambda h: False
+    assert not page.empty_holding_now() and calls == []                     # Cancel: nothing
+    page.confirm_empty_all = lambda h: True
+    assert page.empty_holding_now()
+    wait_until(qapp, lambda: page._empty_call is None)
+    assert calls == [1] and "Emptied 1 batch." in page.replaced_status.text()
+    assert "v02.cbz is no longer in the library" in page.replaced_status.text()

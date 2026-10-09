@@ -667,6 +667,60 @@ def purge_expired(db, *, journal=None, now: Optional[datetime] = None) -> List[i
     return out
 
 
+def volumes_in_library_problem(db, batch: Batch) -> Optional[str]:
+    """Why a held batch may not be emptied early (None: it may): every volume archive that replaced its chapters must
+    still be in the library - a plain file of the size it was filed with, inside a root that is still configured
+    (owner, 2026-10-09: empty the holding folder "as long as the contents are filled in the real roots")."""
+    if not batch.volume_files:
+        return "it does not record which volume files replaced the chapters"
+    roots = [os.path.normpath(r.path) for r in db.list_roots()]
+    for path, size in batch.volume_files:
+        top = next((r for r in roots if os.path.normcase(os.path.normpath(path)).startswith(
+            os.path.normcase(r.rstrip(os.sep)) + os.sep)), None)
+        name = os.path.basename(path)
+        if top is None:
+            return f"{name} is not inside a configured library root"
+        st = _plain_below(path, top)
+        if st is None:
+            return f"{name} is no longer in the library"
+        if st.st_size != size:
+            return f"{name} has changed since it was filed"
+    return None
+
+
+def empty_now(db, batch_id: int, *, journal=None) -> Batch:
+    """Empty one held batch from the holding folder before its period is over - only while the volumes that replaced
+    its chapters are still in the library; then the same guarded :func:`purge_batch`. Raises
+    :class:`ReplacementConflict` with the reason otherwise (nothing is deleted)."""
+    batch = ReplacementStore(db).get(batch_id)
+    if batch is None or batch.status != "held":
+        raise ReplacementConflict(f"replaced-chapters batch {batch_id} is not held")
+    problem = volumes_in_library_problem(db, batch)
+    if problem:
+        _log.warning("Upgrades: batch %d not emptied early: %s", batch.id, problem)
+        raise ReplacementConflict(f"not emptied: {problem}")
+    _log.info("Upgrades: batch %d: emptying the holding folder now, on the owner's word", batch.id)
+    return purge_batch(db, batch.id, journal=journal)
+
+
+def empty_all_now(db, *, journal=None) -> Tuple[List[int], List[Tuple[int, str]]]:
+    """:func:`empty_now` for every held batch. Returns (emptied ids, [(id, why not)])."""
+    emptied: List[int] = []
+    refused: List[Tuple[int, str]] = []
+    for batch in ReplacementStore(db).with_status("held"):
+        try:
+            after = empty_now(db, batch.id, journal=journal)
+        except ReplacementConflict as exc:
+            refused.append((batch.id, str(exc)))
+            continue
+        except Exception as exc:  # noqa: BLE001 - one batch must not stop the others
+            _log.exception("Upgrades: emptying batch %d failed", batch.id)
+            refused.append((batch.id, f"{type(exc).__name__}: {exc}"))
+            continue
+        (emptied.append(after.id) if after.status == "purged" else refused.append((after.id, after.error or "")))
+    return emptied, refused
+
+
 # --- the owner's answers (GUI) ---------------------------------------------------------------------------------
 
 
@@ -785,3 +839,9 @@ class ReplacedChapters:
 
     def retry(self, batch_id: int) -> Batch:
         return retry_batch(self.db, batch_id, journal=self._journal())
+
+    def empty_now(self, batch_id: int) -> Batch:
+        return empty_now(self.db, batch_id, journal=self._journal())
+
+    def empty_all_now(self) -> Tuple[List[int], List[Tuple[int, str]]]:
+        return empty_all_now(self.db, journal=self._journal())

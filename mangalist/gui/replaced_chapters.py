@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QListWidget,
+    QMessageBox,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -142,14 +143,28 @@ def ask_delete(parent: QWidget, batch: Batch, series: str = "") -> bool:
         dialog.deleteLater()
 
 
+def ask_empty(parent: QWidget, batch: Batch, series: str = "") -> bool:
+    """Empty a held batch now? Cancel is the default."""
+    box = QMessageBox(QMessageBox.Icon.Question, "Empty the holding folder now?",
+                      f"Delete the {_plural(len(batch.files), 'chapter file')} of {series or 'the series'} from the "
+                      f"holding folder now?\n\nThey cannot be restored afterwards. The volumes that replaced them stay in "
+                      "the library (MangaList checks they are still there first).", parent=parent)
+    yes = box.addButton("Empty now", QMessageBox.ButtonRole.DestructiveRole)
+    no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(no)
+    box.exec()
+    return box.clickedButton() is yes
+
+
 class ReplacedDialog(QDialog):
     """The open batches and the owner's answers. ``changed`` carries the series folders whose files moved."""
 
     changed = Signal(list)
 
     def __init__(self, service, batches: Sequence[Batch], parent: Optional[QWidget] = None,
-                 confirm: Optional[ConfirmDeleteFn] = None):
+                 confirm: Optional[ConfirmDeleteFn] = None, confirm_empty: Optional[ConfirmDeleteFn] = None):
         super().__init__(parent)
+        self._confirm_empty = confirm_empty or (lambda parent, batch: ask_empty(parent, batch, self._title(batch)))
         self.setWindowTitle("Replaced chapters")
         self.setObjectName("settingsDialog")
         self.setStyleSheet(DIALOG_STYLE)
@@ -184,15 +199,19 @@ class ReplacedDialog(QDialog):
         self.btn_delete.setProperty("role", "danger-quiet")
         self.btn_retry = button("Try again", tip="List the files again as they are now and do what the setting says")
         self.btn_keep = button("Keep them", tip="Leave the chapter files where they are and do not ask again")
+        self.btn_empty = button("Empty now...", tip="Delete them from the holding folder now - only while the volumes "
+                                                    "that replaced them are still in the library")
+        self.btn_empty.setProperty("role", "danger-quiet")
         self.btn_close = button("Close")
         self.btn_restore.clicked.connect(self.restore_selected)
         self.btn_hold.clicked.connect(self.hold_selected)
         self.btn_delete.clicked.connect(self.delete_selected)
         self.btn_keep.clicked.connect(self.keep_selected)
         self.btn_retry.clicked.connect(self.retry_selected)
+        self.btn_empty.clicked.connect(self.empty_selected)
         self.btn_close.clicked.connect(self.reject)
-        lay.addLayout(hbox(self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep, None,
-                           self.btn_close))
+        lay.addLayout(hbox(self.btn_restore, self.btn_empty, self.btn_hold, self.btn_delete, self.btn_retry,
+                           self.btn_keep, None, self.btn_close))
         self._fill()
 
     # --- the list ------------------------------------------------------------------------------------------
@@ -243,7 +262,7 @@ class ReplacedDialog(QDialog):
         if batch is None:
             self.where_label.setText("Nothing to review." if not self._batches else "")
             self.kept_label.setText("")
-            for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep):
+            for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep, self.btn_empty):
                 b.setEnabled(False)
             return
         for f in batch.files:
@@ -258,11 +277,12 @@ class ReplacedDialog(QDialog):
         mode = self._mode()
         pending = batch.status == "pending"
         self.btn_restore.setVisible(batch.status == "held")
+        self.btn_empty.setVisible(batch.status == "held")
         self.btn_hold.setVisible(pending and mode != "delete")
         self.btn_delete.setVisible(pending and mode == "delete")
         self.btn_retry.setVisible(batch.status == "failed")
         self.btn_keep.setVisible(pending or batch.status == "failed")
-        for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep):
+        for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep, self.btn_empty):
             b.setEnabled(not busy)
 
     # --- the answers ------------------------------------------------------------------------------------------
@@ -294,6 +314,19 @@ class ReplacedDialog(QDialog):
         if batch is None or batch.status not in ("pending", "failed") or self._call is not None:
             return False
         self._run("Keeping them...", batch, lambda: self._service.keep(batch.id), moved=False)
+        return True
+
+    def empty_selected(self) -> bool:
+        """Delete the selected held batch's files from the holding folder now (owner, 2026-10-09) - after a yes, and
+        only while the volumes that replaced them are still in the library (the service checks; it says why not)."""
+        batch = self.selected()
+        if batch is None or batch.status != "held" or self._call is not None:
+            return False
+        if not self._confirm_empty(self, batch):
+            self._say("Nothing deleted.", "")
+            return False
+        self._run(f"Emptying {_plural(len(batch.files), 'file')} from the holding folder...", batch,
+                  lambda: self._service.empty_now(batch.id), moved=False)
         return True
 
     def delete_selected(self) -> bool:

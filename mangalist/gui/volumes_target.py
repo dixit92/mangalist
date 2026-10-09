@@ -26,6 +26,7 @@ class VolumeTarget:
     titles: Tuple[str, ...]             # what the search is given: main title first, then alternatives
     missing: Tuple[str, ...]
     held: Tuple[str, ...]
+    upgrade: Tuple[str, ...] = ()       # those of *missing* that replace chapters held (an upgrade), for the wording
 
 
 @dataclass(frozen=True)

@@ -77,10 +77,19 @@ def test_the_groups_counts_notes_and_rows(qapp):
     tab.count_changed.connect(counts.append)
     tab.set_wanted(WANTED)
     assert counts == [5]
-    heads, titles = rows(tab)
-    assert heads == ["MISSING VOLUMES · 3", "MISSING CHAPTERS · 1", "UPGRADES · 1"]
-    assert titles == ["Frieren", "Oshi no Ko", "Vinland Saga", "Example Webcomic", "Spy x Family"]
-    assert [tab.tree.topLevelItem(i).data(0, dt.ROLE_ASIDE) for i in (0, 4, 6)] == ["nyaa", "needs Suwayomi", "nyaa"]
+    # One group at a time, picked with the chips (owner, 2026-10-09: no scrolling down to Upgrades); Volumes first.
+    assert tab.current_group() == GROUP_VOLUMES
+    assert {g: c.count for g, c in tab.group_chips.items()} == {GROUP_VOLUMES: 3, GROUP_UPGRADES: 1, GROUP_CHAPTERS: 1}
+    seen = {}
+    for group in (GROUP_VOLUMES, GROUP_UPGRADES, GROUP_CHAPTERS):
+        tab.show_group(group)
+        heads, titles = rows(tab)
+        seen[group] = (heads, titles, tab.tree.topLevelItem(0).data(0, dt.ROLE_ASIDE))
+        assert tab.group_chips[group].isChecked() and tab.count_label.text() == "5 series"
+    assert seen[GROUP_VOLUMES] == (["MISSING VOLUMES · 3"], ["Frieren", "Oshi no Ko", "Vinland Saga"], "nyaa")
+    assert seen[GROUP_UPGRADES] == (["UPGRADES · 1"], ["Spy x Family"], "nyaa")
+    assert seen[GROUP_CHAPTERS] == (["MISSING CHAPTERS · 1"], ["Example Webcomic"], "needs Suwayomi")
+    tab.show_group(GROUP_VOLUMES)
     frieren = tab._items["/lib/Frieren"]
     assert frieren.data(0, dt.ROLE_SUB) == "Vol. 12-13" and frieren.checkState(0) == Qt.CheckState.Unchecked
     assert tab.count_label.text() == "5 series" and tab.selected_label.text() == "0 selected"
@@ -91,10 +100,10 @@ def test_the_filter_narrows_the_list_and_the_count(qapp):
     tab, _ = make(qapp)
     tab.filter_edit.setText("frie")
     heads, titles = rows(tab)
-    assert titles == ["Frieren"] and heads[0] == "MISSING VOLUMES · 1" and heads[1] == "MISSING CHAPTERS · 0"
-    assert tab.count_label.text() == "1 of 5 series"
+    assert titles == ["Frieren"] and heads == ["MISSING VOLUMES · 1"]
+    assert tab.group_chips[GROUP_CHAPTERS].count == 0 and tab.count_label.text() == "1 of 5 series"
     tab.filter_edit.clear()
-    assert len(rows(tab)[1]) == 5
+    assert len(rows(tab)[1]) == 3 and tab.count_label.text() == "5 series"       # the Volumes group again
 
 
 def test_checking_series_counts_them_and_survives_a_filter(qapp):
@@ -308,3 +317,40 @@ def test_show_in_list_and_stop(qapp):
     settle(qapp, tab)
     assert not tab.btn_find.isEnabled()
     assert tab._queue == type(tab._queue)()                                  # nothing more is started after stop()
+
+
+# --- groups as chips, a resizable panel (owner, 2026-10-09) ------------------------------------------------------
+
+def test_the_chosen_group_and_the_panel_width_are_remembered(qapp):
+    tab, _ = make(qapp)
+    tab.show_group(GROUP_UPGRADES)
+    tab.splitter.setSizes([520, 900])
+    tab.splitter.splitterMoved.emit(520, 1)
+    again, _ = make(qapp)
+    assert again.current_group() == GROUP_UPGRADES and rows(again)[1] == ["Spy x Family"]
+    assert again.splitter.sizes()[0] == tab.splitter.sizes()[0]
+
+
+def test_focus_opens_the_group_that_holds_the_series(qapp):
+    tab, _ = make(qapp)
+    assert tab.current_group() == GROUP_VOLUMES
+    tab.focus("/lib/Spy x Family")                                   # "Get the volume upgrades" from the List
+    assert tab.current_group() == GROUP_UPGRADES and tab.current_folder() == "/lib/Spy x Family"
+
+
+def test_an_empty_remembered_group_gives_way_to_one_with_series(qapp):
+    from mangalist import config
+
+    cfg = config.load()
+    cfg[dt.CFG_GROUP] = GROUP_UPGRADES
+    config.save(cfg)
+    tab, _ = make(qapp, wanted=[w for w in WANTED if w.group != GROUP_UPGRADES])
+    assert tab.current_group() == GROUP_VOLUMES
+
+
+def test_the_in_progress_panel_height_is_resizable_and_remembered(qapp):
+    tab, _ = make(qapp)
+    tab.vsplitter.setSizes([400, 360])
+    tab.vsplitter.splitterMoved.emit(400, 1)
+    again, _ = make(qapp)
+    assert again.vsplitter.sizes()[1] == tab.vsplitter.sizes()[1]
