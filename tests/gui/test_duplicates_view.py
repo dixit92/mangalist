@@ -258,7 +258,8 @@ def test_only_the_newest_scan_counts(views, pair, monkeypatch):
     monkeypatch.setattr(duplicates_view, "find_duplicate_files", maybe_slow)
     view = views.make()
     view.refresh()
-    view.refresh()
+    wait_until(views.qapp, lambda: calls)    # the first scan is inside (and held) before the second starts: the
+    view.refresh()                           # threads' start order alone would not say which one is held
     wait_until(views.qapp, lambda: view.file_groups)
     gate.set()
     for _ in range(30):
