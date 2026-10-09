@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from mangalist import config  # noqa: E402
 from mangalist.gui import lanes  # noqa: E402
 from mangalist.gui.main_window import _count_by_folder  # noqa: E402
-from mangalist.gui.table_model import COL_LIBRARY, COL_TITLE  # noqa: E402
+from mangalist.gui.table_model import COL_LIBRARY  # noqa: E402
 from mangalist.identity.backfill import backfill_signatures  # noqa: E402
 from mangalist.knowledge import from_mangapixer_item  # noqa: E402
 from mangalist.scanner import scan_one_root  # noqa: E402
@@ -437,6 +437,7 @@ def test_the_end_of_the_scan_does_not_put_the_rows_in_a_second_time(lib):
     win._scan_applied = {r.root_id for r in result.roots}          # ... and the window already showed these roots
     win._on_scan_finished(result)
     assert all(a is b for a, b in zip(win._model.entries(), shown)) and len(win._model.entries()) == len(shown)
+    assert win._scan_applied == set()                              # used up: a finish with no start in between still works
 
     win._scan_applied = set()                                      # a finish for roots never shown puts them in
     win._on_scan_finished(result)

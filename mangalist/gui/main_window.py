@@ -1014,11 +1014,13 @@ class MainWindow(QMainWindow):
 
     def _on_scan_finished(self, result) -> None:
         if isinstance(result, LibraryScan):
+            shown, self._scan_applied = self._scan_applied, set()      # this scan's roots; the next one starts empty
             for rs in result.roots:         # normally all shown already, root by root
                 if rs.error:
                     self._drop_root_rows(rs.root_id)
-                elif rs.root_id not in self._scan_applied:
+                elif rs.root_id not in shown:
                     self._apply_root_scan(rs, result.renamed if len(result.roots) == 1 else ())
+            self._scan_applied = set()
             entries: List[MangaEntry] = result.entries
             loose = result.loose
             errors = result.errors
@@ -1071,6 +1073,7 @@ class MainWindow(QMainWindow):
             self._set_rows(kept)
 
     def _on_scan_failed(self, msg: str) -> None:
+        self._scan_applied = set()
         self._progress.setVisible(False)
         self._status_label.setText("Scan failed")
         QMessageBox.critical(self, "Scan failed", msg)
