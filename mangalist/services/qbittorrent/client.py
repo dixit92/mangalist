@@ -80,7 +80,7 @@ class TorrentRejected(QbtError):
     """qBittorrent answered ``Fails.`` to an add: an invalid link, or the torrent is already there."""
 
 
-class TorrentNotFound(QbtError):
+class TorrentNotFound(QbtError, LookupError):
     """No torrent with that info hash."""
 
 
