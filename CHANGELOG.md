@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.7] - 2026-10-09
+
+The sixth MangaList release (testing build): safer duplicate detection, the series' scanlation group kept by default, a busy state while deleting, and excluded folders no longer reported missing.
+
 - **Fewer false duplicates (safety):** files only count as copies when their names differ by tags alone (`[group]`,
   `(Digital)`, a year, a copy marker). Names that differ by another number - chapters written before their volume
   (`009 Vol 01 Title` next to `008 Vol 01 Title`), or `Season 1 v01` next to `Season 2 v01` - are different units and
