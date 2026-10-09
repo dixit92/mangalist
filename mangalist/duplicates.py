@@ -25,7 +25,8 @@ The listing is the database as of the last scan, with each file's size and time 
 gone, or is not a plain file, is left out) - so a list built after a discard is already right without a rescan.
 
 Deleting is an owner-approved exception to the journal's "moves only" rule (2026-10-08: no holding folder, only an explicit
-confirmation) for this one action. It lives in :func:`delete_checked` (one file, every guard) and :func:`discard_duplicates`
+confirmation) for this action - and, since the volumes cycle, for the confirmed delete of chapters a filed volume replaced
+(``mangalist.upgrades``, which calls :func:`delete_checked` the same way). It lives in :func:`delete_checked` (one file, every guard) and :func:`discard_duplicates`
 (the root's ``.mangalist.lock`` and "keep at least one of each number" around it). Nothing else in MangaList deletes
 a library file. No Qt.
 """
