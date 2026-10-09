@@ -96,3 +96,23 @@ def test_pending_mangapixer_scans_are_retried_even_without_downloads(tmp_path, m
     monkeypatch.setattr(scans, "request_scans", lambda cache, libs: asked.append(sorted(libs)) or scans.ScanReport())
     result = make_downloads_job(open_ledger=lambda: ledger, client_factory=lambda conn: qbt)(JobContext())
     assert result.message.startswith("no downloads in progress") and asked == [[]]
+
+
+def test_scan_requests_switched_off_in_settings_are_not_sent(tmp_path, monkeypatch):
+    from mangalist.downloads.options import KEY_SCAN_AFTER_FILING, set_flag
+    from mangalist.services.mangapixer import scans
+    from mangalist.store.mangapixer import MangaPixerCache, Mapping
+
+    ledger, qbt, sid, sdir = _setup(tmp_path)
+    db = ledger.store
+    MangaPixerCache(db).save_mapping(Mapping(root_id=db.list_roots()[0].id, library_id="lib0manga"))
+    MangaPixerCache(db).set_scan_pending("lib1other", "2026-01-01T00:00:00Z")
+    set_flag(db, KEY_SCAN_AFTER_FILING, False)
+    asked = []
+    monkeypatch.setattr(scans, "request_scans", lambda cache, libs: asked.append(sorted(libs)) or scans.ScanReport())
+    ledger.save_connection(QbtConnection("http://qbt.example:8080", "admin", SECRET))
+    ledger.create(sid, candidate(), ["2"], str(sdir))
+    qbt.put(HASH, "Pack", {"Series A v02.cbz": data("v02")}, state="uploading")
+    result = make_downloads_job(open_ledger=lambda: ledger, client_factory=lambda conn: qbt)(JobContext())
+    assert result.extra["filed"] == 1 and asked == []                     # neither the new library nor the pending one
+    assert "rescan ok" in result.message and "MangaPixer" not in result.message

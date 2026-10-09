@@ -1,4 +1,4 @@
-"""Roots manager dialog and the main window's roots wiring (offscreen Qt)."""
+"""Roots editor / dialog and the main window's roots wiring (offscreen Qt)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from mangalist import config  # noqa: E402
-from mangalist.gui.roots_dialog import RootsDialog  # noqa: E402
+from mangalist.gui.roots_dialog import RootsDialog, RootsEditor  # noqa: E402
 
 from .conftest import make_archive  # noqa: E402
 
@@ -33,7 +33,7 @@ def _preview(dlg):
 
 
 def test_add_root_with_exclusions_and_live_preview(qapp, db, lib):
-    dlg = RootsDialog(db, browse=lambda *a: "")
+    dlg = RootsEditor(db, browse=lambda *a: "")
     assert dlg.root_list.count() == 0
     assert dlg.add_root(str(lib)) is not None
     assert dlg.root_list.count() == 1 and dlg.name_edit.text() == "Manga"
@@ -52,7 +52,7 @@ def test_add_root_with_exclusions_and_live_preview(qapp, db, lib):
     dlg.name_edit.setText("My Manga")
     dlg.name_edit.textEdited.emit("My Manga")
     dlg.origin_combo.setCurrentIndex(dlg.origin_combo.findData("manga"))
-    dlg.accept()
+    assert dlg.commit()
     roots = db.list_roots()
     assert [(r.name, r.origin_hint, r.exclusions) for r in roots] == [("My Manga", "manga", ["@Oneshots/**"])]
 
@@ -60,14 +60,15 @@ def test_add_root_with_exclusions_and_live_preview(qapp, db, lib):
 def test_cancel_changes_nothing(qapp, db, lib):
     db.add_root(str(lib), exclusions=["*.txt"])
     dlg = RootsDialog(db)
-    dlg.remove_selected()
-    dlg.reject()
+    dlg.editor.remove_selected()
+    dlg.reject()                                                  # Cancel: nothing was written
     assert [r.exclusions for r in db.list_roots()] == [["*.txt"]]
+    dlg.deleteLater()
 
 
 def test_remove_and_overlap_errors(qapp, db, lib, tmp_path):
     db.add_root(str(lib))
-    dlg = RootsDialog(db)
+    dlg = RootsEditor(db)
     assert dlg.add_root(str(lib / "Series A")) is None        # inside an existing root
     assert "overlaps" in dlg.error_label.text()
     other = tmp_path / "Other"
@@ -75,14 +76,35 @@ def test_remove_and_overlap_errors(qapp, db, lib, tmp_path):
     assert dlg.add_root(str(other)) is not None
     dlg.root_list.setCurrentRow(0)
     dlg.remove_selected()
-    dlg.accept()
+    assert dlg.commit()
     assert [r.path for r in db.list_roots()] == [str(other)]
 
 
 def test_an_unreachable_root_has_no_preview(qapp, db, tmp_path):
     db.add_root(str(tmp_path / "offline share"))
-    dlg = RootsDialog(db)
+    dlg = RootsEditor(db)
     assert "not reachable" in dlg.preview_label.text()
+
+
+def test_the_dialog_saves_on_ok_and_keeps_open_on_an_error(qapp, db, lib):
+    dlg = RootsDialog(db, browse=lambda *a: "")
+    dlg.editor.add_root(str(lib))
+    dlg.accept()
+    assert dlg.result() == 1 and dlg.changed and [r.path for r in db.list_roots()] == [str(lib)]
+    dlg.deleteLater()
+
+
+def test_commit_reports_a_problem_and_writes_nothing(qapp, db, lib, tmp_path):
+    db.add_root(str(lib), name="First")
+    editor = RootsEditor(db)
+    other = tmp_path / "Other"
+    other.mkdir()
+    editor.add_root(str(other))
+    editor.root_list.setCurrentRow(1)
+    editor.path_edit.setText(str(lib / "Series A"))                # now inside the first root
+    editor.path_edit.textEdited.emit(str(lib / "Series A"))
+    assert not editor.commit() and "overlaps" in editor.error_label.text()
+    assert [r.name for r in db.list_roots()] == ["First"]
 
 
 def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib, tmp_path):
@@ -94,11 +116,13 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
     db.add_root(str(lib), exclusions=["@Oneshots/**"])
     win = MainWindow()
     try:
-        assert win._path_edit.text() == str(lib)
-        assert any(b.text() == "Roots" for b in win.findChildren(QPushButton))
+        # The top bar names the library folder (its path in the tooltip); its page is under Settings > Library.
+        assert win._top.status.text() == "Manga" and win._top.status.toolTip() == f"Manga: {lib}"
+        assert win._list.stack.currentIndex() == 2 and win._list.btn_add_root.isHidden() is False   # empty state
         db.add_root(str(second))
         win._after_roots_changed()
-        assert win._path_edit.text().startswith("2 roots:")
+        assert win._top.status.text() == "Manga, Manhwa" and str(second) in win._top.status.toolTip()
+        assert win._thread is None                  # only told: no scan starts by itself here
 
         from mangalist.gui.main_window import ScanWorker
         worker = ScanWorker(db.list_roots(), db)
@@ -111,6 +135,8 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
         assert "1 archive(s) not in a series folder" in win._status_label.text()
         assert "Stray.cbz" in win._status_label.toolTip()
         assert {s.rel_path for s in db.list_series()} == {"Series A", "Series K"}
+        assert win._list.counts_label.text() == "2 series" and win._list.stack.currentIndex() == 0
+        assert win._top.status.text().startswith("Manga, Manhwa · scanned ")
     finally:
         win.close()
         win.deleteLater()
@@ -127,7 +153,7 @@ def test_legacy_config_root_becomes_root_1_in_the_window(qapp, lib):
     paths.config_file().write_text(json.dumps({"last_root": str(lib)}), encoding="utf-8")
     win = MainWindow()
     try:
-        assert win._path_edit.text() == str(lib)
+        assert win._top.status.text() == "Manga" and str(lib) in win._top.status.toolTip()
         assert config.load()["last_root"] == str(lib)
     finally:
         win.close()

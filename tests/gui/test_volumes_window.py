@@ -1,7 +1,7 @@
-"""The volumes GUI inside the main window (offscreen Qt, fake backend): nothing exists without downloads; with them,
-"Find volumes on nyaa..." is enabled only for a MangaPixer-matched series licensed in English (row menu and Wanted
-panel), the toolbar has qBittorrent / Downloads, and a series' download status shows in the Wanted panel and the
-detail panel."""
+"""The downloads inside the main window (offscreen Qt, fake backend): nothing exists without downloads; with them the
+Download tab gets every series with gaps ("Find volumes on nyaa..." findable only for a MangaPixer-matched series
+licensed in English), the row menu and the details panel lead to it, Settings reaches qBittorrent / Downloads, and a
+series' download status shows in the details panel."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("PySide6")
-
-from PySide6.QtWidgets import QMenu  # noqa: E402
 
 from mangalist.downloads.contracts import DownloadStatus as S  # noqa: E402
 from mangalist.knowledge import from_mangapixer_item, from_own_matcher  # noqa: E402
@@ -82,23 +80,9 @@ def _backend():
 
 def test_nothing_of_the_volumes_gui_exists_without_downloads(make_window):
     win = make_window(downloads=False)
-    assert win._volumes is None and win._volumes_backend is None
-    assert not win._wanted.btn_find.isVisibleTo(win._wanted) and win._wanted.tree.isColumnHidden(3)
+    assert win._volumes is None and win._volumes_backend is None and win._download_tab is None
+    assert not win._top.tab_download.isVisibleTo(win) and win._pages.count() == 1
     assert not win._detail._lbl_download.isVisibleTo(win._detail)
-    from PySide6.QtWidgets import QPushButton
-
-    labels = {b.text() for b in win.findChildren(QPushButton)}
-    assert "qBittorrent" not in labels and "Downloads" not in labels
-
-
-def test_toolbar_has_qbittorrent_and_downloads_buttons_before_rescan(make_window):
-    win = make_window(_backend())
-    assert win._volumes.btn_qbittorrent.text() == "qBittorrent" and win._volumes.btn_downloads.text() == "Downloads"
-    buttons = (win._btn_mangapixer, win._volumes.btn_qbittorrent, win._volumes.btn_downloads, win._btn_rescan)
-    win.show()
-    xs = [w.mapTo(win, w.rect().topLeft()).x() for w in buttons]
-    assert [w.text() for w in buttons] == ["MangaPixer", "qBittorrent", "Downloads", "Rescan"]
-    assert xs == sorted(xs) and len(set(xs)) == 4
 
 
 @pytest.mark.parametrize("title, enabled, why", [
@@ -119,75 +103,70 @@ def test_find_volumes_enable_rules(make_window, title, enabled, why):
         assert got.target.series_id == 1 and got.target.folder == str(Path("/lib") / QUEST)
 
 
-def test_row_menu_action_is_disabled_with_a_tooltip_reason(make_window):
+def _wanted(win):
+    win._rebuild_wanted()
+    return {(w.title, w.group): w for w in win._download_tab._wanted}
+
+
+def test_the_download_tab_gets_every_series_with_gaps(make_window):
     win = make_window(_backend())
-    menu = QMenu()
-    on = win._volumes.add_row_action(menu, _row(win, QUEST))
-    off = win._volumes.add_row_action(menu, _row(win, OWN))
-    assert on.text() == "Find volumes on nyaa…" and on.isEnabled()
-    assert not off.isEnabled() and "not linked there" in off.toolTip() and menu.toolTipsVisible()
+    got = _wanted(win)
+    # REVIEW (not matched yet) and OWN (own matcher, nothing looked up) have nothing to compare: no gaps, not listed.
+    assert set(got) == {(QUEST, "volumes"), (NEW, "volumes")}
+    quest = got[(QUEST, "volumes")]
+    assert quest.findable and quest.reason == "" and quest.missing == ("2", "3") and quest.held == ("1",)
+    assert quest.series_id == 1 and quest.folder == str(Path("/lib") / QUEST) and quest.gaps == "Vol. 2-3"
+    assert quest.titles[0] == "Example Quest"
+    assert not got[(NEW, "volumes")].findable and "rescan first" in got[(NEW, "volumes")].reason
+    assert win._top.tab_download.badge == 2                                             # count_changed -> the badge
 
 
-def test_wanted_panel_button_follows_the_selected_series(make_window):
+def test_row_menu_leads_to_the_download_tab(make_window):
     win = make_window(_backend())
-    panel = win._wanted
-    panel.rebuild(win._model)
-    assert panel.btn_find.isVisibleTo(panel)
-    group = panel.tree.topLevelItem(1)                                          # Missing
-    items = {group.child(i).text(0): group.child(i) for i in range(group.childCount())}
-    assert QUEST in items
-    panel.tree.setCurrentItem(items[QUEST])
-    assert panel.btn_find.isEnabled()
-    panel.tree.setCurrentItem(panel.tree.topLevelItem(1))                       # a group: no series
-    assert not panel.btn_find.isEnabled()
-    assert panel.btn_find.toolTip() == "Select a series."
+    win._rebuild_wanted()
+    menus = []
+    win._exec_menu = lambda menu, pos: menus.append(menu) or None
+    for title in (QUEST, OWN):
+        win._select_source_row(_row(win, title))
+        rect = win._table.visualRect(win._proxy.mapFromSource(win._model.index(_row(win, title), 2)))
+        win._on_context_menu(rect.center())
+    acts = [{a.text(): a for a in m.actions()} for m in menus]
+    assert acts[0]["Get the missing volumes…"].isEnabled()
+    off = acts[1]["Get the missing volumes…"]
+    assert not off.isEnabled() and "no gaps" in off.toolTip()
+    assert win.get_missing(str(Path("/lib") / QUEST))
+    assert win._top.current() == 1 and win._pages.currentWidget() is win._download_tab
+    assert win._download_tab.current_folder() == str(Path("/lib") / QUEST)
 
 
-def test_wanted_panel_button_opens_the_dialog_for_the_enabled_series(make_window):
-    win = make_window(_backend())
-    opened = []
-    win._volumes.run_nyaa = lambda parent, backend, target: opened.append(target) or type("D", (), {})()
-    panel = win._wanted
-    panel.rebuild(win._model)
-    group = panel.tree.topLevelItem(1)
-    quest = next(group.child(i) for i in range(group.childCount()) if group.child(i).text(0) == QUEST)
-    panel.tree.setCurrentItem(quest)
-    panel.btn_find.click()
-    assert [t.title for t in opened] == [QUEST]
-
-
-def test_download_status_shows_in_the_wanted_panel_and_the_detail_panel(make_window, qapp):
+def test_download_status_shows_in_the_detail_panel(make_window, qapp):
     backend = _backend()
     backend.record_list = [record(1, series_id=1, status=S.SENT), record(2, series_id=1, status=S.FILED),
                            record(3, series_id=4, status=S.FAILED, error="no space left", wanted=("2",))]
     win = make_window(backend)
     wait_until(qapp, lambda: win._volumes.records)
-    panel = win._wanted
-    panel.rebuild(win._model)
-    group = panel.tree.topLevelItem(1)
-    texts = {group.child(i).text(0): group.child(i).text(3) for i in range(group.childCount())}
-    assert texts[QUEST] == "Filed v03-v05 - seeding"                  # the newest record of the series wins
-    assert not panel.tree.isColumnHidden(3)
-    win._volumes.show_in_detail(_row(win, QUEST))
-    assert win._detail._lbl_download.text() == "Filed v03-v05 - seeding" and "Target folder" in win._detail._lbl_download.toolTip()
+    assert win._detail._lbl_download.isVisibleTo(win._detail) is False      # no series selected yet
+    win._select_source_row(_row(win, QUEST))
+    assert win._detail._lbl_download.isVisibleTo(win._detail)
+    assert win._detail._lbl_download.text() == "Filed v03-v05 - seeding"   # the newest record of the series wins
+    assert "Target folder" in win._detail._lbl_download.toolTip()
     win._volumes.show_in_detail(_row(win, OWN))
     assert win._detail._lbl_download.text() == "-"
     assert win._volumes.status_for_row(_row(win, DONE)) == ("Failed: no space left", win._volumes.status_for_row(
         _row(win, DONE))[1])
 
 
-def test_records_refresh_after_a_send_updates_the_panels(make_window, qapp):
+def test_records_refresh_after_a_send_updates_the_details(make_window, qapp):
     backend = _backend()
     win = make_window(backend)
     wait_until(qapp, lambda: backend.threads)                      # the startup read has begun (and is maybe running)
-    win._wanted.rebuild(win._model)
     row = _row(win, QUEST)
+    win._select_source_row(row)
     assert win._volumes.status_for_row(row) is None
     backend.record_list.append(record(1, series_id=1))
     assert win._volumes.refresh_records()                          # queued behind a running read, or started
     wait_until(qapp, lambda: win._volumes.status_for_row(row) is not None)
-    group = win._wanted.tree.topLevelItem(1)
-    assert [group.child(i).text(3) for i in range(group.childCount()) if group.child(i).text(0) == QUEST] == ["Sent"]
+    assert win._detail._lbl_download.text() == "Sent"
 
 
 def test_series_lookup_errors_disable_instead_of_crashing(make_window):
@@ -218,6 +197,7 @@ def test_close_stops_the_refresh_timer(make_window):
 
 
 def test_a_refresh_asked_for_during_a_read_runs_right_after_it(make_window, qapp):
+    import sys
     import threading
 
     backend = _backend()
@@ -225,7 +205,17 @@ def test_a_refresh_asked_for_during_a_read_runs_right_after_it(make_window, qapp
     gate = threading.Event()
     original = backend.records
 
+    def from_the_controller():                  # the Download tab's list reads the records too: count only these
+        frame = sys._getframe(1)
+        while frame is not None:
+            if frame.f_code.co_filename.endswith("volumes_controller.py"):
+                return True
+            frame = frame.f_back
+        return False
+
     def slow_records(series_id=None):
+        if not from_the_controller():
+            return original(series_id)
         reads.append(1)
         if len(reads) == 1:
             gate.wait(10)

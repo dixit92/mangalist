@@ -7,10 +7,20 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **A new look, in two tabs:** **List** (your library, with state chips - Missing volumes, Missing chapters, Upgrades,
+  Duplicates and more - and a details panel you can collapse) and **Download** (the series to get, grouped, with
+  nyaa's releases for the one you select and the downloads in progress). "Get the missing volumes" in the List tab
+  takes you to that series in the Download tab. The app bundles the IBM Plex fonts.
+- **One Settings dialog** replaces the separate dialogs: Library, Connected services (MangaPixer, qBittorrent),
+  Download sources (nyaa: English and/or raw, hide light novels, only trusted uploaders), Matching and Automation
+  (the container's schedules, Remove Completed).
+- **Duplicates:** the Duplicates chip lists series held in more than one folder, and duplicate files (the same number
+  twice in one folder, MangaPixer's rule) to keep or discard. Discarded files are deleted only after a confirmation
+  that lists every one of them, and one copy of each number always stays.
 - **MangaPixer sees new volumes within minutes:** after filing downloads, MangaList asks MangaPixer (1.36.0 or later) to
   rescan each library it filed into - one request per library; when MangaPixer is busy or cooling down, again after the
   time it names. The token needs the **Request library scans** permission (create a new token with it); without it
-  MangaList stops asking until a new token is entered.
+  MangaList stops asking until a new token is entered. Settings > Automation can switch the requests off.
 - After filing, MangaList also records the series' new volumes right away (they no longer show as missing until the
   nightly rescan).
 - **A new icon:** MangaPixer's icon turned 90 degrees, in inverted colours - for the app, the installers, the web GUI of the

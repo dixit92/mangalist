@@ -1,10 +1,12 @@
-"""The volumes MVP's part of the main window: toolbar buttons, the row-menu action, the Wanted panel and detail
-panel hooks, and the download records behind the status texts.
+"""The downloads' part of the main window (UI cycle: the Download tab took over the Wanted panel and the toolbar
+buttons): the series-id cache, the nyaa enable rule per row (it decides the "To get" list's ``findable``), the download
+records behind the details panel's Download line, and the existing dialogs the shell opens until lane B's Download tab
+and Settings replace them.
 
 The main window builds one :class:`VolumesController` only when downloads are switched on and a backend exists
-(:func:`~mangalist.gui.downloads_backend.create_backend`); without one nothing of the volumes GUI is created.
-The records are read off the UI thread (at start, after the dialogs close, after a send, and every minute while
-the window is open) and cached; the panels read the cache.
+(:func:`~mangalist.gui.downloads_backend.create_backend`); without one there is no Download tab. The records are read
+off the UI thread (at start, after the dialogs close, after a send, and every minute while the window is open) and
+cached; the details panel reads the cache.
 """
 
 from __future__ import annotations
@@ -13,8 +15,7 @@ import logging
 from typing import Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QTimer
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenu, QToolBar, QWidget
+from PySide6.QtWidgets import QWidget
 
 from ..downloads.contracts import DownloadRecord
 from ..models import MangaEntry
@@ -31,17 +32,14 @@ from .volumes_target import (
 _log = logging.getLogger(__name__)
 
 REFRESH_MS = 60_000
-FIND_VOLUMES_LABEL = "Find volumes on nyaa…"
 
 
 class VolumesController(QObject):
-    def __init__(self, window: QWidget, backend: DownloadsBackend, model, wanted, detail,
-                 set_status: Callable[[str], None]):
+    def __init__(self, window: QWidget, backend: DownloadsBackend, model, detail, set_status: Callable[[str], None]):
         super().__init__(window)
         self._window = window
         self.backend = backend
         self._model = model
-        self._wanted = wanted
         self._detail = detail
         self._set_status = set_status
         self._series_ids: Dict[str, Optional[int]] = {}
@@ -59,43 +57,12 @@ class VolumesController(QObject):
         self.run_qbittorrent = open_qbittorrent_dialog
         self.run_downloads = open_downloads_dialog
 
-        wanted.set_downloads(self._wanted_availability, self.status_for_row)
-        wanted.find_volumes_requested.connect(self.open_find_volumes)
         detail.set_downloads_enabled(True)
         self._timer = QTimer(self)
         self._timer.setInterval(REFRESH_MS)
         self._timer.timeout.connect(self.refresh_records)
         self._timer.start()
         QTimer.singleShot(0, self.refresh_records)
-
-    # --- toolbar and menu ----------------------------------------------------------------------------
-
-    def add_toolbar_buttons(self, toolbar: QToolBar, make_button: Callable[[str], QWidget],
-                            spacer: Callable[[int], QWidget], before: Optional[QAction] = None) -> None:
-        """qBittorrent… and Downloads…, inserted before the *before* action (appended when None)."""
-        btn_qbt = make_button("qBittorrent")
-        btn_qbt.setToolTip("Where MangaList sends the volumes you pick on nyaa (qBittorrent Web UI)")
-        btn_qbt.clicked.connect(self.open_qbittorrent)
-        add = (lambda w: toolbar.insertWidget(before, w)) if before is not None else toolbar.addWidget
-        add(btn_qbt)
-        add(spacer(6))
-        btn_dl = make_button("Downloads")
-        btn_dl.setToolTip("Volumes sent to qBittorrent and where each one stands")
-        btn_dl.clicked.connect(self.open_downloads)
-        add(btn_dl)
-        add(spacer(6))
-        self.btn_qbittorrent, self.btn_downloads = btn_qbt, btn_dl
-
-    def add_row_action(self, menu: QMenu, src_row: int) -> QAction:
-        """"Find volumes on nyaa…" in a one-series row menu: enabled only where the rule allows, otherwise
-        disabled with the reason as its tooltip."""
-        availability = self.availability(src_row)
-        action = menu.addAction(FIND_VOLUMES_LABEL)
-        action.setEnabled(availability.enabled)
-        action.setToolTip("Search nyaa for this series' missing volumes" if availability.enabled
-                          else availability.reason)
-        menu.setToolTipsVisible(True)
-        return action
 
     # --- the rule ------------------------------------------------------------------------------------
 
@@ -121,10 +88,6 @@ class VolumesController(QObject):
             series_id=self.series_id_for(entry), folder=str(entry.folder), title=entry.title,
             english_title=entry.english_title, knowledge=self._model.knowledge_at(src_row),
             state=self._model.state_at(src_row), held=self._model.held_volumes_at(src_row))
-
-    def _wanted_availability(self, src_row: int) -> Tuple[bool, str]:
-        got = self.availability(src_row)
-        return got.enabled, got.reason
 
     # --- actions -------------------------------------------------------------------------------------
 
@@ -169,7 +132,6 @@ class VolumesController(QObject):
     def _on_records(self, records) -> None:
         self.records = list(records)
         self._latest = latest_by_series(self.records)
-        self._wanted.refresh_downloads()
         self.show_in_detail(self._detail_row)
 
     def _on_records_failed(self, message: str) -> None:

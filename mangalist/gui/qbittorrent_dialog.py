@@ -5,6 +5,9 @@ The password is typed into a masked field and never shown again once saved: the 
 placeholder says one is stored ("leave empty to keep"). It is never logged and never part of a message.
 "Test connection" runs off the UI thread against the values as typed (an empty password field means "the stored
 one"); the connection is not saved until Save.
+
+:class:`QbittorrentPanel` is the form as a widget (the Settings dialog's Connected services section embeds it, with its
+own Save / Cancel); :class:`QbittorrentDialog` wraps it with Save / Cancel buttons.
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -27,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from .background import BackgroundCall, start_call
+from .download_style import apply_style, set_tone
 from .downloads_backend import DEFAULT_SAVE_PATH, BackendError, DownloadsBackend, QbtSettings
 
 PASSWORD_STORED_HINT = "A password is stored (hidden). Leave empty to keep it."
@@ -51,7 +55,7 @@ def normalize_url(text: str) -> str:
 def _hint(text: str) -> QLabel:
     label = QLabel(text)
     label.setWordWrap(True)
-    label.setStyleSheet("color: #666;")
+    label.setProperty("role", "muted")
     return label
 
 
@@ -67,11 +71,13 @@ def _with_hint(field: QWidget, hint: QLabel) -> QWidget:
     return box
 
 
-class QbittorrentDialog(QDialog):
+class QbittorrentPanel(QWidget):
+    saved_changes = Signal()        # the settings were saved
+    tested = Signal(str)            # the connection test worked: qBittorrent's version text
+
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setWindowTitle("qBittorrent")
-        self.resize(640, 420)
+        self.setObjectName("qbittorrentPanel")
         self._backend = backend
         self._call: Optional[BackgroundCall] = None
         self._settings = QbtSettings()
@@ -83,6 +89,7 @@ class QbittorrentDialog(QDialog):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
         intro = QLabel("MangaList sends the releases you pick to qBittorrent through its Web UI, in its own "
                        "\"mangalist\" category. Enable the Web UI in qBittorrent's options first.")
         intro.setWordWrap(True)
@@ -123,12 +130,6 @@ class QbittorrentDialog(QDialog):
         outer.addWidget(self.status_label)
         outer.addStretch(1)
 
-        box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        box.accepted.connect(self.accept)
-        box.rejected.connect(self.reject)
-        self.button_box = box
-        outer.addWidget(box)
-
     # --- data ----------------------------------------------------------------------------------------
 
     def _load(self) -> None:
@@ -159,7 +160,7 @@ class QbittorrentDialog(QDialog):
         return self.password_edit.text() or None
 
     def _say(self, text: str, *, error: bool = False, ok: bool = False) -> None:
-        self.status_label.setStyleSheet("color: #b71c1c;" if error else "color: #2e7d32;" if ok else "")
+        set_tone(self.status_label, "bad" if error else "ok" if ok else "")
         self.status_label.setText(text)
 
     # --- actions -------------------------------------------------------------------------------------
@@ -183,11 +184,8 @@ class QbittorrentDialog(QDialog):
         self.password_edit.setPlaceholderText(PASSWORD_STORED_HINT if self._settings.has_password
                                               else PASSWORD_EMPTY_HINT)
         self._say("Saved.", ok=True)
+        self.saved_changes.emit()
         return True
-
-    def accept(self) -> None:
-        if self.save():
-            super().accept()
 
     def test_connection(self) -> bool:
         if self._call is not None:
@@ -207,6 +205,7 @@ class QbittorrentDialog(QDialog):
 
     def _on_tested(self, version: str) -> None:
         self._say(f"Connected. qBittorrent {version}".rstrip() + ".", ok=True)
+        self.tested.emit(version)
 
     def _on_test_failed(self, message: str) -> None:
         self._say(f"Connection failed: {message}", error=True)
@@ -215,9 +214,36 @@ class QbittorrentDialog(QDialog):
         self._call = None
         self.btn_test.setEnabled(True)
 
-    def done(self, result: int) -> None:
+    def stop(self) -> None:
         if self._call is not None:
             self._call.abandon()
+
+
+class QbittorrentDialog(QDialog):
+    def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setWindowTitle("qBittorrent")
+        self.resize(640, 420)
+        self.panel = QbittorrentPanel(backend, self)
+        outer = QVBoxLayout(self)
+        outer.addWidget(self.panel, 1)
+        box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        self.button_box = box
+        outer.addWidget(box)
+        apply_style(self)
+
+    @property
+    def saved(self) -> bool:
+        return self.panel.saved
+
+    def accept(self) -> None:
+        if self.panel.save():
+            super().accept()
+
+    def done(self, result: int) -> None:
+        self.panel.stop()
         super().done(result)
 
 

@@ -119,3 +119,98 @@ def test_check_now_runs_the_downloads_job_once(db, series, qbt, tmp_path):
     qbt.put(rec.info_hash, "Series A v02 (Digital)", {"Series A v02 (Digital).cbz": b"v02" * 400}, state="uploading")
     assert b.check_now().startswith("1 checked: 1 filed")
     assert b.ledger.get(rec.id).status == DownloadStatus.FILED and (sdir / "Series A v02 (Digital).cbz").exists()
+
+
+# --- the Settings dialog's switches and the Download tab's extras -----------------------------------------
+
+
+class _Nyaa:
+    """A nyaa client with a canned feed per category (what ``rss`` is asked for is recorded)."""
+
+    def __init__(self, feeds):
+        self.feeds, self.asked = feeds, []
+
+    def rss(self, query, category="3_1", filter_=0):
+        self.asked.append((query, category))
+        return list(self.feeds.get(category, []))
+
+
+def _item(title, category="3_1", seeders=5, trusted=False):
+    from mangalist.services.nyaa.rss import RssItem
+
+    h = f"{abs(hash(title)):040x}"[:40]
+    return RssItem(title=title, torrent_url=f"https://nyaa.example/dl/{h[:6]}", view_url=f"https://nyaa.example/{h[:6]}",
+                   info_hash=h, published="2026-10-01T00:00:00+00:00", seeders=seeders, category=category,
+                   trusted=trusted, size_bytes=1000)
+
+
+def test_nyaa_options_default_to_english_and_round_trip(db, qbt):
+    from mangalist.downloads.options import NyaaOptions
+
+    b = _backend(db, qbt)
+    assert b.nyaa_options() == NyaaOptions() and NyaaOptions().categories() == ("3_1",)
+    b.set_nyaa_options(NyaaOptions(english=False, raw=True, hide_light_novels=False, trusted_only=True))
+    got = b.nyaa_options()
+    assert (got.english, got.raw, got.hide_light_novels, got.trusted_only) == (False, True, False, True)
+    assert got.digital_first and got.hide_no_seeders                      # fixed: how the search always works
+    assert got.categories() == ("3_3",)
+    b.set_nyaa_options(NyaaOptions(english=False, raw=False))
+    assert b.nyaa_options().categories() == ("3_1",)                       # never a search of nothing
+
+
+def test_search_follows_the_options_categories_and_trusted_filter(db, qbt):
+    from mangalist.downloads.options import NyaaOptions
+
+    client = _Nyaa({"3_1": [_item("Series A v02 (Digital) (G1)", "3_1", trusted=False)],
+                    "3_3": [_item("Series A v03 (Digital) (G2)", "3_3", trusted=True)]})
+    b = _backend(db, qbt, nyaa_client=client)
+    assert [c.title for c in b.search(["Series A"], ["2", "3"], ["1"])] == ["Series A v02 (Digital) (G1)"]
+    assert {cat for _q, cat in client.asked} == {"3_1"}
+    b.set_nyaa_options(NyaaOptions(english=True, raw=True))
+    got = b.search(["Series A"], ["2", "3"], ["1"])
+    assert sorted(c.title for c in got) == ["Series A v02 (Digital) (G1)", "Series A v03 (Digital) (G2)"]
+    assert {cat for _q, cat in client.asked} == {"3_1", "3_3"}
+    b.set_nyaa_options(NyaaOptions(english=True, raw=True, trusted_only=True))
+    assert [c.title for c in b.search(["Series A"], ["2", "3"], ["1"])] == ["Series A v03 (Digital) (G2)"]
+
+
+def test_light_novels_follow_the_hide_switch(db, qbt):
+    from mangalist.downloads.options import NyaaOptions
+
+    client = _Nyaa({"3_1": [_item("Series A Light Novel v02 (EPUB)"), _item("Series A v02 (Digital)")]})
+    b = _backend(db, qbt, nyaa_client=client)
+    assert [c.title for c in b.search(["Series A"], ["2"], [])] == ["Series A v02 (Digital)"]
+    b.set_nyaa_options(NyaaOptions(hide_light_novels=False))
+    assert len(b.search(["Series A"], ["2"], [])) == 2
+
+
+def test_switching_nyaa_off_stops_the_search_with_a_readable_reason(db, qbt):
+    from mangalist.downloads.options import NyaaOptions
+
+    s = _Search()
+    b = _backend(db, qbt, search=s)
+    b.set_nyaa_options(NyaaOptions(enabled=False))
+    with pytest.raises(BackendError, match="switched off"):
+        b.search(["Series A"], ["2"], [])
+    assert s.calls == []
+
+
+def test_remove_completed_series_titles_and_next_check(db, series, qbt):
+    import json
+
+    sid, sdir = series
+    b = _backend(db, qbt)
+    assert b.load_settings().remove_completed is True
+    b.set_remove_completed(False)
+    assert b.load_settings().remove_completed is False
+    assert b.series_titles([sid, 999]) == {sid: "Series A"} and b.series_titles([]) == {}
+
+    from mangalist import paths
+
+    state = paths.data_dir() / "headless-state.json"
+    assert b.next_check() is None                                          # no scheduler state here
+    state.write_text(json.dumps({"version": 1, "jobs": {"downloads": {"next_run": "2026-10-08T11:21:00+00:00"}}}),
+                     encoding="utf-8")
+    assert b.next_check() == "2026-10-08T11:21:00+00:00"
+    state.write_text("{not json", encoding="utf-8")
+    assert b.next_check() is None
