@@ -12,9 +12,13 @@ folder): the layout on disk is what counts. Rules, in order:
 3. Volume archives (units of kind ``volume``) all in ONE folder -> that folder (the series folder itself or a
    subfolder such as ``Volumes``).
 4. Volume archives spread over several folders -> ambiguous; the options are those folders, most volumes first.
-5. No volumes held: the series folder itself, when it holds archives directly or has no subfolders;
-   when it holds only subfolders the place is unclear -> ambiguous; the options are the series folder and
-   its subfolders.
+5. No volumes held - the usual case of an upgrade from chapters to volumes (owner, 2026-10-09: "the series
+   folder - BUT when the chapters being replaced are NOT in the series folder's root, ask"):
+   a. chapter archives in a subfolder (``Chapters``, ``Season 1``, ...) -> ambiguous; the options are the series
+      folder first, then the folders holding chapters (most chapters first), then the other subfolders;
+   b. otherwise the series folder itself, when it holds archives directly or has no subfolders;
+   c. when it holds only subfolders the place is unclear -> ambiguous; the options are the series folder and
+      its subfolders.
 
 Never a folder outside the series folder: every target and option is checked (also through symlinks) to be the
 series folder or inside it. Hidden / system folders (``.x``, ``@eaDir``, ``#recycle``) are never options.
@@ -114,6 +118,18 @@ def infer_placement(series_dir: str, units: Sequence) -> Placement:
         ordered = [f for f, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
         return Placement(series_dir, None, f"volumes are spread over {len(counts)} folders; choose one",
                          _options(series_dir, ordered))
+    chapter_folders = Counter()
+    for u in units:
+        if getattr(u, "kind", None) == "chapter":
+            rel = (u.rel_path or "").replace("\\", "/").strip("/")
+            if rel and _is_archive(rel) and "/" in rel:
+                chapter_folders[os.path.dirname(rel)] += 1
+    if chapter_folders:
+        ordered = [f for f, _ in sorted(chapter_folders.items(), key=lambda kv: (-kv[1], kv[0]))]
+        names = ", ".join(f'"{f}"' for f in ordered[:3]) + (" ..." if len(ordered) > 3 else "")
+        return Placement(series_dir, None, f"no volumes held yet and the chapters sit in subfolders ({names}); "
+                                           "choose where the volumes go",
+                         _options(series_dir, [""] + ordered + subdirs))
     loose = any(is_file and _is_archive(n) for n, _, is_file in listing)
     if loose or not subdirs:
         return Placement(series_dir, series_dir, "no volumes held yet; the series folder itself")

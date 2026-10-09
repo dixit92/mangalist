@@ -32,7 +32,9 @@ LEDGER_STATUS = ("queued", "dispatched", "completed", "failed", "cancelled",
                  "sent", "downloaded", "filed", "removed")
 PLAN_STATUS = ("planned", "applying", "applied", "failed", "interrupted", "undoing", "undone", "undo_failed")
 STEP_STATE = ("planned", "intent", "done", "failed", "undo_intent", "undone")
-STEP_OPS = ("move", "link")
+STEP_OPS = ("move", "link", "hold")                          # hold: a move OUT of the root into the holding folder
+REPLACEMENT_STATUS = ("nothing", "pending", "held", "restored", "purged", "deleted", "declined", "failed")
+REPLACEMENT_MODES = ("holding", "delete")
 LINK_HOW = ("link", "copy")                                  # how a link step created its name
 
 # --- Migrations ----------------------------------------------------------------------------------------
@@ -360,6 +362,35 @@ ALTER TABLE journal_steps ADD COLUMN how       TEXT;
 ALTER TABLE journal_steps ADD COLUMN dst_ident TEXT;
 """
 
+# Volumes cycle, upgrades lane: the chapter files a filed volume replaces (mangalist.upgrades,
+# mangalist.store.replacements). One row per filed download ("batch"): the files listed when the filing was looked at,
+# what happened to them (moved to the holding folder through a journal plan, waiting for the owner's confirmation,
+# deleted, kept, restored, purged). Downloads filed before this schema are never looked at (meta
+# 'upgrades.first_download' = the highest ledger id at the upgrade).
+_V6_REPLACEMENTS = """
+CREATE TABLE IF NOT EXISTS replacements (
+    id           INTEGER PRIMARY KEY,
+    download_id  INTEGER NOT NULL UNIQUE,            -- the ledger row whose filing made the chapters redundant
+    series_id    INTEGER REFERENCES series(id) ON DELETE SET NULL,
+    root_path    TEXT,                               -- the root holding the chapters (absolute)
+    series_dir   TEXT,                               -- absolute
+    volumes      TEXT    NOT NULL DEFAULT '[]',      -- JSON: the filed volumes that replace them (exact strings)
+    volume_files TEXT    NOT NULL DEFAULT '[]',      -- JSON: [{path, size}] the filed volume archives (checked before acting)
+    files        TEXT    NOT NULL DEFAULT '[]',      -- JSON: [{path, rel, size, modified, chapters, volume}] the chapter files
+    kept         TEXT    NOT NULL DEFAULT '[]',      -- JSON: [{rel, why}] chapter files near them that are NOT replaced
+    mode         TEXT,                               -- holding | delete (the setting when the batch was made)
+    status       TEXT    NOT NULL,                   -- nothing | pending | held | restored | purged | deleted | declined | failed
+    plan_id      INTEGER,                            -- the journal plan that moved them to the holding folder
+    holding_dir  TEXT,                               -- this batch's own folder inside the holding folder
+    purge_after  TEXT,                               -- ISO 8601 UTC: held files are deleted from the holding folder after it
+    error        TEXT,
+    created_at   TEXT    NOT NULL,
+    updated_at   TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS replacements_by_status ON replacements (status);
+INSERT OR IGNORE INTO meta (key, value) SELECT 'upgrades.first_download', CAST(COALESCE(MAX(id), 0) AS TEXT) FROM ledger;
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
@@ -367,6 +398,7 @@ MIGRATIONS: List[Tuple[int, str]] = [
     (3, _V3_INVENTORY),
     (4, _V4_IDENTITY),
     (5, _V5_DOWNLOADS),
+    (6, _V6_REPLACEMENTS),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

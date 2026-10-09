@@ -40,7 +40,7 @@ def sid(db, n: int) -> int:
 
 
 def test_schema_5_tables_and_columns(db):
-    assert db.schema_version() == schema.SCHEMA_VERSION == 5
+    assert db.schema_version() == schema.SCHEMA_VERSION >= 5
     with db.connect() as con:
         ledger_cols = {r[1] for r in con.execute("PRAGMA table_info(ledger)")}
         step_cols = {r[1] for r in con.execute("PRAGMA table_info(journal_steps)")}
@@ -72,7 +72,7 @@ def test_a_populated_schema_4_database_upgrades_to_5_and_keeps_its_rows(tmp_path
     con.close()
 
     st = store.Store(path, import_legacy=False)
-    assert st.schema_version() == 5
+    assert st.schema_version() == schema.SCHEMA_VERSION >= 5
     assert [u.vol_from for u in st.list_units(7)] == ["1"]
     assert st.get_setting("theme") == "dark"
     with st.connect() as c:
