@@ -242,7 +242,7 @@ class MainWindow(QMainWindow):
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
     _CFG_COLUMNS_VERSION = "list_columns_version"     # 2: the Library column exists (hidden unless the owner showed it)
-    _CFG_LIBRARY = "list_library"                      # the picked library folder's path (absent: all libraries)
+    _CFG_LIBRARY = "list_library"                      # the picked library folder's path ("" or absent: all libraries)
     _CFG_SPLITTER = "list_splitter_sizes"
     _CFG_DETAILS = "details_panel"
 
@@ -515,10 +515,8 @@ class MainWindow(QMainWindow):
         root = next((r for r in self._roots() if r.id == root_id), None) if root_id is not None else None
         if root_id is not None and root is None:
             root_id = None
-        if root is None:
-            self._cfg.pop(self._CFG_LIBRARY, None)
-        else:
-            self._cfg[self._CFG_LIBRARY] = root.path
+        # "" = all libraries (the settings store only writes keys, so a removed key would keep its old value)
+        self._cfg[self._CFG_LIBRARY] = root.path if root is not None else ""
         config.save(self._cfg)
         self._apply_library(root_id)
         self._refresh_derived()
