@@ -72,6 +72,7 @@ _log = logging.getLogger(__name__)
 
 REFRESH_MS = 60_000
 SEARCH_DELAY_MS = 350          # a pause after selecting a series, before it is searched
+UPGRADE_NOTE_STYLE = "\nQLabel#upgradeNote { background: #e8eefb; border-radius: 6px; padding: 8px 12px; }\n"
 _NOTE_COLORS = {"muted": "#5a5a57", "warn": "#8a3f00"}
 
 
@@ -184,6 +185,7 @@ class DownloadTab(QWidget):
             self._refresh_timer.timeout.connect(self.downloads.refresh)
             self._refresh_timer.start()
         apply_style(self)
+        self.setStyleSheet(self.styleSheet() + UPGRADE_NOTE_STYLE)
         if autostart:
             self.downloads.refresh()
             self.refresh_replaced()
@@ -254,8 +256,8 @@ class DownloadTab(QWidget):
         top = QWidget()
         tv = QVBoxLayout(top)
         tv.setContentsMargins(20, 18, 20, 18)
-        self.upgrade_label = label("", "muted", wrap=True)
-        self.upgrade_label.setObjectName("upgradeNote")
+        self.upgrade_label = label("", wrap=True)
+        self.upgrade_label.setObjectName("upgradeNote")        # a tinted banner (its rule is in the tab's sheet)
         self.upgrade_label.setVisible(False)
         tv.addWidget(self.upgrade_label)
         self.releases = ReleasesPanel(self._backend, top, confirm=confirm, open_url=open_url, managed=True,

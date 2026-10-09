@@ -33,13 +33,26 @@ from ..classifier import _human
 from ..store.replacements import Batch, ReplacementConflict
 from .background import BackgroundCall, start_call
 from .download_rules import batch_status_text, replaced_bar_text
-from .download_style import apply_style, set_tone
+from .download_style import STYLESHEET, set_tone
 from .download_widgets import button, flat_table, hbox, label
 from .downloads_backend import BackendError
-from .volumes_target import numbers_text
+from .volumes_target import numbers_text, volume_label
 
 ConfirmDeleteFn = Callable[[QWidget, Batch], bool]
 COLUMNS = ("Series", "Volumes", "Files", "State")
+#: The download widgets' look, plus the two delete buttons: "Delete..." (opens the list) and the final "Delete N files".
+DIALOG_STYLE = STYLESHEET + """
+QPushButton[role="danger-quiet"] { color: #8b1d1d; border-color: #d9a3a3; }
+QPushButton[role="danger-quiet"]:hover { background: #fbeaea; }
+QPushButton[role="danger"] { border: 1px solid #8b1d1d; background: #8b1d1d; color: #ffffff; font-weight: 600; }
+QPushButton[role="danger"]:hover { background: #6e1616; }
+"""
+
+
+def file_line(f, *, full: bool = False) -> str:
+    """One chapter file in a list: its path, the chapters, the volume that holds them, its size."""
+    vols = ", ".join(volume_label(v.strip()) for v in f.volume.split(",") if v.strip())
+    return f"{f.path if full else f.rel}    ch. {f.chapters} in {vols}    {_human(f.size)}"
 
 
 def _plural(n: int, word: str) -> str:
@@ -93,7 +106,7 @@ class ConfirmReplaceDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Delete these chapter files?")
         self.setObjectName("settingsDialog")            # the download widgets' look
-        apply_style(self)
+        self.setStyleSheet(DIALOG_STYLE)
         self.setModal(True)
         self.resize(760, 440)
         n = len(batch.files)
@@ -108,7 +121,7 @@ class ConfirmReplaceDialog(QDialog):
                             wrap=True))
         self.list = QListWidget()
         for f in batch.files:
-            self.list.addItem(f"{f.path}    ch. {f.chapters} -> v{f.volume}    {_human(f.size)}")
+            self.list.addItem(file_line(f, full=True))
         lay.addWidget(self.list, 1)
         buttons = QDialogButtonBox()
         self.delete_button = buttons.addButton(f"Delete {_plural(n, 'file')}", QDialogButtonBox.ButtonRole.AcceptRole)
@@ -139,7 +152,7 @@ class ReplacedDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Replaced chapters")
         self.setObjectName("settingsDialog")
-        apply_style(self)
+        self.setStyleSheet(DIALOG_STYLE)
         self.resize(860, 560)
         self._service = service
         self._confirm = confirm or (lambda parent, batch: ask_delete(parent, batch, self._title(batch)))
@@ -168,7 +181,7 @@ class ReplacedDialog(QDialog):
         self.btn_restore = button("Restore", tip="Move the files back where they were")
         self.btn_hold = button("Move to holding folder", primary=True)
         self.btn_delete = button("Delete...", tip="Shows every file first; nothing is deleted before you confirm")
-        self.btn_delete.setProperty("role", "danger")
+        self.btn_delete.setProperty("role", "danger-quiet")
         self.btn_retry = button("Try again", tip="List the files again as they are now and do what the setting says")
         self.btn_keep = button("Keep them", tip="Leave the chapter files where they are and do not ask again")
         self.btn_close = button("Close")
@@ -234,7 +247,7 @@ class ReplacedDialog(QDialog):
                 b.setEnabled(False)
             return
         for f in batch.files:
-            self.files.addItem(f"{f.rel}    ch. {f.chapters} -> v{f.volume}    {_human(f.size)}")
+            self.files.addItem(file_line(f))
         if batch.status == "held":
             self.where_label.setText(f"Held in {batch.holding_dir}" + (f" - {batch.error}" if batch.error else ""))
         else:

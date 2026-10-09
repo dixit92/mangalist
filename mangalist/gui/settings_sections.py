@@ -32,7 +32,7 @@ from .downloads_backend import BackendError, DownloadsBackend
 from .settings_common import SectionPage, placeholder
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
 from .shell import SECTION_SERVICES
-from PySide6.QtWidgets import QButtonGroup, QLineEdit, QRadioButton, QSpinBox  # noqa: E402 - Automation: replaced chapters
+from PySide6.QtWidgets import QButtonGroup, QComboBox, QLineEdit, QRadioButton  # noqa: E402 - Automation
 from .. import upgrades  # noqa: E402
 
 SOURCES_LEAD = "Where releases come from. A source works only when the service it needs is connected."
@@ -209,6 +209,7 @@ class AutomationPage(SectionPage):
     # Replaced chapters (upgrades): what happens to chapter files once a filed volume holds them.
     REPLACED_LEAD = ("When a volume you filed holds chapters you have as chapter files (an upgrade), those files are "
                      "no longer needed. Only chapters MangaPixer's volume list puts wholly in a filed volume count.")
+    HOLDING_DAY_CHOICES = (7, 14, 30, 60, 90, 180, 365)
     HOLDING_HINT = ("Outside every library folder and MangaPixer library, on the same disk share as the library "
                     "(the container's /data). Files keep their folders there, so they can be restored.")
 
@@ -228,17 +229,16 @@ class AutomationPage(SectionPage):
         self.holding_edit = QLineEdit()
         self.holding_edit.setAccessibleName("Holding folder")
         self.holding_edit.setPlaceholderText(upgrades.DEFAULT_HOLDING_FOLDER)
-        self.days_spin = QSpinBox()
-        self.days_spin.setRange(1, upgrades.MAX_HOLDING_DAYS)
-        self.days_spin.setSuffix(" days")
-        self.days_spin.setAccessibleName("Empty the holding folder after")
+        self.days_combo = QComboBox()
+        self.days_combo.setAccessibleName("Empty the holding folder after")
+        self.days_combo.setMinimumWidth(140)
         grid = QGridLayout()
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(6)
         grid.addWidget(label("Holding folder"), 0, 0)
         grid.addWidget(self.holding_edit, 0, 1)
         grid.addWidget(label("Empty it after"), 1, 0)
-        grid.addLayout(hbox(self.days_spin, None), 1, 1)
+        grid.addLayout(hbox(self.days_combo, None), 1, 1)
         grid.setColumnStretch(1, 1)
         bv.addLayout(grid)
         self.holding_hint = label(self.HOLDING_HINT, "muted", wrap=True)
@@ -248,19 +248,22 @@ class AutomationPage(SectionPage):
         self.body.addWidget(box)
         self.hold_radio.toggled.connect(self._replaced_mode_changed)
         self.holding_edit.editingFinished.connect(self._holding_folder_changed)
-        self.days_spin.valueChanged.connect(self._holding_days_changed)
+        self.days_combo.currentIndexChanged.connect(self._holding_days_changed)
 
     def _refresh_replaced(self) -> None:
         settings = upgrades.load_settings(self._db)
         self.hold_radio.setChecked(settings.mode == upgrades.MODE_HOLDING)
         self.delete_radio.setChecked(settings.mode == upgrades.MODE_DELETE)
         self.holding_edit.setText(settings.holding_folder)
-        self.days_spin.setValue(settings.holding_days)
+        self.days_combo.clear()
+        for days in sorted(set(self.HOLDING_DAY_CHOICES) | {settings.holding_days}):
+            self.days_combo.addItem(f"{days} days" if days != 1 else "1 day", days)
+        self.days_combo.setCurrentIndex(self.days_combo.findData(settings.holding_days))
         self._show_holding_state(settings.mode)
 
     def _show_holding_state(self, mode: str) -> None:
         holding = mode == upgrades.MODE_HOLDING
-        for widget in (self.holding_edit, self.days_spin, self.holding_hint):
+        for widget in (self.holding_edit, self.days_combo, self.holding_hint):
             widget.setEnabled(holding)
         problem = upgrades.holding_problem(self._db, self.holding_edit.text()) if holding else None
         self._say_replaced(f"The holding folder cannot be used: {problem}. Nothing is moved until it is fixed."
@@ -295,10 +298,11 @@ class AutomationPage(SectionPage):
         self._say_replaced("Holding folder saved.", "ok")
         self.downloads_changed.emit()
 
-    def _holding_days_changed(self, value: int) -> None:
-        if self._loading:
+    def _holding_days_changed(self, _index: int) -> None:
+        days = self.days_combo.currentData()
+        if self._loading or not isinstance(days, int):
             return
-        upgrades.set_holding_days(self._db, int(value))
+        upgrades.set_holding_days(self._db, days)
 
     def refresh(self) -> None:
         self._loading = True

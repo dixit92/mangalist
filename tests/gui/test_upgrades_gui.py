@@ -239,7 +239,7 @@ def test_automation_settings_for_replaced_chapters(qapp, tmp_path):
     page = AutomationPage(db, Backend(), open_cache(db), env={})
     try:
         assert page.hold_radio.isChecked() and page.holding_edit.text() == upgrades.DEFAULT_HOLDING_FOLDER
-        assert page.days_spin.value() == 30
+        assert page.days_combo.currentData() == 30 and page.days_combo.currentText() == "30 days"
         page.delete_radio.setChecked(True)
         assert upgrades.load_settings(db).mode == "delete" and not page.holding_edit.isEnabled()
         page.hold_radio.setChecked(True)
@@ -251,8 +251,11 @@ def test_automation_settings_for_replaced_chapters(qapp, tmp_path):
         page.holding_edit.setText(good)
         page.holding_edit.editingFinished.emit()
         assert upgrades.load_settings(db).holding_folder == good and page.replaced_status.text() == "Holding folder saved."
-        page.days_spin.setValue(14)
+        page.days_combo.setCurrentIndex(page.days_combo.findData(14))
         assert upgrades.load_settings(db).holding_days == 14
+        upgrades.set_holding_days(db, 45)                                  # a value set elsewhere is offered too
+        page.refresh()
+        assert page.days_combo.currentText() == "45 days"
     finally:
         page.deleteLater()
 
