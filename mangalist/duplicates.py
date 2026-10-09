@@ -14,6 +14,12 @@ library database's units, so MangaList and MangaPixer agree on what a folder hol
   :func:`mangalist.split_chapters.splits_of`): they are different numbers, so they never meet. A part that is itself in two
   files (``2.1`` twice) is a duplicate of that part.
 - A number is compared as an exact decimal, never a float: ``12`` and ``12.0`` are the same chapter, ``12`` and ``12.5`` are not.
+- MangaList's own safety rule on top (owner, 2026-10-09): files are copies only when their names differ by tags alone
+  (``[group]``, ``(Digital)``, a year, a copy marker). When anything else differs by a number - ``009 Vol 01`` next to
+  ``008 Vol 01`` (chapters the parser does not read), ``Season 1 v01`` next to ``Season 2 v01`` - they are different
+  units and never listed. FMD2's download index (``0002 [Vol. 0001 Ch. 1]``) is not such a number.
+- The usual group: when the copies come from different scanlation groups, the group of the neighbouring numbers (else
+  the folder's most used group) - a series keeps its translation style. The default Keep prefers it.
 
 The listing is the database as of the last scan, with each file's size and time read from the disk now (a file that has
 gone, or is not a plain file, is left out) - so a list built after a discard is already right without a rescan.
@@ -28,7 +34,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import stat
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -38,6 +46,8 @@ from typing import Collection, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .gui.shell import DuplicateFile, DuplicateGroup
 from .inventory import to_number
+from .parsing.model import Layer
+from .parsing.parser import parse_name
 from .store.lock import LOCK_NAME, LockError, RootLock
 
 _log = logging.getLogger(__name__)
@@ -141,24 +151,105 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
         container = "/".join(_slash_parts(rel)[:-1])
         buckets.setdefault((sid, container, stated.kind, stated.number), []).append((rel, stated.group))
 
+    # (series id, container, kind) -> {number: [groups]} - for the usual group of a duplicate number
+    groups_by_number: Dict[Tuple[int, str, str], Dict[Decimal, List[str]]] = {}
+    for (sid, container, kind, number), members in buckets.items():
+        groups_by_number.setdefault((sid, container, kind), {})[number] = [g for _rel, g in members if g]
+
     out: List[DuplicateGroup] = []
-    for (sid, _container, kind, number), members in buckets.items():
+    for (sid, container, kind, number), members in buckets.items():
         if len(members) < 2:
             continue
         root_id, series_rel = series_info[sid]
         series_folder = Path(roots[root_id].path, *_slash_parts(series_rel))
-        files = []
-        for rel, group in sorted(members):
-            seen = _stat_plain_file(Path(series_folder, *_slash_parts(rel)))
-            if seen is not None:
-                files.append(DuplicateFile(path=str(seen[0]), size=seen[1], modified=iso_from_ns(seen[2]), group=group))
-        if len(files) < 2:
-            continue
-        out.append(DuplicateGroup(series_id=sid, folder=str(series_folder), title=series_folder.name or str(series_folder),
-                                  kind=kind, number=canonical_number(number), files=tuple(files)))
+        for same in _alike(members, number).values():
+            if len(same) < 2:
+                continue
+            files = []
+            for rel, group in sorted(same):
+                seen = _stat_plain_file(Path(series_folder, *_slash_parts(rel)))
+                if seen is not None:
+                    files.append(DuplicateFile(path=str(seen[0]), size=seen[1], modified=iso_from_ns(seen[2]),
+                                               group=group))
+            if len(files) < 2:
+                continue
+            usual = usual_group(groups_by_number[(sid, container, kind)], number, [f.group for f in files])
+            out.append(DuplicateGroup(series_id=sid, folder=str(series_folder),
+                                      title=series_folder.name or str(series_folder), kind=kind,
+                                      number=canonical_number(number), files=tuple(files), usual_group=usual))
     out.sort(key=lambda g: (g.title.casefold(), g.folder, _directory(g), 0 if g.kind == KIND_VOLUME else 1,
                             Decimal(g.number)))
     return out
+
+
+_TAGS = re.compile(r"\[[^\[\]]*\]|\([^()]*\)|\{[^{}]*\}")
+_DIGITS = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _number_pattern(number: Decimal) -> str:
+    """A regex for *number* as names write it: ``01``, ``1``, ``12.5``, ``012.50``."""
+    whole, _, frac = canonical_number(number).partition(".")
+    return r"0*" + re.escape(whole) + (r"\.(?:" + re.escape(frac) + r")0*" if frac else r"(?:\.0+)?")
+
+
+def other_numbers(name: str, number: Decimal) -> Tuple[str, ...]:
+    """The numbers a file name states outside tags and outside its volume / chapter labels: ``009`` in
+    ``Sea 009 Vol 01 Title``, ``1`` in ``Series Season 1 v01``. FMD2's download index and a bare unit *number* are not
+    among them. Leading zeros dropped."""
+    stem = os.path.splitext(os.path.basename(name))[0]
+    text, before = stem, None
+    while text != before:                                   # nested tags: "[Vol. 1 Ch. 2 - Title [group]]"
+        before, text = text, _TAGS.sub(" ", text)
+    num = _number_pattern(number)
+    # every volume / chapter label, whatever its number: "v03 c012" and "v04 c012" are the same chapter 12 (one of them
+    # mislabelled - MangaPixer's rule counts them), while "009 Vol 01" keeps its 009 and "Season 1 v01" its 1
+    text = re.sub(r"(?i)(?<![a-z0-9])(?:v|vol|volume|c|ch|chap|chapter|ep|episode|#)\.?\s*\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?"
+                  r"(?![0-9])", " ", text)
+    parsed = parse_name(os.path.basename(name))
+    if parsed is not None and parsed.layer == Layer.FMD2 and parsed.index is not None:
+        text = re.sub(r"(?<![0-9.])0*" + str(int(parsed.index)) + r"(?![0-9.])", " ", text, count=1)
+    if not re.search(r"(?i)(?<![a-z0-9])(?:v|vol|volume|c|ch|chap|chapter)\.?\s*\d", stem):
+        text = re.sub(r"(?<![0-9.])" + num + r"(?![0-9])", " ", text, count=1)   # a bare number: the unit itself
+    return tuple(str(Decimal(d).normalize()) if "." in d else str(int(d)) for d in _DIGITS.findall(text))
+
+
+def _alike(members: List[Tuple[str, Optional[str]]], number: Decimal) -> Dict[Tuple[str, ...], List[Tuple[str, Optional[str]]]]:
+    """*members* split by the other numbers their names state: only files that agree on them are copies."""
+    out: Dict[Tuple[str, ...], List[Tuple[str, Optional[str]]]] = {}
+    for rel, group in members:
+        out.setdefault(other_numbers(rel, number), []).append((rel, group))
+    return out
+
+
+def usual_group(groups_by_number: Dict[Decimal, List[str]], number: Decimal, candidates: Sequence[Optional[str]]) -> Optional[str]:
+    """The group a series uses around *number*: the nearest single-file numbers below and above (a series can change
+    groups), else the folder's most used group. None unless it tells the copies apart (some have it, some do not)."""
+    def key(g: Optional[str]) -> str:
+        return (g or "").strip().casefold()
+
+    have = {key(g) for g in candidates if g}
+    if not have or all(key(g) in have and g for g in candidates) and len(have) == 1:
+        return None
+    single = sorted(n for n, gs in groups_by_number.items() if n != number and len(gs) == 1)
+    below = [n for n in single if n < number][-1:]
+    above = [n for n in single if n > number][:1]
+    near = Counter(key(groups_by_number[n][0]) for n in below + above)
+    pick = None
+    if near:
+        best, count = near.most_common(1)[0]
+        if count == sum(near.values()) or count > 1:            # the neighbours agree
+            pick = best
+    if pick is None:
+        every = Counter(key(g) for gs in groups_by_number.values() for g in gs)
+        if every:
+            best, count = every.most_common(1)[0]
+            if list(every.values()).count(count) == 1:          # a clear favourite, not a tie
+                pick = best
+    if pick is None or pick not in have:
+        return None
+    if all(key(g) == pick for g in candidates):
+        return None
+    return next(g for g in candidates if g and key(g) == pick)
 
 
 def _directory(group: DuplicateGroup) -> str:
@@ -199,7 +290,13 @@ def format_time(iso: str) -> str:
 # --- the default choice ----------------------------------------------------------------------------------
 
 def default_keep(group: DuplicateGroup) -> DuplicateFile:
-    """The file to keep by default: the newest of the number, the largest of equally new ones (then by path, so it is stable)."""
+    """The file to keep by default: one from the series' usual group when the copies differ by group (the newest of
+    those), else the newest of the number, the largest of equally new ones (then by path, so it is stable)."""
+    usual = (group.usual_group or "").strip().casefold()
+    if usual:
+        same = [f for f in group.files if (f.group or "").strip().casefold() == usual]
+        if same:
+            return max(same, key=lambda f: (f.modified, f.size, f.path))
     return newest(group)
 
 

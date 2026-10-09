@@ -98,3 +98,40 @@ def test_relink_folder_into_another_root(db, library, tmp_path):
     assert db.relink_folder(library / "Moving", other / "Moving")
     moved = db.get_series(root2.id, "Moving")
     assert moved is not None and moved.id == sid
+
+
+def test_a_folder_the_root_now_excludes_is_let_go_not_missing(db, library):
+    # owner 2026-10-09: excluding "@Oneshots" asked "missing - forget it?"; excluding is the owner's choice
+    root = db.add_root(str(library))
+    _scan(db, root, library, ("Series A", "fp-a", 2), ("@Oneshots", "fp-o", 5), ("Extras", "fp-e", 1))
+    mu_cache.save_entry(Path(link_key(library, "@Oneshots")), 42, "Linked Title", "", None, mu_confirmed=True)
+    db.set_exclusions(root.id, ["@Oneshots/**", "Extras"])
+    rec = _scan(db, root, library, ("Series A", "fp-a", 2))
+    assert sorted(rec.excluded) == ["@Oneshots", "Extras"] and rec.missing == []
+    assert [s.rel_path for s in db.list_series(root.id)] == ["Series A"]       # nothing left to ask about
+    db.set_exclusions(root.id, [])                                                 # lifted: back as it was
+    _scan(db, root, library, ("Series A", "fp-a", 2), ("@Oneshots", "fp-o", 5))
+    back = db.get_series(root.id, "@Oneshots")
+    assert back.status == "present" and back.mu_id == 42
+
+
+def test_an_already_missing_folder_that_is_then_excluded_is_let_go(db, library):
+    root = db.add_root(str(library))
+    _scan(db, root, library, ("Series A", "fp-a", 2), ("@Oneshots", "fp-o", 5))
+    _scan(db, root, library, ("Series A", "fp-a", 2))
+    assert db.get_series(root.id, "@Oneshots").status == "missing"
+    db.set_exclusions(root.id, ["@Oneshots"])
+    rec = _scan(db, root, library, ("Series A", "fp-a", 2))
+    assert rec.excluded == ["@Oneshots"] and db.get_series(root.id, "@Oneshots") is None
+
+
+def test_an_excluded_folder_with_download_records_stays_missing(db, library):
+    root = db.add_root(str(library))
+    _scan(db, root, library, ("Series A", "fp-a", 2))
+    sid = db.get_series(root.id, "Series A").id
+    with db.connect() as con:
+        con.execute("INSERT INTO ledger (created_at, updated_at, series_id, tool) VALUES ('t', 't', ?, 'qbittorrent')",
+                    (sid,))
+    db.set_exclusions(root.id, ["Series A"])
+    rec = _scan(db, root, library)
+    assert rec.missing == ["Series A"] and rec.excluded == []                       # a download still points at it

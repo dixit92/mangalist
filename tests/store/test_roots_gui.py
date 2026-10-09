@@ -158,3 +158,16 @@ def test_legacy_config_root_becomes_root_1_in_the_window(qapp, lib):
     finally:
         win.close()
         win.deleteLater()
+
+
+def test_fields_nothing_uses_yet_are_hidden(qapp, db, lib):
+    dlg = RootsDialog(db)
+    try:
+        dlg.show()
+        ed = dlg.editor
+        assert ed.name_edit.isVisibleTo(dlg) and ed.path_edit.isVisibleTo(dlg)
+        for w in (ed.origin_combo, ed.enforce_combo, ed.staging_edit):        # renamer / origin evidence: later phases
+            assert not w.isVisibleTo(dlg)
+    finally:
+        dlg.close()
+        dlg.deleteLater()

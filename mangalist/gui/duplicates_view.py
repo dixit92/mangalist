@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -91,6 +92,9 @@ STYLE = """
 #DuplicatesView QPushButton[role="discard"] { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }
 #DuplicatesView QPushButton[role="keep"]:checked { background: #e7f3ec; color: #1d5e36; border-color: #1d5e36; font-weight: 600; }
 #DuplicatesView QPushButton[role="discard"]:checked { background: #fbeaea; color: #8b1d1d; border-color: #8b1d1d; font-weight: 600; }
+#DuplicatesView QProgressBar { border: none; background: #e3e3df; border-radius: 2px; max-height: 4px; min-height: 4px; }
+#DuplicatesView QProgressBar::chunk { background: #1f4fb8; border-radius: 2px; }
+#DuplicatesView QLabel[role="busy"] { color: #1f4fb8; font-size: 12px; font-weight: 600; }
 """
 
 
@@ -279,6 +283,8 @@ class DuplicatesView(QWidget):
         self._applying = False
         self._blocked: Optional[str] = None
         self._scan_error = ""
+        self._deleting = 0                                  # files in the running Apply
+        self._after_apply = False                           # busy until the rescan + re-read that follow an Apply
         self._series_link: Optional[Callable[[str], Optional[str]]] = None
         self._focus: Optional[str] = None                   # a series folder: show only its duplicate files
         self._card_apply: Dict[Tuple[Optional[int], str], QPushButton] = {}
@@ -320,6 +326,13 @@ class DuplicatesView(QWidget):
         bar_layout = QVBoxLayout(bar)
         bar_layout.setContentsMargins(20, 10, 20, 10)
         bar_layout.setSpacing(6)
+        # Deleting, the library's rescan and the re-read can take a while on a big library: a moving bar and the cards
+        # greyed out say "working", not "stuck".
+        self.busy_bar = QProgressBar()
+        self.busy_bar.setRange(0, 0)
+        self.busy_bar.setTextVisible(False)
+        self.busy_bar.hide()
+        bar_layout.addWidget(self.busy_bar)
         self.report = _label("", "muted")
         self.report.setWordWrap(True)
         self.report.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -439,6 +452,8 @@ class DuplicatesView(QWidget):
         if generation != self._generation:
             return                                          # a newer scan is on its way
         self._scanning = False
+        if not self._blocked:
+            self._after_apply = False
         self._groups = list(groups)
         self._render_files()
         self._update_summary()
@@ -448,6 +463,8 @@ class DuplicatesView(QWidget):
         if generation != self._generation:
             return
         self._scanning = False
+        if not self._blocked:
+            self._after_apply = False
         self._scan_error = message
         self._update_summary()
 
@@ -522,6 +539,8 @@ class DuplicatesView(QWidget):
         rows: List[_FileRow] = []
         for f in sorted(group.files, key=lambda f: (f.modified, f.size, f.path), reverse=True):
             tags = [t for t, best in (("newest", newest(group)), ("largest", largest(group))) if best is f]
+            if group.usual_group and (f.group or "").strip().casefold() == group.usual_group.strip().casefold():
+                tags.insert(0, "series' group")
             discard = self._choice[f.path] if remembered else f.path != keep.path
             row = _FileRow(f, os.path.relpath(f.path, group.folder), tags, discard)
             row.chosen.connect(lambda path, discard, g=group: self._chose(g, path, discard))
@@ -557,14 +576,31 @@ class DuplicatesView(QWidget):
         return row.discard == discard
 
     def set_blocked(self, reason: Optional[str]) -> None:
-        """The shell says why files must not be deleted right now (a scan is running), or None."""
+        """The shell says why files must not be deleted right now (a scan is running), or None. After an Apply it also
+        keeps the busy state up until the library's rescan is done."""
         self._blocked = reason or None
+        if self._blocked is None and not self._scanning:
+            self._after_apply = False                       # the rescan after an Apply is done, and so is the re-read
         self._update_summary()
+
+    def busy_text(self) -> str:
+        """What the view is busy with, or "" (shown next to the moving bar)."""
+        if self._applying:
+            n = self._deleting
+            return f"Deleting {n} file{'s' if n != 1 else ''}..."
+        if self._after_apply and self._blocked:
+            return "Rescanning the library..."
+        if self._scanning:
+            return "Looking for duplicate files..."
+        return ""
 
     def _update_summary(self) -> None:
         discards = [r.file for _g, rows in self._by_group for r in rows if r.discard]
         total = sum(f.size for f in discards)
         busy = self._applying or self._scanning
+        working = self.busy_text()
+        self.busy_bar.setVisible(bool(working))
+        self._body.setEnabled(not working)                  # no Keep / Discard while the list is about to change
         self.apply_button.setText(f"Apply ({len(discards)})" if discards else "Apply")
         self.apply_button.setEnabled(bool(discards) and not busy and not self._blocked)
         for key, button in self._card_apply.items():
@@ -572,12 +608,13 @@ class DuplicatesView(QWidget):
             button.setText(f"Apply for this series ({n})" if n else "Apply for this series")
             button.setEnabled(bool(n) and not busy and not self._blocked)
         self.refresh_button.setEnabled(not self._applying)
+        self.status.setProperty("role", "busy" if working else "muted")
+        self.status.style().unpolish(self.status)
+        self.status.style().polish(self.status)
         if self._scan_error:
             self.status.setText(f"Could not look for duplicates: {self._scan_error}")
-        elif self._applying:
-            self.status.setText("Deleting...")
-        elif self._scanning:
-            self.status.setText("Looking for duplicate files...")
+        elif working:
+            self.status.setText(working)
         elif self._blocked and discards:
             self.status.setText(f"Deleting is paused: {self._blocked}")
         elif discards:
@@ -641,6 +678,8 @@ class DuplicatesView(QWidget):
             self.status.setText("Nothing was deleted.")
             return
         self._applying = True
+        self._deleting = len(files)
+        self._after_apply = True
         self.report.hide()
         self._update_summary()
         db = self._db
@@ -662,6 +701,7 @@ class DuplicatesView(QWidget):
 
     def _apply_failed(self, message: str) -> None:
         self._applying = False
+        self._after_apply = False
         self._show_report([f"Nothing more was deleted: {message}"], error=True)
         self.refresh()
 

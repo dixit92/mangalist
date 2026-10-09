@@ -72,6 +72,10 @@ class FakeDuplicatesView(QWidget):
         self.db = db
         self.groups = None
         self.refreshed = 0
+        self.blocked = []
+
+    def set_blocked(self, reason):
+        self.blocked.append(reason)
 
     def set_series_duplicates(self, groups):
         self.groups = list(groups)
@@ -303,6 +307,7 @@ def test_start_scans_the_library_in_the_background(make_window, qapp, tmp_path):
     assert "scanning…" in win._top.status.text() and not win._btn_rescan.isEnabled()
     wait_until(qapp, lambda: win._thread is None, timeout=30)
     assert win._model.rowCount() == 2 and win._list.stack.currentIndex() == 0
+    assert win._duplicates_view.blocked == ["the library is being rescanned", None]   # its busy state follows the scan
     assert win._top.status.text().startswith("Library · scanned ") and win._btn_rescan.isEnabled()
 
 

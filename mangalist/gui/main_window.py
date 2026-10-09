@@ -829,6 +829,8 @@ class MainWindow(QMainWindow):
         self._worker = worker
         thread.start()
         self._show_roots()
+        if self._duplicates_view is not None and hasattr(self._duplicates_view, "set_blocked"):
+            self._duplicates_view.set_blocked("the library is being rescanned")
 
     def _on_progress(self, done: int, total: int, name: str) -> None:
         if total > 0:
@@ -914,6 +916,8 @@ class MainWindow(QMainWindow):
         self._btn_rescan.setEnabled(True)
         self._progress.setVisible(False)
         self._show_roots()
+        if self._duplicates_view is not None and hasattr(self._duplicates_view, "set_blocked"):
+            self._duplicates_view.set_blocked(None)
 
     def _stop_scan(self, wait_ms: int = 5000) -> None:
         if self._worker is not None:
