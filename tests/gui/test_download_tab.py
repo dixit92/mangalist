@@ -80,7 +80,7 @@ def test_the_groups_counts_notes_and_rows(qapp):
     heads, titles = rows(tab)
     assert heads == ["MISSING VOLUMES · 3", "MISSING CHAPTERS · 1", "UPGRADES · 1"]
     assert titles == ["Frieren", "Oshi no Ko", "Vinland Saga", "Example Webcomic", "Spy x Family"]
-    assert [tab.tree.topLevelItem(i).data(0, dt.ROLE_ASIDE) for i in (0, 4, 6)] == ["nyaa", "needs Suwayomi", "coming later"]
+    assert [tab.tree.topLevelItem(i).data(0, dt.ROLE_ASIDE) for i in (0, 4, 6)] == ["nyaa", "needs Suwayomi", "nyaa"]
     frieren = tab._items["/lib/Frieren"]
     assert frieren.data(0, dt.ROLE_SUB) == "Vol. 12-13" and frieren.checkState(0) == Qt.CheckState.Unchecked
     assert tab.count_label.text() == "5 series" and tab.selected_label.text() == "0 selected"
@@ -167,8 +167,9 @@ def test_a_series_that_cannot_be_searched_says_why_and_asks_nothing(qapp):
     tab.settings_requested.connect(sections.append)
     tab.releases.message_action.click()
     assert sections == ["services"]
-    tab.focus("/lib/Spy x Family")
-    assert "later version" in tab.releases.message_text.text() and not tab.releases.message_action.isVisibleTo(tab)
+    tab.focus("/lib/Spy x Family")          # an upgrade the shell does not call searchable (the old "coming later")
+    assert "cannot be upgraded from nyaa yet" in tab.releases.message_text.text()
+    assert not tab.releases.message_action.isVisibleTo(tab) and tab.upgrade_note_text() == ""
     tab.set_wanted(WANTED + [ws("Unlicensed", reason="Not licensed in English", findable=False)])
     tab.focus("/lib/Unlicensed")
     assert tab.releases.message_text.text() == "Not licensed in English"

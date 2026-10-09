@@ -19,11 +19,16 @@ GROUP_TITLES: Mapping[str, str] = {GROUP_VOLUMES: "Missing volumes", GROUP_CHAPT
 #: (note, tone): the small text at the right of a group's header; ``warn`` is the amber of "needs Suwayomi".
 GROUP_NOTES: Mapping[str, Tuple[str, str]] = {GROUP_VOLUMES: ("nyaa", "muted"),
                                               GROUP_CHAPTERS: ("needs Suwayomi", "warn"),
-                                              GROUP_UPGRADES: ("coming later", "muted")}
+                                              GROUP_UPGRADES: ("nyaa", "muted")}
 NOT_NYAA_REASONS: Mapping[str, str] = {
     GROUP_CHAPTERS: "Missing chapters come from Suwayomi, which is not set up yet (Settings > Connected services).",
-    GROUP_UPGRADES: "Upgrading chapters to volumes is coming in a later version.",
 }
+#: The groups whose volumes come from nyaa (an upgrade is a volume held only as chapters).
+NYAA_GROUPS = (GROUP_VOLUMES, GROUP_UPGRADES)
+#: What a shell that does not decide upgrades yet says for them (gui.list_text before the volumes cycle).
+LEGACY_UPGRADES_REASON = "coming later"
+UPGRADE_NOT_FINDABLE = "This series cannot be upgraded from nyaa yet (only series matched in MangaPixer and licensed " \
+                       "in English can be searched)."
 
 # The search state of a series (this session): shown in its row until a download's own status replaces it.
 SEARCH_QUEUED = "queued"
@@ -64,11 +69,91 @@ def count_text(shown: int, total: int) -> str:
 
 def not_findable_reason(series: WantedSeries) -> str:
     """Why the nyaa search cannot run for *series* ('' when it can): the shell's own reason, or the group's."""
-    if series.group != GROUP_VOLUMES:
+    if series.group not in NYAA_GROUPS:
         return NOT_NYAA_REASONS.get(series.group, series.reason or "Not available yet.")
     if series.findable:
         return ""
+    if series.group == GROUP_UPGRADES and series.reason in ("", LEGACY_UPGRADES_REASON):
+        return UPGRADE_NOT_FINDABLE
     return series.reason or "This series cannot be searched on nyaa yet."
+
+
+def merge_entries(entries: Sequence[WantedSeries]) -> WantedSeries:
+    """One folder's "To get" entries as the one series the releases panel searches: a series with missing volumes AND
+    upgrades is one search for both (``missing`` = every wanted volume, exact, ascending). Without a searchable entry,
+    the first in group order (its reason is the one shown)."""
+    from dataclasses import replace
+
+    from ..knowledge import fmt_num, to_decimal
+
+    order = {g: i for i, g in enumerate(GROUPS)}
+    entries = sorted(entries, key=lambda e: order.get(e.group, len(order)))
+    searchable = [e for e in entries if e.group in NYAA_GROUPS and e.findable]
+    if not searchable:
+        return entries[0]
+    if len(searchable) == 1:
+        return searchable[0]
+    numbers = {d for e in searchable for d in (to_decimal(v) for v in e.missing) if d is not None}
+    return replace(searchable[0], missing=tuple(fmt_num(d) for d in sorted(numbers)),
+                   gaps="  ·  ".join(e.gaps for e in searchable if e.gaps))
+
+
+def upgrade_volumes_of(entries: Sequence[WantedSeries]) -> Tuple[str, ...]:
+    """The upgrade volumes among one folder's searchable entries (the Download tab's note says what happens after)."""
+    return tuple(v for e in entries if e.group == GROUP_UPGRADES and e.findable for v in e.missing)
+
+
+# --- replaced chapters (upgrades) ---------------------------------------------------------------------------
+
+def upgrade_note(volumes: Sequence[str], mode: str, days: int) -> str:
+    """The line above the releases of a series with upgrade volumes: what happens to the chapters they replace."""
+    from .volumes_target import numbers_text
+
+    vols = numbers_text(volumes, pad=True)
+    if mode == "delete":
+        after = ("the chapter files they replace are listed for you to confirm; nothing is deleted before you do "
+                 "(Settings > Automation)")
+    else:
+        after = (f"the chapter files they replace move to the holding folder, restorable for {days} days "
+                 "(Settings > Automation)")
+    return f"Upgrade {vols}: volumes for chapters you hold. Once filed, {after}."
+
+
+def _files(n: int) -> str:
+    return f"{n} chapter file{'s' if n != 1 else ''}"
+
+
+def replaced_bar_text(batches: Sequence) -> Tuple[str, str]:
+    """(text, tone) of the Download tab's replaced-chapters line; ('', '') when there is nothing to show. Pending
+    batches ask ("Replace 24 chapter files of 2 series?"); held ones say where they are."""
+    pending = [b for b in batches if b.status == "pending"]
+    held = [b for b in batches if b.status == "held"]
+    if pending:
+        n = sum(len(b.files) for b in pending)
+        series = len({b.series_dir for b in pending})
+        waiting = [b for b in pending if b.mode == "holding" and b.error]
+        text = f"Replace {_files(n)} of {series} series with the volumes filed?"
+        if waiting:
+            text += f" ({len(waiting)} could not be moved yet)"
+        return text, "warn"
+    if held:
+        n = sum(len(b.files) for b in held)
+        return f"{_files(n)} replaced by volumes are in the holding folder ({len(held)} series)", "muted"
+    return "", ""
+
+
+def batch_status_text(batch) -> str:
+    """One batch's state in words (the Replaced chapters dialog)."""
+    if batch.status == "pending":
+        if batch.mode == "holding" and batch.error:
+            return f"Not moved yet: {batch.error}"
+        return "Waiting for your answer"
+    if batch.status == "held":
+        until = when_text(batch.purge_after)
+        return f"In the holding folder until {until}" if until else "In the holding folder"
+    return {"restored": "Restored", "purged": "Emptied from the holding folder", "deleted": "Deleted",
+            "declined": "Kept", "failed": f"Failed: {batch.error}" if batch.error else "Failed",
+            "nothing": "Nothing to replace"}.get(batch.status, batch.status)
 
 
 def row_status(record: Optional[DownloadRecord], search: Optional[str]) -> str:

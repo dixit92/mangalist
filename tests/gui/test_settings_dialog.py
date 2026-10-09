@@ -467,7 +467,9 @@ def test_automation_shows_the_container_schedules_read_only(qapp, db, cache):
     assert dict((what, label.text()) for what, label in page.schedule_labels) == {
         "Rescan the library": "daily 02:15", "Sync with MangaPixer": "daily 03:15",
         "File finished downloads": "every hour (and Check now)"}
-    assert not any(isinstance(w, QLineEdit) for w in page.findChildren(QLineEdit))           # read-only: no editor
+    editors = [w for w in page.findChildren(QLineEdit)                  # read-only: no editor for the schedules
+               if w is not page.holding_edit and w.parent() is not page.days_spin]     # (replaced chapters' own)
+    assert editors == []
     assert "changed there" in all_text(page)
     assert "Automatic downloads" in all_text(page) and "next phase" in all_text(page)
 

@@ -32,6 +32,8 @@ from .downloads_backend import BackendError, DownloadsBackend
 from .settings_common import SectionPage, placeholder
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
 from .shell import SECTION_SERVICES
+from PySide6.QtWidgets import QButtonGroup, QLineEdit, QRadioButton, QSpinBox  # noqa: E402 - Automation: replaced chapters
+from .. import upgrades  # noqa: E402
 
 SOURCES_LEAD = "Where releases come from. A source works only when the service it needs is connected."
 MATCHING_LEAD = "Where series information comes from. Not download sources."
@@ -198,10 +200,105 @@ class AutomationPage(SectionPage):
         self.status_label = label("", wrap=True)
         self.status_label.setProperty("tone", "bad")
         self.body.addWidget(self.status_label)
+        self._build_replaced()
         self.body.addWidget(placeholder(AUTOMATIC_DOWNLOADS))
         self._cache = cache
         self.refresh()
         self._loading = False
+
+    # Replaced chapters (upgrades): what happens to chapter files once a filed volume holds them.
+    REPLACED_LEAD = ("When a volume you filed holds chapters you have as chapter files (an upgrade), those files are "
+                     "no longer needed. Only chapters MangaPixer's volume list puts wholly in a filed volume count.")
+    HOLDING_HINT = ("Outside every library folder and MangaPixer library, on the same disk share as the library "
+                    "(the container's /data). Files keep their folders there, so they can be restored.")
+
+    def _build_replaced(self) -> None:
+        box = card("true")
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(16, 14, 16, 14)
+        bv.setSpacing(8)
+        bv.addWidget(label("Replaced chapters", "name"))
+        bv.addWidget(label(self.REPLACED_LEAD, "lead", wrap=True))
+        self.hold_radio = QRadioButton("Move them to a holding folder - restorable, done after each filing")
+        self.delete_radio = QRadioButton("Delete them after I confirm the list of files - nothing is deleted before")
+        self._mode_group = QButtonGroup(self)
+        for radio in (self.hold_radio, self.delete_radio):
+            self._mode_group.addButton(radio)
+            bv.addWidget(radio)
+        self.holding_edit = QLineEdit()
+        self.holding_edit.setAccessibleName("Holding folder")
+        self.holding_edit.setPlaceholderText(upgrades.DEFAULT_HOLDING_FOLDER)
+        self.days_spin = QSpinBox()
+        self.days_spin.setRange(1, upgrades.MAX_HOLDING_DAYS)
+        self.days_spin.setSuffix(" days")
+        self.days_spin.setAccessibleName("Empty the holding folder after")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
+        grid.addWidget(label("Holding folder"), 0, 0)
+        grid.addWidget(self.holding_edit, 0, 1)
+        grid.addWidget(label("Empty it after"), 1, 0)
+        grid.addLayout(hbox(self.days_spin, None), 1, 1)
+        grid.setColumnStretch(1, 1)
+        bv.addLayout(grid)
+        self.holding_hint = label(self.HOLDING_HINT, "muted", wrap=True)
+        bv.addWidget(self.holding_hint)
+        self.replaced_status = label("", wrap=True)
+        bv.addWidget(self.replaced_status)
+        self.body.addWidget(box)
+        self.hold_radio.toggled.connect(self._replaced_mode_changed)
+        self.holding_edit.editingFinished.connect(self._holding_folder_changed)
+        self.days_spin.valueChanged.connect(self._holding_days_changed)
+
+    def _refresh_replaced(self) -> None:
+        settings = upgrades.load_settings(self._db)
+        self.hold_radio.setChecked(settings.mode == upgrades.MODE_HOLDING)
+        self.delete_radio.setChecked(settings.mode == upgrades.MODE_DELETE)
+        self.holding_edit.setText(settings.holding_folder)
+        self.days_spin.setValue(settings.holding_days)
+        self._show_holding_state(settings.mode)
+
+    def _show_holding_state(self, mode: str) -> None:
+        holding = mode == upgrades.MODE_HOLDING
+        for widget in (self.holding_edit, self.days_spin, self.holding_hint):
+            widget.setEnabled(holding)
+        problem = upgrades.holding_problem(self._db, self.holding_edit.text()) if holding else None
+        self._say_replaced(f"The holding folder cannot be used: {problem}. Nothing is moved until it is fixed."
+                           if problem else "", "bad")
+
+    def _say_replaced(self, text: str, tone: str) -> None:
+        self.replaced_status.setText(text)
+        set_prop(self.replaced_status, "tone", tone if text else "")
+
+    def _replaced_mode_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        mode = upgrades.MODE_HOLDING if self.hold_radio.isChecked() else upgrades.MODE_DELETE
+        upgrades.set_mode(self._db, mode)
+        self._show_holding_state(mode)
+        self.downloads_changed.emit()
+
+    def _holding_folder_changed(self) -> None:
+        if self._loading:
+            return
+        text = self.holding_edit.text().strip()
+        if text == upgrades.load_settings(self._db).holding_folder:
+            return
+        try:
+            upgrades.set_holding_folder(self._db, text)
+        except ValueError as exc:
+            self._loading = True
+            self.holding_edit.setText(upgrades.load_settings(self._db).holding_folder)
+            self._loading = False
+            self._say_replaced(f"Not changed: {exc}.", "bad")
+            return
+        self._say_replaced("Holding folder saved.", "ok")
+        self.downloads_changed.emit()
+
+    def _holding_days_changed(self, value: int) -> None:
+        if self._loading:
+            return
+        upgrades.set_holding_days(self._db, int(value))
 
     def refresh(self) -> None:
         self._loading = True
@@ -216,6 +313,7 @@ class AutomationPage(SectionPage):
             except BackendError:
                 self.remove_check.setChecked(False)
         self.scan_note.setVisible(bool(self._cache is not None and scan_forbidden(self._cache)))
+        self._refresh_replaced()
         self._loading = False
 
     def on_show(self) -> None:

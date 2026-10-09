@@ -1,19 +1,25 @@
 """The Download tab: what to get (left), the selected series' releases (right) and what is in progress (bottom right).
 
 **To get** lists the shell's :class:`~mangalist.gui.shell.WantedSeries` in three groups - Missing volumes (nyaa), Missing
-chapters (needs Suwayomi), Upgrades (later) - with a filter, a checkbox per series, each series' gaps and what is going
-on with it (a search, a download). **Releases** is the find-volumes panel for the selected series
+chapters (needs Suwayomi), Upgrades (nyaa: volumes for chapters held) - with a filter, a checkbox per series, each
+series' gaps and what is going on with it (a search, a download). A series in two nyaa groups (missing volumes AND
+upgrades) is one search for every volume it wants. **Releases** is the find-volumes panel for the selected series
 (:class:`~mangalist.gui.releases_panel.ReleasesPanel`): selecting a series searches nyaa for it (a short pause first, so
 arrowing through the list asks nothing) and keeps the result for the session; a series that cannot be searched says why.
 **Find releases for selected** searches every checked series one after another - the backend keeps nyaa's politeness
 delay - and marks each "Releases ready"; there is no "send all". **In progress** is the downloads list with Check now.
+For an upgrade, a line above the releases says what happens to the chapters the volumes replace (Settings >
+Automation); **Replaced chapters** (:mod:`.replaced_chapters`) - a line above In progress - asks about the chapter files
+the filed volumes replaced, or says they are in the holding folder, and opens the review (restore, move, keep,
+delete after the confirmation).
 
 Every backend call runs off the UI thread (:mod:`.background`); the search queue runs one series at a time.
 """
 
 from __future__ import annotations
 
-from collections import deque
+import logging
+from collections import defaultdict, deque
 from typing import Callable, Deque, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, QTimer, Signal
@@ -43,14 +49,18 @@ from .download_rules import (
     SEARCH_RUNNING,
     count_text,
     grouped,
+    merge_entries,
     not_findable_reason,
     row_status,
+    upgrade_note,
+    upgrade_volumes_of,
 )
 from .download_style import FONT_MONO, apply_style, set_tone
 from .download_widgets import ROLE_ASIDE, ROLE_SUB, TwoLineDelegate, button, hbox, label
 from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList
 from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
+from .replaced_chapters import ConfirmDeleteFn, ReplacedBar, ReplacedDialog
 from .shell import GROUP_CHAPTERS, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
 from .volumes_target import VolumeTarget, latest_by_series
 
@@ -58,9 +68,25 @@ ROLE_FOLDER = Qt.ItemDataRole.UserRole + 10
 ROLE_HEADER = Qt.ItemDataRole.UserRole + 11       # a group header's text
 ROLE_NOTE_TONE = Qt.ItemDataRole.UserRole + 12
 
+_log = logging.getLogger(__name__)
+
 REFRESH_MS = 60_000
 SEARCH_DELAY_MS = 350          # a pause after selecting a series, before it is searched
 _NOTE_COLORS = {"muted": "#5a5a57", "warn": "#8a3f00"}
+
+
+def replaced_service(backend):
+    """The replaced-chapters service for this backend: its own (``replaced_chapters()``), else one over the backend's
+    library database (the adapter's ``db``); None without either (the line stays hidden)."""
+    own = getattr(backend, "replaced_chapters", None)
+    if callable(own):
+        return own()
+    db = getattr(backend, "db", None)
+    if db is None:
+        return None
+    from ..upgrades import ReplacedChapters
+
+    return ReplacedChapters(db)
 
 
 def run_lookup(backend: DownloadsBackend, target: VolumeTarget) -> SearchOutcome:
@@ -112,14 +138,20 @@ class DownloadTab(QWidget):
     count_changed = Signal(int)             # how many series are to get (the tab's badge)
     show_in_list = Signal(str)              # a series folder: show it in the List tab
     settings_requested = Signal(str)        # a section of the Settings dialog (SECTION_*)
+    library_changed = Signal(list)          # series folders whose files moved (restore / hold / delete): rescan them
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
-                 autostart: bool = True, refresh_ms: int = REFRESH_MS, search_delay_ms: int = SEARCH_DELAY_MS):
+                 autostart: bool = True, refresh_ms: int = REFRESH_MS, search_delay_ms: int = SEARCH_DELAY_MS,
+                 replaced=None, confirm_delete: Optional[ConfirmDeleteFn] = None):
         super().__init__(parent)
         self.setObjectName("downloadTab")
         self._backend = backend
+        self._replaced = replaced if replaced is not None else replaced_service(backend)
+        self._confirm_delete = confirm_delete
+        self._replaced_call = None
         self._wanted: List[WantedSeries] = []
+        self._entries: Dict[str, List[WantedSeries]] = {}
         self._by_folder: Dict[str, WantedSeries] = {}
         self._series_ids: Dict[str, Optional[int]] = {}
         self._checked: set = set()
@@ -134,6 +166,7 @@ class DownloadTab(QWidget):
         self._bulk_notes = ""
         self._latest: Dict[int, DownloadRecord] = {}
         self._items: Dict[str, QTreeWidgetItem] = {}
+        self._rows: Dict[str, List[QTreeWidgetItem]] = {}
         self._header_items: Dict[str, QTreeWidgetItem] = {}
         self._current: Optional[str] = None
         self._pending_focus: Optional[str] = None
@@ -153,6 +186,7 @@ class DownloadTab(QWidget):
         apply_style(self)
         if autostart:
             self.downloads.refresh()
+            self.refresh_replaced()
 
     # --- UI ------------------------------------------------------------------------------------------
 
@@ -220,6 +254,10 @@ class DownloadTab(QWidget):
         top = QWidget()
         tv = QVBoxLayout(top)
         tv.setContentsMargins(20, 18, 20, 18)
+        self.upgrade_label = label("", "muted", wrap=True)
+        self.upgrade_label.setObjectName("upgradeNote")
+        self.upgrade_label.setVisible(False)
+        tv.addWidget(self.upgrade_label)
         self.releases = ReleasesPanel(self._backend, top, confirm=confirm, open_url=open_url, managed=True,
                                       source_label=self._source_label())
         self.releases.search_again.connect(self._search_again)
@@ -227,6 +265,10 @@ class DownloadTab(QWidget):
         self.releases.settings_requested.connect(self.settings_requested)
         tv.addWidget(self.releases)
         right.addWidget(top, 1)
+
+        self.replaced_bar = ReplacedBar()
+        self.replaced_bar.review_requested.connect(self.open_replaced)
+        right.addWidget(self.replaced_bar)
 
         bottom = QFrame()
         bottom.setObjectName("inProgressPanel")
@@ -255,7 +297,11 @@ class DownloadTab(QWidget):
         """The "To get" list (the shell sends it after every scan / sync). Results of an earlier search are kept for a
         series whose wanted volumes did not change."""
         self._wanted = list(series)
-        self._by_folder = {s.folder: s for s in self._wanted}
+        entries: Dict[str, List[WantedSeries]] = defaultdict(list)
+        for item in self._wanted:
+            entries[item.folder].append(item)
+        self._entries = dict(entries)
+        self._by_folder = {folder: merge_entries(items) for folder, items in self._entries.items()}
         self._series_ids = {s.folder: s.series_id if s.series_id is not None else self._backend.series_id_for(s.folder)
                             for s in self._wanted}
         for folder in list(self._results):
@@ -269,7 +315,7 @@ class DownloadTab(QWidget):
                                          if sid is not None})
         if self._current in self._by_folder and self._current not in self._results:
             self._show_series(self._current, now=False)      # its wanted volumes changed: look again
-        self.count_changed.emit(len(self._wanted))
+        self.count_changed.emit(len(self._by_folder))
 
     @staticmethod
     def _signature(item: WantedSeries) -> tuple:
@@ -283,8 +329,8 @@ class DownloadTab(QWidget):
         self.tree.blockSignals(True)
         self.tree.clear()
         self._items.clear()
+        self._rows.clear()
         self._header_items.clear()
-        shown_total = 0
         for group, items in grouped(self._wanted, self.filter_edit.text()):
             header = QTreeWidgetItem(self.tree)
             header.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -295,7 +341,6 @@ class DownloadTab(QWidget):
             header.setSizeHint(0, QSize(100, 36))
             self._header_items[group] = header
             for series in items:
-                shown_total += 1
                 row = QTreeWidgetItem(self.tree)
                 row.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
                 row.setText(0, series.title)
@@ -303,11 +348,12 @@ class DownloadTab(QWidget):
                 row.setData(0, ROLE_FOLDER, series.folder)
                 row.setCheckState(0, Qt.CheckState.Checked if series.folder in self._checked else Qt.CheckState.Unchecked)
                 row.setToolTip(0, f"{series.title}\n{series.folder}")
-                self._items[series.folder] = row
+                self._items.setdefault(series.folder, row)
+                self._rows.setdefault(series.folder, []).append(row)
         self.tree.blockSignals(False)
         self._rebuilding = False
         self._refresh_statuses()
-        self.count_label.setText(count_text(shown_total, len(self._wanted)))
+        self.count_label.setText(count_text(len(self._rows), len(self._by_folder)))
         self._update_selected()
         if current in self._items:
             self.tree.blockSignals(True)
@@ -317,20 +363,22 @@ class DownloadTab(QWidget):
             # the series is filtered out or gone: the panel keeps what it shows only while the series exists
             if current not in self._by_folder:
                 self._current = None
+                self._show_upgrade_note(None)
                 self.releases.show_message("", "Select a series to see its releases.")
 
     def _refresh_statuses(self) -> None:
-        for folder, row in self._items.items():
+        for folder, rows in self._rows.items():
             sid = self._series_ids.get(folder)
             record = self._latest.get(sid) if sid is not None else None
-            row.setData(0, ROLE_ASIDE, row_status(record, self._states.get(folder)))
+            for row in rows:
+                row.setData(0, ROLE_ASIDE, row_status(record, self._states.get(folder)))
 
     def visible_folders(self) -> List[str]:
         """The folders in the list, top to bottom (after the filter)."""
         out = []
         for i in range(self.tree.topLevelItemCount()):
             folder = self.tree.topLevelItem(i).data(0, ROLE_FOLDER)
-            if folder:
+            if folder and folder not in out:
                 out.append(folder)
         return out
 
@@ -353,10 +401,16 @@ class DownloadTab(QWidget):
         folder = item.data(0, ROLE_FOLDER)
         if not folder:
             return
-        if item.checkState(0) == Qt.CheckState.Checked:
+        checked = item.checkState(0) == Qt.CheckState.Checked
+        if checked:
             self._checked.add(folder)
         else:
             self._checked.discard(folder)
+        self._rebuilding = True                     # the same series' row in another group follows
+        for row in self._rows.get(folder, ()):
+            if row is not item:
+                row.setCheckState(0, item.checkState(0))
+        self._rebuilding = False
         self._update_selected()
 
     def _update_selected(self) -> None:
@@ -407,6 +461,7 @@ class DownloadTab(QWidget):
         self._current = folder
         self._delay.stop()
         reason = not_findable_reason(series)
+        self._show_upgrade_note(folder if not reason else None)
         if reason:
             self._show_unavailable(series, reason)
             return
@@ -427,6 +482,27 @@ class DownloadTab(QWidget):
             self._search_selected()
         else:
             self._delay.start()
+
+    def _show_upgrade_note(self, folder: Optional[str]) -> None:
+        """The line above the releases of a series with upgrade volumes: what happens to the chapters they replace."""
+        volumes = upgrade_volumes_of(self._entries.get(folder, ())) if folder else ()
+        text = ""
+        if volumes:
+            settings = None
+            try:
+                settings = self._replaced.settings() if self._replaced is not None else None
+            except Exception:  # noqa: BLE001 - a note only
+                _log.warning("Reading the replaced-chapters settings failed", exc_info=True)
+            from ..upgrades import ReplacedSettings
+
+            settings = settings or ReplacedSettings()
+            text = upgrade_note(volumes, settings.mode, settings.holding_days)
+        self.upgrade_label.setText(text)
+        self.upgrade_label.setVisible(bool(text))
+
+    def upgrade_note_text(self) -> str:
+        """The upgrade line shown above the releases ('' when none)."""
+        return self.upgrade_label.text()
 
     def _show_unavailable(self, series: WantedSeries, reason: str) -> None:
         needs_suwayomi = series.group == GROUP_CHAPTERS
@@ -582,6 +658,45 @@ class DownloadTab(QWidget):
     def _on_records(self, records: Sequence[DownloadRecord]) -> None:
         self._latest = latest_by_series(records)
         self._refresh_statuses()
+        self.refresh_replaced()
+
+    # --- replaced chapters ------------------------------------------------------------------------------
+
+    def refresh_replaced(self) -> None:
+        """Reload the replaced-chapters line (off the UI thread; after every downloads reload)."""
+        service = self._replaced
+        if service is None or self._stopped or self._replaced_call is not None:
+            return
+        made: list = []
+        self._replaced_call = start_call(service.open_batches, self.replaced_bar.set_batches,
+                                         lambda message: _log.warning("Replaced chapters: %s", message),
+                                         lambda: self._replaced_loaded(made[0] if made else None))
+        made.append(self._replaced_call)
+        self._calls.append(self._replaced_call)
+
+    def _replaced_loaded(self, call) -> None:
+        if call in self._calls:
+            self._calls.remove(call)
+        if call is self._replaced_call:
+            self._replaced_call = None
+
+    def replaced_dialog(self) -> Optional[ReplacedDialog]:
+        """The review of the replaced chapters (not shown; :meth:`open_replaced` runs it)."""
+        if self._replaced is None:
+            return None
+        dialog = ReplacedDialog(self._replaced, self.replaced_bar.batches, self, confirm=self._confirm_delete)
+        dialog.changed.connect(self.library_changed)
+        dialog.finished.connect(lambda _code: self.refresh_replaced())
+        return dialog
+
+    def open_replaced(self) -> None:
+        dialog = self.replaced_dialog()
+        if dialog is None:
+            return
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     def _on_sent(self, _record: DownloadRecord) -> None:
         self.downloads.refresh()
