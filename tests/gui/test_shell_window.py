@@ -352,3 +352,17 @@ def test_missing_series_button_appears_with_missing_series(make_window, monkeypa
     assert win._update_missing_count() == 2
     assert win._btn_missing.text() == "Missing (2)" and win._missing_action.isVisible()
     assert not win._btn_missing.isHidden()
+
+
+class ReplacingDownloadTab(FakeDownloadTab):
+    """Lane B's tab with the volumes cycle's replaced-chapters signal (lane A)."""
+
+    library_changed = Signal(list)
+
+
+def test_restore_move_or_delete_of_replaced_chapters_rescans(make_window):
+    win = make_window(downloads=True, tab=ReplacingDownloadTab)
+    scans = []
+    win._start_scan = lambda roots=None: scans.append(roots)
+    win._download_tab.library_changed.emit(["/lib/Series A"])
+    assert scans == [None] and "Chapter files changed in 1 series - rescanning" in win._status_label.text()

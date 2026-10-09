@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from mangalist.gui.list_text import (
     REASON_CHAPTERS,
-    REASON_UPGRADES,
     chapter_numbers,
     english_text,
     expand_numbers,
@@ -85,7 +84,7 @@ def test_one_entry_per_kind_of_gap():
     chs = got[GROUP_CHAPTERS]
     assert not chs.findable and chs.reason == REASON_CHAPTERS and chs.missing == ("41", "42")
     ups = got[GROUP_UPGRADES]
-    assert not ups.findable and ups.reason == REASON_UPGRADES and ups.missing == ("13",)
+    assert ups.findable and ups.reason == "" and ups.missing == ("13",)      # the same nyaa rule as missing volumes
     assert wanted_label(got) == "Get the missing volumes"
     assert wanted_label([GROUP_CHAPTERS]) == "Get the missing chapters"
     assert wanted_label([GROUP_UPGRADES]) == "Get the volume upgrades" and wanted_label([]) == ""

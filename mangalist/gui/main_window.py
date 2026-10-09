@@ -375,6 +375,8 @@ class MainWindow(QMainWindow):
             tab = lanes.download_tab_class()(self._volumes_backend, self)
             tab.count_changed.connect(self._top.set_download_count)
             tab.show_in_list.connect(self.show_folder_in_list)
+            if hasattr(tab, "library_changed"):         # Restore / Move / Delete of replaced chapters moved files
+                tab.library_changed.connect(self._on_replaced_chapters_moved)
             self._download_tab = tab
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
@@ -601,7 +603,8 @@ class MainWindow(QMainWindow):
             st = model.state_at(row)
             if entry is None or st is None or not st.gaps:
                 continue
-            volumes = self._volumes.availability(row) if self._volumes is not None and st.missing_volumes else None
+            volumes = (self._volumes.availability(row)
+                       if self._volumes is not None and (st.missing_volumes or st.upgrade_volumes) else None)
             series_id = self._volumes.series_id_for(entry) if self._volumes is not None else None
             out += wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title,
                                  state=st, knowledge=model.knowledge_at(row), held=model.held_volumes_at(row),
@@ -655,6 +658,13 @@ class MainWindow(QMainWindow):
         row = self._row_for_folder(folder)
         if row is not None:
             self._select_source_row(row)
+
+    def _on_replaced_chapters_moved(self, folders) -> None:
+        """The Download tab restored, moved or deleted replaced chapter files: rescan so the table and the database
+        follow."""
+        n = len(list(folders))
+        self._status_label.setText(f"Chapter files changed in {n} series - rescanning")
+        self._start_scan()
 
     def _on_files_deleted(self, paths) -> None:
         """Lane C's view deleted duplicate files: rescan so the table and the database follow."""

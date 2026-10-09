@@ -18,7 +18,6 @@ from .volumes_target import Availability, numbers_text, search_titles
 
 #: The reason shown for a group that cannot be searched yet (the Download tab greys them out).
 REASON_CHAPTERS = "needs Suwayomi"
-REASON_UPGRADES = "coming later"
 MAX_EXPANDED = 5000             # a chapter range wider than this is cut (a broken number, not a real gap)
 
 _LINK_WORDS = {
@@ -117,8 +116,8 @@ def wanted_series(*, folder: str, title: str, english_title: Optional[str], stat
                   knowledge: Optional[SeriesKnowledge], held: Sequence[str], series_id: Optional[int],
                   volumes: Optional[Availability]) -> List[WantedSeries]:
     """What one series adds to the Download tab's "To get" list: one entry per kind of gap it has - missing
-    volumes (searchable when *volumes*, the nyaa rule's answer, says so), missing chapters (Suwayomi, later) and
-    volumes that would upgrade chapters (later). Nothing for a series without gaps."""
+    volumes and volumes that would upgrade chapters (both searchable when *volumes*, the nyaa rule's answer, says so)
+    and missing chapters (Suwayomi, later). Nothing for a series without gaps."""
     if state is None or not state.gaps:
         return []
     if knowledge is not None:
@@ -136,10 +135,11 @@ def wanted_series(*, folder: str, title: str, english_title: Optional[str], stat
         out.append(WantedSeries(group=GROUP_CHAPTERS, gaps=group_gaps_text(state, GROUP_CHAPTERS),
                                 missing=chapter_numbers(state.missing_chapters), findable=False,
                                 reason=REASON_CHAPTERS, **common))
-    if state.upgrade_volumes:
+    if state.upgrade_volumes:                   # the same nyaa rule as missing volumes (the volumes cycle, lane A)
+        findable = bool(volumes is not None and volumes.enabled)
+        reason = "" if findable else (volumes.reason if volumes is not None else "downloads are off")
         out.append(WantedSeries(group=GROUP_UPGRADES, gaps=group_gaps_text(state, GROUP_UPGRADES),
-                                missing=tuple(state.upgrade_volumes), findable=False, reason=REASON_UPGRADES,
-                                **common))
+                                missing=tuple(state.upgrade_volumes), findable=findable, reason=reason, **common))
     return out
 
 
