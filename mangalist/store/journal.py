@@ -41,6 +41,16 @@ name in the library for a finished download's file. Every guarantee above holds,
 - Undo removes ONLY the destination name, and only while it is still the file the step made (its recorded
   inode; for a copy also size + signature) AND the source still holds the same data - so an undo never
   removes the last copy of anything (e.g. after qBittorrent deleted the torrent's data).
+
+**Hold steps** (``op='hold'``, :meth:`Journal.plan_holding`; the upgrades' replaced chapters): a move of one library
+FILE out of the plan's root into a holding folder, keeping its root-relative layout so undo puts it back. Applied, undone
+and recovered exactly like a move (an older build reads them as moves), with these specifics:
+
+- Only the destination lies outside the root, and only inside the given holding folder, which must lie outside the root
+  (and the root outside it) - lexically and after resolving symlinks. The root lock is held as for any plan with a root.
+- The source must be a plain file strictly inside the root, with no symlink anywhere below the root (the file itself
+  included) and not a ``.mangalist`` lock artefact. Folders are never held.
+- A holding folder on another filesystem fails the step (``EXDEV``): nothing is copied, nothing deleted.
 """
 
 from __future__ import annotations
@@ -148,6 +158,36 @@ def _norm(p) -> str:
 def _inside(path: str, folder: str) -> bool:
     a, b = os.path.normcase(path), os.path.normcase(folder)
     return a.startswith(b.rstrip(os.sep) + os.sep)
+
+
+def _same_or_inside(path: str, folder: str) -> bool:
+    """*path* is *folder* or inside it, lexically or after resolving symlinks (either is enough to refuse)."""
+    def check(a: str, b: str) -> bool:
+        a, b = os.path.normcase(os.path.normpath(a)), os.path.normcase(os.path.normpath(b))
+        return a == b or a.startswith(b.rstrip(os.sep) + os.sep)
+
+    return check(path, folder) or check(os.path.realpath(path), os.path.realpath(folder))
+
+
+def _plain_file_below(path: str, root: str) -> Optional[str]:
+    """Why *path* is not a plain file reached from *root* without a symlink (None: it is)."""
+    import stat as _stat
+
+    if os.path.basename(path).startswith(".mangalist"):
+        return "it is a MangaList lock artefact"
+    here = os.path.normpath(root)
+    st = None
+    for part in path[len(here.rstrip(os.sep)) + 1:].split(os.sep):
+        here = os.path.join(here, part)
+        try:
+            st = os.lstat(here)
+        except OSError:
+            return "the source does not exist"
+        if _stat.S_ISLNK(st.st_mode):
+            return "the source is, or lies behind, a symbolic link"
+    if st is None or not _stat.S_ISREG(st.st_mode):
+        return "the source is not a plain file"
+    return None
 
 
 def exists_exact(path: str) -> bool:
@@ -393,6 +433,55 @@ class Journal:
                             [(plan_id, i, s, d, sz, sg, now) for i, s, d, sz, sg in rows])
         return self.get_plan(plan_id)
 
+    def plan_holding(self, reason: str, files: Iterable[str], root_path, holding_dir,
+                     note: Optional[str] = None) -> Plan:
+        """Check *files* (plain library files inside *root_path*) and record a plan of ``hold`` steps moving each to
+        *holding_dir* + its root-relative path. Raises :class:`StepRefused` (nothing recorded) for the first one that
+        is not allowed (see "Hold steps" above)."""
+        if root_path is None or holding_dir is None:
+            raise StepRefused("a holding plan needs its root and its holding folder")
+        root, holding = _norm(root_path), _norm(holding_dir)
+        if not os.path.isabs(os.fspath(holding_dir)):
+            raise StepRefused("the holding folder is not an absolute path")
+        if _same_or_inside(holding, root) or _same_or_inside(root, holding):
+            raise StepRefused(f"the holding folder {holding} overlaps the root {root}; it must lie outside every root")
+        rows = []
+        seen = set()
+        for i, f in enumerate(files):
+            src = _norm(f)
+            rel = src[len(root.rstrip(os.sep)) + 1:]
+            dst = os.path.join(holding, rel)
+            where = f"step {i + 1} ({src} -> {dst})"
+            if not _inside(src, root):
+                raise StepRefused(f"{where}: {src} is outside the plan's root {root}")
+            problem = _plain_file_below(src, root)
+            if problem:
+                raise StepRefused(f"{where}: {problem}")
+            if os.path.normcase(src) in seen:
+                raise StepRefused(f"{where}: the file is listed twice")
+            seen.add(os.path.normcase(src))
+            if os.path.lexists(dst):
+                raise StepRefused(f"{where}: the destination exists (a move never replaces anything)")
+            parts = rel.split(os.sep)
+            for part in parts:
+                problem = windows_name_problem(part)
+                if problem:
+                    raise StepRefused(f"{where}: {part!r}: {problem}")
+            size = os.stat(src).st_size
+            rows.append((i, src, dst, size, content_signature(src, "stat")))
+        if not rows:
+            raise StepRefused("a plan needs at least one file")
+        now = utcnow()
+        with self.store.connect(durable=True) as con:
+            cur = con.execute("INSERT INTO journal_plans (created_at, updated_at, reason, root_path, status, note, host,"
+                              " pid) VALUES (?,?,?,?, 'planned', ?,?,?)",
+                              (now, now, reason, root, note, this_host(), os.getpid()))
+            plan_id = int(cur.lastrowid)
+            con.executemany("INSERT INTO journal_steps (plan_id, seq, op, src, dst, is_dir, src_size, src_signature,"
+                            " state, updated_at) VALUES (?,?, 'hold', ?,?, 0, ?,?, 'planned', ?)",
+                            [(plan_id, i, s, d, sz, sg, now) for i, s, d, sz, sg in rows])
+        return self.get_plan(plan_id)
+
     # --- applying ----------------------------------------------------------------------------------
 
     def apply(self, plan_id: int, lock: Optional[RootLock] = None) -> Plan:
@@ -428,6 +517,10 @@ class Journal:
                 return self._fail(step, f"root lock lost: {exc}")
         if not exists_exact(src):
             return self._fail(step, "the source is gone")
+        if step.op == "hold":
+            problem = _plain_file_below(src, str(held.root)) if held is not None else "no root lock is held"
+            if problem:
+                return self._fail(step, problem)
         case_only = _is_case_only(src, dst)
         if exists_exact(dst) and not case_only:
             return self._fail(step, "the destination exists now (another tool?); nothing replaced")

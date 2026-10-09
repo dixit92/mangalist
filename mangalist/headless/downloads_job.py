@@ -62,11 +62,33 @@ def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
     return "; ".join(notes) or None
 
 
+def replaced_chapters_step(ledger) -> Optional[str]:
+    """After a pass: the chapter files the filed volumes replace (:mod:`mangalist.upgrades`) - moved to the holding
+    folder (holding mode, reversible) or recorded for the owner's confirmation (delete mode: never deleted here) - and
+    the holding folder's retention purge. Runs before the rescan, so the rescan sees the result. Returns a summary."""
+    from ..upgrades import after_filing
+
+    return after_filing(ledger.store, ledger).summary() or None
+
+
 def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
                        client_factory: Optional[Callable[[object], object]] = None,
-                       after: Optional[Callable[[JobContext, object, object], Optional[str]]] = after_pass) -> JobFunc:
+                       after: Optional[Callable[[JobContext, object, object], Optional[str]]] = after_pass,
+                       replaced: Optional[Callable[[object], Optional[str]]] = replaced_chapters_step) -> JobFunc:
     """The job function. *open_ledger* / *client_factory* are for tests (default: the data folder's database and
-    a client built from its stored connection); *after* runs after each pass (None: nothing)."""
+    a client built from its stored connection); *after* runs after each pass (None: nothing); *replaced* is the
+    replaced-chapters step (None: nothing)."""
+
+    def _replaced(ledger) -> Optional[str]:
+        if replaced is None:
+            return None
+        try:
+            return replaced(ledger)
+        except Cancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the filing is done; the chapters stay where they are
+            _log.warning("Downloads: the replaced-chapters step failed (%s)", type(exc).__name__, exc_info=True)
+            return f"replaced chapters: {type(exc).__name__}"
 
     def _after(ctx: JobContext, ledger, report) -> Optional[str]:
         if after is None:
@@ -90,8 +112,9 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
 
             ledger = DownloadLedger(get_store())
         if not ledger.active():
-            note = _after(ctx, ledger, _NoReport())     # pending MangaPixer scans are retried all the same
-            return JobResult("skipped", "no downloads in progress" + (f"; {note}" if note else ""))
+            notes = [n for n in (_replaced(ledger),          # waiting batches retried, the holding folder emptied
+                                 _after(ctx, ledger, _NoReport())) if n]   # pending MangaPixer scans are retried too
+            return JobResult("skipped", "no downloads in progress" + "".join(f"; {n}" for n in notes))
         conn = ledger.connection()
         if conn is None:
             _log.info("Downloads: no qBittorrent connection is set up; skipped")
@@ -111,6 +134,10 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         status = "error" if report.errors else "ok"
         message = (f"{report.checked} checked: {len(report.filed)} filed, {len(report.removed)} removed, "
                    f"{len(report.failed)} failed, {len(report.waiting)} waiting")
+        replaced_note = _replaced(ledger)
+        if replaced_note:
+            message += f"; {replaced_note}"
+            extra["replaced"] = replaced_note
         note = _after(ctx, ledger, report)
         if note:
             message += f"; {note}"

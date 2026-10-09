@@ -68,8 +68,11 @@ def test_no_volumes_and_only_subfolders_is_ambiguous(sdir):
     (sdir / ".hidden").mkdir()
     (sdir / "@eaDir").mkdir()
     p = infer_placement(str(sdir), [chap("Chapters/c001.cbz")])
-    assert p.ambiguous and "only subfolders" in p.reason
+    assert p.ambiguous and 'the chapters sit in subfolders ("Chapters")' in p.reason      # rule 5a since upgrades
     assert p.options == (str(sdir), str(sdir / "Chapters"), str(sdir / "Side Story"))
+    # Without chapter units there, the folder still holds only subfolders (rule 5c).
+    p = infer_placement(str(sdir), [])
+    assert p.ambiguous and "only subfolders" in p.reason
 
 
 def test_volumes_as_folders_of_images_are_ambiguous(sdir):

@@ -48,11 +48,15 @@ def test_groups_come_in_the_fixed_order_sorted_by_title_and_filtered():
 
 def test_group_notes_and_reasons():
     assert rules.GROUP_NOTES[GROUP_VOLUMES][0] == "nyaa" and rules.GROUP_NOTES[GROUP_CHAPTERS][0] == "needs Suwayomi"
-    assert rules.GROUP_NOTES[GROUP_UPGRADES][0] == "coming later"
+    assert rules.GROUP_NOTES[GROUP_UPGRADES][0] == "nyaa"                 # upgrades search nyaa (volumes cycle)
     assert rules.not_findable_reason(ws("A", findable=True)) == ""
     assert rules.not_findable_reason(ws("A", reason="Not licensed in English")) == "Not licensed in English"
     assert "Suwayomi" in rules.not_findable_reason(ws("C", GROUP_CHAPTERS, findable=True))
-    assert "later version" in rules.not_findable_reason(ws("U", GROUP_UPGRADES))
+    assert "cannot be upgraded from nyaa yet" in rules.not_findable_reason(ws("U", GROUP_UPGRADES))
+    assert "cannot be upgraded" in rules.not_findable_reason(ws("U", GROUP_UPGRADES, reason="coming later"))
+    assert rules.not_findable_reason(ws("U", GROUP_UPGRADES, findable=True)) == ""
+    assert rules.not_findable_reason(ws("U", GROUP_UPGRADES, reason="Not licensed in English")) == \
+        "Not licensed in English"
 
 
 def test_row_status_precedence():
