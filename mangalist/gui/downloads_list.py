@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHeaderView, QProgressBar, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QProgressBar, QVBoxLayout, QWidget
 
 from ..downloads.contracts import DownloadRecord
 from .background import BackgroundCall, start_call
@@ -19,7 +19,7 @@ from .download_rules import badge_kind, next_check_text, when_text
 from .download_style import set_tone
 from .download_widgets import button, flat_table, hbox, label, pill
 from .downloads_backend import DownloadsBackend
-from .tables import cell
+from .tables import cell, resizable_columns
 from .volumes_target import status_text, status_tooltip
 
 COLUMNS = ("Series", "Release", "Status", "Updated")
@@ -81,12 +81,7 @@ class DownloadsList(QWidget):
                              self.btn_check, spacing=12))
 
         self.table = flat_table("progressTable", COLUMNS, select_rows=False)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(COL_RELEASE, QHeaderView.ResizeMode.Stretch)
-        header.setStretchLastSection(False)
-        for col, width in ((COL_SERIES, 200), (COL_STATUS, 230), (COL_UPDATED, 110)):
-            self.table.setColumnWidth(col, width)
+        resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 240, COL_UPDATED: 110})
         self.table.verticalHeader().setDefaultSectionSize(34)
         outer.addWidget(self.table, 1)
 
@@ -103,12 +98,15 @@ class DownloadsList(QWidget):
         if self.records:
             self._show(self.records)
 
-    def refresh(self) -> bool:
+    def refresh(self, *_args) -> bool:
+        self._check_failed = False
+        return self._reload()
+
+    def _reload(self) -> bool:
         if self._call is not None:
             self._again = True
             return False
-        self.btn_refresh.setEnabled(False)
-        self.progress.setVisible(True)
+        self._busy(True)
         backend = self._backend
         self._call = start_call(lambda: load_snapshot(backend), self._on_snapshot, self._on_error,
                                 self._on_call_finished)
@@ -159,7 +157,7 @@ class DownloadsList(QWidget):
         self._busy(False)
         if self._again:
             self._again = False
-            self.refresh()
+            self._reload()
 
     def _busy(self, busy: bool) -> None:
         self.btn_refresh.setEnabled(not busy)
@@ -192,7 +190,7 @@ class DownloadsList(QWidget):
     def _after_check(self) -> None:
         failed = self._check_failed
         self._on_call_finished()
-        self.refresh()                       # also after a failure: the list stays right, the message stays
+        self._reload()                       # also after a failure: the list stays right, the message stays
         self.check_finished.emit(not failed)
 
     # --- closing ---------------------------------------------------------------------------------------

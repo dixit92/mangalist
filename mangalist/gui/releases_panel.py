@@ -16,11 +16,10 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Callable, List, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
-    QHeaderView,
     QMessageBox,
     QProgressBar,
     QStackedWidget,
@@ -36,6 +35,7 @@ from .download_rules import release_why
 from .download_style import FONT_MONO, set_tone
 from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, flat_table, hbox, label
 from .downloads_backend import DownloadsBackend
+from .tables import resizable_columns
 from .volumes_target import VolumeTarget, numbers_text, volume_label
 
 ConfirmFn = Callable[[QWidget, str], bool]
@@ -124,6 +124,7 @@ class ReleasesPanel(QWidget):
         self._sent_hashes = set()
         self.sent_records: List[DownloadRecord] = []
         self._settings_section: Optional[str] = None
+        self._fitted = False
         self._build_ui()
 
     # --- UI ------------------------------------------------------------------------------------------
@@ -200,13 +201,8 @@ class ReleasesPanel(QWidget):
         self.table.setItemDelegateForColumn(COL_PICK, RadioDelegate(self.table))
         self.table.setItemDelegateForColumn(COL_RELEASE, TwoLineDelegate(self.table, row_height=ROW_HEIGHT))
         self.table.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(COL_RELEASE, QHeaderView.ResizeMode.Stretch)
-        header.setStretchLastSection(False)
-        for col, width in ((COL_PICK, 36), (COL_FILLS, 110), (COL_HELD, 110), (COL_SOURCE, 84), (COL_SIZE, 90),
-                           (COL_SEEDERS, 80)):
-            self.table.setColumnWidth(col, width)
+        resizable_columns(self.table, {COL_PICK: 36, COL_RELEASE: 420, COL_FILLS: 110, COL_HELD: 110, COL_SOURCE: 84,
+                                       COL_SIZE: 90, COL_SEEDERS: 80})        # every column can be dragged
         for col in (COL_SIZE, COL_SEEDERS):
             self.table.horizontalHeaderItem(col).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.table.itemSelectionChanged.connect(self._update_send)
@@ -234,6 +230,20 @@ class ReleasesPanel(QWidget):
         self.stack.addWidget(self.results_page)
         outer.addWidget(self.stack, 1)
         self.show_message("", "Select a series to see its releases.")
+
+    def _fit_release_column(self) -> None:
+        """Give the Release column the width the others leave (once: after that the owner's drag stands)."""
+        if self._fitted or not self.table.isVisible():
+            return
+        others = sum(self.table.columnWidth(c) for c in range(self.table.columnCount()) if c != COL_RELEASE)
+        room = self.table.viewport().width() - others
+        if room > 200:
+            self.table.setColumnWidth(COL_RELEASE, room)
+            self._fitted = True
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._fit_release_column)
 
     # --- what the panel shows -------------------------------------------------------------------------
 
@@ -419,6 +429,7 @@ class ReleasesPanel(QWidget):
         else:
             self.stack.setCurrentIndex(PAGE_RESULTS)
             self.table.selectRow(0)
+            QTimer.singleShot(0, self._fit_release_column)
         self._update_send()
 
     def _fill_row(self, row: int, candidate: NyaaCandidate) -> None:
