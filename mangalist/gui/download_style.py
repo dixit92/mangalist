@@ -51,7 +51,7 @@ def _tone_rules() -> str:
 
 
 STYLESHEET = f"""
-QWidget#downloadTab, QDialog#settingsDialog {{ background: {GROUND}; color: {INK}; font-family: {FONT_SANS}; }}
+QWidget#downloadTab, QDialog#settingsDialog {{ background: {GROUND}; color: {INK}; font-family: {FONT_SANS}; font-size: 14px; }}
 QDialog#settingsDialog {{ background: #ffffff; }}
 QFrame#toGetPanel, QFrame#inProgressPanel {{ background: #ffffff; }}
 QFrame#toGetPanel {{ border: none; border-right: 1px solid {LINE}; }}

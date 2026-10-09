@@ -82,6 +82,8 @@ class DownloadsList(QWidget):
 
         self.table = flat_table("progressTable", COLUMNS, select_rows=False)
         resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 240, COL_UPDATED: 110})
+        self.table.horizontalHeaderItem(COL_UPDATED).setTextAlignment(Qt.AlignmentFlag.AlignRight
+                                                                     | Qt.AlignmentFlag.AlignVCenter)
         self.table.verticalHeader().setDefaultSectionSize(34)
         outer.addWidget(self.table, 1)
 
