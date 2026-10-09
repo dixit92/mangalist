@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.9] - 2026-10-09
+
+The eighth MangaList release (testing build): upgrades from chapters to volumes, partial pack downloads (only the missing volumes), a Library picker with per-library rescans, Remove now for a download you stopped, and Apply to selected in Duplicates.
+
 - **Upgrades from nyaa: chapters to volumes.** The Download tab's **Upgrades** group is no longer "coming later": a series
   held as chapters whose English volumes are out gets the same nyaa search and send as missing volumes, picked by you.
   The volumes are filed into the series folder (MangaList asks where when the chapters they replace sit in a subfolder).
