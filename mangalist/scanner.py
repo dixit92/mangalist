@@ -10,6 +10,10 @@ Every archive is parsed by the layered parser (:mod:`mangalist.parsing`) with it
 folder title, the root's naming scheme (when set) and the series' stored "volumes or chapters?" answer
 (Design Decisions C12). :func:`record_library_scan` stores each archive's units per series in the
 database (``units`` table) and applies stored answers; :func:`answer_series_kind` records a new answer.
+
+A scan of several roots can be recorded root by root (:func:`scan_and_record_library`: the window shows each root's
+series as soon as it is read), and a scan of only some roots records only those - see its docstring for why moves
+between roots are still carried.
 """
 
 from __future__ import annotations
@@ -417,10 +421,12 @@ def scan_and_record_library(
     db=None,
     *,
     progress: Optional[Callable[[int, int, str], None]] = None,
+    on_start: Optional[Callable[[int, int, str], None]] = None,
     on_root: Optional[Callable[[RootScan, List[tuple]], None]] = None,
 ) -> LibraryScan:
     """Scan *roots* one after another and, with *db*, record each root as soon as it was read; *on_root(root scan,
-    renamed)* is called after that, so a window can show the root's series before the next root is read.
+    renamed)* is called after that, so a window can show the root's series before the next root is read, and
+    *on_start(number, how many, root name)* before each root is read (a window names it in its status).
 
     Recording per root is as good as recording all roots at once because identity never needs the other roots in
     the same call: a series moved from root A to root B is recognised whichever of the two is read first (A first:
@@ -431,7 +437,9 @@ def scan_and_record_library(
     result = LibraryScan()
     many = len(roots) > 1
     recorded = False
-    for root in roots:
+    for number, root in enumerate(roots, start=1):
+        if on_start is not None:
+            on_start(number, len(roots), getattr(root, "name", "") or str(root.path))
         rs = scan_one_root(root, progress, label=many)
         result.roots.append(rs)
         result.loose.extend(rs.loose)
