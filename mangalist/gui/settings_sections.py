@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QGridLayout,
     QLineEdit,
+    QMessageBox,
     QRadioButton,
     QVBoxLayout,
     QWidget,
@@ -37,6 +38,7 @@ from ..downloads.options import (
     save_nyaa_options,
     set_flag,
 )
+from .background import start_call
 from .download_rules import schedule_rows
 from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
@@ -193,6 +195,8 @@ class AutomationPage(SectionPage):
         self._db = db
         self._backend = backend
         self._loading = True
+        self._empty_call = None
+        self.confirm_empty_all = self._ask_empty_all        # replaceable in tests (answers for the owner)
 
         grid = QGridLayout()
         grid.setColumnMinimumWidth(0, 260)
@@ -268,6 +272,13 @@ class AutomationPage(SectionPage):
         bv.addLayout(grid)
         self.holding_hint = label(self.HOLDING_HINT, "muted", wrap=True)
         bv.addWidget(self.holding_hint)
+        # Empty it early (owner, 2026-10-09) - only batches whose volumes are still in the library.
+        self.held_label = label("", "muted")
+        self.btn_empty_holding = button("Empty the holding folder now...")
+        self.btn_empty_holding.setToolTip("Delete what the holding folder keeps now, instead of after the period above - "
+                                          "only where the volumes that replaced the chapters are still in the library")
+        self.btn_empty_holding.clicked.connect(self.empty_holding_now)
+        bv.addLayout(hbox(self.btn_empty_holding, self.held_label, None))
         self.replaced_status = label("", wrap=True)
         bv.addWidget(self.replaced_status)
         self.body.addWidget(box)
@@ -285,6 +296,58 @@ class AutomationPage(SectionPage):
             self.days_combo.addItem(f"{days} days" if days != 1 else "1 day", days)
         self.days_combo.setCurrentIndex(self.days_combo.findData(settings.holding_days))
         self._show_holding_state(settings.mode)
+        self._show_held()
+
+    def _held(self):
+        from ..store.replacements import ReplacementStore
+
+        try:
+            return ReplacementStore(self._db).with_status("held")
+        except Exception:  # noqa: BLE001 - a count only
+            return []
+
+    def _show_held(self) -> None:
+        held = self._held()
+        files = sum(len(b.files) for b in held)
+        self.held_label.setText(f"{len(held)} batch{'es' if len(held) != 1 else ''}, {files} "
+                                f"file{'s' if files != 1 else ''} held" if held else "Nothing is held")
+        self.btn_empty_holding.setEnabled(bool(held) and self._empty_call is None)
+
+    def _ask_empty_all(self, held) -> bool:
+        files = sum(len(b.files) for b in held)
+        box = QMessageBox(QMessageBox.Icon.Question, "Empty the holding folder now?",
+                          f"Delete the {files} replaced chapter file{'s' if files != 1 else ''} the holding folder keeps "
+                          "now? They cannot be restored afterwards.\n\nA batch is only emptied while the volumes that "
+                          "replaced it are still in the library; any other stays held.", parent=self)
+        yes = box.addButton("Empty now", QMessageBox.ButtonRole.DestructiveRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def empty_holding_now(self) -> bool:
+        """Empty every held batch whose volumes are still in the library (after a yes; off the UI thread)."""
+        held = self._held()
+        if not held or self._empty_call is not None or not self.confirm_empty_all(held):
+            return False
+        self._say_replaced("Emptying the holding folder...", "")
+        self.btn_empty_holding.setEnabled(False)
+        db = self._db
+        self._empty_call = start_call(lambda: upgrades.empty_all_now(db), self._emptied,
+                                      lambda message: self._say_replaced(f"Could not empty it: {message}", "bad"),
+                                      self._empty_finished)
+        return True
+
+    def _emptied(self, result) -> None:
+        emptied, refused = result
+        text = f"Emptied {len(emptied)} batch{'es' if len(emptied) != 1 else ''}."
+        if refused:
+            text += " Kept: " + "; ".join(why for _id, why in refused[:3]) + (" ..." if len(refused) > 3 else "")
+        self._say_replaced(text, "bad" if refused else "")
+
+    def _empty_finished(self) -> None:
+        self._empty_call = None
+        self._show_held()
 
     def _show_holding_state(self, mode: str) -> None:
         holding = mode == upgrades.MODE_HOLDING

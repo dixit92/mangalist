@@ -57,6 +57,20 @@ PACK_DELAY_MS = 400                 # the selection must settle this long before
 
 NO_FOLDER_CHOSEN = "Choose a folder..."
 FOOTER_NOTE = "MangaList links only the missing volumes into the series folder; nothing there is replaced."
+UPGRADE_FOOTER_NOTE = ("MangaList links the volumes into the series folder; the chapter files they replace are then handled "
+                       "as Settings > Automation says (holding folder or deleted after you confirm).")
+
+
+def wanted_text(target) -> str:
+    """"Missing v07", "Upgrade v23-v24" or "Missing v07 · upgrade v01-v03" (rich text, numbers in mono)."""
+    upgrade = [v for v in getattr(target, "upgrade", ()) if v in target.missing]
+    plain = [v for v in target.missing if v not in upgrade]
+    parts = []
+    if plain:
+        parts.append(f"Missing {_mono(numbers_text(plain, pad=True))}")
+    if upgrade:
+        parts.append(f"{'upgrade' if plain else 'Upgrade'} {_mono(numbers_text(upgrade, pad=True))}")
+    return " &middot; ".join(parts)
 PARTIAL_TEXT = "Only the missing volumes"
 PARTIAL_TIP = ("Only the files that hold a missing volume are downloaded; qBittorrent skips the rest of the pack. "
                "The torrent then seeds only what it downloaded, not the whole pack. Untick to download everything.")
@@ -360,8 +374,9 @@ class ReleasesPanel(QWidget):
         if target is None:
             self.subtitle_label.setText("")
             return
-        missing = (f"Missing {_mono(numbers_text(target.missing, pad=True))}" if target.missing
+        missing = (wanted_text(target) if target.missing
                    else "Missing volumes not known - releases are compared with the volumes you have")
+        self.note_label.setText(UPGRADE_FOOTER_NOTE if getattr(target, "upgrade", ()) else FOOTER_NOTE)
         if self._placement is None:
             where = "files go to ..." if not self._placement_error else "the target folder could not be worked out"
         elif self._placement.ambiguous:
@@ -443,7 +458,7 @@ class ReleasesPanel(QWidget):
         placement, chosen = self._placement, self.chosen_target_dir()
         if placement is not None and placement.ambiguous and chosen:
             target = self.target
-            missing = f"Missing {_mono(numbers_text(target.missing, pad=True))}" if target and target.missing else ""
+            missing = wanted_text(target) if target and target.missing else ""
             self.subtitle_label.setText(f"{missing} &middot; files go to {_mono(folder_text(chosen, placement.series_dir))}")
 
     def _on_results(self, candidates: Sequence[NyaaCandidate]) -> None:

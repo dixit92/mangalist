@@ -675,6 +675,58 @@ class MainWindow(QMainWindow):
         if row is not None:
             self._select_source_row(row)
 
+    def _exclusion_for(self, entry) -> Optional[Tuple[Root, str]]:
+        """(the entry's root, the anchored pattern for its folder): ``<folder>/**`` hides that folder (and itself) in
+        that root only - a pattern without a ``/`` would hide every folder of that name."""
+        root = next((r for r in self._roots() if r.id == getattr(entry, "root_id", None)), None)
+        if root is None:
+            return None
+        try:
+            rel = Path(entry.folder).resolve().relative_to(Path(root.path).resolve()).as_posix()
+        except ValueError:
+            return None
+        return (root, f"{rel}/**") if rel and rel != "." else None
+
+    def confirm_exclude(self, names: Sequence[str]) -> bool:
+        """Ask before excluding (tests answer for the owner by replacing this on the window)."""
+        return self._confirm_exclude(names)
+
+    def _confirm_exclude(self, names: Sequence[str]) -> bool:
+        listed = "\n".join(f"  {n}" for n in names[:12]) + ("\n  ..." if len(names) > 12 else "")
+        box = QMessageBox(QMessageBox.Icon.Question, "Exclude from the library?",
+                          f"Stop scanning {'this folder' if len(names) == 1 else f'these {len(names)} folders'}?\n\n"
+                          f"{listed}\n\nNothing in it is moved or deleted; it just leaves MangaList's list. Settings > "
+                          "Library > Edit undoes it (its MangaUpdates link is kept).", parent=self)
+        yes = box.addButton("Exclude", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def exclude_from_library(self, entries) -> int:
+        """Add the entries' folders to their roots' exclusions (after a yes), then rescan those roots. Returns how many
+        patterns were added. Owner, 2026-10-09: "add an entry to the ignorelist for a root in list view's right click
+        menu"."""
+        found = [(e, x) for e in entries for x in [self._exclusion_for(e)] if x is not None]
+        if not found or not self.confirm_exclude([str(e.title) for e, _x in found]):
+            return 0
+        by_root: Dict[int, Tuple[Root, List[str]]] = {}
+        for _e, (root, pattern) in found:
+            by_root.setdefault(root.id, (root, list(root.exclusions)))[1].append(pattern)
+        added = 0
+        for root_id, (root, patterns) in by_root.items():
+            new = list(dict.fromkeys(patterns))                 # no duplicates; the existing ones keep their order
+            added += len(new) - len(root.exclusions)
+            try:
+                self._db.set_exclusions(root_id, new)
+            except Exception as exc:  # noqa: BLE001 - say it; nothing else changed
+                QMessageBox.warning(self, "Could not exclude", f"{root.name}: {exc}")
+                return 0
+            _log.info("Excluded from %s: %s", root.name, ", ".join(p for p in new if p not in root.exclusions))
+        self._status_label.setText(f"Excluded {len(found)} folder(s) - rescanning")
+        self._start_scan([r for r, _p in by_root.values()])
+        return added
+
     def _on_replaced_chapters_moved(self, folders) -> None:
         """The Download tab restored, moved or deleted replaced chapter files: rescan so the table and the database
         follow."""
@@ -1535,6 +1587,7 @@ class MainWindow(QMainWindow):
         act_kind = None
         act_get = None
         act_dupes = act_mangapixer = None
+        act_exclude = None
 
         if n == 1:
             if getattr(entries[0], "needs_kind", False):
@@ -1545,6 +1598,9 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             act_copy_path = menu.addAction("Copy folder path")
             act_copy_title = menu.addAction("Copy title")
+            act_exclude = menu.addAction("Exclude from its library…")
+            act_exclude.setToolTip("Add this folder to its library's exclusions: MangaList stops scanning it (its files "
+                                   "are not touched; Settings > Library undoes it)")
             menu.addSeparator()
             act_fix_mu = menu.addAction("Fix MangaUpdates match…")
             entry0 = entries[0]
@@ -1578,6 +1634,7 @@ class MainWindow(QMainWindow):
             link_actions = {}
             menu.addAction(f"{n} folders selected").setEnabled(False)
             menu.addSeparator()
+            act_exclude = menu.addAction(f"Exclude {n} folders from their libraries…")
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
             menu.addSeparator()
 
@@ -1631,6 +1688,8 @@ class MainWindow(QMainWindow):
             self._open_url(self.mangapixer_series_url(str(entries[0].folder)) or "")
         elif chosen in link_actions and link_actions[chosen]:
             self._open_url(link_actions[chosen])
+        elif act_exclude is not None and chosen is act_exclude:
+            self.exclude_from_library(entries)
         elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)
         elif chosen is act_get and act_get is not None:

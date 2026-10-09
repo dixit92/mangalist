@@ -366,3 +366,21 @@ def test_restore_move_or_delete_of_replaced_chapters_rescans(make_window):
     win._start_scan = lambda roots=None: scans.append(roots)
     win._download_tab.library_changed.emit(["/lib/Series A"])
     assert scans == [None] and "Chapter files changed in 1 series - rescanning" in win._status_label.text()
+
+
+def test_exclude_from_its_library_adds_an_anchored_pattern_and_rescans_that_root(make_window, tmp_path):
+    lib = tmp_path / "Library"
+    (lib / "Series A").mkdir(parents=True)
+    win = make_window(entries=False)
+    root = win._db.add_root(str(lib), exclusions=["*.txt"])
+    entry = _entry("Series A")
+    entry.folder, entry.root_id = lib / "Series A", root.id
+    scans, asked = [], []
+    win._start_scan = lambda roots=None: scans.append([r.id for r in roots] if roots else None)
+    win.confirm_exclude = lambda names: asked.append(list(names)) or False
+    assert win.exclude_from_library([entry]) == 0 and win._db.get_root(root.id).exclusions == ["*.txt"]
+    win.confirm_exclude = lambda names: asked.append(list(names)) or True
+    assert win.exclude_from_library([entry]) == 1
+    assert win._db.get_root(root.id).exclusions == ["*.txt", "Series A/**"]     # anchored: only that folder
+    assert scans == [[root.id]] and asked == [["Series A"], ["Series A"]]
+    assert win.exclude_from_library([entry]) == 0                                # already excluded: nothing added

@@ -19,6 +19,7 @@ from mangalist import store, upgrades  # noqa: E402
 from mangalist.gui import download_tab as dt  # noqa: E402
 from mangalist.gui.download_tab import DownloadTab  # noqa: E402
 from mangalist.gui.replaced_chapters import ConfirmReplaceDialog, ReplacedDialog  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
 from mangalist.gui.shell import GROUP_UPGRADES, GROUP_VOLUMES, WantedSeries  # noqa: E402
 from mangalist.store.replacements import Batch, ReplacedFile  # noqa: E402
 
@@ -64,6 +65,16 @@ class FakeReplaced:
     def _set(self, bid, status):
         self.batches = [replace(b, status=status) if b.id == bid else b for b in self.batches]
         return next(b for b in self.batches if b.id == bid)
+
+    def empty_now(self, bid):
+        self.calls.append(("empty_now", bid))
+        self.threads.append(threading.get_ident())
+        return self._set(bid, "purged")
+
+    def empty_now(self, bid):
+        self.calls.append(("empty_now", bid))
+        self.threads.append(threading.get_ident())
+        return self._set(bid, "purged")
 
     def restore(self, bid):
         self.calls.append(("restore", bid))
@@ -140,13 +151,15 @@ def test_an_upgrade_is_searched_on_nyaa_and_sent_for_the_upgrade_volumes(qapp):
 def test_a_series_with_missing_volumes_and_upgrades_is_one_search(qapp):
     series = [wanted(GROUP_VOLUMES, ("7",), "Vol. 7"), wanted()]
     tab, backend = make(qapp, series, service=FakeReplaced(mode="delete"))
-    assert tab.count_label.text() == "1 series" and len(tab._rows[FOLDER]) == 2
+    # one series, two groups: one row per group (one group shown at a time), one search for all its volumes
+    assert tab.count_label.text() == "1 series" and len(tab._rows[FOLDER]) == 1
     tab.focus(FOLDER)
     settle(qapp, tab)
     assert backend.searched[0][1] == ("1", "2", "3", "7")
     assert "listed for you to confirm" in tab.upgrade_note_text()
-    tab.set_checked(FOLDER)                                  # one row checked: the other follows
-    assert all(r.checkState(0) == tab._rows[FOLDER][0].checkState(0) for r in tab._rows[FOLDER])
+    tab.set_checked(FOLDER)                                  # ticked in Volumes ...
+    tab.show_group(GROUP_UPGRADES)                           # ... and so in Upgrades too
+    assert len(tab._rows[FOLDER]) == 1 and tab._rows[FOLDER][0].checkState(0) == Qt.CheckState.Checked
     assert tab.checked_folders() == [FOLDER]
 
 
@@ -275,3 +288,67 @@ def test_a_failed_batch_offers_try_again_and_keep(qapp):
     wait_until(qapp, lambda: not dialog.busy())
     assert service.calls == [("retry", 1)] and dialog.btn_restore.isVisibleTo(dialog)
     dialog.reject()
+
+
+def test_empty_now_on_a_held_batch_asks_first(qapp):
+    service = FakeReplaced([batch(1, "held", mode="holding")], mode="holding")
+    tab, _ = make(qapp, [], service=service)
+    tab.replaced_bar.set_batches(service.open_batches())
+    dialog = tab.replaced_dialog()
+    assert dialog.btn_empty.isVisibleTo(dialog)
+    dialog._confirm_empty = lambda parent, b: False
+    assert not dialog.empty_selected() and service.calls == []           # Cancel: nothing
+    dialog._confirm_empty = lambda parent, b: True
+    assert dialog.empty_selected()
+    wait_until(qapp, lambda: not dialog.busy())
+    assert service.calls == [("empty_now", 1)] and threading.get_ident() not in service.threads[-1:]
+    dialog.reject()
+
+
+def test_the_release_panel_says_upgrade_for_an_upgrade(qapp):
+    from mangalist.gui.releases_panel import FOOTER_NOTE, UPGRADE_FOOTER_NOTE, wanted_text
+    from mangalist.gui.volumes_target import VolumeTarget
+
+    t = VolumeTarget(series_id=5, folder=FOLDER, title="S", titles=("S",), missing=("23", "24"), held=(),
+                     upgrade=("23", "24"))
+    assert wanted_text(t).startswith("Upgrade ") and "Missing" not in wanted_text(t)
+    mixed = VolumeTarget(series_id=5, folder=FOLDER, title="S", titles=("S",), missing=("1", "7"), held=(),
+                         upgrade=("1",))
+    assert wanted_text(mixed).startswith("Missing ") and "upgrade" in wanted_text(mixed)
+    series = [wanted(GROUP_VOLUMES, ("7",), "Vol. 7"), wanted()]
+    tab, _ = make(qapp, series, service=FakeReplaced(mode="holding"))
+    tab.focus(FOLDER)
+    settle(qapp, tab)
+    assert tab.releases.note_label.text() == UPGRADE_FOOTER_NOTE != FOOTER_NOTE
+
+
+def test_empty_now_on_a_held_batch_asks_first(qapp):
+    service = FakeReplaced([batch(1, "held", mode="holding")], mode="holding")
+    tab, _ = make(qapp, [], service=service)
+    tab.replaced_bar.set_batches(service.open_batches())
+    dialog = tab.replaced_dialog()
+    assert dialog.btn_empty.isVisibleTo(dialog)
+    dialog._confirm_empty = lambda parent, b: False
+    assert not dialog.empty_selected() and service.calls == []           # Cancel: nothing
+    dialog._confirm_empty = lambda parent, b: True
+    assert dialog.empty_selected()
+    wait_until(qapp, lambda: not dialog.busy())
+    assert service.calls == [("empty_now", 1)] and threading.get_ident() not in service.threads[-1:]
+    dialog.reject()
+
+
+def test_the_release_panel_says_upgrade_for_an_upgrade(qapp):
+    from mangalist.gui.releases_panel import FOOTER_NOTE, UPGRADE_FOOTER_NOTE, wanted_text
+    from mangalist.gui.volumes_target import VolumeTarget
+
+    t = VolumeTarget(series_id=5, folder=FOLDER, title="S", titles=("S",), missing=("23", "24"), held=(),
+                     upgrade=("23", "24"))
+    assert wanted_text(t).startswith("Upgrade ") and "Missing" not in wanted_text(t)
+    mixed = VolumeTarget(series_id=5, folder=FOLDER, title="S", titles=("S",), missing=("1", "7"), held=(),
+                         upgrade=("1",))
+    assert wanted_text(mixed).startswith("Missing ") and "upgrade" in wanted_text(mixed)
+    series = [wanted(GROUP_VOLUMES, ("7",), "Vol. 7"), wanted()]
+    tab, _ = make(qapp, series, service=FakeReplaced(mode="holding"))
+    tab.focus(FOLDER)
+    settle(qapp, tab)
+    assert tab.releases.note_label.text() == UPGRADE_FOOTER_NOTE != FOOTER_NOTE
