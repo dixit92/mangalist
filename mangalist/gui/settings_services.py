@@ -194,24 +194,27 @@ class ServicesPage(SectionPage):
         def run():
             try:
                 client.ping()
-                return len(client.libraries())
+                return ("ok", len(client.libraries()))
+            except mpc.TokenRejected:
+                return ("refused", "MangaPixer refused the token (wrong, revoked or expired). Enter a new one under Edit.")
+            except mpc.MangaPixerError as exc:                   # the client's own messages carry no secret
+                return ("failed", f"Connection failed: {exc}")
             finally:
                 client.close()
 
-        self._spawn(run, self._mp_ok, self._mp_failed_text)
+        self._spawn(run, self._mp_result, lambda message: self._mp_result(("failed", message)))
         return True
 
-    def _mp_ok(self, libraries: int) -> None:
-        self.mp_card.set_status("Connected", "ok")
-        self.mp_card.btn_secondary.setEnabled(True)
-
-    def _mp_failed_text(self, message: str) -> None:
-        # a refused token reads "Token refused"; anything else is not reachable / not right
-        refused = "refused" in message.lower() and "token" in message.lower()
-        self.mp_card.set_status("Token refused" if refused else "Not reachable", "bad")
-        self.mp_card.btn_secondary.setEnabled(True)
-        self.mp_card.set_note(message if not scan_forbidden(self._cache) else SCAN_FORBIDDEN_NOTE,
-                              "bad" if not scan_forbidden(self._cache) else "warn")
+    def _mp_result(self, answer) -> None:
+        kind, detail = answer
+        card = self.mp_card
+        card.btn_secondary.setEnabled(True)
+        if kind == "ok":
+            card.set_status("Connected", "ok")
+            card.set_note(SCAN_FORBIDDEN_NOTE if scan_forbidden(self._cache) else "")
+            return
+        card.set_status("Token refused" if kind == "refused" else "Not reachable", "bad")
+        card.set_note(str(detail), "bad")
 
     def test_qbittorrent(self) -> bool:
         backend = self._backend
@@ -242,7 +245,6 @@ class ServicesPage(SectionPage):
     # --- the editors ------------------------------------------------------------------------------------------
 
     def _open_editor(self, title: str, widget: QWidget, *buttons) -> None:
-        self._clear_editor()
         back = back_link("Connected services")
         back.clicked.connect(self.close_editor)
         self.editor_layout.addLayout(hbox(back, None, *buttons))
@@ -253,6 +255,7 @@ class ServicesPage(SectionPage):
     def edit_mangapixer(self) -> Optional[MangaPixerPanel]:
         if self._cache is None:
             return None
+        self._clear_editor()
         panel = MangaPixerPanel(self._cache, self.editor_page, self._client_factory)
         panel.changed.connect(self.mangapixer_changed)
         self.mp_panel = panel
@@ -262,6 +265,7 @@ class ServicesPage(SectionPage):
     def edit_qbittorrent(self) -> Optional[QbittorrentPanel]:
         if self._backend is None:
             return None
+        self._clear_editor()
         panel = QbittorrentPanel(self._backend, self.editor_page)
         panel.saved_changes.connect(self._qbt_saved)
         self.qbt_panel = panel
