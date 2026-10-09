@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..states import State
-from .chips import ChipButton
+from .chips import ChipButton, FlowLayout
 from .detail_panel import DetailPanel
 from .list_delegates import ROW_HEIGHT, MonoDelegate, SecondaryDelegate, StateBadgeDelegate, TitleDelegate
 from .table_model import COL_ENGLISH, COL_FILES, COL_GAPS, COL_STATE, COL_TITLE, COL_VERDICT, STATE_FILTERS
@@ -60,6 +60,7 @@ class ListTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._filter: Optional[str] = None
+        self._counts: Dict[Optional[str], Optional[int]] = {}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -97,11 +98,13 @@ class ListTab(QWidget):
         self.search.setPlaceholderText("Filter title, English title, verdict")
         self.search.setAccessibleName("Filter series")
         self.search.setClearButtonEnabled(True)
-        self.search.setFixedWidth(320)
-        row.addWidget(self.search)
+        self.search.setMinimumWidth(200)
+        self.search.setMaximumWidth(320)
+        self.search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        row.addWidget(self.search, 1, Qt.AlignmentFlag.AlignTop)
 
-        chips = QHBoxLayout()
-        chips.setSpacing(6)
+        chip_box = QWidget()
+        chips = FlowLayout(chip_box, spacing=6)
         self.chips: Dict[Optional[str], ChipButton] = {}
         for key, label in CHIPS:
             chip = ChipButton(label, key)
@@ -119,14 +122,16 @@ class ListTab(QWidget):
         self.chip_more.clicked.connect(self._open_more)
         chips.addWidget(self.chip_more)
         self.chips[None].setChecked(True)
-        row.addLayout(chips)
+        # The search takes spare width first (up to the mockup's 320 px); the chips wrap only when it is short.
+        chip_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        row.addWidget(chip_box)
         row.addStretch(1)
 
+        # Shown only while the details panel is collapsed (its own × hides it).
         self.btn_details = QPushButton("Details")
-        self.btn_details.setCheckable(True)
-        self.btn_details.setChecked(True)
-        self.btn_details.setToolTip("Show or hide the details panel")
-        self.btn_details.clicked.connect(lambda checked: self.set_details_visible(checked, emit=True))
+        self.btn_details.setToolTip("Show the details panel")
+        self.btn_details.clicked.connect(lambda: self.set_details_visible(True, emit=True))
+        self.btn_details.setVisible(False)
         self.btn_mu_start = QPushButton("MU lookup")
         self.btn_mu_start.setToolTip("Look up every series on MangaUpdates (series MangaPixer knows are skipped)")
         self.btn_mu_stop = QPushButton("Stop")
@@ -134,7 +139,7 @@ class ListTab(QWidget):
         self.btn_mu_stop.setVisible(False)
         self.btn_mu_stop.setEnabled(False)
         for b in (self.btn_details, self.btn_mu_start, self.btn_mu_stop):
-            row.addWidget(b)
+            row.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         return bar
 
     def _build_table(self) -> QTableView:
@@ -150,7 +155,7 @@ class ListTab(QWidget):
         table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
         header.setSectionsMovable(True)
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -237,13 +242,13 @@ class ListTab(QWidget):
         in_more = key in self._more_actions
         self.chip_more.setChecked(in_more)
         self.chip_more.setText(f"{dict(MORE_FILTERS)[key]} ▾" if in_more else "More ▾")
-        if not in_more:
-            self.chip_more.set_count(None)
+        self.chip_more.set_count(self._counts.get(key) if in_more else None)
         if emit:
             self.filter_changed.emit(key)
 
     def set_counts(self, counts: Dict[Optional[str], Optional[int]]) -> None:
         """The chips' counts by key (a key missing: no count shown)."""
+        self._counts = dict(counts)
         for key, chip in self.chips.items():
             chip.set_count(counts.get(key))
         if self._filter in self._more_actions:
@@ -272,7 +277,7 @@ class ListTab(QWidget):
 
     def set_details_visible(self, visible: bool, emit: bool = False) -> None:
         self.details.setVisible(visible)
-        self.btn_details.setChecked(visible)
+        self.btn_details.setVisible(not visible)
         if visible:
             sizes = self.splitter.sizes()
             if len(sizes) == 2 and sizes[1] < 200:

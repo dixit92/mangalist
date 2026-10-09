@@ -75,7 +75,8 @@ class StateBadgeDelegate(QStyledItemDelegate):
         badge_font = theme.font(12, 600)
         fm = QFontMetrics(badge_font)
         rect = QRectF(opt.rect).adjusted(CELL_PAD, 0, -CELL_PAD, 0)
-        width = min(fm.horizontalAdvance(label) + 16, rect.width())
+        text_w = fm.horizontalAdvance(label) + 1
+        width = min(text_w + 16, rect.width())
         height = fm.height() + 4
         box = QRectF(rect.left(), rect.top() + (rect.height() - height) / 2, width, height)
         painter.save()
@@ -85,8 +86,9 @@ class StateBadgeDelegate(QStyledItemDelegate):
         painter.drawRoundedRect(box, height / 2, height / 2)
         painter.setFont(badge_font)
         painter.setPen(QColor(fg))
-        painter.drawText(box.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter,
-                         fm.elidedText(label, Qt.TextElideMode.ElideRight, int(box.width() - 16)))
+        shown = label if text_w + 16 <= box.width() else fm.elidedText(label, Qt.TextElideMode.ElideRight,
+                                                                         int(box.width() - 16))
+        painter.drawText(box.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, shown)
         if flags:
             small = theme.font(12, 400)
             painter.setFont(small)

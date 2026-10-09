@@ -189,7 +189,7 @@ QTableView, QTreeView, QListView, QTableWidget, QTreeWidget, QListWidget {{
     background: {PANEL}; alternate-background-color: {PANEL_SUBTLE}; border: 1px solid {BORDER_SOFT};
     gridline-color: {ROW_RULE}; selection-background-color: {SELECTED}; selection-color: {INK}; outline: 0;
 }}
-QTableView::item, QTreeView::item, QListView::item {{ padding: 0 8px; }}
+QTableView::item, QTreeView::item, QListView::item {{ padding: 0 8px; min-height: 28px; }}
 QTableView::item:selected, QTreeView::item:selected, QListView::item:selected {{ background: {SELECTED}; color: {INK}; }}
 QTableView#seriesTable {{ border: none; font-size: 13px; }}
 QTableView#seriesTable::item {{ border-bottom: 1px solid {ROW_RULE}; padding: 0 12px; }}
@@ -199,6 +199,7 @@ QHeaderView::section {{
     border-bottom: 1px solid {BORDER_SOFT};
 }}
 QHeaderView::section:hover {{ background: {HOVER}; }}
+QHeaderView::section:first {{ padding-left: 20px; }}
 QTableCornerButton::section {{ background: {PANEL}; border: none; }}
 
 /* scroll bars: thin, rounded */

@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from mangalist import config  # noqa: E402
 from mangalist.gui.roots_dialog import RootsDialog  # noqa: E402
@@ -94,11 +94,14 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
     db.add_root(str(lib), exclusions=["@Oneshots/**"])
     win = MainWindow()
     try:
-        assert win._path_edit.text() == str(lib)
-        assert any(b.text() == "Roots" for b in win.findChildren(QPushButton))
+        # The top bar names the library folder (its path in the tooltip); its dialog is under Settings.
+        assert win._top.status.text() == "Manga" and win._top.status.toolTip() == f"Manga: {lib}"
+        assert "Library folders…" in [a.text() for a in win._settings_menu.actions()]
+        assert win._list.stack.currentIndex() == 2 and win._list.btn_add_root.isHidden() is False   # empty state
         db.add_root(str(second))
         win._after_roots_changed()
-        assert win._path_edit.text().startswith("2 roots:")
+        assert win._top.status.text() == "Manga, Manhwa" and str(second) in win._top.status.toolTip()
+        assert win._thread is None                  # only told: no scan starts by itself here
 
         from mangalist.gui.main_window import ScanWorker
         worker = ScanWorker(db.list_roots(), db)
@@ -111,6 +114,8 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
         assert "1 archive(s) not in a series folder" in win._status_label.text()
         assert "Stray.cbz" in win._status_label.toolTip()
         assert {s.rel_path for s in db.list_series()} == {"Series A", "Series K"}
+        assert win._list.counts_label.text() == "2 series" and win._list.stack.currentIndex() == 0
+        assert win._top.status.text().startswith("Manga, Manhwa · scanned ")
     finally:
         win.close()
         win.deleteLater()
@@ -127,7 +132,7 @@ def test_legacy_config_root_becomes_root_1_in_the_window(qapp, lib):
     paths.config_file().write_text(json.dumps({"last_root": str(lib)}), encoding="utf-8")
     win = MainWindow()
     try:
-        assert win._path_edit.text() == str(lib)
+        assert win._top.status.text() == "Manga" and str(lib) in win._top.status.toolTip()
         assert config.load()["last_root"] == str(lib)
     finally:
         win.close()

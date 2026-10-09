@@ -330,7 +330,7 @@ class MainWindow(QMainWindow):
         self._btn_mu_stop.clicked.connect(self._on_mu_stop)
         lst.filter_changed.connect(self._on_filter_changed)
         lst.details_toggled.connect(self._on_details_toggled)
-        lst.add_root_clicked.connect(self._on_choose_root)
+        lst.add_root_clicked.connect(lambda: self._on_choose_root())
         self._detail.get_requested.connect(self._on_get_requested)
 
         header = self._table.horizontalHeader()
@@ -390,6 +390,7 @@ class MainWindow(QMainWindow):
         sel = self._table.selectionModel()
         if sel is not None:
             sel.selectionChanged.connect(self._on_row_changed)
+        self._model.modelReset.connect(self._on_row_changed)     # a reset drops the selection without a signal
 
         # Restore or apply default column order, then apply visibility.
         self._restore_column_state()
@@ -416,6 +417,10 @@ class MainWindow(QMainWindow):
 
     # --- Tabs, Settings, the List tab's state ------------------------------
 
+    def _exec_menu(self, menu: QMenu, global_pos: QPoint):
+        """Open *menu* at *global_pos* and return the chosen action (one place, so tests can answer for the owner)."""
+        return menu.exec(global_pos)
+
     def _on_tab_changed(self, tab: int) -> None:
         self._pages.setCurrentIndex(1 if tab == TAB_DOWNLOAD and self._download_tab is not None else 0)
 
@@ -432,7 +437,7 @@ class MainWindow(QMainWindow):
         open_settings = lanes.open_settings_function()
         if open_settings is None:
             btn = self._top.btn_settings
-            self._settings_menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+            self._exec_menu(self._settings_menu, btn.mapToGlobal(btn.rect().bottomLeft()))
             return
         from ..identity.carry import last_carry_id
 
@@ -1204,7 +1209,7 @@ class MainWindow(QMainWindow):
                 ok = header.restoreState(QByteArray.fromHex(state_hex.encode()))
                 if ok and header.count() == len(COLUMNS):
                     # Re-apply stretch/movable settings after restore (Qt may reset them)
-                    header.setStretchLastSection(False)
+                    header.setStretchLastSection(True)
                     header.setSectionsMovable(True)
                     return
                 # Section count mismatch (e.g. new column added) — discard stale state.
@@ -1216,7 +1221,7 @@ class MainWindow(QMainWindow):
         for col, width in self._DEFAULT_WIDTHS.items():
             header.resizeSection(col, width)
         # Ensure settings are applied after default order too
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
         header.setSectionsMovable(True)
 
     def _save_column_state(self) -> None:
@@ -1262,7 +1267,7 @@ class MainWindow(QMainWindow):
             act.setCheckable(True)
             act.setChecked(name not in hidden)
             act.setData(col)
-        chosen = menu.exec(self._table.horizontalHeader().mapToGlobal(pos))
+        chosen = self._exec_menu(menu, self._table.horizontalHeader().mapToGlobal(pos))
         if chosen is None:
             return
         self._toggle_column(chosen.data())
@@ -1418,7 +1423,7 @@ class MainWindow(QMainWindow):
         act_mark.setEnabled(n_examined < n)
         act_unmark.setEnabled(n_examined > 0)
 
-        chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
+        chosen = self._exec_menu(menu, self._table.viewport().mapToGlobal(pos))
         if chosen is None:
             return
 

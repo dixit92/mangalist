@@ -1,14 +1,14 @@
-"""The shell's two painted buttons: a state chip (label + its count, the count dimmer) and a top-bar tab (label + an
-optional count pill). A Qt stylesheet cannot style two runs of text in one button, so the stylesheet draws the
+"""The shell's two painted buttons - a state chip (label + its count, the count dimmer) and a top-bar tab (label + an
+optional count pill) - and the flow layout that wraps the chips. A Qt stylesheet cannot style two runs of text in one button, so the stylesheet draws the
 button's frame (``chip`` / ``tab`` properties, :mod:`.theme`) and these paint the text themselves."""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
-from PySide6.QtWidgets import QPushButton, QSizePolicy, QStyle, QStyleOptionButton
+from PySide6.QtWidgets import QLayout, QLayoutItem, QPushButton, QSizePolicy, QStyle, QStyleOptionButton
 
 from . import theme
 
@@ -153,3 +153,67 @@ class TabButton(QPushButton):
             p.setPen(QColor(theme.ACCENT))
             p.drawText(box, Qt.AlignmentFlag.AlignCenter, str(self._badge))
         p.end()
+
+
+class FlowLayout(QLayout):
+    """Lays its items out left to right and wraps them onto the next line when the width runs out (the mockup's
+    chips: ``flex-wrap: wrap``)."""
+
+    def __init__(self, parent=None, spacing: int = 6):
+        super().__init__(parent)
+        self._items: List[QLayoutItem] = []
+        self._spacing = spacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item: QLayoutItem) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int) -> Optional[QLayoutItem]:
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int) -> Optional[QLayoutItem]:
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._arrange(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._arrange(rect, apply=True)
+
+    def sizeHint(self) -> QSize:
+        width = sum(i.sizeHint().width() for i in self._visible()) + self._spacing * max(len(self._visible()) - 1, 0)
+        height = max((i.sizeHint().height() for i in self._visible()), default=0)
+        return QSize(width, height)
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._visible():
+            size = size.expandedTo(item.minimumSize())
+        return size
+
+    def _visible(self) -> List[QLayoutItem]:
+        return [i for i in self._items if i.widget() is None or not i.widget().isHidden()]
+
+    def _arrange(self, rect: QRect, apply: bool) -> int:
+        x, y, line = rect.x(), rect.y(), 0
+        for item in self._visible():
+            hint = item.sizeHint()
+            if x > rect.x() and x + hint.width() > rect.right() + 1:
+                x = rect.x()
+                y += line + self._spacing
+                line = 0
+            if apply:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self._spacing
+            line = max(line, hint.height())
+        return y + line - rect.y()
