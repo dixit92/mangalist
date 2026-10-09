@@ -141,9 +141,10 @@ class RootLock:
     # --- reading -----------------------------------------------------------------------------------
 
     def read(self) -> Optional[LockInfo]:
-        """The current holder, or None when the root is free (or the file is unreadable)."""
+        """The current holder, or None when the root is free (or the file is unreadable). A file that is in use for a
+        moment (Windows: the holder's heartbeat is replacing it) is read again, not taken for "free"."""
         try:
-            return LockInfo.parse(self.path.read_text(encoding="utf-8"))
+            return LockInfo.parse(_in_use_retry(lambda: self.path.read_text(encoding="utf-8")))
         except FileNotFoundError:
             return None
         except OSError:
@@ -240,7 +241,7 @@ class RootLock:
                         heartbeat=self._clock())
         tmp = self.path.with_name(f"{LOCK_NAME}.{self.token}.tmp")
         tmp.write_text(info.dump(), encoding="utf-8")
-        os.replace(tmp, self.path)
+        _in_use_retry(lambda: os.replace(tmp, self.path))     # Windows: a reader may have the file open this instant
         self._info = info
 
     def check(self) -> None:
@@ -298,3 +299,19 @@ class RootLock:
 
     def __exit__(self, *exc) -> None:
         self.release()
+
+
+IN_USE_TRIES = 10
+IN_USE_WAIT = 0.02          # seconds between tries: a reader or a replace holds the file for well under that
+
+
+def _in_use_retry(fn):
+    """*fn()*, tried again while the file is in use (Windows reports a sharing violation as PermissionError while
+    another process opens or replaces it; POSIX never does). Other errors, and the last try's, are raised."""
+    for attempt in range(IN_USE_TRIES):
+        try:
+            return fn()
+        except PermissionError:
+            if attempt == IN_USE_TRIES - 1:
+                raise
+            time.sleep(IN_USE_WAIT)

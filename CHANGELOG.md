@@ -15,6 +15,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
   choice)").
 - **Sync now on the MangaPixer card** in Settings > Connected services, next to Test and Edit (it was only inside
   Edit).
+- **Windows:** a library's lock file that is in use for a moment (another reader, or the heartbeat replacing it) is
+  read again instead of being taken for "free" - the app holding the lock could think it had lost it mid-operation.
 
 ## [2026.10.7] - 2026-10-09
 
