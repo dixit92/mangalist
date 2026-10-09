@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.6] - 2026-10-09
+
+The fifth MangaList release (testing build): duplicates one series at a time, Open in MangaPixer, a Duplicates column that counts files, and links that work in the Unraid container.
+
 - **Duplicates, one series at a time:** each series in the Duplicates view has its own **Apply for this series**, and
   right-clicking a series in the List offers **Review duplicate files**, which opens the view on that series only.
 - **Open in MangaPixer:** a series MangaPixer knows has a link to its MangaPixer page (from the Duplicates view and the
