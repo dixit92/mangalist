@@ -128,6 +128,10 @@ def replaced_bar_text(batches: Sequence) -> Tuple[str, str]:
     batches ask ("Replace 24 chapter files of 2 series?"); held ones say where they are."""
     pending = [b for b in batches if b.status == "pending"]
     held = [b for b in batches if b.status == "held"]
+    failed = [b for b in batches if b.status == "failed"]
+    if failed and not pending:
+        return (f"Replacing chapters failed for {len({b.series_dir for b in failed})} series; the chapters are still "
+                "in the library", "warn")
     if pending:
         n = sum(len(b.files) for b in pending)
         series = len({b.series_dir for b in pending})

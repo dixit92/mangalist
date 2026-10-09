@@ -341,3 +341,43 @@ def test_the_resolver_supplies_mangapixer_volume_list(db, ledger, library, holdi
     cache.apply_page("lib0", [], [item])
     volumes, why = upgrades._knowledge_volumes(db, db.get_series(db.list_roots()[0].id, SERIES))
     assert volumes is None and "NeedsReview" in why
+
+
+def test_a_holding_folder_on_another_filesystem_fails_visibly_and_can_be_retried(db, ledger, library, holding, known,
+                                                                                 tmp_path, monkeypatch):
+    import errno
+
+    from mangalist.store import journal as journal_module
+
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    real = journal_module.rename_noreplace
+
+    def exdev(src, dst):
+        raise OSError(errno.EXDEV, "Invalid cross-device link", src, None, dst)
+
+    monkeypatch.setattr(journal_module, "rename_noreplace", exdev)
+    report = upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    assert batch.status == "failed" and "another filesystem" in batch.error and report.failed
+    assert len(names(sdir)) == 6                                        # nothing copied, nothing deleted
+    service = upgrades.ReplacedChapters(db)
+    assert [b.id for b in service.open_batches()] == [batch.id]         # the owner sees it
+    monkeypatch.setattr(journal_module, "rename_noreplace", real)
+    assert service.retry(batch.id).status == "held" and len(names(sdir)) == 3
+
+
+def test_a_root_no_longer_configured_is_never_written(db, ledger, library, holding, known, tmp_path):
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    upgrades.set_mode(db, upgrades.MODE_DELETE)
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    with db.connect() as con:
+        con.execute("UPDATE replacements SET root_path = ? WHERE id = ?", (str(tmp_path / "gone"), batch.id))
+    out = upgrades.delete_confirmed(db, batch.id, [f.path for f in batch.files])
+    assert not any(o.deleted for o in out) and "no longer configured" in out[0].reason
+    upgrades.set_mode(db, upgrades.MODE_HOLDING)
+    after = upgrades.hold_batch(db, batch.id)
+    assert after.status == "failed" and "no longer configured" in after.error and len(names(sdir)) == 6
+    assert upgrades.keep_batch(db, batch.id).status == "declined"

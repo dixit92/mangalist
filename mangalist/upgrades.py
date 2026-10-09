@@ -324,6 +324,11 @@ def _still_listed(f: ReplacedFile, root: str) -> bool:
     return st is not None and st.st_size == f.size and _iso_from_ns(st.st_mtime_ns) == f.modified
 
 
+def _root_configured(db, root: str) -> bool:
+    return bool(root) and any(os.path.normcase(os.path.normpath(r.path)) == os.path.normcase(os.path.normpath(root))
+                              for r in db.list_roots())
+
+
 def _volumes_problem(batch: Batch) -> Optional[str]:
     """Why the filed volumes no longer stand in for the chapters (None: every one is in the library at its size)."""
     if not batch.volume_files:
@@ -520,6 +525,8 @@ def hold_batch(db, batch_id: int, *, journal=None, now: Optional[datetime] = Non
         if problem:
             return fail(problem)
         root = batch.root_path or ""
+        if not _root_configured(db, root):
+            return fail("its library root is no longer configured")
         files = [f for f in batch.files if _still_listed(f, root)]
         for f in batch.files:
             if f not in files:
@@ -550,7 +557,8 @@ def hold_batch(db, batch_id: int, *, journal=None, now: Optional[datetime] = Non
     moved = [s for s in plan.steps if s.state == "done"]
     failed_step = next((s for s in plan.steps if s.state == "failed"), None)
     if not moved:
-        return fail(f"nothing moved: {failed_step.error if failed_step else plan.status}")
+        return fail(f"nothing moved: {failed_step.error if failed_step else plan.status} - the chapters stay in the "
+                    "library; check the holding folder (Settings > Automation) and try again")
     error = None
     if failed_step is not None:
         error = (f"{len(moved)} of {len(plan.steps)} moved; stopped at {os.path.basename(failed_step.src)}: "
@@ -692,9 +700,8 @@ def delete_confirmed(db, batch_id: int, confirmed: Sequence[str]) -> List[Delete
     problem = _volumes_problem(batch)
     if problem:
         return refuse_all(problem)
-    roots = [r.path for r in db.list_roots()]
     root = batch.root_path or ""
-    if not any(os.path.normcase(os.path.normpath(r)) == os.path.normcase(os.path.normpath(root)) for r in roots):
+    if not _root_configured(db, root):
         return refuse_all("its library root is no longer configured")
     lock = RootLock(root)
     try:
@@ -722,9 +729,21 @@ def delete_confirmed(db, batch_id: int, confirmed: Sequence[str]) -> List[Delete
     return out
 
 
+def retry_batch(db, batch_id: int, *, journal=None, now: Optional[datetime] = None) -> Batch:
+    """A failed batch, asked again: pending with a fresh plan (the files are listed again as they are now when moved);
+    in holding mode it is moved right away."""
+    store = ReplacementStore(db)
+    batch = store.update(batch_id, expect=("failed",), status="pending", plan_id=None, holding_dir=None, error=None)
+    _log.info("Upgrades: batch %d asked again by the owner", batch.id)
+    if load_settings(db).mode == MODE_HOLDING:
+        return hold_batch(db, batch.id, journal=journal, now=now)
+    return batch
+
+
 def keep_batch(db, batch_id: int) -> Batch:
-    """The owner keeps a pending batch's chapter files: nothing is moved or deleted, and it is not asked again."""
-    batch = ReplacementStore(db).update(batch_id, expect=("pending",), status="declined", error=None)
+    """The owner keeps a batch's chapter files (pending, or failed): nothing is moved or deleted, and it is not asked
+    again."""
+    batch = ReplacementStore(db).update(batch_id, expect=("pending", "failed"), status="declined", error=None)
     _log.info("Upgrades: batch %d: the owner keeps the %d chapter file(s)", batch.id, len(batch.files))
     return batch
 
@@ -746,8 +765,8 @@ class ReplacedChapters:
         return load_settings(self.db)
 
     def open_batches(self) -> List[Batch]:
-        """Pending and held batches, oldest first."""
-        return ReplacementStore(self.db).with_status("pending", "held")
+        """Pending, failed and held batches, oldest first (what the owner may still act on)."""
+        return ReplacementStore(self.db).with_status("pending", "failed", "held")
 
     def series_title(self, batch: Batch) -> str:
         return os.path.basename(os.path.normpath(batch.series_dir)) if batch.series_dir else f"Series #{batch.series_id}"
@@ -763,3 +782,6 @@ class ReplacedChapters:
 
     def keep(self, batch_id: int) -> Batch:
         return keep_batch(self.db, batch_id)
+
+    def retry(self, batch_id: int) -> Batch:
+        return retry_batch(self.db, batch_id, journal=self._journal())

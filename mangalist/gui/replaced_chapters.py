@@ -6,7 +6,7 @@ the owner's answers.
   hidden when there is nothing. "Review" opens the dialog.
 - :class:`ReplacedDialog` - every open batch (series, volumes, files, state) and the selected batch's files: **Restore**
   (held), **Move to holding folder** (pending, holding mode), **Delete...** (pending, delete mode: the confirmation
-  first) and **Keep them** (pending: never asked again).
+  first), **Try again** (failed) and **Keep them** (pending or failed: never asked again).
 - :class:`ConfirmReplaceDialog` - lists every file about to be deleted; Delete is explicit, Cancel is the default
   (the duplicates view's confirmation).
 
@@ -169,14 +169,17 @@ class ReplacedDialog(QDialog):
         self.btn_hold = button("Move to holding folder", primary=True)
         self.btn_delete = button("Delete...", tip="Shows every file first; nothing is deleted before you confirm")
         self.btn_delete.setProperty("role", "danger")
+        self.btn_retry = button("Try again", tip="List the files again as they are now and do what the setting says")
         self.btn_keep = button("Keep them", tip="Leave the chapter files where they are and do not ask again")
         self.btn_close = button("Close")
         self.btn_restore.clicked.connect(self.restore_selected)
         self.btn_hold.clicked.connect(self.hold_selected)
         self.btn_delete.clicked.connect(self.delete_selected)
         self.btn_keep.clicked.connect(self.keep_selected)
+        self.btn_retry.clicked.connect(self.retry_selected)
         self.btn_close.clicked.connect(self.reject)
-        lay.addLayout(hbox(self.btn_restore, self.btn_hold, self.btn_delete, self.btn_keep, None, self.btn_close))
+        lay.addLayout(hbox(self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep, None,
+                           self.btn_close))
         self._fill()
 
     # --- the list ------------------------------------------------------------------------------------------
@@ -227,7 +230,7 @@ class ReplacedDialog(QDialog):
         if batch is None:
             self.where_label.setText("Nothing to review." if not self._batches else "")
             self.kept_label.setText("")
-            for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_keep):
+            for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep):
                 b.setEnabled(False)
             return
         for f in batch.files:
@@ -244,8 +247,9 @@ class ReplacedDialog(QDialog):
         self.btn_restore.setVisible(batch.status == "held")
         self.btn_hold.setVisible(pending and mode != "delete")
         self.btn_delete.setVisible(pending and mode == "delete")
-        self.btn_keep.setVisible(pending)
-        for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_keep):
+        self.btn_retry.setVisible(batch.status == "failed")
+        self.btn_keep.setVisible(pending or batch.status == "failed")
+        for b in (self.btn_restore, self.btn_hold, self.btn_delete, self.btn_retry, self.btn_keep):
             b.setEnabled(not busy)
 
     # --- the answers ------------------------------------------------------------------------------------------
@@ -265,9 +269,16 @@ class ReplacedDialog(QDialog):
         self._run("Moving to the holding folder...", batch, lambda: self._service.hold(batch.id))
         return True
 
+    def retry_selected(self) -> bool:
+        batch = self.selected()
+        if batch is None or batch.status != "failed" or self._call is not None:
+            return False
+        self._run("Trying again...", batch, lambda: self._service.retry(batch.id))
+        return True
+
     def keep_selected(self) -> bool:
         batch = self.selected()
-        if batch is None or batch.status != "pending" or self._call is not None:
+        if batch is None or batch.status not in ("pending", "failed") or self._call is not None:
             return False
         self._run("Keeping them...", batch, lambda: self._service.keep(batch.id), moved=False)
         return True
@@ -285,14 +296,26 @@ class ReplacedDialog(QDialog):
         return True
 
     def _run(self, text: str, batch: Batch, fn: Callable[[], object], *, moved: bool = True) -> None:
+        """Run the action, then read the open batches again - both off the UI thread."""
         self._say(text, "")
+        service, action = self._service, _guarded(fn)
         made: list = []
-        self._call = start_call(_guarded(fn), lambda result: self._done(batch, result, moved), self._failed,
+
+        def work():
+            result = action()
+            try:
+                return result, list(service.open_batches())
+            except Exception:  # noqa: BLE001 - the action is done; the list stays as shown
+                return result, None
+
+        self._call = start_call(work, lambda out: self._done(batch, out[0], moved, out[1]), self._failed,
                                 lambda: self._finished(made[0] if made else None))
         made.append(self._call)
         self._show_selected()
 
-    def _done(self, batch: Batch, result, moved: bool) -> None:
+    def _done(self, batch: Batch, result, moved: bool, batches: Optional[List[Batch]] = None) -> None:
+        if batches is not None:
+            self._batches = batches
         if isinstance(result, list):                        # a delete: one outcome per file
             gone = sum(1 for o in result if o.deleted)
             refused = [o for o in result if not o.deleted]
@@ -312,14 +335,8 @@ class ReplacedDialog(QDialog):
             self._call = None
         if self._closed:
             return
-        self._reload(batch_id=self.selected().id if self.selected() else None)
-
-    def _reload(self, batch_id: Optional[int] = None) -> None:
-        try:
-            self._batches = list(self._service.open_batches())
-        except Exception:  # noqa: BLE001 - keep what is shown
-            pass
-        self._fill(keep_id=batch_id)
+        shown = self.selected()
+        self._fill(keep_id=shown.id if shown is not None else None)
 
     def _say(self, text: str, tone: str) -> None:
         self.message_label.setText(text)

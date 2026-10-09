@@ -32,7 +32,7 @@ from .schema import REPLACEMENT_MODES, REPLACEMENT_STATUS
 META_FIRST_DOWNLOAD = "upgrades.first_download"
 
 #: Statuses the owner still has something to do with (the Download tab shows them).
-OPEN = ("pending", "held")
+OPEN = ("pending", "failed", "held")
 
 
 class ReplacementConflict(ValueError):
