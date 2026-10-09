@@ -11,16 +11,22 @@ message (the clients never put a password in one).
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from dataclasses import replace
-from typing import Callable, Optional, Sequence
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Sequence
 
+from .. import paths
 from ..gui.downloads_backend import BackendError, QbtSettings
 from ..services.nyaa import NyaaError, NyaaSearch
+from ..services.nyaa.client import NyaaClient
+from ..services.nyaa.ranking import order
 from ..services.qbittorrent import QbtError, client_from_connection, normalize_base_url
 from ..store.downloads import DownloadLedger
 from .contracts import DownloadRecord, NyaaCandidate, Placement, QbtConnection, TorrentClient
+from .options import NyaaOptions, load_nyaa_options, save_nyaa_options
 from .placement import placement_for
 from .service import SendRefused, send_pick
 
@@ -32,7 +38,9 @@ class Backend:
                  client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection):
         self.db = db
         self.ledger = DownloadLedger(db)
-        self._search = search
+        self._search = search                   # given: used as it is (tests); else one NyaaSearch per category
+        self._searches: Dict[tuple, NyaaSearch] = {}
+        self._nyaa_client: Optional[NyaaClient] = None
         self._search_lock = threading.Lock()    # one search at a time: nyaa's politeness delay is per client
         self._client_factory = client_factory
 
@@ -51,13 +59,42 @@ class Backend:
     # --- nyaa ------------------------------------------------------------------------------------------
 
     def search(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> Sequence[NyaaCandidate]:
+        options = load_nyaa_options(self.db)
+        if not options.enabled:
+            raise BackendError("nyaa is switched off (Settings > Download sources)")
         with self._search_lock:
-            if self._search is None:
-                self._search = NyaaSearch()
+            found: Dict[str, NyaaCandidate] = {}
+            searches = self._searches_for(options)
             try:
-                return self._search.search(titles, missing, held)
+                for search in searches:
+                    for candidate in search.search(titles, missing, held):
+                        found.setdefault(candidate.info_hash, candidate)
             except NyaaError as exc:
                 raise BackendError(f"nyaa: {exc}") from None
+        results = [c for c in found.values() if c.trusted or not options.trusted_only]
+        return order(results) if len(searches) > 1 else results      # one search is ranked already
+
+    def _searches_for(self, options: NyaaOptions) -> List[NyaaSearch]:
+        """The searches to run: the injected one, else one per category the options ask for, sharing one client (so
+        nyaa's politeness delay holds across them)."""
+        if self._search is not None:
+            return [self._search]
+        if self._nyaa_client is None:
+            self._nyaa_client = NyaaClient()
+        out = []
+        for category in options.categories():
+            key = (category, not options.hide_light_novels)
+            if key not in self._searches:
+                self._searches[key] = NyaaSearch(self._nyaa_client, category=category,
+                                                 include_not_comic=not options.hide_light_novels)
+            out.append(self._searches[key])
+        return out
+
+    def nyaa_options(self) -> NyaaOptions:
+        return load_nyaa_options(self.db)
+
+    def set_nyaa_options(self, options: NyaaOptions) -> None:
+        save_nyaa_options(self.db, options)
 
     # --- qBittorrent -----------------------------------------------------------------------------------
 
@@ -98,6 +135,32 @@ class Backend:
             return self._client_factory(self._connection(settings, password)).version()
         except QbtError as exc:
             raise BackendError(str(exc)) from None
+
+    def set_remove_completed(self, on: bool) -> None:
+        self.ledger.set_remove_completed(on)
+
+    def series_titles(self, series_ids: Sequence[int]) -> Dict[int, str]:
+        """The folder name of each library series row (what the Downloads list calls the series)."""
+        wanted = sorted({int(i) for i in series_ids})
+        if not wanted:
+            return {}
+        marks = ",".join("?" * len(wanted))
+        with self.db.connect() as con:
+            rows = con.execute(f"SELECT id, rel_path FROM series WHERE id IN ({marks})", wanted).fetchall()
+        return {int(r["id"]): Path(r["rel_path"]).name or r["rel_path"] for r in rows}
+
+    def next_check(self) -> Optional[str]:
+        """When the container's scheduler next runs the downloads job (ISO 8601, UTC), or None when not known - the
+        scheduler's state file is only there where the headless runner runs."""
+        from ..headless.downloads_job import JOB_NAME
+        from ..headless.state import STATE_NAME
+
+        try:
+            data = json.loads((paths.data_dir() / STATE_NAME).read_text(encoding="utf-8"))
+            value = data["jobs"][JOB_NAME]["next_run"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        return value if isinstance(value, str) and value else None
 
     def check_now(self) -> str:
         """The scheduled downloads job, once, now (the hourly schedule is unchanged). A pass the scheduler runs at the

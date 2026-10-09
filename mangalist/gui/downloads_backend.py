@@ -1,9 +1,10 @@
 """What the volumes GUI needs from the rest of MangaList, as one small interface.
 
-The dialogs (:mod:`.nyaa_dialog`, :mod:`.qbittorrent_dialog`, :mod:`.downloads_dialog`) and the main window
-talk only to a :class:`DownloadsBackend`; they never import the nyaa / qBittorrent services or the store. The
-shapes that cross it are :mod:`mangalist.downloads.contracts` (``NyaaCandidate``, ``Placement``,
-``DownloadRecord``) plus :class:`QbtSettings` below.
+The Download tab, the Settings dialog, the dialogs that still wrap their panels (:mod:`.nyaa_dialog`,
+:mod:`.qbittorrent_dialog`, :mod:`.downloads_dialog`) and the main window talk only to a :class:`DownloadsBackend`;
+they never import the nyaa / qBittorrent services or the store. The shapes that cross it are
+:mod:`mangalist.downloads.contracts` (``NyaaCandidate``, ``Placement``, ``DownloadRecord``) plus :class:`QbtSettings`
+below.
 
 **For the integrator.** Write the real adapter at merge and expose it as
 ``mangalist.downloads.adapter.create_backend(db)`` (``db`` is the main window's store); :func:`create_backend`
@@ -26,6 +27,11 @@ one existing piece:
 ``check_now()``                           the scheduled downloads job, run once now (file finished downloads, Remove
                                           Completed); returns its one-line summary.
 ========================================  =======================================================================
+
+Optional extras (the Download tab and Settings use them when the backend has them, via ``getattr``):
+``nyaa_options()`` / ``set_nyaa_options(options)`` (the nyaa source's switches), ``set_remove_completed(on)``,
+``series_titles(series_ids)`` (names for the downloads list) and ``next_check()`` (the next scheduled downloads
+check, ISO 8601 UTC, or None).
 
 Every method may block (network, database): the GUI calls them off the UI thread, except ``series_id_for`` and
 the settings getter / setter, which must be quick. A failure the owner should read raises :class:`BackendError`
