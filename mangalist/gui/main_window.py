@@ -1,12 +1,18 @@
-"""Main application window."""
+"""Main application window (UI cycle, owner-approved mockup 2026-10-08): the top bar (List / Download tabs, the
+library status, Rescan, Settings), the List tab (filter bar with state chips, the table, the collapsible details
+panel, the footer) and the Download tab (lane B's; a placeholder until it merges).
+
+The window owns the model and every action - scans, MangaUpdates lookups, MangaPixer data, the row menu, kind
+answers, missing series, signatures; :mod:`.list_tab` and :mod:`.top_bar` only build the widgets."""
 
 from __future__ import annotations
 
+import datetime
 import logging
 import subprocess
 import webbrowser
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from PySide6.QtCore import (
     QByteArray,
@@ -19,24 +25,13 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QCloseEvent, QGuiApplication
+from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDockWidget,
     QFileDialog,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QSplitter,
-    QStatusBar,
-    QTableView,
-    QToolBar,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -46,17 +41,20 @@ from .._version import __version__
 from ..models import MangaEntry
 from ..scanner import LibraryScan, apply_kind_hint, record_library_scan, scan_library
 from ..store import Journal, Root, RootError
+from . import lanes
 from .app_icon import build_app_icon
-from .detail_panel import DetailPanel
 from .downloads_backend import create_backend as create_downloads_backend
+from .list_tab import DUPLICATES, PAGE_DUPLICATES, PAGE_EMPTY, PAGE_TABLE, ListTab, all_filter_keys, chip_label
+from .list_text import wanted_label, wanted_series
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .roots_dialog import RootsDialog
+from .shell import WantedSeries
 from .table_model import (
-    COLUMNS, COL_BEHIND, COL_DUPE, COL_EXAMINED, COL_GAPS, COL_LICENSED,
-    COL_MU_TITLE, COL_OFFICIAL, COL_STATE, COL_TITLE, STATE_FILTERS, MangaTableModel, state_matches,
+    COL_BEHIND, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LICENSED, COL_MU_TITLE, COL_OFFICIAL, COL_STATE,
+    COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
 )
-from .wanted_panel import WantedPanel
+from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +63,10 @@ from .wanted_panel import WantedPanel
 
 
 _log = logging.getLogger(__name__)
+
+
+class _ScanStopped(Exception):
+    """The window closed during a scan."""
 
 
 class ScanWorker(QObject):
@@ -78,15 +80,26 @@ class ScanWorker(QObject):
         super().__init__()
         self._roots = list(roots)
         self._db = db
+        self._stop = False
+
+    def stop(self) -> None:
+        """Abandon the scan at the next folder (nothing is recorded)."""
+        self._stop = True
+
+    def _progress(self, done: int, total: int, name: str) -> None:
+        if self._stop:
+            raise _ScanStopped()
+        self.progress.emit(done, total, name)
 
     def run(self) -> None:
         try:
-            result = scan_library(
-                self._roots,
-                progress=lambda d, t, name: self.progress.emit(d, t, name),
-            )
+            result = scan_library(self._roots, progress=self._progress)
+        except _ScanStopped:
+            return
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
+            return
+        if self._stop:
             return
         if not result.entries and result.errors and len(result.errors) == len(self._roots):
             self.failed.emit("\n".join(result.errors))
@@ -128,17 +141,6 @@ class SignatureWorker(QObject):
 
 
 # ---------------------------------------------------------------------------
-# Toolbar helpers
-# ---------------------------------------------------------------------------
-
-
-def _toolbar_spacer(width: int) -> QWidget:
-    spacer = QWidget()
-    spacer.setFixedWidth(width)
-    return spacer
-
-
-# ---------------------------------------------------------------------------
 # Sort proxy that uses Qt.UserRole for sortable values
 # ---------------------------------------------------------------------------
 
@@ -162,6 +164,15 @@ class _SortProxy(QSortFilterProxyModel):
         self._state_filter = key
         self.invalidateFilter()
 
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        # The mockup's headers: upper case, numbers right-aligned over their column.
+        if orientation == Qt.Horizontal:
+            if role == Qt.DisplayRole:
+                return column_label(section).upper()
+            if role == Qt.TextAlignmentRole and section == COL_FILES:
+                return int(Qt.AlignRight | Qt.AlignVCenter)
+        return super().headerData(section, orientation, role)
+
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
         """Check if row should be shown based on text filter AND dupe filter."""
         # First apply the standard text filter
@@ -181,12 +192,49 @@ class _SortProxy(QSortFilterProxyModel):
         return True
 
 
+def _when(moment: Optional[datetime.datetime]) -> str:
+    """``03:30`` today, ``Oct 7 19:21`` before."""
+    if moment is None:
+        return ""
+    if moment.date() == datetime.date.today():
+        return moment.strftime("%H:%M")
+    return f"{moment.strftime('%b')} {moment.day} {moment.strftime('%H:%M')}"
+
+
+def _parse_time(text: Optional[str]) -> Optional[datetime.datetime]:
+    """An ISO 8601 time from the database, in local time (None when missing or unreadable)."""
+    if not text:
+        return None
+    try:
+        moment = datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment.astimezone() if moment.tzinfo is not None else moment
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
 
 
 class MainWindow(QMainWindow):
+    # The theme styles every button; the dialogs that accept a button style get none (gui/theme.py).
+    _BUTTON_STYLE = ""
+    # The List tab's columns: what shows by default and in which order (the owner's choices are remembered under
+    # their own keys, so the old toolbar-era settings do not carry the old 18-column layout over).
+    _DEFAULT_COL_ORDER = [
+        "Title", "State", "Gaps", "English", "Verdict", "Files",
+        "✓", "Dupe", "MU Title", "Behind", "Licensed", "Completed", "Official source", "Alternative Title",
+        "Last Modified", "Subfolders", "Vol %", "Ch %", "Both %",
+    ]
+    _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
+    _DEFAULT_WIDTHS = {COL_TITLE: 340, COL_STATE: 200, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
+                       COL_FILES: 80, COL_EXAMINED: 32, COL_MU_TITLE: 260, COL_OFFICIAL: 180}
+    _CFG_COLUMNS = "list_column_state"
+    _CFG_HIDDEN = "list_hidden_columns"
+    _CFG_SPLITTER = "list_splitter_sizes"
+    _CFG_DETAILS = "details_panel"
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"MangaList {__version__}")
@@ -198,7 +246,7 @@ class MainWindow(QMainWindow):
         self._db = store.get_store()
         self._recover_journal()
         win = self._cfg.get("window") or {}
-        self.resize(int(win.get("w", 1200)), int(win.get("h", 720)))
+        self.resize(int(win.get("w", 1440)), int(win.get("h", 900)))
 
         self._model = MangaTableModel()
         self._proxy = _SortProxy(self)
@@ -210,10 +258,17 @@ class MainWindow(QMainWindow):
         self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
                                         needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)))
 
-        # Volumes MVP: only with downloads switched on and a backend (the controller is built in _build_ui).
+        # Downloads: only with downloads switched on and a backend (the Download tab and the volumes controller are
+        # built in _build_ui).
         self._volumes = None
         self._volumes_backend = self._make_volumes_backend()
-        self._build_ui()
+        self._download_tab = None
+        self._duplicates_view = None
+        self._dupe_file_groups: Optional[int] = None
+        self._dupe_call = None
+        self._wanted_series: List[WantedSeries] = []
+        self._last_scan: Optional[datetime.datetime] = None
+        self._scan_label = ""
 
         self._thread: QThread | None = None
         self._worker: ScanWorker | None = None
@@ -222,6 +277,7 @@ class MainWindow(QMainWindow):
         self._mu_entries: List[MangaEntry] = []
         self._sig_thread: QThread | None = None
         self._sig_worker: SignatureWorker | None = None
+        self._build_ui()
 
         # Debounce timer so rapid column-resize events don't thrash config I/O.
         self._col_resize_timer = QTimer(self)
@@ -231,243 +287,104 @@ class MainWindow(QMainWindow):
 
         self._show_roots()
         self._update_missing_count()
+        self._refresh_derived()
 
     # --- UI construction -------------------------------------------------
 
-    _BUTTON_STYLE = (
-        "QPushButton {"
-        "  padding: 4px 12px;"
-        "  border: 1px solid #888;"
-        "  border-radius: 4px;"
-        "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #f5f5f5,stop:1 #dcdcdc);"
-        "  color: #111;"
-        "  font-weight: 600;"
-        "}"
-        "QPushButton:hover {"
-        "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #e8f0fe,stop:1 #c5d8fc);"
-        "  border-color: #5585d6;"
-        "}"
-        "QPushButton:pressed, QPushButton:checked {"
-        "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #b8ccf5,stop:1 #d0e2ff);"
-        "  border-color: #5585d6;"
-        "}"
-        "QPushButton:disabled {"
-        "  color: #999;"
-        "  background: #e8e8e8;"
-        "  border-color: #bbb;"
-        "}"
-    )
-
-    def _make_button(self, label: str) -> QPushButton:
-        btn = QPushButton(label)
-        btn.setStyleSheet(self._BUTTON_STYLE)
-        return btn
-
     def _build_ui(self) -> None:
-        toolbar = QToolBar("Main")
-        toolbar.setMovable(False)
-        toolbar.setContentsMargins(4, 2, 4, 2)
-        self.addToolBar(toolbar)
-
-        btn_choose = self._make_button("Choose Manga Root")
-        btn_choose.setToolTip("Add a folder of series folders as a root and scan")
-        btn_choose.clicked.connect(self._on_choose_root)
-        toolbar.addWidget(btn_choose)
-
-        toolbar.addWidget(_toolbar_spacer(6))
-
-        btn_roots = self._make_button("Roots")
-        btn_roots.setToolTip("Manage roots and their exclusions")
-        btn_roots.clicked.connect(self._on_roots)
-        toolbar.addWidget(btn_roots)
-        self._btn_roots = btn_roots
-
-        toolbar.addWidget(_toolbar_spacer(6))
-
-        btn_mangapixer = self._make_button("MangaPixer")
-        btn_mangapixer.setToolTip("Use a MangaPixer server's links and series data (API token)")
-        btn_mangapixer.clicked.connect(self._on_mangapixer)
-        toolbar.addWidget(btn_mangapixer)
-        self._btn_mangapixer = btn_mangapixer
-
-        toolbar.addWidget(_toolbar_spacer(6))
-
-        btn_rescan = self._make_button("Rescan")
-        btn_rescan.clicked.connect(self._on_rescan)
-        self._rescan_action = toolbar.addWidget(btn_rescan)
-        self._btn_rescan = btn_rescan
-
-        # Missing series (shown only when there are any): re-attach or forget.
-        self._missing_spacer = toolbar.addWidget(_toolbar_spacer(6))
-        btn_missing = self._make_button("Missing (0)")
-        btn_missing.setToolTip("Series whose folder vanished and could not be recognised elsewhere: "
-                               "re-attach them to their new folder, or forget them")
-        btn_missing.clicked.connect(self._on_missing)
-        self._missing_action = toolbar.addWidget(btn_missing)
-        self._btn_missing = btn_missing
+        central = QWidget()
+        col = QVBoxLayout(central)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        self._top = TopBar()
+        self._top.tab_changed.connect(self._on_tab_changed)
+        self._top.rescan_clicked.connect(self._on_rescan)
+        self._top.settings_clicked.connect(self._on_settings)
+        self._top.missing_clicked.connect(self._on_missing)
+        col.addWidget(self._top)
+        self._pages = QStackedWidget()
+        col.addWidget(self._pages, 1)
+        self.setCentralWidget(central)
+        self._btn_rescan = self._top.btn_rescan
+        self._btn_missing = self._top.btn_missing
+        # "Missing (N)" shows only when N > 0; the action carries that state for the window being hidden too.
+        self._missing_action = QAction("Missing series", self)
         self._missing_action.setVisible(False)
-        self._missing_spacer.setVisible(False)
+        self._missing_action.triggered.connect(self._on_missing)
 
-        toolbar.addSeparator()
-
-        toolbar.addWidget(QLabel("Root: "))
-        self._path_edit = QLineEdit()
-        self._path_edit.setReadOnly(True)
-        self._path_edit.setMinimumWidth(420)
-        toolbar.addWidget(self._path_edit)
-
-        toolbar.addSeparator()
-
-        # Duplicates filter checkbox
-        self._dupes_checkbox = QCheckBox("Show Dupes Only")
-        self._dupes_checkbox.setToolTip("Show only entries with duplicate MU matches")
-        self._dupes_checkbox.toggled.connect(self._on_dupes_filter_changed)
-        toolbar.addWidget(self._dupes_checkbox)
-
-        toolbar.addSeparator()
-        toolbar.addWidget(QLabel("State: "))
-        self._state_combo = QComboBox()
-        self._state_combo.setToolTip("Show only series in this rescan state")
-        for key, label in STATE_FILTERS:
-            self._state_combo.addItem(label, key)
-        self._state_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self._state_combo.setMinimumContentsLength(16)
-        self._state_combo.currentIndexChanged.connect(self._on_state_filter_changed)
-        toolbar.addWidget(self._state_combo)
-        self._toolbar = toolbar
-        self._wanted_toolbar_slot = toolbar.addSeparator()   # the Wanted panel toggle goes before it
-        toolbar.addWidget(QLabel("Filter: "))
-        self._filter_edit = QLineEdit()
-        self._filter_edit.setPlaceholderText("Type to filter title / english / verdict…")
-        self._filter_edit.setMaximumWidth(280)
-        self._filter_edit.textChanged.connect(self._proxy.setFilterFixedString)
-        toolbar.addWidget(self._filter_edit)
-
-        toolbar.addSeparator()
-
-        btn_mu_start = self._make_button("▶ MU Lookup")
-        btn_mu_start.setToolTip("Start MangaUpdates lookup for all entries")
-        btn_mu_start.clicked.connect(self._on_mu_start)
-        toolbar.addWidget(btn_mu_start)
-        self._btn_mu_start = btn_mu_start
-
-        toolbar.addWidget(_toolbar_spacer(4))
-
-        btn_mu_stop = self._make_button("■ Stop")
-        btn_mu_stop.setToolTip("Stop MangaUpdates lookup")
-        btn_mu_stop.clicked.connect(self._on_mu_stop)
-        btn_mu_stop.setEnabled(False)
-        toolbar.addWidget(btn_mu_stop)
-        self._btn_mu_stop = btn_mu_stop
-
-        toolbar.addWidget(_toolbar_spacer(8))
-
-        chk_autostart = QCheckBox("Auto-start MU")
-        chk_autostart.setToolTip("Automatically start MU lookup after each scan")
-        chk_autostart.setChecked(bool(self._cfg.get("mu_autostart", False)))
-        chk_autostart.toggled.connect(self._on_mu_autostart_toggled)
-        toolbar.addWidget(chk_autostart)
-        self._chk_autostart = chk_autostart
-
-        # Central splitter
-        splitter = QSplitter(Qt.Horizontal)
-
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._table = QTableView()
+        # --- the List tab
+        lst = ListTab()
+        self._list = lst
+        self._pages.addWidget(lst)
+        self._table = lst.table
         self._table.setModel(self._proxy)
-        self._table.setSortingEnabled(True)
-        self._table.setSelectionBehavior(QTableView.SelectRows)
-        self._table.setSelectionMode(QTableView.ExtendedSelection)
-        self._table.setAlternatingRowColors(True)
-        self._table.verticalHeader().setVisible(False)
+        self._detail = lst.details
+        self._filter_edit = lst.search
+        self._filter_edit.textChanged.connect(self._proxy.setFilterFixedString)
+        self._status_label = lst.status_label
+        self._progress = lst.progress
+        self._sig_label = lst.sig_label
+        self._btn_mu_start = lst.btn_mu_start
+        self._btn_mu_stop = lst.btn_mu_stop
+        self._btn_mu_start.clicked.connect(self._on_mu_start)
+        self._btn_mu_stop.clicked.connect(self._on_mu_stop)
+        lst.filter_changed.connect(self._on_filter_changed)
+        lst.details_toggled.connect(self._on_details_toggled)
+        lst.add_root_clicked.connect(self._on_choose_root)
+        self._detail.get_requested.connect(self._on_get_requested)
+
         header = self._table.horizontalHeader()
-        # All columns user-resizable; last column does not auto-stretch.
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setStretchLastSection(False)
-        header.setSectionsMovable(True)
-        header.setContextMenuPolicy(Qt.CustomContextMenu)
         header.customContextMenuRequested.connect(self._on_header_context_menu)
         self._table.sortByColumn(COL_TITLE, Qt.AscendingOrder)
-        self._table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_context_menu)
         self._table.doubleClicked.connect(self._on_double_click)
         self._table.clicked.connect(self._on_table_clicked)
-        left_layout.addWidget(self._table)
 
-        self._detail = DetailPanel()
+        lst.set_details_visible(bool(self._cfg.get(self._CFG_DETAILS, True)))
+        saved = self._cfg.get(self._CFG_SPLITTER)
+        width = max(self.width(), 900)
+        lst.splitter.setSizes([int(s) for s in saved] if saved and len(saved) == 2 else [width - 380, 380])
+        lst.splitter.splitterMoved.connect(self._on_splitter_moved)
 
-        splitter.addWidget(left)
-        splitter.addWidget(self._detail)
-        splitter.setStretchFactor(0, 7)
-        splitter.setStretchFactor(1, 3)
-        self._splitter = splitter
-
-        saved_sizes = self._cfg.get("splitter_sizes")
-        if saved_sizes and len(saved_sizes) == 2:
-            splitter.setSizes([int(s) for s in saved_sizes])
-        else:
-            splitter.setSizes([800, 360])
-
-        splitter.splitterMoved.connect(self._on_splitter_moved)
-        self.setCentralWidget(splitter)
-
-        # Wanted panel (dock): wanted / missing / upgrade series with their official sources.
-        self._wanted = WantedPanel(open_url=self._open_url)
-        self._wanted.series_activated.connect(self._select_source_row)
-        dock = QDockWidget("Wanted", self)
-        dock.setObjectName("wanted_dock")
-        dock.setWidget(self._wanted)
-        dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
-                         | QDockWidget.DockWidgetFloatable)
-        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
-        dock.setVisible(bool(self._cfg.get("wanted_panel", False)))
-        dock.visibilityChanged.connect(self._on_wanted_visibility)
-        self._wanted_dock = dock
-        toggle = dock.toggleViewAction()
-        toggle.setText("Wanted panel")
-        # A real button (a toolbar action is drawn as flat text): pressed while the panel is open, in step with the
-        # dock's own close button through the action.
-        btn_wanted = self._make_button("Wanted panel")
-        btn_wanted.setCheckable(True)
-        btn_wanted.setToolTip("Show the series that are wanted, missing units or have an upgrade, with their official "
-                              "sources")
-        btn_wanted.setChecked(dock.isVisibleTo(self))
-        btn_wanted.clicked.connect(lambda _checked=False: toggle.trigger())
-        toggle.toggled.connect(btn_wanted.setChecked)
-        self._toolbar.insertWidget(self._wanted_toolbar_slot, btn_wanted)   # next to the State filter
-        self._wanted_toggle = toggle
-        self._btn_wanted = btn_wanted
-        self._wanted_timer = QTimer(self)
-        self._wanted_timer.setSingleShot(True)
-        self._wanted_timer.setInterval(300)
-        self._wanted_timer.timeout.connect(self._rebuild_wanted)
-        for sig in (self._model.modelReset, self._model.dataChanged, self._model.layoutChanged):
-            sig.connect(lambda *_a: self._wanted_timer.start())
-
-        # Status bar
-        sb = QStatusBar()
-        self.setStatusBar(sb)
-        self._status_label = QLabel("Ready")
-        sb.addWidget(self._status_label, 1)
-        self._progress = QProgressBar()
-        self._progress.setMaximumWidth(200)
-        self._progress.setVisible(False)
-        sb.addPermanentWidget(self._progress)
-        self._sig_label = QLabel("")
-        self._sig_label.setToolTip("Content signatures (128 KiB read per archive) let MangaList recognise "
-                                   "renamed or moved series; signed in the background after a scan")
-        self._sig_label.setVisible(False)
-        sb.addPermanentWidget(self._sig_label)
-
+        # --- the Download tab (lane B's; a placeholder until it merges) and the downloads' status
         if self._volumes_backend is not None:
             from .volumes_controller import VolumesController
 
-            self._volumes = VolumesController(self, self._volumes_backend, self._model, self._wanted, self._detail,
+            self._volumes = VolumesController(self, self._volumes_backend, self._model, self._detail,
                                               self._status_label.setText)
-            self._volumes.add_toolbar_buttons(toolbar, self._make_button, _toolbar_spacer, before=self._rescan_action)
+            tab_class = lanes.download_tab_class()
+            if tab_class is not None:
+                tab = tab_class(self._volumes_backend, self)
+            else:
+                tab = lanes.PlaceholderDownloadTab(self._volumes_backend, self, find_volumes=self._find_volumes_for)
+            tab.count_changed.connect(self._top.set_download_count)
+            tab.show_in_list.connect(self.show_folder_in_list)
+            self._download_tab = tab
+            self._pages.addWidget(tab)
+            self._top.set_download_available(True)
+
+        # --- the duplicates view (lane C's; without it the Duplicates chip filters the table)
+        view_class = lanes.duplicates_view_class()
+        if view_class is not None:
+            view = view_class(self._db, self)
+            view.show_in_list.connect(self.show_folder_in_list)
+            view.files_deleted.connect(self._on_files_deleted)
+            lst.set_duplicates_widget(view)
+            self._duplicates_view = view
+
+        # Settings: lane B's dialog; until it merges, a menu of the dialogs it absorbs.
+        self._settings_menu = self._build_settings_menu()
+
+        # Chip counts, the "To get" list and the details' call to action follow the model (debounced).
+        self._derived_timer = QTimer(self)
+        self._derived_timer.setSingleShot(True)
+        self._derived_timer.setInterval(300)
+        self._derived_timer.timeout.connect(self._refresh_derived)
+        for sig in (self._model.modelReset, self._model.dataChanged, self._model.layoutChanged):
+            sig.connect(lambda *_a: self._derived_timer.start())
+
+        QShortcut(QKeySequence.StandardKey.Find, self, activated=self._focus_search)
+        QShortcut(QKeySequence(Qt.Key_F5), self, activated=self._on_rescan)
 
         # Connect selection (rebind in case it returned None earlier)
         sel = self._table.selectionModel()
@@ -480,12 +397,247 @@ class MainWindow(QMainWindow):
         header.sectionMoved.connect(self._on_column_moved)
         header.sectionResized.connect(self._on_section_resized)
 
+    def _build_settings_menu(self) -> QMenu:
+        """The Settings button's menu while lane B's dialog is not merged: the dialogs it will absorb."""
+        menu = QMenu(self)
+        menu.addAction("Library folders…", self._on_roots)
+        menu.addAction("Add a library folder…", self._on_choose_root)
+        menu.addAction("MangaPixer…", self._on_mangapixer)
+        if self._volumes is not None:
+            menu.addAction("qBittorrent…", self._volumes.open_qbittorrent)
+            menu.addAction("Downloads…", self._volumes.open_downloads)
+        menu.addSeparator()
+        act = menu.addAction("Look up MangaUpdates after every scan")
+        act.setCheckable(True)
+        act.setChecked(bool(self._cfg.get("mu_autostart", False)))
+        act.toggled.connect(self._on_mu_autostart_toggled)
+        self._chk_autostart = act
+        return menu
+
+    # --- Tabs, Settings, the List tab's state ------------------------------
+
+    def _on_tab_changed(self, tab: int) -> None:
+        self._pages.setCurrentIndex(1 if tab == TAB_DOWNLOAD and self._download_tab is not None else 0)
+
+    def show_tab(self, tab: int) -> None:
+        self._top.set_current(tab)
+        self._on_tab_changed(tab)
+
+    def _focus_search(self) -> None:
+        self.show_tab(TAB_LIST)
+        self._filter_edit.setFocus()
+        self._filter_edit.selectAll()
+
+    def _on_settings(self) -> None:
+        open_settings = lanes.open_settings_function()
+        if open_settings is None:
+            btn = self._top.btn_settings
+            self._settings_menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+            return
+        from ..identity.carry import last_carry_id
+
+        try:
+            before = last_carry_id(self._db)
+        except Exception:  # noqa: BLE001
+            before = 0
+        result = open_settings(self, self._db, self._volumes_backend)
+        self._apply_settings_result(result, before)
+
+    def _apply_settings_result(self, result, carry_before: int = 0) -> None:
+        """After the Settings dialog: re-read the settings it may have written, then rescan / re-read MangaPixer /
+        reload the downloads as it says."""
+        self._cfg = config.load()           # every change this window makes is saved at once: nothing is lost
+        self._chk_autostart.setChecked(bool(self._cfg.get("mu_autostart", False)))
+        if result is None:
+            return
+        if getattr(result, "mangapixer_changed", False):
+            self._after_mangapixer_changed(carry_before)
+        if getattr(result, "roots_changed", False):
+            self._after_roots_changed(rescan=True)
+        if getattr(result, "downloads_changed", False) and self._volumes is not None:
+            self._volumes.refresh_records()
+            self._rebuild_wanted()
+
+    def _on_details_toggled(self, visible: bool) -> None:
+        self._cfg[self._CFG_DETAILS] = visible
+        config.save(self._cfg)
+
+    def _on_filter_changed(self, key) -> None:
+        """A chip was picked: All, a state, a "More" filter, or Duplicates."""
+        dupes = key == DUPLICATES
+        self._proxy.set_state_filter(None if dupes else key)
+        self._proxy.set_dupes_only(dupes and self._duplicates_view is None)
+        if dupes and self._duplicates_view is not None:
+            self._duplicates_view.set_series_duplicates(self._model.duplicate_series())
+            self._duplicates_view.refresh()
+        self._update_page()
+        if key is None:
+            self._status_label.setText("Showing all entries")
+        elif dupes:
+            n = sum(1 for i in range(self._model.rowCount()) if self._model.is_duplicate(i))
+            self._status_label.setText(f"Showing {n} duplicate entries")
+        else:
+            self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {chip_label(key)}")
+
+    def _update_page(self) -> None:
+        """The table, the duplicates view, or the empty state (no library / scanning / nothing found)."""
+        lst = self._list
+        if self._list.current_filter() == DUPLICATES and self._duplicates_view is not None:
+            lst.show_page(PAGE_DUPLICATES)
+            return
+        if self._model.rowCount():
+            lst.show_page(PAGE_TABLE)
+            return
+        roots = self._roots()
+        if self._thread is not None:
+            lst.set_empty("Scanning your library…", self._scan_label, can_add=False, busy=True)
+        elif not roots:
+            lst.set_empty("No library folder yet", "Add the folder that holds your series folders. MangaList scans it "
+                          "and shows every series here.", can_add=True)
+        else:
+            names = ", ".join(r.name for r in roots)
+            lst.set_empty("No series to show", f"Rescan to read {names}, or add another library folder.",
+                          can_add=True)
+        lst.show_page(PAGE_EMPTY)
+
+    def _refresh_derived(self) -> None:
+        """What follows the table: the chips' counts, the footer, the Download tab's list, the details' button."""
+        self._update_counts()
+        self._rebuild_wanted()
+        self._update_detail_wanted()
+        if self._list.current_filter() == DUPLICATES and self._duplicates_view is not None:
+            self._duplicates_view.set_series_duplicates(self._model.duplicate_series())
+
+    def _update_counts(self) -> None:
+        model = self._model
+        n = model.rowCount()
+        keys = [k for k in all_filter_keys() if k is not None and k != DUPLICATES]
+        counts: Dict[Optional[str], Optional[int]] = {None: n}
+        for k in keys:
+            counts[k] = 0
+        for row in range(n):
+            st = model.state_at(row)
+            if st is None:
+                continue
+            for k in keys:
+                if state_matches(st, k):
+                    counts[k] += 1
+        series_dupes = len(model.duplicate_series())
+        counts[DUPLICATES] = series_dupes + (self._dupe_file_groups or 0)
+        self._list.set_counts(counts)
+        entries = [model.entry_at(r) for r in range(n)]
+        by_kind = {"Volumes": 0, "Chapters": 0, "Both": 0}
+        for e in entries:
+            if e is not None and e.verdict.value in by_kind:
+                by_kind[e.verdict.value] += 1
+        unknown = n - sum(by_kind.values())
+        self._list.counts_label.setText(f"{n} series" if n else "")
+        self._list.kinds_label.setText(
+            f"{by_kind['Volumes']} volume folders · {by_kind['Chapters']} chapter folders · {by_kind['Both']} both · "
+            f"{unknown} unknown" if n else "")
+
+    # --- The Download tab's "To get" list ----------------------------------
+
+    def _rebuild_wanted(self) -> None:
+        """Hand the Download tab every series with gaps (after every scan / MangaPixer sync / state change)."""
+        if self._download_tab is None:
+            return
+        out: List[WantedSeries] = []
+        model = self._model
+        for row in range(model.rowCount()):
+            entry = model.entry_at(row)
+            st = model.state_at(row)
+            if entry is None or st is None or not st.gaps:
+                continue
+            volumes = self._volumes.availability(row) if self._volumes is not None and st.missing_volumes else None
+            series_id = self._volumes.series_id_for(entry) if self._volumes is not None else None
+            out += wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title,
+                                 state=st, knowledge=model.knowledge_at(row), held=model.held_volumes_at(row),
+                                 series_id=series_id, volumes=volumes)
+        self._wanted_series = out
+        self._download_tab.set_wanted(out)
+
+    def _wanted_groups(self, folder: str) -> List[str]:
+        return [w.group for w in self._wanted_series if w.folder == folder]
+
+    def _update_detail_wanted(self) -> None:
+        entry = self._current_entry()
+        if entry is None or self._download_tab is None:
+            self._detail.set_wanted("")
+            return
+        self._detail.set_wanted(wanted_label(self._wanted_groups(str(entry.folder))))
+
+    def _current_entry(self) -> Optional[MangaEntry]:
+        sel = self._table.selectionModel()
+        idx = sel.currentIndex() if sel is not None else QModelIndex()
+        if not idx.isValid():
+            return None
+        return self._model.entry_at(self._proxy.mapToSource(idx).row())
+
+    def _on_get_requested(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.get_missing(str(entry.folder))
+
+    def get_missing(self, folder: str) -> bool:
+        """"Get the missing volumes": switch to the Download tab with *folder*'s series selected."""
+        if self._download_tab is None:
+            return False
+        self._rebuild_wanted()
+        self.show_tab(TAB_DOWNLOAD)
+        self._download_tab.focus(folder)
+        return True
+
+    def _row_for_folder(self, folder: str) -> Optional[int]:
+        for r in range(self._model.rowCount()):
+            e = self._model.entry_at(r)
+            if e is not None and str(e.folder) == str(folder):
+                return r
+        return None
+
+    def show_folder_in_list(self, folder: str) -> None:
+        """Select *folder*'s series in the List tab (from the Download tab or the duplicates view)."""
+        self.show_tab(TAB_LIST)
+        row = self._row_for_folder(folder)
+        if row is not None:
+            self._select_source_row(row)
+
+    def _find_volumes_for(self, folder: str) -> None:
+        """The placeholder Download tab's "Find volumes on nyaa...": the existing dialog."""
+        row = self._row_for_folder(folder)
+        if row is not None and self._volumes is not None:
+            self._volumes.open_find_volumes(row)
+
+    def _on_files_deleted(self, paths) -> None:
+        """Lane C's view deleted duplicate files: rescan so the table and the database follow."""
+        self._status_label.setText(f"{len(paths)} duplicate file(s) deleted - rescanning")
+        self._start_scan()
+
+    def _count_duplicate_files(self) -> None:
+        """Lane C's duplicate-numbers finder, off the UI thread, for the Duplicates chip's count."""
+        finder = lanes.find_duplicate_files_function()
+        if finder is None or self._dupe_call is not None:
+            return
+        from .background import start_call
+
+        db = self._db
+        self._dupe_call = start_call(lambda: len(finder(db)), self._on_duplicate_files_counted,
+                                     lambda msg: _log.warning("Counting duplicate files failed: %s", msg),
+                                     self._on_duplicate_count_finished)
+
+    def _on_duplicate_files_counted(self, n: int) -> None:
+        self._dupe_file_groups = int(n)
+        self._update_counts()
+
+    def _on_duplicate_count_finished(self) -> None:
+        self._dupe_call = None
+
     # --- Slots -----------------------------------------------------------
 
     # --- Roots -----------------------------------------------------------
 
     def _make_volumes_backend(self):
-        """The volumes MVP's backend, or None (downloads off, or no adapter): then no volumes GUI exists."""
+        """The downloads backend, or None (downloads off, or no adapter): then no Download tab exists."""
         return create_downloads_backend(self._db)
 
     def _recover_journal(self) -> None:
@@ -504,17 +656,41 @@ class MainWindow(QMainWindow):
             _log.warning("Could not read the roots", exc_info=True)
             return []
 
+    def _mangapixer_synced(self) -> Optional[datetime.datetime]:
+        try:
+            from ..services.mangapixer import open_cache
+
+            return _parse_time(open_cache(self._db).last_sync_at())
+        except Exception:  # noqa: BLE001 - the status line only
+            return None
+
     def _show_roots(self) -> None:
+        """The top bar's status: the library folder(s), the last scan, MangaPixer's last sync."""
         roots = self._roots()
         if not roots:
-            self._path_edit.setText("")
-            self._path_edit.setToolTip("No root yet: choose a Manga Root")
-        elif len(roots) == 1:
-            self._path_edit.setText(roots[0].path)
-            self._path_edit.setToolTip(f"{roots[0].name}: {roots[0].path}")
+            parts = ["No library folder"]
+            tip = "No library folder yet: add one in Settings"
         else:
-            self._path_edit.setText(f"{len(roots)} roots: " + ", ".join(r.name for r in roots))
-            self._path_edit.setToolTip("\n".join(f"{r.name}: {r.path}" for r in roots))
+            parts = [", ".join(r.name for r in roots) if len(roots) <= 2 else f"{len(roots)} library folders"]
+            tip = "\n".join(f"{r.name}: {r.path}" for r in roots)
+        if self._thread is not None:
+            parts.append("scanning…")
+        elif self._last_scan is not None:
+            parts.append(f"scanned {_when(self._last_scan)}")
+        synced = self._mangapixer_synced()
+        if synced is not None:
+            parts.append(f"MangaPixer synced {_when(synced)}")
+        self._top.set_status(" · ".join(parts), tip)
+        self._update_page()
+
+    def start_initial_scan(self) -> bool:
+        """At start: scan the library folders so the table fills without a click (never blocks the UI)."""
+        roots = self._roots()
+        if not roots or not any(Path(r.path).is_dir() for r in roots):
+            self._update_page()
+            return False
+        self._start_scan(roots)
+        return self._thread is not None
 
     def _add_root_path(self, d: str) -> bool:
         """Make *d* a root (if it is not one already). False when it cannot be one."""
@@ -550,23 +726,31 @@ class MainWindow(QMainWindow):
     def _on_roots(self) -> None:
         dlg = self._make_roots_dialog()
         if dlg.exec() == RootsDialog.Accepted:
-            self._after_roots_changed()
+            self._after_roots_changed(rescan=True)
 
     def _on_mangapixer(self) -> None:
+        from ..identity.carry import last_carry_id
         from ..services.mangapixer import open_cache
         from .mangapixer_dialog import open_mangapixer_dialog
 
-        from ..identity.carry import carries_since, last_carry_id
-
         before = last_carry_id(self._db)
         open_mangapixer_dialog(self, open_cache(self._db))
-        # The connection, the mappings or the synced items may have changed.
+        self._after_mangapixer_changed(before)
+
+    def _after_mangapixer_changed(self, carry_before: int) -> None:
+        """The connection, the mappings or the synced items may have changed: re-read MangaPixer's data."""
+        from ..identity.carry import carries_since
+
         self._mp_resolver = None
         self._mp_items = {}
         self._model.refresh_states()
         # A sync may have carried missing series along MangaPixer's carriedFrom.
-        self._apply_identity_changes(carries_since(self._db, before))
+        try:
+            self._apply_identity_changes(carries_since(self._db, carry_before))
+        except Exception:  # noqa: BLE001
+            _log.warning("Reading MangaPixer's carried series failed", exc_info=True)
         self._update_missing_count()
+        self._show_roots()
 
     def _mp_item_for(self, entry: MangaEntry):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
@@ -612,14 +796,16 @@ class MainWindow(QMainWindow):
         volume_list = volumes.get("items") if volumes else None
         return as_state_inventory(entry.inventory(volume_list or None))
 
-    def _after_roots_changed(self) -> None:
+    def _after_roots_changed(self, rescan: bool = False) -> None:
         self._show_roots()
-        if self._roots() and self._model.rowCount():
-            self._status_label.setText("Roots changed - Rescan to apply")
+        if rescan and self._roots():
+            self._start_scan()
+        elif self._roots() and self._model.rowCount():
+            self._status_label.setText("Library folders changed - Rescan to apply")
 
     def _on_rescan(self) -> None:
         if not self._roots():
-            QMessageBox.information(self, "No folder", "Choose a Manga Root first.")
+            QMessageBox.information(self, "No library folder", "Add a library folder first (Settings).")
             return
         self._start_scan()
 
@@ -636,6 +822,7 @@ class MainWindow(QMainWindow):
 
         self._btn_rescan.setEnabled(False)
         label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
+        self._scan_label = label
         self._status_label.setText(f"Scanning {label}…")
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)  # busy until first progress update
@@ -655,6 +842,7 @@ class MainWindow(QMainWindow):
         self._thread = thread
         self._worker = worker
         thread.start()
+        self._show_roots()
 
     def _on_progress(self, done: int, total: int, name: str) -> None:
         if total > 0:
@@ -662,6 +850,7 @@ class MainWindow(QMainWindow):
             self._progress.setValue(done)
         if name:
             self._status_label.setText(f"Scanning ({done}/{total}): {name}")
+            self._list.empty_text.setText(f"{done} / {total}: {name}")
 
     def _on_scan_finished(self, result) -> None:
         if isinstance(result, LibraryScan):
@@ -694,22 +883,10 @@ class MainWindow(QMainWindow):
         self._mp_resolver = None  # folders may have been renamed or added
         self._mp_items = {}
         self._model.set_entries(entries)
-        # Only auto-size columns when the user has no saved column state.
-        if not self._cfg.get("column_state"):
-            self._table.resizeColumnsToContents()
-            # Give Title a generous default width but keep it user-resizable.
-            header = self._table.horizontalHeader()
-            title_w = max(self._table.columnWidth(COL_TITLE), 360)
-            header.resizeSection(COL_TITLE, title_w)
-            # Examined column: narrow and centered.
-            header.resizeSection(COL_EXAMINED, 32)
+        self._last_scan = datetime.datetime.now()
 
-        n = len(entries)
-        n_vol = sum(1 for e in entries if e.verdict.value == "Volumes")
-        n_ch = sum(1 for e in entries if e.verdict.value == "Chapters")
-        n_both = sum(1 for e in entries if e.verdict.value == "Both")
-        n_unk = n - n_vol - n_ch - n_both
-        text = f"{n} folder(s)  —  Volumes: {n_vol}, Chapters: {n_ch}, Both: {n_both}, Unknown: {n_unk}"
+        # The counts are in the footer (_update_counts); the message says what else the scan found.
+        text = f"Scanned {len(entries)} folder(s)"
         tips = []
         if loose:
             text += f"  —  {len(loose)} archive(s) not in a series folder"
@@ -730,6 +907,11 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(False)
         self._mu_entries = list(entries)
         self._update_missing_count()
+        self._refresh_derived()
+        self._show_roots()
+        self._count_duplicate_files()
+        if self._duplicates_view is not None and self._list.current_filter() == DUPLICATES:
+            self._duplicates_view.refresh()
         self._start_signatures()
 
         if self._cfg.get("mu_autostart"):
@@ -744,11 +926,21 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._btn_rescan.setEnabled(True)
+        self._progress.setVisible(False)
+        self._show_roots()
+
+    def _stop_scan(self, wait_ms: int = 5000) -> None:
+        if self._worker is not None:
+            self._worker.stop()
+        if self._thread is not None:
+            self._thread.quit()
+            self._thread.wait(wait_ms)
+
 
     # --- Series identity: missing series, background signatures ----------
 
     def _update_missing_count(self) -> int:
-        """Show "Missing (N)" in the toolbar when N > 0."""
+        """Show "Missing (N)" in the top bar when N > 0."""
         try:
             from ..identity.carry import missing_count
 
@@ -756,9 +948,8 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             _log.warning("Could not count the missing series", exc_info=True)
             n = 0
-        self._btn_missing.setText(f"Missing ({n})")
+        self._top.set_missing(n)
         self._missing_action.setVisible(n > 0)
-        self._missing_spacer.setVisible(n > 0)
         return n
 
     def _make_missing_dialog(self):
@@ -920,8 +1111,7 @@ class MainWindow(QMainWindow):
         thread.finished.connect(self._on_mu_thread_finished)
         self._mu_thread = thread
         self._mu_worker = worker
-        self._btn_mu_start.setEnabled(False)
-        self._btn_mu_stop.setEnabled(True)
+        self._list.set_mu_running(True)
         thread.start()
 
     def _on_mu_entry_started(self, row: int) -> None:
@@ -949,8 +1139,7 @@ class MainWindow(QMainWindow):
         self._model.set_mu_processing_row(None)
         self._mu_thread = None
         self._mu_worker = None
-        self._btn_mu_start.setEnabled(True)
-        self._btn_mu_stop.setEnabled(False)
+        self._list.set_mu_running(False)
 
     def _on_mu_start(self) -> None:
         if not self._mu_entries:
@@ -961,54 +1150,30 @@ class MainWindow(QMainWindow):
     def _on_mu_stop(self) -> None:
         if self._mu_worker is not None:
             self._mu_worker.abort()
-        self._btn_mu_start.setEnabled(True)
-        self._btn_mu_stop.setEnabled(False)
+        self._list.set_mu_running(False)
+
+    def _stop_mu(self, wait_ms: int = 5000) -> None:
+        if self._mu_worker is not None:
+            self._mu_worker.abort()
+        if self._mu_thread is not None:
+            self._mu_thread.quit()
+            self._mu_thread.wait(wait_ms)
 
     def _on_mu_autostart_toggled(self, checked: bool) -> None:
-        self._cfg["mu_autostart"] = checked
-        config.save(self._cfg)
-
-    def _on_dupes_filter_changed(self, checked: bool) -> None:
-        """Toggle showing only duplicate MU matches."""
-        self._proxy.set_dupes_only(checked)
-        # Update status label to show how many duplicates found
-        if checked:
-            dupes_count = sum(1 for i in range(self._model.rowCount())
-                              if self._model.is_duplicate(i))
-            self._status_label.setText(f"Showing {dupes_count} duplicate entries")
-        else:
-            self._status_label.setText("Showing all entries")
-
-    # --- Rescan state: filter, Wanted panel ---------------------------------
-
-    def _on_state_filter_changed(self, _index: int) -> None:
-        key = self._state_combo.currentData()
-        self._proxy.set_state_filter(key)
-        if key is None:
-            self._status_label.setText("Showing all entries")
-        else:
-            self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {self._state_combo.currentText()}")
-
-    def _on_wanted_visibility(self, visible: bool) -> None:
-        shown = not self._wanted_dock.isHidden()   # the owner's choice, not the window being minimised
-        if bool(self._cfg.get("wanted_panel", False)) != shown:
-            self._cfg["wanted_panel"] = shown
+        if bool(self._cfg.get("mu_autostart", False)) != checked:
+            self._cfg["mu_autostart"] = checked
             config.save(self._cfg)
-        if visible:
-            self._rebuild_wanted()
 
-    def _rebuild_wanted(self) -> None:
-        if self._wanted_dock.isVisible():
-            self._wanted.rebuild(self._model)
+    # --- Selection from elsewhere -------------------------------------------
 
     def _select_source_row(self, src_row: int) -> None:
-        """Select a series in the table (clearing the filters that hide it)."""
+        """Select a series in the table (clearing the filters that hide it, leaving the duplicates view)."""
         src = self._model.index(src_row, COL_TITLE)
         idx = self._proxy.mapFromSource(src)
-        if not idx.isValid():
-            self._state_combo.setCurrentIndex(0)
+        if not idx.isValid() or self._list.current_filter() == DUPLICATES:
+            self._list.set_filter(None)
+            self._on_filter_changed(None)
             self._filter_edit.clear()
-            self._dupes_checkbox.setChecked(False)
             idx = self._proxy.mapFromSource(src)
         if idx.isValid():
             self._table.selectRow(idx.row())
@@ -1018,14 +1183,6 @@ class MainWindow(QMainWindow):
         webbrowser.open(url)
 
     # --- Column order & state --------------------------------------------
-
-    # Desired logical order: ✓ Title MU-Title Behind Licensed Verdict
-    #                        Last-Modified Alt-Title Files Subfolders Vol% Ch% Both%
-    _DEFAULT_COL_ORDER = [
-        "✓", "Dupe", "Title", "MU Title", "State", "Gaps", "Behind", "Licensed", "Completed",
-        "Official source", "Verdict", "Last Modified", "Alternative Title", "Files", "Subfolders",
-        "Vol %", "Ch %", "Both %",
-    ]
 
     def _apply_default_column_order(self) -> None:
         """Move header sections to match _DEFAULT_COL_ORDER."""
@@ -1039,8 +1196,8 @@ class MainWindow(QMainWindow):
                 header.moveSection(current_visual, visual_idx)
 
     def _restore_column_state(self) -> None:
-        """Restore saved header state, or apply the default order."""
-        state_hex = self._cfg.get("column_state") or ""
+        """Restore saved header state, or apply the default order and widths."""
+        state_hex = self._cfg.get(self._CFG_COLUMNS) or ""
         header = self._table.horizontalHeader()
         if state_hex:
             try:
@@ -1051,18 +1208,20 @@ class MainWindow(QMainWindow):
                     header.setSectionsMovable(True)
                     return
                 # Section count mismatch (e.g. new column added) — discard stale state.
-                self._cfg["column_state"] = ""
+                self._cfg[self._CFG_COLUMNS] = ""
                 config.save(self._cfg)
             except Exception:  # noqa: BLE001
                 pass
         self._apply_default_column_order()
+        for col, width in self._DEFAULT_WIDTHS.items():
+            header.resizeSection(col, width)
         # Ensure settings are applied after default order too
         header.setStretchLastSection(False)
         header.setSectionsMovable(True)
 
     def _save_column_state(self) -> None:
         state = self._table.horizontalHeader().saveState()
-        self._cfg["column_state"] = bytes(state.toHex()).decode()
+        self._cfg[self._CFG_COLUMNS] = bytes(state.toHex()).decode()
         config.save(self._cfg)
 
     def _on_column_moved(self, _logical: int, _old: int, _new: int) -> None:
@@ -1072,36 +1231,50 @@ class MainWindow(QMainWindow):
         self._col_resize_timer.start()
 
     def _on_splitter_moved(self, _pos: int, _idx: int) -> None:
-        self._cfg["splitter_sizes"] = self._splitter.sizes()
+        self._cfg[self._CFG_SPLITTER] = self._list.splitter.sizes()
         config.save(self._cfg)
 
     # --- Column visibility -----------------------------------------------
 
+    def _hidden_columns(self) -> set:
+        """The columns the owner hid (by name); the mockup's trimmed set until the owner changes it."""
+        hidden = self._cfg.get(self._CFG_HIDDEN)
+        if not isinstance(hidden, list):
+            return {name for name in COLUMNS if name not in self._DEFAULT_SHOWN}
+        return set(hidden)
+
     def _apply_hidden_columns(self) -> None:
         """Hide/show columns according to config."""
-        hidden = set(self._cfg.get("hidden_columns", []))
+        hidden = self._hidden_columns()
         header = self._table.horizontalHeader()
         for col, name in enumerate(COLUMNS):
             header.setSectionHidden(col, name in hidden)
 
     def _on_header_context_menu(self, pos: QPoint) -> None:
+        """Show / hide columns (remembered); the title column always stays."""
         menu = QMenu(self._table.horizontalHeader())
-        hidden = set(self._cfg.get("hidden_columns", []))
-        for col, name in enumerate(COLUMNS):
-            act = menu.addAction(name)
+        hidden = self._hidden_columns()
+        order = sorted(range(len(COLUMNS)), key=self._table.horizontalHeader().visualIndex)
+        for col in order:
+            name = COLUMNS[col]
+            act = menu.addAction(column_label(col))
+            act.setEnabled(col != COL_TITLE)
             act.setCheckable(True)
             act.setChecked(name not in hidden)
             act.setData(col)
         chosen = menu.exec(self._table.horizontalHeader().mapToGlobal(pos))
         if chosen is None:
             return
-        col = chosen.data()
+        self._toggle_column(chosen.data())
+
+    def _toggle_column(self, col: int) -> None:
+        hidden = self._hidden_columns()
         name = COLUMNS[col]
         if name in hidden:
             hidden.discard(name)
         else:
             hidden.add(name)
-        self._cfg["hidden_columns"] = sorted(hidden)
+        self._cfg[self._CFG_HIDDEN] = sorted(hidden)
         config.save(self._cfg)
         self._apply_hidden_columns()
 
@@ -1115,7 +1288,10 @@ class MainWindow(QMainWindow):
         src_index: QModelIndex = self._proxy.mapToSource(idx)
         row = src_index.row()
         entry = self._model.entry_at(row)
-        self._detail.show_entry(entry, self._model.state_at(row), self._model.links_at(row))
+        m = self._model
+        self._detail.show_entry(entry, m.state_at(row), m.links_at(row), knowledge=m.knowledge_at(row),
+                                held_volumes=m.held_volumes_at(row), held_chapters=m.held_chapters_at(row))
+        self._update_detail_wanted()
         if self._volumes is not None:
             self._volumes.show_in_detail(row)
 
@@ -1167,7 +1343,7 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self._table)
         act_kind = None
-        act_find_volumes = None
+        act_get = None
 
         if n == 1:
             if getattr(entries[0], "needs_kind", False):
@@ -1184,8 +1360,13 @@ class MainWindow(QMainWindow):
             act_open_mu = menu.addAction("Open MangaUpdates page")
             act_open_mu.setEnabled(bool(entry0.mu_url))
             act_check_mu = menu.addAction("Check MU for this entry")
-            if self._volumes is not None:
-                act_find_volumes = self._volumes.add_row_action(menu, rows[0])
+            if self._download_tab is not None:
+                groups = self._wanted_groups(str(entry0.folder))
+                act_get = menu.addAction((wanted_label(groups) or "Get the missing volumes") + "…")
+                act_get.setEnabled(bool(groups))
+                act_get.setToolTip("Open this series in the Download tab" if groups else
+                                   "Nothing missing: no gaps to download")
+                menu.setToolTipsVisible(True)
             links_menu = menu.addMenu("Official sources")
             link_actions = {}
             for link in self._model.links_at(rows[0]):
@@ -1250,8 +1431,8 @@ class MainWindow(QMainWindow):
             self._open_url(link_actions[chosen])
         elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)
-        elif chosen is act_find_volumes and act_find_volumes is not None:
-            self._volumes.open_find_volumes(rows[0])
+        elif chosen is act_get and act_get is not None:
+            self.get_missing(str(entries[0].folder))
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)
         elif chosen is act_confirm_mu:
@@ -1445,6 +1626,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._volumes is not None:
             self._volumes.stop()
+        if self._download_tab is not None:
+            self._download_tab.stop()
+        if self._dupe_call is not None:
+            self._dupe_call.abandon()
+        self._derived_timer.stop()
+        self._stop_scan()
+        self._stop_mu()
         self._stop_signatures()
         self._cfg["window"] = {"w": self.width(), "h": self.height()}
         self._save_column_state()
