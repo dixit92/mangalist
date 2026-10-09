@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import logging
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote
@@ -157,19 +158,34 @@ class _SortProxy(QSortFilterProxyModel):
         self._dupes_only = False
         self._state_filter: Optional[str] = None
 
+    @contextmanager
+    def _filter_change(self):
+        """Qt 6.10+ announces a filter change around it (``invalidateFilter`` is deprecated there and warned on every
+        call); older PySide6 (requirements allow 6.6+) re-filters after it."""
+        if hasattr(self, "beginFilterChange"):
+            self.beginFilterChange()
+            try:
+                yield
+            finally:
+                self.endFilterChange()
+        else:
+            yield
+            self.invalidateFilter()
+
     def refresh_scope(self) -> None:
         """The model's library scope changed: let the rows of the picked library through."""
-        self.invalidateFilter()
+        with self._filter_change():
+            pass
 
     def set_dupes_only(self, enabled: bool) -> None:
         """Filter to show only duplicate MU matches."""
-        self._dupes_only = enabled
-        self.invalidateFilter()
+        with self._filter_change():
+            self._dupes_only = enabled
 
     def set_state_filter(self, key: Optional[str]) -> None:
         """Show only rows whose rescan state passes *key* (table_model.STATE_FILTERS; None = all)."""
-        self._state_filter = key
-        self.invalidateFilter()
+        with self._filter_change():
+            self._state_filter = key
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         # The mockup's headers: upper case, numbers right-aligned over their column.
