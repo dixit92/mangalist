@@ -183,3 +183,31 @@ def test_collection_about_and_unknown_states_stop_inheritance(cache, db, tmp_pat
     assert k.not_a_series and k.not_a_series_reason == "Collection about Synthetic Quest"
     assert from_mangapixer_item(res["Shonen/Future/Part 1"].item).not_a_series
     assert not from_mangapixer_item(res["Shonen/Synthetic Quest"].item).not_a_series
+
+
+# --- paired after every scan (owner, 2026-10-09: a root added after the last sync stayed unpaired) ------------------
+
+def test_a_scan_pairs_a_new_root_without_a_sync(cache, db, tmp_path):
+    from mangalist.scanner import record_library_scan, scan_library
+
+    _seed(cache, {"manga": ("manga", LIBRARY), "other": ("manhwa", [folder("x1", ["Alpha Quest"])])})
+    base = tmp_path / "share" / "Shonen"
+    for name in ("Alpha Quest", "Beta Story", "Gamma"):
+        (base / name).mkdir(parents=True)
+        (base / name / f"{name} v01.cbz").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    root = db.add_root(str(base), "Shonen")
+    assert cache.mapping(root.id) is None
+    record_library_scan(db, scan_library(db.list_roots(), db=db))
+    m = cache.mapping(root.id)
+    assert (m.library_id, m.prefix, m.manual, m.matched, m.unmatched) == ("manga", ["Shonen"], False, 3, 0)
+
+
+def test_pairing_after_a_scan_needs_a_synced_mangapixer_and_keeps_manual_choices(cache, db, tmp_path):
+    from mangalist.scanner import refresh_mangapixer_pairing
+
+    root = add_root_with_series(db, tmp_path, "Shonen", ["Alpha Quest"])
+    assert refresh_mangapixer_pairing(db) is False and cache.mapping(root.id) is None   # never synced: nothing to pair
+    _seed(cache, {"manga": ("manga", LIBRARY)})
+    mp_map.set_manual_mapping(cache, root.id, None)                                      # "do not use MangaPixer"
+    assert refresh_mangapixer_pairing(db) is True
+    assert cache.mapping(root.id).library_id is None and cache.mapping(root.id).manual
