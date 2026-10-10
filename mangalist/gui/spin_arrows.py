@@ -85,14 +85,14 @@ def spin_rules(line: str = "#c4c4bf", hover: str = "#f3f3f1", color: str = "#5a5
         return ", ".join(f"{b}{part}" for b in boxes)
 
     return f"""
-{sel("")} {{ padding-right: 26px; }}
+{sel("")} {{ padding-left: 10px; padding-right: 26px; }}
 {sel("::up-button")} {{ subcontrol-origin: border; subcontrol-position: top right; width: 22px; border: none;
     border-left: 1px solid {line}; border-top-right-radius: 6px; background: transparent; }}
 {sel("::down-button")} {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; border: none;
     border-left: 1px solid {line}; border-bottom-right-radius: 6px; background: transparent; }}
 {sel("::up-button:hover")}, {sel("::down-button:hover")} {{ background: {hover}; }}
-{sel("::up-arrow")} {{ image: url("{files['up']}"); width: 8px; height: 8px; }}
-{sel("::down-arrow")} {{ image: url("{files['down']}"); width: 8px; height: 8px; }}
+{sel("::up-arrow")} {{ image: url("{files['up']}"); width: 9px; height: 9px; }}
+{sel("::down-arrow")} {{ image: url("{files['down']}"); width: 9px; height: 9px; }}
 {sel("::up-arrow:disabled")}, {sel("::up-arrow:off")} {{ image: url("{files['up_off']}"); }}
 {sel("::down-arrow:disabled")}, {sel("::down-arrow:off")} {{ image: url("{files['down_off']}"); }}
 """
