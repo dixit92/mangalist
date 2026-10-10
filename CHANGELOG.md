@@ -7,6 +7,7 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **The Download tab follows what was filed.** When a check files volumes or chapters, the library is rescanned, so the To get list and the panel drop what arrived (they kept showing it as missing until the next scan).
 - **"Check qBittorrent now" is now "Check downloads now"**: it asks Suwayomi as well (files finished chapters), so the old name was misleading.
 - **Suwayomi sources: only your languages, and only MangaDex (English) ticked to start.** Every MangaDex language used to arrive ticked. The list now shows the sources in your nyaa languages (English unless Raw is ticked) plus any you use; "Show all languages" shows the rest. "Reset to default" undoes a list ticked by hand.
 - **Number boxes show their up / down arrows again** (Settings > Download sources > Download budget, Logging): the stylesheet had hidden them. Settings cards have a little more room inside their border.
