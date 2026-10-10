@@ -19,27 +19,62 @@ the release fits under the cap, else queues it - or sends it past the cap when t
 :meth:`Backend.budget_status` is the cap and the usage (the release panel's confirmation, the In progress list, Settings);
 :meth:`Backend.send_queued_now`, :meth:`Backend.move_to_front` and :meth:`Backend.remove_from_queue` are the In progress
 list's overrides. The hand-over of the queue runs in :meth:`Backend.check_now` (the downloads job).
+
+**Chapters through Suwayomi** (the Suwayomi MVP): :meth:`Backend.chapter_lookup` finds the series in Suwayomi (MangaDex by
+the id MangaPixer links, else title candidates the owner confirms - :meth:`Backend.confirm_match`), lists its missing
+chapters with their groups and the default group, and :meth:`Backend.send_chapters` records and enqueues the picks
+(:mod:`mangalist.downloads.chapters`). Suwayomi's connection, sources and per-series choices live in
+:class:`~mangalist.store.downloads.SuwayomiSettings`. :meth:`Backend.records` returns every tool's records.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from .. import paths
-from ..gui.downloads_backend import BackendError, QbtSettings
+from ..gui.downloads_backend import BackendError, QbtSettings, SuwayomiCheck, SuwayomiSettingsView
+from ..services.suwayomi import SuwayomiError
 from ..services.nyaa import NyaaError, NyaaSearch
 from ..services.nyaa.client import NyaaClient
 from ..services.nyaa.ranking import order
 from ..services.qbittorrent import QbtError, client_from_connection, normalize_base_url
 from ..store.downloads import DownloadLedger, StatusConflict
 from ..torrent_files import TorrentError, read_torrent
-from .contracts import DownloadRecord, NyaaCandidate, Placement, QbtConnection, TorrentClient
+from ..store.downloads import SuwayomiSettings
+from .contracts import (
+    TOOL_SUWAYOMI,
+    ChapterClient,
+    DownloadRecord,
+    NyaaCandidate,
+    Placement,
+    QbtConnection,
+    SuwayomiConnection,
+    SuwayomiSource,
+    TorrentClient,
+)
 from .budget import OVER_CAP_QUEUE, SIZE_SELECTED, BudgetState
+from .chapters import (
+    HOW_CONFIRMED,
+    HOW_MANGADEX,
+    ChapterLookup,
+    ChapterSendOutcome,
+    ChapterSendRefused,
+    MangaMatch,
+    allowed_sources,
+    build_lookup,
+    chapter_placement_for,
+    find_manga,
+    held_chapter_groups,
+    mangadex_id_for,
+    send_chapters,
+    title_candidates,
+)
 from .options import (
     KEY_PARTIAL_DOWNLOADS,
     NyaaOptions,
@@ -60,9 +95,15 @@ _log = logging.getLogger(__name__)
 
 class Backend:
     def __init__(self, db, *, search: Optional[NyaaSearch] = None, nyaa_client: Optional[NyaaClient] = None,
-                 client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection):
+                 client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection,
+                 chapter_client_factory: Optional[Callable[[SuwayomiConnection], ChapterClient]] = None,
+                 namer=None):
         self.db = db
         self.ledger = DownloadLedger(db)
+        self.chapter_ledger = DownloadLedger(db, tool=TOOL_SUWAYOMI)
+        self.suwayomi = SuwayomiSettings(db)
+        self._chapter_client_factory = chapter_client_factory
+        self._namer = namer
         self._search = search                   # given: used as it is (tests); else one NyaaSearch per category
         self._searches: Dict[tuple, NyaaSearch] = {}
         self._nyaa_client = nyaa_client            # one client for every category: nyaa's politeness delay is per client
@@ -237,7 +278,9 @@ class Backend:
             raise BackendError(f"not removed: {exc}") from None
 
     def records(self, series_id: Optional[int] = None) -> Sequence[DownloadRecord]:
-        return self.ledger.for_series(series_id) if series_id is not None else self.ledger.all_records()
+        """Every tool's records (torrents and chapter downloads)."""
+        every = self.ledger.for_tool(None)
+        return every.for_series(series_id) if series_id is not None else every.all_records()
 
     def load_settings(self) -> QbtSettings:
         conn = self.ledger.connection()
@@ -306,7 +349,8 @@ class Backend:
         from ..headless.downloads_job import make_downloads_job
         from ..headless.jobs import JobContext
 
-        result = make_downloads_job(open_ledger=lambda: self.ledger, client_factory=self._client_factory)(JobContext())
+        result = make_downloads_job(open_ledger=lambda: self.ledger, client_factory=self._client_factory,
+                                    chapter_client_factory=self._chapter_client_factory, namer=self._namer)(JobContext())
         if result.status == "error":
             raise BackendError(result.message)
         return result.message
@@ -321,6 +365,176 @@ class Backend:
             password = stored.password if stored is not None else ""
         return QbtConnection(base_url=base_url, username=settings.username.strip(), password=password,
                              verify_tls=settings.verify_tls)
+
+
+    # --- Suwayomi (chapters) -----------------------------------------------------------------------------------
+
+    def suwayomi_ready(self) -> bool:
+        conn = self.suwayomi.connection()
+        return conn is not None and bool(conn.base_url)
+
+    def load_suwayomi(self) -> SuwayomiSettingsView:
+        conn = self.suwayomi.connection()
+        if conn is None:
+            return SuwayomiSettingsView()
+        return SuwayomiSettingsView(base_url=conn.base_url, username=conn.username, has_password=bool(conn.password),
+                                    download_dir=conn.download_dir)
+
+    def save_suwayomi(self, view: SuwayomiSettingsView, password: Optional[str]) -> None:
+        self.suwayomi.save_connection(self._suwayomi_connection(view, password))
+
+    def forget_suwayomi(self) -> None:
+        self.suwayomi.forget_connection()
+
+    def test_suwayomi(self, view: SuwayomiSettingsView, password: Optional[str]) -> SuwayomiCheck:
+        conn = self._suwayomi_connection(view, password)
+        client = self._chapter_client(conn)
+        try:
+            info = client.server_settings() if hasattr(client, "server_settings") else {"version": client.version()}
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+        folder = conn.download_dir
+        found = os.path.isdir(os.path.join(folder, "mangas")) if folder else None
+        return SuwayomiCheck(version=str(info.get("version") or "?"),
+                             download_as_cbz=info.get("download_as_cbz", True) is not False,
+                             flaresolverr=bool(info.get("flaresolverr")),
+                             flaresolverr_url=str(info.get("flaresolverr_url") or ""),
+                             downloads_path=str(info.get("downloads_path") or ""), folder_found=found)
+
+    def _suwayomi_connection(self, view: SuwayomiSettingsView, password: Optional[str]) -> SuwayomiConnection:
+        from ..services.suwayomi import normalize_base_url as suwayomi_url
+
+        try:
+            base_url = suwayomi_url(view.base_url)
+        except ValueError as exc:
+            raise BackendError(str(exc)) from None
+        if not password:
+            stored = self.suwayomi.connection()
+            password = stored.password if stored is not None and view.username.strip() else ""
+        return SuwayomiConnection(base_url=base_url, username=view.username.strip(), password=password or "",
+                                  download_dir=(view.download_dir or "").strip())
+
+    def _chapter_client(self, conn: Optional[SuwayomiConnection] = None) -> ChapterClient:
+        conn = conn if conn is not None else self.suwayomi.connection()
+        if conn is None or not conn.base_url:
+            raise BackendError("Suwayomi is not set up yet (Settings > Connected services > Suwayomi)")
+        if self._chapter_client_factory is not None:
+            return self._chapter_client_factory(conn)
+        from ..services.suwayomi import client_from_connection as suwayomi_client
+
+        return suwayomi_client(conn)
+
+    def suwayomi_sources(self) -> List[tuple]:
+        """``[(SuwayomiSource, allowed)]``: the allowed sources first, in the owner's order, then the other installed
+        ones (English first). Asks Suwayomi."""
+        client = self._chapter_client()
+        try:
+            installed = list(client.sources())
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+        allowed = allowed_sources(installed, self.suwayomi.sources())
+        ids = {s.id for s in allowed}
+        rest = sorted((s for s in installed if s.id not in ids),
+                      key=lambda s: (s.lang not in ("en", "all"), not s.is_mangadex, s.display_name.casefold()))
+        return [(s, True) for s in allowed] + [(s, False) for s in rest]
+
+    def set_suwayomi_sources(self, source_ids: Sequence[str]) -> None:
+        self.suwayomi.set_sources(source_ids)
+
+    def chapter_lookup(self, series_id: int, missing: Sequence[str], titles: Sequence[str]) -> ChapterLookup:
+        """Find the series in Suwayomi and list its missing chapters (see :mod:`mangalist.downloads.chapters`)."""
+        lookup = ChapterLookup(series_id=series_id, missing=tuple(missing))
+        try:
+            lookup.placement = chapter_placement_for(self.db, series_id)
+        except LookupError as exc:
+            lookup.placement_error = str(exc)
+        client = self._chapter_client()
+        try:
+            sources = allowed_sources(list(client.sources()), self.suwayomi.sources())
+            if not sources:
+                lookup.error = ("no Suwayomi source is allowed (Settings > Download sources > Suwayomi sources), or "
+                                "the MangaDex extension is not installed in Suwayomi")
+                return lookup
+            stored = self.suwayomi.series_choice(series_id)
+            found = find_manga(client, sources, mangadex_id=mangadex_id_for(self.db, series_id), titles=titles,
+                               stored=stored)
+            lookup.notes = list(found.notes)
+            lookup.candidates = list(found.candidates)
+            if found.match is None:
+                return lookup
+            in_hand = self._chapters_in_hand(series_id)
+            built = build_lookup(client, series_id=series_id, missing=missing, match=found.match,
+                                 held=self._held_groups(series_id), stored_group=stored.get("group"), in_hand=in_hand)
+            built.placement, built.placement_error = lookup.placement, lookup.placement_error
+            built.notes = lookup.notes
+            if found.match.how == HOW_MANGADEX and stored.get("manga_id") != found.match.manga.id:
+                self.suwayomi.set_series_choice(series_id, source_id=found.match.source.id,
+                                                manga_id=found.match.manga.id, manga_title=built.manga_title,
+                                                how=HOW_MANGADEX)
+            if not built.available and not built.queued_in_suwayomi and found.match.how == HOW_MANGADEX:
+                # MangaDex has none of them: the owner's other sources, by title (owner: "when MangaDex has nothing")
+                others = [s for s in sources if not s.is_mangadex]
+                if others:
+                    built.candidates = title_candidates(client, others, titles)
+                    built.notes.append("MangaDex has none of the missing chapters")
+            return built
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
+    def _held_groups(self, series_id: int):
+        try:
+            return held_chapter_groups(self.db, series_id)
+        except LookupError:
+            return {}
+
+    def _chapters_in_hand(self, series_id: int) -> Dict[str, DownloadRecord]:
+        from .contracts import DownloadStatus
+
+        keep = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED, DownloadStatus.REMOVED)
+        out: Dict[str, DownloadRecord] = {}
+        for rec in self.chapter_ledger.for_series(series_id):
+            if rec.status in keep:
+                for number in rec.wanted_chapters:
+                    out[number] = rec
+        return out
+
+    def confirm_match(self, series_id: int, match: MangaMatch) -> None:
+        """The owner confirmed a title match: it is the series' Suwayomi manga from now on."""
+        self.suwayomi.set_series_choice(series_id, source_id=match.source.id, manga_id=int(match.manga.id),
+                                        manga_title=match.manga.title, how=HOW_CONFIRMED)
+        _log.info("Chapters: series %s matched to %s manga %s by the owner", series_id, match.source.display_name,
+                  match.manga.id)
+
+    def forget_match(self, series_id: int) -> None:
+        self.suwayomi.set_series_choice(series_id, source_id=None, manga_id=None, manga_title=None, how=None)
+
+    def set_series_group(self, series_id: int, group: Optional[str]) -> None:
+        self.suwayomi.set_series_choice(series_id, group=group or None)
+
+    def send_chapters(self, series_id: int, match: MangaMatch, picks: Sequence, target_dir: str,
+                      manga_title: str = "", source_name: str = "") -> ChapterSendOutcome:
+        client = self._chapter_client()
+        try:
+            return send_chapters(client, self.chapter_ledger, series_id, match, picks, target_dir,
+                                 manga_title=manga_title, source_name=source_name)
+        except ChapterSendRefused as exc:
+            raise BackendError(str(exc)) from None
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
+
+def _close(client) -> None:
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
 
 
 def create_backend(db) -> Backend:

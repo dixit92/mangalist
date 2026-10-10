@@ -18,8 +18,11 @@ torrent is the owner's from then on).
 send the total of the files it keeps, until qBittorrent reports its own figure (the selected files' bytes); each pass
 writes that figure back to the record. A size that is not known at all counts as 0 and is said so.
 
-The accounting works on :class:`~mangalist.downloads.contracts.DownloadRecord` alone - whichever client a record belongs
-to - so chapter downloads (Suwayomi, later) join the same budget by being records with a size. Sizes are in bytes; the
+**Torrents only** (owner, 2026-10-10: the budget is for torrents - chapter downloads "don't have seeding"): a record of
+any other tool (Suwayomi's chapter downloads) never counts and is never queued, whatever its status; every function
+here skips it, so a list of every tool's records can be passed as it is.
+
+The accounting works on :class:`~mangalist.downloads.contracts.DownloadRecord` alone. Sizes are in bytes; the
 cap is set in GB of 1024^3 bytes, the unit of every size MangaList shows (the releases table, the partial-download line).
 """
 
@@ -28,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-from .contracts import DownloadRecord, DownloadStatus
+from .contracts import TOOL_QBITTORRENT, DownloadRecord, DownloadStatus
 
 GB = 1024 ** 3
 
@@ -61,7 +64,9 @@ def gb_text(size: int) -> str:
 
 
 def counts(record: DownloadRecord) -> bool:
-    """True when *record*'s download counts against the cap (see the module docstring)."""
+    """True when *record*'s download counts against the cap (see the module docstring): a torrent only."""
+    if record.tool != TOOL_QBITTORRENT:
+        return False
     if record.status in COUNTED:
         return True
     return record.status == DownloadStatus.FAILED and record.in_client
@@ -83,7 +88,7 @@ def used_bytes(records: Iterable[DownloadRecord]) -> int:
 
 def queue_of(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
     """The QUEUED records in the order they are handed over (their ``queue_position``, then id)."""
-    queued = [r for r in records if r.status == DownloadStatus.QUEUED]
+    queued = [r for r in records if r.status == DownloadStatus.QUEUED and r.tool == TOOL_QBITTORRENT]
     return sorted(queued, key=lambda r: (r.queue_position or 1 << 30, r.id))
 
 
@@ -152,7 +157,7 @@ class BudgetState:
 
 
 def state_of(records: Sequence[DownloadRecord], cap_gb: float) -> BudgetState:
-    """The budget over *records* (every record of every client) under a cap of *cap_gb* GB (0: no limit)."""
+    """The budget over *records* (any tool's; only torrents count) under a cap of *cap_gb* GB (0: no limit)."""
     counted = _counted(records)
     return BudgetState(cap_bytes=gb_bytes(cap_gb), used_bytes=sum(max(0, r.size_bytes) for r in counted),
                        queued=tuple(queue_of(records)), unknown_sizes=sum(1 for r in counted if r.size_bytes <= 0),

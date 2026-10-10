@@ -1,0 +1,215 @@
+{
+ "data": {
+  "fetchMangaAndChapters": {
+   "manga": {
+    "id": 1,
+    "title": "Example Manga",
+    "url": "/manga/00000000-0000-4000-8000-0000000c0000",
+    "status": "COMPLETED",
+    "inLibrary": false,
+    "initialized": true,
+    "source": {
+     "id": "2499283573021220255",
+     "displayName": "MangaDex (EN)"
+    }
+   },
+   "chapters": [
+    {
+     "id": 1,
+     "name": "Vol.1 Ch.1 - Example Title 1",
+     "chapterNumber": 1.0,
+     "scanlator": "Alpha Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0001",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0001",
+     "uploadDate": "1517511029000",
+     "sourceOrder": 1,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 2,
+     "name": "Vol.1 Ch.2 - Example Title 2",
+     "chapterNumber": 2.0,
+     "scanlator": "Alpha Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0002",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0002",
+     "uploadDate": "1517511214000",
+     "sourceOrder": 2,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 3,
+     "name": "Vol.1 Ch.3 - Example Title 3",
+     "chapterNumber": 3.0,
+     "scanlator": "Alpha Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0003",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0003",
+     "uploadDate": "1517511232000",
+     "sourceOrder": 3,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 4,
+     "name": "Vol.1 Ch.4 - Example Title 4",
+     "chapterNumber": 4.0,
+     "scanlator": "Alpha Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0004",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0004",
+     "uploadDate": "1517511288000",
+     "sourceOrder": 4,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 333,
+     "name": "Vol.3 Ch.331 - Example Title 333",
+     "chapterNumber": 331.0,
+     "scanlator": "Gamma Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0005",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0005",
+     "uploadDate": "1517665687000",
+     "sourceOrder": 333,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 334,
+     "name": "Vol.3 Ch.332 - Example Title 334",
+     "chapterNumber": 332.0,
+     "scanlator": "Gamma Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0006",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0006",
+     "uploadDate": "1517665742000",
+     "sourceOrder": 334,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 335,
+     "name": "Vol.3 Ch.332 - Example Title 335",
+     "chapterNumber": 332.0,
+     "scanlator": "Beta Group",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0007",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0007",
+     "uploadDate": "1518276223000",
+     "sourceOrder": 335,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 336,
+     "name": "Vol.3 Ch.333 - Example Title 336",
+     "chapterNumber": 333.0,
+     "scanlator": "Gamma Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0008",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0008",
+     "uploadDate": "1517665775000",
+     "sourceOrder": 336,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 337,
+     "name": "Vol.3 Ch.333 - Example Title 337",
+     "chapterNumber": 333.0,
+     "scanlator": "Beta Group",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0009",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0009",
+     "uploadDate": "1518275743000",
+     "sourceOrder": 337,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 338,
+     "name": "Vol.3 Ch.334 - Example Title 338",
+     "chapterNumber": 334.0,
+     "scanlator": "Beta Group",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c000a",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c000a",
+     "uploadDate": "1518277210000",
+     "sourceOrder": 338,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 339,
+     "name": "Vol.3 Ch.334 - Example Title 339",
+     "chapterNumber": 334.0,
+     "scanlator": "Gamma Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c000b",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c000b",
+     "uploadDate": "1517665820000",
+     "sourceOrder": 339,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 340,
+     "name": "Vol.3 Ch.335 - Example Title 340",
+     "chapterNumber": 335.0,
+     "scanlator": "Gamma Scans",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c000c",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c000c",
+     "uploadDate": "1517665845000",
+     "sourceOrder": 340,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 989,
+     "name": "Vol.8 Ch.953.5",
+     "chapterNumber": 953.5,
+     "scanlator": "Epsilon",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c000d",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c000d",
+     "uploadDate": "1563077947000",
+     "sourceOrder": 989,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 990,
+     "name": "Vol.8 Ch.953.6 - Example Title 990",
+     "chapterNumber": 953.6,
+     "scanlator": "Zeta & Delta Team",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c000e",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c000e",
+     "uploadDate": "1571540813000",
+     "sourceOrder": 990,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    },
+    {
+     "id": 991,
+     "name": "Vol.8 Ch.953.6 - Example Title 991",
+     "chapterNumber": 953.6,
+     "scanlator": "Eta",
+     "url": "/chapter/00000000-0000-4000-8000-0000000c000f",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c000f",
+     "uploadDate": "1571234810000",
+     "sourceOrder": 991,
+     "isDownloaded": false,
+     "pageCount": -1,
+     "mangaId": 1
+    }
+   ]
+  }
+ }
+}

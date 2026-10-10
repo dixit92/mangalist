@@ -4,6 +4,8 @@ switches, write-only secrets, and what ``open_settings`` reports as changed."""
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -28,6 +30,11 @@ from mangalist.gui.shell import (  # noqa: E402
 from mangalist.services.mangapixer import client as mpc  # noqa: E402
 from mangalist.services.mangapixer import open_cache  # noqa: E402
 
+from mangalist.gui.downloads_backend import SuwayomiCheck, SuwayomiSettingsView  # noqa: E402
+
+from ..downloads.suwayomi_fakes import MANGADEX, WEEB  # noqa: E402
+from .chapter_fakes import PASSWORD as PASSWORD_SUWA  # noqa: E402
+from .chapter_fakes import FakeChapterBackend  # noqa: E402
 from .conftest import FakeBackend, qapp, wait_until  # noqa: E402,F401
 
 TOKEN = "mpx_SecretTokenDoNotShow_0123456789"
@@ -299,12 +306,12 @@ def test_services_cards_before_anything_is_set_up(qapp, db, cache):
     assert [c.name_label.text() for c in (page.mp_card, page.qbt_card, page.suwayomi_card)] == [
         "MangaPixer", "qBittorrent", "Suwayomi"]
     assert page.mp_card.badge.text() == "Not set up" and page.qbt_card.badge.text() == "Not set up"
-    assert page.suwayomi_card.badge.text() == "Not set up" and page.suwayomi_card.badge.property("badge") == "muted"
+    assert page.suwayomi_card.badge.text() == "Not available" and page.suwayomi_card.badge.property("badge") == "muted"
     assert not page.mp_card.btn_secondary.isEnabled() and not page.qbt_card.btn_secondary.isEnabled()
     assert page.mp_card.used_label.text() == "Used by: Matching, Automation"
     assert page.qbt_card.used_label.text() == "Used by: nyaa"
     assert page.suwayomi_card.used_label.text() == "Used by: Suwayomi sources (chapters)"
-    assert not page.suwayomi_card.btn_primary.isEnabled()
+    assert not page.suwayomi_card.btn_primary.isEnabled()                       # this backend cannot talk to Suwayomi
 
 
 def test_connected_status_is_checked_live_off_the_ui_thread(qapp, db, cache):
@@ -381,13 +388,80 @@ def test_the_mangapixer_card_lists_libraries_and_root_mapping_and_warns_about_sc
     assert "Request library scans" in card.note_label.text()
 
 
-def test_suwayomi_what_is_it_explains_and_set_up_waits(qapp, db, cache):
+def test_suwayomi_what_is_it_explains_and_set_up_opens_the_form(qapp, db, cache):
     told = []
-    dlg, _ = make(qapp, db, cache, info=lambda parent, title, text: told.append((title, text)))
+    backend = FakeChapterBackend(connected=False)
+    dlg, _ = make(qapp, db, cache, backend, info=lambda parent, title, text: told.append((title, text)))
     page = dlg.pages[SECTION_SERVICES]
-    page.suwayomi_card.btn_secondary.click()
+    card = page.suwayomi_card
+    page.suwayomi_info.click()
     assert told and told[0][0] == "Suwayomi" and "Missing chapters" in told[0][1]
-    assert page.suwayomi_card.btn_primary.toolTip() == "Connecting Suwayomi comes in a later version"
+    assert card.badge.text() == "Not set up" and card.btn_primary.text() == "Set up" and card.btn_primary.isEnabled()
+    assert not card.btn_secondary.isEnabled()                                    # nothing to test yet
+    card.btn_primary.click()
+    assert page.suwayomi_panel is not None and page.stack.currentIndex() == 1
+
+
+def test_suwayomi_card_is_checked_live_and_names_what_to_fix(qapp, db, cache):
+    backend = FakeChapterBackend()
+    dlg, _ = make(qapp, db, cache, backend)
+    page = dlg.pages[SECTION_SERVICES]
+    card = page.suwayomi_card
+    assert card.btn_primary.text() == "Edit" and "192.0.2.10:4567" in card.detail_label.text()
+    assert "/data/appdata/suwayomi/downloads" in card.detail_label.text() and PASSWORD_SUWA not in all_text(dlg)
+    dlg.show_section(SECTION_SERVICES)
+    settle(qapp, dlg)
+    assert card.badge.text() == "Connected v2.4.2366" and card.badge.property("badge") == "ok"
+    assert backend.suwayomi_tested and backend.suwayomi_tested[0][1] is None     # the stored password
+    assert threading.get_ident() not in backend.threads
+    # Suwayomi answers, but "Download as CBZ" is off and FlareSolverr is not set: said on the card.
+    backend.check = SuwayomiCheck(version="v2.4.2366", download_as_cbz=False, flaresolverr=False, folder_found=False)
+    assert page.test_suwayomi()
+    settle(qapp, dlg)
+    note = card.note_label.text()
+    assert "Download as CBZ" in note and "FlareSolverr" in note and "8191" in note and "mangas" in note
+    backend.suwayomi_test_error = "Suwayomi could not be reached at http://192.0.2.10:4567 (ConnectionError)"
+    assert page.test_suwayomi()
+    settle(qapp, dlg)
+    assert card.badge.text() == "Not connected" and "could not be reached" in card.note_label.text()
+
+
+def test_suwayomi_without_a_download_folder_warns(qapp, db, cache):
+    backend = FakeChapterBackend()
+    backend.view = SuwayomiSettingsView(base_url="http://192.0.2.10:4567")
+    dlg, _ = make(qapp, db, cache, backend)
+    card = dlg.pages[SECTION_SERVICES].suwayomi_card
+    assert card.badge.text() == "No download folder" and "cannot be filed" in card.note_label.text()
+
+
+def test_edit_suwayomi_saves_with_a_write_only_password_and_tests_what_is_typed(qapp, db, cache):
+    backend = FakeChapterBackend(connected=False)
+    dlg, _ = make(qapp, db, cache, backend)
+    page = dlg.pages[SECTION_SERVICES]
+    panel = page.edit_suwayomi()
+    assert panel.password_edit.text() == "" and panel.password_edit.echoMode() == QLineEdit.EchoMode.Password
+    assert "8191" in all_text(panel) and "FlareSolverr" in all_text(panel)          # set in Suwayomi itself
+    assert not panel.save() and "address" in panel.status_label.text()              # an address is needed
+    panel.url_edit.setText("http://192.0.2.10:4567")
+    panel.user_edit.setText("owner")
+    panel.password_edit.setText(PASSWORD_SUWA)
+    panel.folder_edit.setText("/data/appdata/suwayomi/downloads")
+    assert panel.test_connection()
+    wait_until(qapp, lambda: panel._call is None)
+    view, password = backend.suwayomi_tested[-1]
+    assert view.base_url == "http://192.0.2.10:4567" and password == PASSWORD_SUWA and backend.suwayomi_saved == []
+    assert "Connected: Suwayomi v2.4.2366" in panel.status_label.text()
+    assert panel.save()
+    view, password = backend.suwayomi_saved[-1]
+    assert (view.base_url, view.username, view.download_dir, password) == (
+        "http://192.0.2.10:4567", "owner", "/data/appdata/suwayomi/downloads", PASSWORD_SUWA)
+    assert dlg.result_data().downloads_changed and page.stack.currentIndex() == 0
+    assert PASSWORD_SUWA not in all_text(dlg)
+    # Edit again: the stored password is never shown; an empty field keeps it.
+    panel = page.edit_suwayomi()
+    assert panel.password_edit.text() == "" and "stored" in panel.password_edit.placeholderText()
+    panel.save()
+    assert backend.suwayomi_saved[-1][1] is None
 
 
 def test_edit_mangapixer_opens_its_panel_and_tells_the_shell_when_it_changed(qapp, db, cache):
@@ -467,6 +541,56 @@ def test_suwayomi_sources_wait_for_suwayomi_and_point_to_the_services(qapp, db, 
     assert "needs Suwayomi" in all_text(page) and "Suwayomi not set up" in all_text(page)
     page.btn_suwayomi.click()
     assert dlg.current == SECTION_SERVICES
+    assert not page.sources_list.isEnabled() and not page.load_suwayomi_sources()
+
+
+def sources(page):
+    from PySide6.QtCore import Qt
+
+    return [(page.sources_list.item(i).text().split("  ·  ")[0],
+             page.sources_list.item(i).checkState() == Qt.CheckState.Checked) for i in range(page.sources_list.count())]
+
+
+def test_suwayomi_sources_are_read_from_suwayomi_ticked_and_ordered(qapp, db, cache):
+    from PySide6.QtCore import Qt
+
+    backend = FakeChapterBackend()
+    dlg, _ = make(qapp, db, cache, backend)
+    page = dlg.pages[SECTION_SOURCES]
+    dlg.show_section(SECTION_SOURCES)
+    wait_until(qapp, lambda: page._sources_call is None)
+    assert page.suwayomi_badge.text() == "Ready" and page.btn_suwayomi.isHidden()
+    assert sources(page) == [("MangaDex (EN)", True), ("Weeb Example", False)]      # MangaDex first by default
+    assert page.sources_note.text() == "1 of 2 in use"
+    assert threading.get_ident() not in backend.threads
+    page.sources_list.item(1).setCheckState(Qt.CheckState.Checked)
+    assert backend.allowed == [MANGADEX.id, WEEB.id] and dlg.result_data().downloads_changed
+    page.sources_list.setCurrentRow(1)
+    page.btn_up.click()                                                           # Weeb Example first
+    assert sources(page) == [("Weeb Example", True), ("MangaDex (EN)", True)]
+    assert backend.allowed == [WEEB.id, MANGADEX.id]
+    page.sources_list.item(1).setCheckState(Qt.CheckState.Unchecked)
+    assert backend.allowed == [WEEB.id] and page.sources_note.text() == "1 of 2 in use"
+    page.sources_list.setCurrentRow(1)
+    page.btn_down.click()                                                         # the last row: nothing moves
+    assert sources(page) == [("Weeb Example", True), ("MangaDex (EN)", False)]
+    page.sources_list.setCurrentRow(0)
+    page.btn_down.click()
+    assert sources(page) == [("MangaDex (EN)", False), ("Weeb Example", True)] and backend.allowed == [WEEB.id]
+
+
+def test_suwayomi_sources_say_when_suwayomi_cannot_be_read_or_has_none(qapp, db, cache):
+    backend = FakeChapterBackend()
+    backend.sources_error = "Suwayomi could not be reached at http://192.0.2.10:4567 (ConnectionError)"
+    dlg, _ = make(qapp, db, cache, backend)
+    page = dlg.pages[SECTION_SOURCES]
+    dlg.show_section(SECTION_SOURCES)
+    wait_until(qapp, lambda: page._sources_call is None)
+    assert "Could not read them" in page.sources_note.text() and page.sources_list.count() == 0
+    backend.sources_error, backend.installed = None, []
+    page.btn_sources_reload.click()
+    wait_until(qapp, lambda: page._sources_call is None)
+    assert "install extensions in Suwayomi" in page.sources_note.text()
 
 
 # --- Matching and Automation -------------------------------------------------------------------------------

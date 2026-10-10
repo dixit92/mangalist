@@ -1,0 +1,17 @@
+{
+ "data": {
+  "fetchSourceManga": {
+   "hasNextPage": false,
+   "mangas": [
+    {
+     "id": 1,
+     "title": "Example Manga",
+     "url": "/manga/00000000-0000-4000-8000-0000000c0000",
+     "sourceId": "2499283573021220255",
+     "inLibrary": false,
+     "initialized": false
+    }
+   ]
+  }
+ }
+}

@@ -13,6 +13,13 @@ Automation); **Replaced chapters** (:mod:`.replaced_chapters`) - a line above In
 the filed volumes replaced, or says they are in the holding folder, and opens the review (restore, move, keep,
 delete after the confirmation).
 
+**Missing chapters** (the Suwayomi MVP, 2026-10-10): once Suwayomi is connected (``backend.suwayomi_ready``) the group is
+searchable - selecting a series opens the chapters panel (:class:`~mangalist.gui.chapters_panel.ChaptersPanel`) in the
+releases panel's place: the series found in Suwayomi (MangaDex by id; title matches confirmed by the owner), its missing
+chapters with the groups that have them, the default group's copies ticked, Send to Suwayomi. A row of the group shows
+the series' chapter downloads as chips ("Downloading ch 101-104", "Filed ch 101-104") and the lookup's state; a row of
+the volume groups shows its torrents. The In progress list shows both.
+
 Every backend call runs off the UI thread (:mod:`.background`); the search queue runs one series at a time.
 """
 
@@ -30,6 +37,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QSplitter,
+    QStackedWidget,
     QStyle,
     QStyleOptionViewItem,
     QTreeWidget,
@@ -42,8 +50,9 @@ from ..downloads.contracts import DownloadRecord
 from .. import config
 from .background import describe_error, start_call
 from .chips import ChipButton
+from .chapters_panel import ChaptersPanel
 from .download_rules import (
-    GROUP_NOTES,
+    CHAPTER_CHIPS,
     GROUP_TITLES,
     SEARCH_FAILED,
     SEARCH_NONE,
@@ -53,7 +62,9 @@ from .download_rules import (
     count_text,
     grouped,
     merge_entries,
+    chapters_reason,
     chips_text,
+    group_note,
     not_findable_reason,
     row_chips,
     upgrade_note,
@@ -71,6 +82,8 @@ from .volumes_target import VolumeTarget
 ROLE_FOLDER = Qt.ItemDataRole.UserRole + 10
 ROLE_HEADER = Qt.ItemDataRole.UserRole + 11       # a group header's text
 ROLE_NOTE_TONE = Qt.ItemDataRole.UserRole + 12
+ROLE_GROUP = Qt.ItemDataRole.UserRole + 13         # a series row's group (its chips: torrents or chapter downloads)
+PANEL_RELEASES, PANEL_CHAPTERS = 0, 1
 
 _log = logging.getLogger(__name__)
 
@@ -175,6 +188,8 @@ class DownloadTab(QWidget):
         self._bulk_done = 0
         self._bulk_notes = ""
         self._records: Dict[int, List[DownloadRecord]] = {}     # every download of a series (the row chips)
+        self._chapter_lookups: Dict[str, object] = {}           # folder -> the chapters panel's last lookup
+        self._chapter_states: Dict[str, str] = {}               # folder -> SEARCH_* of its chapter lookup
         self._items: Dict[str, QTreeWidgetItem] = {}
         self._rows: Dict[str, List[QTreeWidgetItem]] = {}
         self._header_items: Dict[str, QTreeWidgetItem] = {}
@@ -287,11 +302,20 @@ class DownloadTab(QWidget):
         tv.addWidget(self.upgrade_label)
         self.releases = ReleasesPanel(self._backend, top, confirm=confirm, open_url=open_url, managed=True,
                                       source_label=self._source_label(),
-                                      downloads_for=lambda sid: self._records.get(sid, ()))
+                                      downloads_for=lambda sid: [r for r in self._records.get(sid, ())
+                                                                 if not r.is_chapters])
         self.releases.search_again.connect(self._search_again)
         self.releases.sent.connect(self._on_sent)
         self.releases.settings_requested.connect(self.settings_requested)
-        tv.addWidget(self.releases)
+        self.chapters = ChaptersPanel(self._backend, top, confirm=confirm,
+                                      downloads_for=lambda sid: [r for r in self._records.get(sid, ()) if r.is_chapters])
+        self.chapters.sent.connect(self._on_sent)
+        self.chapters.looked_up.connect(self._on_chapter_lookup)
+        self.chapters.settings_requested.connect(self.settings_requested)
+        self.panels = QStackedWidget()
+        self.panels.addWidget(self.releases)
+        self.panels.addWidget(self.chapters)
+        tv.addWidget(self.panels)
         upper = QWidget()                       # the releases and the replaced-chapters line, above the divider
         uv = QVBoxLayout(upper)
         uv.setContentsMargins(0, 0, 0, 0)
@@ -359,6 +383,11 @@ class DownloadTab(QWidget):
             if folder not in self._by_folder or self._signatures.get(folder) != self._signature(self._by_folder[folder]):
                 self._results.pop(folder, None)
                 self._states.pop(folder, None)
+        for folder in list(self._chapter_lookups):          # a lookup stands while the missing chapters do not change
+            entry = self._chapters_entry(folder)
+            if entry is None or tuple(self._chapter_lookups[folder].missing) != tuple(entry.missing):
+                self._chapter_lookups.pop(folder, None)
+                self._chapter_states.pop(folder, None)
         self._checked &= set(self._by_folder)
         self._queue = deque(f for f in self._queue if f in self._by_folder)
         self._rebuild()
@@ -394,7 +423,7 @@ class DownloadTab(QWidget):
                 continue
             header = QTreeWidgetItem(self.tree)
             header.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            note, tone = GROUP_NOTES[group]
+            note, tone = group_note(group, self.suwayomi_ready())
             header.setData(0, ROLE_HEADER, f"{GROUP_TITLES[group].upper()} · {len(items)}")
             header.setData(0, ROLE_ASIDE, note)
             header.setData(0, ROLE_NOTE_TONE, tone)
@@ -406,6 +435,7 @@ class DownloadTab(QWidget):
                 row.setText(0, series.title)
                 row.setData(0, ROLE_SUB, series.gaps)
                 row.setData(0, ROLE_FOLDER, series.folder)
+                row.setData(0, ROLE_GROUP, group)
                 row.setCheckState(0, Qt.CheckState.Checked if series.folder in self._checked else Qt.CheckState.Unchecked)
                 row.setToolTip(0, f"{series.title}\n{series.folder}")
                 self._items.setdefault(series.folder, row)
@@ -430,8 +460,13 @@ class DownloadTab(QWidget):
     def _refresh_statuses(self) -> None:
         for folder, rows in self._rows.items():
             sid = self._series_ids.get(folder)
-            chips = row_chips(self._records.get(sid, ()) if sid is not None else (), self._states.get(folder))
+            records = self._records.get(sid, ()) if sid is not None else ()
             for row in rows:
+                if row.data(0, ROLE_GROUP) == GROUP_CHAPTERS:
+                    chips = row_chips([r for r in records if r.is_chapters], self._chapter_states.get(folder),
+                                      CHAPTER_CHIPS)
+                else:
+                    chips = row_chips([r for r in records if not r.is_chapters], self._states.get(folder))
                 row.setData(0, ROLE_CHIPS, chips)
                 row.setData(0, ROLE_ASIDE, chips_text(chips))
 
@@ -549,10 +584,28 @@ class DownloadTab(QWidget):
                             titles=series.titles or (series.title,), missing=series.missing, held=series.held,
                             upgrade=upgrade)
 
+    def suwayomi_ready(self) -> bool:
+        """Suwayomi is connected: the Missing chapters group can be looked up (quick: one database read)."""
+        ready = getattr(self._backend, "suwayomi_ready", None)
+        try:
+            return bool(ready()) if callable(ready) else False
+        except Exception:  # noqa: BLE001 - a missing connection is "not ready", never a crash
+            return False
+
+    def _chapters_entry(self, folder: str) -> Optional[WantedSeries]:
+        return next((e for e in self._entries.get(folder, ()) if e.group == GROUP_CHAPTERS), None)
+
     def _show_series(self, folder: str, *, now: bool) -> None:
         series = self._by_folder.get(folder)
         if series is None:
             return
+        chapters = self._chapters_entry(folder)
+        if chapters is not None and (self._group == GROUP_CHAPTERS or series.group == GROUP_CHAPTERS):
+            self._current = folder
+            self._delay.stop()
+            self._show_chapters(chapters)
+            return
+        self.panels.setCurrentIndex(PANEL_RELEASES)
         self._current = folder
         self._delay.stop()
         reason = not_findable_reason(series)
@@ -578,6 +631,39 @@ class DownloadTab(QWidget):
         else:
             self._delay.start()
 
+    def _show_chapters(self, series: WantedSeries) -> None:
+        """A Missing chapters series: the chapters panel (or why it cannot be looked up)."""
+        self._show_upgrade_note(None)
+        sid = self._series_ids.get(series.folder)
+        reason = chapters_reason(series, self.suwayomi_ready(), sid)
+        if reason:
+            self.panels.setCurrentIndex(PANEL_RELEASES)
+            self._show_unavailable(series, reason)
+            return
+        self.panels.setCurrentIndex(PANEL_CHAPTERS)
+        cached = self._chapter_lookups.get(series.folder)
+        if cached is None:
+            self._chapter_states[series.folder] = SEARCH_RUNNING
+            self._refresh_statuses()
+        self.chapters.open_series(sid, series.title, series.missing, series.titles or (series.title,), cached=cached)
+
+    def _on_chapter_lookup(self, series_id: int, lookup) -> None:
+        folder = next((f for f, sid in self._series_ids.items() if sid == series_id), None)
+        if folder is None:
+            return
+        if lookup is None:
+            self._chapter_lookups.pop(folder, None)
+            self._chapter_states[folder] = SEARCH_FAILED
+        else:
+            self._chapter_lookups[folder] = lookup
+            ready = lookup.match is not None and bool(lookup.available) or bool(lookup.candidates)
+            self._chapter_states[folder] = SEARCH_READY if ready else SEARCH_NONE
+        self._refresh_statuses()
+
+    def chapter_lookup_of(self, folder: str):
+        """The chapters panel's last lookup of *folder* (None when not looked up this session)."""
+        return self._chapter_lookups.get(folder)
+
     def _show_upgrade_note(self, folder: Optional[str]) -> None:
         """The line above the releases of a series with upgrade volumes: what happens to the chapters they replace."""
         volumes = upgrade_volumes_of(self._entries.get(folder, ())) if folder else ()
@@ -600,7 +686,8 @@ class DownloadTab(QWidget):
         return self.upgrade_label.text()
 
     def _show_unavailable(self, series: WantedSeries, reason: str) -> None:
-        needs_suwayomi = series.group == GROUP_CHAPTERS
+        self.panels.setCurrentIndex(PANEL_RELEASES)
+        needs_suwayomi = series.group == GROUP_CHAPTERS and not self.suwayomi_ready()
         self.releases.show_message(series.title, reason, "Open Settings" if needs_suwayomi else None,
                                    SECTION_SERVICES if needs_suwayomi else None)
         self.releases.subtitle_label.setText(f"Wanted: {series.gaps}")
@@ -797,7 +884,7 @@ class DownloadTab(QWidget):
         finally:
             dialog.deleteLater()
 
-    def _on_sent(self, _record: DownloadRecord) -> None:
+    def _on_sent(self, _record) -> None:
         self.downloads.refresh()
 
     def refresh(self) -> None:
@@ -817,6 +904,7 @@ class DownloadTab(QWidget):
             call.abandon()
         self._calls.clear()
         self.releases.stop()
+        self.chapters.stop()
         self.downloads.stop()
         self._update_selected()
 

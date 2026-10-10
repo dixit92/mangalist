@@ -111,14 +111,44 @@ def find_volumes_availability(*, series_id: Optional[int], folder: str, title: s
 # --- download status wording ----------------------------------------------------------------------
 
 
+def units_text(record: DownloadRecord) -> str:
+    """The units a download is for: ``v03-v05`` (volumes) or ``ch 101-104`` (a chapter download)."""
+    if getattr(record, "is_chapters", False):
+        chapters = numbers_text(record.wanted_chapters)
+        return f"ch {chapters}" if chapters else ""
+    return numbers_text(record.wanted_volumes, pad=True)
+
+
+def chapter_status_text(record: DownloadRecord) -> str:
+    """A chapter download (Suwayomi): "Downloading", "Downloading - <Suwayomi's error>", "Downloaded" (or "Downloaded -
+    <why it is not filed yet>"), "Filed ch 4",
+    "Filed ch 4 - <why Suwayomi still has its copy>", "Filed ch 4 - done", "Failed: <reason>", "Cancelled"."""
+    status, units = record.status, units_text(record)
+    filed = f"Filed {units}" if units else "Filed"
+    if status == DownloadStatus.SENT:
+        return f"Downloading - {record.error}" if record.error else "Downloading"
+    if status == DownloadStatus.FILED:
+        return f"{filed} - {record.error}" if record.error else filed
+    if status == DownloadStatus.REMOVED:
+        return f"{filed} - done"
+    if status == DownloadStatus.FAILED:
+        return f"Failed: {record.error}" if record.error else "Failed"
+    if status == DownloadStatus.DOWNLOADED and record.error:        # waits to be filed, and why (e.g. no folder set)
+        return f"Downloaded - {record.error}"
+    return {DownloadStatus.DOWNLOADED: "Downloaded", DownloadStatus.CANCELLED: "Cancelled"}.get(status,
+                                                                                               status.capitalize())
+
+
 def status_text(record: DownloadRecord) -> str:
     """"Queued - 2nd in line", "Downloading", "Downloaded", "Filed v03-v05 - seeding", "Filed v03-v05 - done",
-    "Failed: <reason>", "Cancelled".
+    "Failed: <reason>", "Cancelled". A chapter download: :func:`chapter_status_text`.
 
     The volumes come first: once filed they are in the library, whatever happens to the torrent afterwards - "done"
     means qBittorrent finished seeding and the torrent with its downloaded copy was removed (never the library's).
     A queued download waits under the download budget; a note on it (e.g. bigger than the cap on its own) replaces its
     place in line."""
+    if getattr(record, "is_chapters", False):
+        return chapter_status_text(record)
     status = record.status
     if status == DownloadStatus.QUEUED:
         from ..downloads.budget import place_text
@@ -136,7 +166,28 @@ def status_text(record: DownloadRecord) -> str:
             DownloadStatus.CANCELLED: "Cancelled"}.get(status, status.capitalize())
 
 
+def chapter_status_tooltip(record: DownloadRecord) -> str:
+    lines = [record.title, f"Chapters: {numbers_text(record.wanted_chapters) or '-'}",
+             f"From: {record.source or 'Suwayomi'}" + (f" · {record.group}" if record.group else " · no group named"),
+             f"Target folder: {record.target_dir}", f"Updated: {record.updated_at}",
+             "Chapter downloads are outside the download budget (it counts torrents only)."]
+    if record.status == DownloadStatus.SENT:
+        lines.append("In Suwayomi's download queue; MangaList files it once Suwayomi has it (every hour, or Check now).")
+    if record.status == DownloadStatus.FILED:
+        lines.append(f"The chapter is in the library; Suwayomi still has its downloaded copy"
+                     + (f": {record.error}." if record.error else " (deleted at the next check)."))
+    if record.status == DownloadStatus.REMOVED:
+        lines.append("Done: filed into the library under MangaList's naming scheme; Suwayomi deleted its downloaded copy.")
+    if record.copied:
+        lines.append("Copied, not hard-linked: Suwayomi's download folder is on another filesystem.")
+    if record.status == DownloadStatus.FAILED and record.error:
+        lines.append(f"Error: {record.error}")
+    return "\n".join(lines)
+
+
 def status_tooltip(record: DownloadRecord) -> str:
+    if getattr(record, "is_chapters", False):
+        return chapter_status_tooltip(record)
     from ..downloads.budget import counts, place_text, size_note
 
     lines = [record.title, f"Volumes: {numbers_text(record.wanted_volumes, pad=True) or '-'}",

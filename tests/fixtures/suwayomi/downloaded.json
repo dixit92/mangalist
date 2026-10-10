@@ -1,0 +1,30 @@
+{
+ "data": {
+  "chapters": {
+   "nodes": [
+    {
+     "id": 1,
+     "name": "Vol.1 Ch.1 - Example Title 1",
+     "chapterNumber": 1.0,
+     "scanlator": "Alpha Scans",
+     "isDownloaded": true,
+     "pageCount": 1,
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0001",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0001",
+     "uploadDate": "1517511029000"
+    },
+    {
+     "id": 2,
+     "name": "Vol.1 Ch.2 - Example Title 2",
+     "chapterNumber": 2.0,
+     "scanlator": "Alpha Scans",
+     "isDownloaded": true,
+     "pageCount": 1,
+     "url": "/chapter/00000000-0000-4000-8000-0000000c0002",
+     "realUrl": "https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0002",
+     "uploadDate": "1517511214000"
+    }
+   ]
+  }
+ }
+}
