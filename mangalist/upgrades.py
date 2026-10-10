@@ -604,11 +604,12 @@ def restore_batch(db, batch_id: int, *, journal=None) -> Batch:
     return store.update(batch.id, expect=("held",), error=f"not everything was restored - {why}")
 
 
-def purge_batch(db, batch_id: int, *, journal=None) -> Batch:
+def purge_batch(db, batch_id: int, *, journal=None, reason: str = "holding period over") -> Batch:
     """Delete a held batch's files from the holding folder - the only delete there. Each file must be a done
     ``hold`` step of the batch's plan, a plain file strictly inside the batch's own holding folder (no symlink on the
     way) with the size it had when it was moved, and the holding folder must still lie outside every root and
-    library. Anything else is left where it is. Never touches a library file."""
+    library. Anything else is left where it is. Never touches a library file. ``reason`` is what the log says for
+    each deletion: the holding period ending, or the owner emptying it early."""
     from .store.journal import Journal
 
     journal = journal if journal is not None else Journal(db)
@@ -640,7 +641,7 @@ def purge_batch(db, batch_id: int, *, journal=None) -> Batch:
             _log.warning("Upgrades: batch %d: could not delete %s (%s)", batch.id, s.dst, exc.strerror or exc)
             continue
         removed += 1
-        _log.info("Upgrades: batch %d: holding period over, deleted %s", batch.id, s.dst)
+        _log.info("Upgrades: batch %d: %s, deleted %s", batch.id, reason, s.dst)
     for folder, _dirs, _files in sorted(os.walk(top), key=lambda t: -len(t[0])):
         try:
             os.rmdir(folder)                # only empty folders: never content
@@ -705,7 +706,7 @@ def empty_now(db, batch_id: int, *, journal=None) -> Batch:
         _log.warning("Upgrades: batch %d not emptied early: %s", batch.id, problem)
         raise ReplacementConflict(f"not emptied: {problem}")
     _log.info("Upgrades: batch %d: emptying the holding folder now, on the owner's word", batch.id)
-    return purge_batch(db, batch.id, journal=journal)
+    return purge_batch(db, batch.id, journal=journal, reason="emptied early, on the owner's word")
 
 
 def empty_all_now(db, *, journal=None) -> Tuple[List[int], List[Tuple[int, str]]]:
