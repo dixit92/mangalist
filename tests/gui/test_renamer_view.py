@@ -109,7 +109,10 @@ def test_the_dry_run_summary_the_preview_and_the_notes(qapp, db, made):
         first = win.series_list.item(0)
         assert first.text() == "Series A"                               # the title alone on its line ...
         assert "to rename" in first.data(ROLE_SUB)                      # ... the counts under it (owner, 2026-10-10)
-        assert first.data(ROLE_CHIPS) == [("2 collisions", "bad")]      # collisions as a red chip
+        chips = [win.series_list.item(i).data(ROLE_CHIPS) for i in range(win.series_list.count())]
+        assert [("2 collisions", "bad")] in chips                       # collisions as a red chip
+        assert all(not (win.series_list.item(i).data(ROLE_SUB) or "").count("collision")
+                   for i in range(win.series_list.count()))             # ... not repeated in the grey line
         rows = _preview_rows(win)
         assert (fmd2(1, "0001", "Start", "G"), "Ch. 0001.00 (Start) [G].cbz", RENAME) in rows
         assert ("omake.cbz", "(as it is)", "left alone") in rows
