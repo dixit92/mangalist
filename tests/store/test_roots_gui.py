@@ -121,7 +121,9 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
         assert win._list.stack.currentIndex() == 2 and win._list.btn_add_root.isHidden() is False   # empty state
         db.add_root(str(second))
         win._after_roots_changed()
-        assert win._top.status.text() == "Manga, Manhwa" and str(second) in win._top.status.toolTip()
+        # two roots: the Library picker (top bar) names them; the status does not repeat them (paths in its tooltip)
+        assert win._top.picker_shown() and win._top.library_name() == "All libraries"
+        assert win._top.status.text() == "" and str(second) in win._top.status.toolTip()
         assert win._thread is None                  # only told: no scan starts by itself here
 
         from mangalist.gui.main_window import ScanWorker
@@ -136,7 +138,7 @@ def test_main_window_shows_the_migrated_root_and_scans_every_root(qapp, db, lib,
         assert "Stray.cbz" in win._status_label.toolTip()
         assert {s.rel_path for s in db.list_series()} == {"Series A", "Series K"}
         assert win._list.counts_label.text() == "2 series" and win._list.stack.currentIndex() == 0
-        assert win._top.status.text().startswith("Manga, Manhwa · scanned ")
+        assert win._top.status.text().startswith("Scanned ")
     finally:
         win.close()
         win.deleteLater()
