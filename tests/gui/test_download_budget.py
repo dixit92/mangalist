@@ -23,7 +23,7 @@ from mangalist.gui.releases_panel import ReleasesPanel  # noqa: E402
 from mangalist.gui.settings_sections import SourcesPage  # noqa: E402
 
 from .conftest import FakeBackend, candidate, qapp, record, target, wait_until  # noqa: E402,F401
-from .test_partial_panel import PartialBackend, pack  # noqa: E402
+from .test_partial_panel import PartialBackend  # noqa: E402
 
 MB = 1024 * 1024
 
