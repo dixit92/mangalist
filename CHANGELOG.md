@@ -7,6 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.17] - 2026-10-10
+
+The sixteenth MangaList release (testing build): the chapters panel offers a source's extra chapters and has Select all, MangaFire's "unofficial" label is not used as a group, and the Renamer hides series already in the scheme.
+
+- **Extra chapters the source has are offered.** The chapters panel now also lists the source's decimal chapters (`71.5`) between the folder's first and last chapter that the folder does not hold. They are unticked, marked "extra - not counted as missing", and never count as missing. Chapters before the folder's first loose chapter are left out, since they may be inside a volume you hold.
+- **Select all** in the chapters table's header ticks every chapter that can be sent, or none; it shows partly checked when only some are ticked.
+- **MangaFire's "unofficial" is not a group.** MangaFire labels each chapter "official" or "unofficial" where other sources name the scanlation group. "unofficial" is now left out of file names, like `[no group]`; "official" stays. Files already named `[unofficial]` show as Rename pending.
+- **The Renamer hides series already in the scheme.** After a library's rename, every series no longer shows "in the scheme"; "Show series already in the scheme (N)" lists them again. Series with files left alone or collisions stay listed.
+
 ## [2026.10.16] - 2026-10-10
 
 The fifteenth MangaList release (testing build): choose where a series' chapters come from, Rescan follows the library you picked, empty scanlation-only folders can get their chapters, and the Renamer's preview reads as a preview.
