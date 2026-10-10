@@ -23,6 +23,28 @@ GROUP_NOTES: Mapping[str, Tuple[str, str]] = {GROUP_VOLUMES: ("nyaa", "muted"),
 NOT_NYAA_REASONS: Mapping[str, str] = {
     GROUP_CHAPTERS: "Missing chapters come from Suwayomi, which is not set up yet (Settings > Connected services).",
 }
+#: The Missing chapters group's note once Suwayomi is connected (the Suwayomi MVP).
+CHAPTERS_READY_NOTE: Tuple[str, str] = ("Suwayomi", "muted")
+
+
+def group_note(group: str, suwayomi_ready: bool = False) -> Tuple[str, str]:
+    """(note, tone) at the right of a group's header: Missing chapters says "needs Suwayomi" (amber) until Suwayomi is
+    connected, then "Suwayomi"."""
+    if group == GROUP_CHAPTERS and suwayomi_ready:
+        return CHAPTERS_READY_NOTE
+    return GROUP_NOTES[group]
+
+
+def chapters_reason(series: WantedSeries, suwayomi_ready: bool, series_id: Optional[int] = None) -> str:
+    """Why the chapters panel cannot look a Missing chapters series up ('' when it can): Suwayomi not set up, the
+    folder not scanned yet, or no chapter numbers known."""
+    if not suwayomi_ready:
+        return NOT_NYAA_REASONS[GROUP_CHAPTERS]
+    if (series_id if series_id is not None else series.series_id) is None:
+        return "MangaList has not scanned this folder yet: rescan first."
+    if not series.missing:
+        return "The missing chapter numbers are not known for this series."
+    return ""
 #: The groups whose volumes come from nyaa (an upgrade is a volume held only as chapters).
 NYAA_GROUPS = (GROUP_VOLUMES, GROUP_UPGRADES)
 #: What a shell that does not decide upgrades yet says for them (gui.list_text before the volumes cycle).
@@ -183,10 +205,13 @@ MAX_DOWNLOAD_CHIPS = 2
 def download_chip(record: DownloadRecord) -> Chip:
     """One download as a chip: "Queued v36" (grey: waiting under the download budget), "Downloading v36", "Downloaded
     v36", "Seeding v09-v18", "Filed v09-v18 - stopped", "Failed: ...", "Filed v03 - done" - in the In progress list's
-    badge colour. The numbers are the record's wanted units, so a chapter download (later) gets the same chips."""
-    from .volumes_target import numbers_text
-    units = numbers_text(record.wanted_volumes, pad=True)
+    badge colour. The numbers are the record's wanted units, so a chapter download gets the same chips: "Downloading ch
+    101-104", "Filed ch 101-104" (a chapter download does not seed)."""
+    from .volumes_target import units_text
+    units = units_text(record)
     status = record.status
+    if record.is_chapters and status in (DownloadStatus.FILED, DownloadStatus.REMOVED) and not record.error:
+        return (f"Filed {units}" if units else "Filed"), badge_kind(record)
     if status == DownloadStatus.QUEUED:
         text = f"Queued {units}" if units else "Queued"
     elif status == DownloadStatus.SENT:
@@ -200,13 +225,55 @@ def download_chip(record: DownloadRecord) -> Chip:
     return text, badge_kind(record)
 
 
+def merge_batches(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
+    """Chapter downloads as the owner sent them: the chapter records of one Send (``batch``) that are in the same status
+    (and, failed, for the same reason) become one record - their chapters together, the newest id and update, the source
+    and group in its title ("Ch. 101-104 · Group · MangaDex (EN)") - so the chips and the In progress list show
+    "Downloading ch 101-104" once, not four times. Torrent records pass unchanged. The order is kept (a merged record
+    takes the place of its first member)."""
+    from dataclasses import replace
+
+    from .volumes_target import numbers_text
+
+    out: List[DownloadRecord] = []
+    groups: Dict[tuple, List[DownloadRecord]] = {}
+    for record in records:
+        if not record.is_chapters:
+            out.append(record)
+            continue
+        key = (record.batch or f"#{record.id}", record.status, record.error or "")
+        if key not in groups:
+            groups[key] = []
+            out.append(record)                  # its place; replaced below
+        groups[key].append(record)
+    from ..knowledge import to_decimal
+
+    merged: Dict[int, DownloadRecord] = {}
+    for members in groups.values():
+        first = members[0]
+        chapters = tuple(dict.fromkeys(c for m in members for c in m.wanted_chapters))
+        chapters = tuple(sorted(chapters, key=lambda c: (to_decimal(c) is None, to_decimal(c) or 0)))
+        parts = [f"Ch. {numbers_text(chapters)}" if chapters else "Chapters"]
+        groups_named = sorted({m.group for m in members if m.group})
+        if groups_named:
+            parts.append(" + ".join(groups_named))
+        if first.source:
+            parts.append(first.source)
+        title = " · ".join(parts) if len(members) > 1 else first.title or " · ".join(parts)
+        merged[first.id] = replace(first, id=max(m.id for m in members), wanted_chapters=chapters, title=title,
+                                   updated_at=max(m.updated_at for m in members),
+                                   filed_files=tuple(f for m in members for f in m.filed_files),
+                                   copied=any(m.copied for m in members))
+    return [merged.get(r.id, r) if r.is_chapters else r for r in out]
+
+
 def row_chips(records: Iterable[DownloadRecord], search: Optional[str]) -> List[Chip]:
     """The chips at the right of a "To get" row (owner, 2026-10-09: "user should be aware if there's a torrent
     already under download for a series"): every torrent of the series still in qBittorrent or failed, newest first
     (at most two, then "+N"), then the search state - so a series with a torrent is never shown as plain "Releases
     ready". A queued download (the download budget) shows the same way. A finished download (removed from qBittorrent)
-    shows only when there is nothing else to say."""
-    records = sorted(records, key=lambda r: r.id, reverse=True)
+    shows only when there is nothing else to say. Chapter downloads show by Send (:func:`merge_batches`)."""
+    records = sorted(merge_batches(records), key=lambda r: r.id, reverse=True)
     live = [r for r in records if r.status in _SHOWN]
     chips = [download_chip(r) for r in live[:MAX_DOWNLOAD_CHIPS]]
     if len(live) > MAX_DOWNLOAD_CHIPS:
@@ -228,14 +295,14 @@ def chips_text(chips: Sequence[Chip]) -> str:
 def in_qbittorrent(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
     """The series' downloads whose torrent is still in qBittorrent (on its way, or filed and seeding), newest first."""
     keep = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
-    return sorted((r for r in records if r.status in keep), key=lambda r: r.id, reverse=True)
+    return sorted((r for r in records if r.status in keep and not r.is_chapters), key=lambda r: r.id, reverse=True)
 
 
 def in_hand(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
     """:func:`in_qbittorrent` plus the series' QUEUED downloads (waiting under the download budget), newest first: a
     release in either is not sent again."""
     keep = (DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
-    return sorted((r for r in records if r.status in keep), key=lambda r: r.id, reverse=True)
+    return sorted((r for r in records if r.status in keep and not r.is_chapters), key=lambda r: r.id, reverse=True)
 
 
 # --- the In progress list --------------------------------------------------------------------------------
