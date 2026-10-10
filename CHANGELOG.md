@@ -7,12 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.12] - 2026-10-09
+
+The eleventh MangaList release (testing build): the "To get" list shows which series already have a torrent in qBittorrent, packs without volume numbers show what their file list holds, and the releases table gains a Published column.
+
 - **A series with a torrent in qBittorrent says so in the "To get" list.** Each row now carries coloured chips, the In progress list's badge colours: "Downloading v36" (blue), "Seeding v09-v18" (green, filed and still seeding), "Failed: ..." (red), then the search state ("Releases ready" outlined, "No releases", "Searching..."). A filed torrent used to disappear behind "Releases ready". The chips name units from the download record, so chapter downloads will use the same chips.
 - **The releases panel names the series' torrents already in qBittorrent** ("Already in qBittorrent - Seeding v09-v18: ..."), and a release that is one of them cannot be sent again.
 - **A pack whose title has no volume numbers shows what it holds.** Once its `.torrent` file list is read, Fills and You have are filled from the file names and the line under it says "file list: v01-v10, 10 files" instead of "contents unknown". The selected release is read first, then up to five other numberless packs one after another in the background.
 - **The releases table has a Published column** (the day the release was posted on nyaa), no longer only in the tooltip.
 - **Fixed: the status at the right of a "To get" row was cut off** ("Releases rea...", "Se...") on displays with fractional font metrics: the width was rounded down and the text then cut at its own width.
-
 - **Emptying the holding folder early is logged as such.** "Empty now" used to log each deletion as "holding period over"; it now says "emptied early, on the owner's word". The automatic purge after the holding period keeps its wording.
 
 ## [2026.10.11] - 2026-10-09
