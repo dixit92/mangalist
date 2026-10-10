@@ -260,3 +260,32 @@ def test_no_files_recorded_says_rescan(db, renamer, library):
     rescan(db)
     preview = renamer.preview_series(db.get_series(root.id, "Series N").id)
     assert preview.error and "rescan" in preview.error
+
+
+def test_a_series_mangapixer_has_not_analysed_is_not_renamed(db, hooks, two_series):
+    sid = _sid(db, two_series, "Series A")
+    verdict = {"analysed": None}
+    r = Renamer(db, namer=FakeNamer(), title_for=lambda *a: None, rescan=None, request_scans=None,
+                analysed=lambda db_, series: verdict["analysed"])
+    preview = r.preview_series(sid)
+    verdict["analysed"] = False                             # MangaPixer turns out not to have analysed them
+    res = r.apply(r.batches([preview])[0])
+    assert res.renamed == 0 and res.status == "nothing"
+    assert all("has not analysed" in why for _n, why in res.skipped) and len(res.skipped) == 2
+
+
+def test_links_are_left_alone(tmp_path):
+    from mangalist.parsing import parse_name
+    from mangalist.renamer import plan_files
+
+    real = tmp_path / fmd2(1, "0001")
+    real.write_bytes(b"x")
+    link = tmp_path / fmd2(2, "0002")
+    try:
+        link.symlink_to(real)
+    except (OSError, NotImplementedError):
+        pytest.skip("no symbolic links here")
+    plans = {p.name: p for p in plan_files([(str(real), parse_name(real.name)), (str(link), parse_name(link.name))],
+                                           namer=FakeNamer(), series_title="S")}
+    assert plans[real.name].status == RENAME
+    assert plans[link.name].status == LEFT_ALONE and "link" in plans[link.name].reason

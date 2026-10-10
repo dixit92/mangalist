@@ -993,6 +993,8 @@ class MainWindow(QMainWindow):
             _log.warning("Reading MangaPixer's carried series failed", exc_info=True)
         self._update_missing_count()
         self._show_roots()
+        # MangaPixer's titles and volume lists name the files: a volume learned, a new title -> Rename pending again.
+        self._count_rename_pending()
 
     def _mp_item_for(self, entry: MangaEntry):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or

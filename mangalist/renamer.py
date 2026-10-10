@@ -404,6 +404,9 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
         if not exists(path):
             first.append(FilePlan(path, None, LEFT_ALONE, layer, "the file is gone since the last scan"))
             continue
+        if os.path.islink(path):
+            first.append(FilePlan(path, None, LEFT_ALONE, layer, "a link to another file (left as it is)"))
+            continue
         if parsed is None:
             first.append(FilePlan(path, None, LEFT_ALONE, layer, "the name could not be read"))
             continue
@@ -845,6 +848,10 @@ class Renamer:
                 result.skipped += [(f.name, "the series is no longer in the library") for f in shown.renames]
                 continue
             now = self._preview(root, series, self.files_of(root, series), limits)
+            if now.analysed is False:
+                result.skipped += [(f.name, "MangaPixer has not analysed this series' files yet - let it finish its "
+                                            "scan first") for f in shown.renames]
+                continue
             current = {(f.path, f.new_path) for f in now.renames}
             ok = [(f.path, f.new_path) for f in shown.renames if (f.path, f.new_path) in current]
             for f in shown.renames:
