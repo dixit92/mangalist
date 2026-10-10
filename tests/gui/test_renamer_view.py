@@ -174,9 +174,12 @@ def test_the_pilot_series_then_its_library(qapp, db, made):
 
 
 def test_without_the_naming_module_nothing_can_be_renamed(qapp, db, made, monkeypatch):
-    import sys
+    from mangalist import renamer as renamer_module
 
-    monkeypatch.setitem(sys.modules, "mangalist.naming", None)
+    def missing(self):                                              # a build without the naming scheme
+        raise renamer_module.NamingUnavailable("the naming scheme is not in this build")
+
+    monkeypatch.setattr(renamer_module.DefaultNamer, "_module", missing)
     win = _window(qapp, Renamer(db, rescan=None, request_scans=None), Scope.all())
     try:
         assert win.summary_label.text() == NOT_AVAILABLE

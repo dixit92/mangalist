@@ -199,11 +199,14 @@ def test_rename_pending_from_scan_entries(db, renamer, two_series, library):
 
 
 def test_without_the_naming_module_nothing_is_pending(db, two_series, monkeypatch):
-    import sys
-
     from mangalist.scanner import scan_library
 
-    monkeypatch.setitem(sys.modules, "mangalist.naming", None)      # an import of it fails, as before lane A merges
+    from mangalist import renamer as renamer_module
+
+    def missing(self):                                              # a build without the naming scheme
+        raise renamer_module.NamingUnavailable("the naming scheme is not in this build")
+
+    monkeypatch.setattr(renamer_module.DefaultNamer, "_module", missing)
     r = Renamer(db, title_for=lambda *a: None, rescan=None, request_scans=None)
     assert not r.available()
     assert r.pending_counts(scan_library(db.list_roots(), db=db).entries) == {}
