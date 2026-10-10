@@ -195,6 +195,10 @@ Chip = Tuple[str, str]
 SEARCH_CHIPS: Mapping[str, Chip] = {SEARCH_QUEUED: ("Queued", "muted"), SEARCH_RUNNING: ("Searching...", "muted"),
                                     SEARCH_READY: ("Releases ready", "ready"), SEARCH_NONE: ("No releases", "muted"),
                                     SEARCH_FAILED: ("Search failed", "bad")}
+#: The chapter lookup states as chips (a Missing chapters row: the chapters panel's lookup in Suwayomi).
+CHAPTER_CHIPS: Mapping[str, Chip] = {SEARCH_QUEUED: ("Queued", "muted"), SEARCH_RUNNING: ("Looking up...", "muted"),
+                                     SEARCH_READY: ("Chapters ready", "ready"), SEARCH_NONE: ("No chapters", "muted"),
+                                     SEARCH_FAILED: ("Lookup failed", "bad")}
 #: The downloads a row always shows: queued under the download budget, the torrent in qBittorrent (on its way, or filed
 #: and still there), or failed.
 _SHOWN = (DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED,
@@ -267,7 +271,8 @@ def merge_batches(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
     return [merged.get(r.id, r) if r.is_chapters else r for r in out]
 
 
-def row_chips(records: Iterable[DownloadRecord], search: Optional[str]) -> List[Chip]:
+def row_chips(records: Iterable[DownloadRecord], search: Optional[str],
+              search_chips: Optional[Mapping[str, Chip]] = None) -> List[Chip]:
     """The chips at the right of a "To get" row (owner, 2026-10-09: "user should be aware if there's a torrent
     already under download for a series"): every torrent of the series still in qBittorrent or failed, newest first
     (at most two, then "+N"), then the search state - so a series with a torrent is never shown as plain "Releases
@@ -278,8 +283,9 @@ def row_chips(records: Iterable[DownloadRecord], search: Optional[str]) -> List[
     chips = [download_chip(r) for r in live[:MAX_DOWNLOAD_CHIPS]]
     if len(live) > MAX_DOWNLOAD_CHIPS:
         chips.append((f"+{len(live) - MAX_DOWNLOAD_CHIPS}", "muted"))
-    if search in SEARCH_CHIPS:
-        chips.append(SEARCH_CHIPS[search])
+    states = SEARCH_CHIPS if search_chips is None else search_chips
+    if search in states:
+        chips.append(states[search])
     if not chips:
         done = next((r for r in records if r.status == DownloadStatus.REMOVED), None)
         if done is not None:
