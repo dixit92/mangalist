@@ -155,7 +155,7 @@ def test_complete_names_are_not_cut_off(name):
 # --- 4. placeholder groups are no group --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("placeholder", ["no group", "No Group", "NO GROUP", "no  group", "Unknown", "none", "N/A",
-                                         "n/a", "null", "-", "?"])
+                                         "n/a", "null", "-", "?", "unofficial", "Unofficial"])
 def test_placeholder_groups(placeholder):
     assert sanitize_group(placeholder) is None
     r = parse_name(f"0003 [Ch. 3 - A Title [{placeholder}]].cbz")
@@ -170,7 +170,8 @@ def test_placeholders_in_other_layers():
     assert _t("Ch. 0003.00 [no group].cbz") == "Ch. 0003.00.cbz"
 
 
-@pytest.mark.parametrize("group", ["No Group Scans", "Nobody", "Unknown Scans", "The None Team", "NA Team"])
+@pytest.mark.parametrize("group", ["No Group Scans", "Nobody", "Unknown Scans", "The None Team", "NA Team", "official",
+                                   "Unofficial Scans"])
 def test_real_groups_with_those_words_stay(group):
     assert sanitize_group(group) == group
     assert parse_name(f"0003 [Ch. 3 [{group}]].cbz").group == group

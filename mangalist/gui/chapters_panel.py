@@ -401,7 +401,7 @@ class ChaptersPanel(QWidget):
             return download_chip(row.in_hand)[0]
         if not row.available:
             return f"not on {self.lookup.source_name}" if self.lookup else "not available"
-        return ""
+        return "extra - not counted as missing" if row.extra else ""
 
     def _fill_rows(self, rows: Sequence[ChapterRow]) -> None:
         self._loading = True
@@ -413,7 +413,8 @@ class ChaptersPanel(QWidget):
             sendable = row.available and row.in_hand is None
             pick.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable if sendable
                           else Qt.ItemFlag.ItemIsEnabled)
-            pick.setCheckState(Qt.CheckState.Checked if sendable else Qt.CheckState.Unchecked)
+            # an extra (71.5) is offered, not picked for the owner (owner, 2026-10-10)
+            pick.setCheckState(Qt.CheckState.Checked if sendable and not row.extra else Qt.CheckState.Unchecked)
             self.table.setItem(r, COL_PICK, pick)
             self.table.setItem(r, COL_CHAPTER, cell(row.number))
             self.table.setItem(r, COL_STATUS, cell(self._status_of(row)))
