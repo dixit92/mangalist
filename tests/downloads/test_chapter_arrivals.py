@@ -81,8 +81,10 @@ def test_suwayomi_name_rule():
 def test_recorded_layout_and_comicinfo(tmp_path):
     # the recorded download: <downloads>/mangas/MangaDex (EN)/<title>/<scanlator>_<chapter name>.cbz
     path = expected_path("/dl", "MangaDex (EN)", "Example Manga", "Vol.1 Ch.1 - Example Title 1", "Alpha Scans")
-    assert path == "/dl/mangas/MangaDex (EN)/Example Manga/Alpha Scans_Vol.1 Ch.1 - Example Title 1.cbz"
-    assert expected_path("/dl", "S", "T", "Ch.2", None) == "/dl/mangas/S/T/Ch.2.cbz"
+    # the download folder is a local path of the machine MangaList runs on: its own separators (CI runs Windows too)
+    assert path == os.path.join("/dl", "mangas", "MangaDex (EN)", "Example Manga",
+                                "Alpha Scans_Vol.1 Ch.1 - Example Title 1.cbz")
+    assert expected_path("/dl", "S", "T", "Ch.2", None) == os.path.join("/dl", "mangas", "S", "T", "Ch.2.cbz")
     import zipfile
 
     cbz = tmp_path / "c.cbz"
