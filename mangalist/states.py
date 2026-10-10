@@ -550,7 +550,16 @@ def compute_state(
                               [f"Empty folder; {what}"])
             when = f" (announced {upcoming_vol.english_date})" if upcoming_vol and upcoming_vol.english_date else ""
             return finish(State.WANTED_AWAITING, reasons=[f"Empty folder; licensed, no English volume out yet{when}"])
-        return finish(State.WANTED_SCANLATION, reasons=["Empty folder; not licensed in English"])
+        # Scanlation only: every chapter up to the latest known one is missing - the Download tab's Missing chapters
+        # group offers them from Suwayomi (owner, 2026-10-10: "should be fixed now that we have a scanlation provider").
+        target = _chapter_target(k)
+        if target is None:
+            return finish(State.WANTED_SCANLATION, reasons=["Empty folder; not licensed in English"])
+        missing = sorted(_whole_numbers(Decimal(1), target))
+        if target != target.to_integral_value():
+            missing.append(target)
+        return finish(State.WANTED_SCANLATION, _chapter_gaps(missing),
+                      [f"Empty folder; not licensed in English; latest chapter {fmt_num(target)}"])
 
     if not known:
         why = ("The series is not matched" if k is None or k.link_state != LINK_DONT_MATCH

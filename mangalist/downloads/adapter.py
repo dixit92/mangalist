@@ -516,6 +516,23 @@ class Backend:
                     out[number] = rec
         return out
 
+    def other_candidates(self, series_id: int, titles: Sequence[str],
+                         exclude_source: Optional[str] = None) -> List[MangaMatch]:
+        """Change source: the series on the owner's allowed sources other than *exclude_source* (the current one) -
+        MangaDex by the id MangaPixer links (first), the others by title - for the owner to pick."""
+        client = self._chapter_client()
+        try:
+            sources = allowed_sources(list(client.sources()), self.suwayomi.sources(), self._source_languages())
+            others = [s for s in sources if s.id != str(exclude_source or "")]
+            mangadex_id = mangadex_id_for(self.db, series_id)
+            linked = find_manga(client, others, mangadex_id=mangadex_id, titles=titles, title_search=False).match
+            by_title = title_candidates(client, [s for s in others if not (mangadex_id and s.is_mangadex)], titles)
+            return ([linked] if linked is not None else []) + by_title
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
     def confirm_match(self, series_id: int, match: MangaMatch) -> None:
         """The owner confirmed a title match: it is the series' Suwayomi manga from now on."""
         self.suwayomi.set_series_choice(series_id, source_id=match.source.id, manga_id=int(match.manga.id),

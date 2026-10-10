@@ -468,6 +468,26 @@ def test_the_rescan_arrow_lists_all_libraries_then_each_root(lib):
     acts[0].trigger()
     top.btn_rescan.click()
     assert scans == [[MANHWA], None, None]
+    assert top.btn_rescan.toolTip() == "Scan every library folder again"
+
+
+def test_the_rescan_button_follows_the_picked_library(lib):
+    # owner, 2026-10-10: with Manhwa picked, Rescan read every library
+    win = lib.make_window()
+    for name in (MANGA, MANHWA):
+        win._db.add_root(str(lib.dirs[name]), name)
+    win._show_roots()
+    top = win._top
+    scans = []
+    win._start_scan = lambda roots=None: scans.append(None if roots is None else [r.name for r in roots])
+    win._on_library_changed(lib.root(win, MANHWA).id)
+    assert top.btn_rescan.toolTip().startswith(f"Scan {MANHWA} again")
+    top.btn_rescan.click()
+    [a for a in top.rescan_menu.actions() if a.text() == "All libraries"][0].trigger()
+    assert scans == [[MANHWA], None]                               # the button: the picked one; the arrow: all
+    win._on_library_changed(None)
+    top.btn_rescan.click()
+    assert scans[-1] is None and top.btn_rescan.toolTip() == "Scan every library folder again"
 
 
 def test_the_rescan_buttons_wait_while_a_scan_runs(lib, qapp):
