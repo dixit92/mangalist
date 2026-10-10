@@ -557,3 +557,33 @@ def test_the_picker_lives_in_the_top_bar_for_both_tabs(lib):
     win._show_roots()
     assert win._top.picker_shown() and win._top.library_label.text() == "Library"
     assert not hasattr(win._list, "library_picker")
+
+
+def test_deleted_duplicates_and_filed_downloads_rescan_only_their_libraries(lib):
+    # owner, 2026-10-10: discarding duplicates in Other-Manga-Ongoing rescanned every library
+    win = lib.make_window()
+    for name in (MANGA, MANHWA, COMICS):
+        win._db.add_root(str(lib.dirs[name]), name)
+    win._show_roots()
+    scans = []
+    win._start_scan = lambda roots=None: scans.append(None if roots is None else [r.name for r in roots])
+    win._on_files_deleted([str(lib.dirs[MANHWA] / "Series" / "a.cbz"), str(lib.dirs[MANHWA] / "Other" / "b.cbz")])
+    win._on_replaced_chapters_moved([str(lib.dirs[MANGA] / "Series"), str(lib.dirs[COMICS] / "Series")])
+    win._on_files_deleted([str(lib.dirs[MANHWA].parent / "elsewhere" / "c.cbz")])     # outside every library: all
+    win._on_replaced_chapters_moved([])
+    assert scans == [[MANHWA], [MANGA, COMICS], None, None]
+
+
+def test_root_of_takes_the_deepest_library_folder(tmp_path):
+    from types import SimpleNamespace
+
+    from mangalist.gui.main_window import root_of
+
+    outer = SimpleNamespace(path=str(tmp_path / "Reading"), name="outer")
+    inner = SimpleNamespace(path=str(tmp_path / "Reading" / "Manga"), name="inner")
+    sibling = SimpleNamespace(path=str(tmp_path / "Reading" / "Manga-Concluded"), name="sibling")
+    roots = [outer, inner, sibling]
+    assert root_of(str(tmp_path / "Reading" / "Manga" / "S" / "a.cbz"), roots) is inner
+    assert root_of(str(tmp_path / "Reading" / "Manga-Concluded" / "S"), roots) is sibling        # not a prefix match
+    assert root_of(str(tmp_path / "Reading" / "x.cbz"), roots) is outer
+    assert root_of(str(tmp_path / "Elsewhere"), roots) is None
