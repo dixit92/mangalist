@@ -1,6 +1,11 @@
-"""Settings > Connected services: MangaPixer, qBittorrent and Suwayomi (not set up yet), each a card with its status, what
-it is for, where it is, what uses it and Test / Edit. Edit opens the service's own form inside the section (the
-MangaPixer panel with its libraries and root mapping; the qBittorrent form with Save / Cancel).
+"""Settings > Connected services: MangaPixer, qBittorrent and Suwayomi, each a card with its status, what it is for, where
+it is, what uses it and Test / Edit. Edit opens the service's own form inside the section (the MangaPixer panel with its
+libraries and root mapping; the qBittorrent form and the Suwayomi form (:class:`SuwayomiPanel`) with Save / Cancel).
+
+**Suwayomi** (the Suwayomi MVP, 2026-10-10): the address, an optional basic-auth login (the password write-only, stored
+like qBittorrent's and never logged), and the folder MangaList reads Suwayomi's downloads from (Suwayomi's ``downloads``
+folder as MangaList sees it - chosen at install). Test connection shows Suwayomi's version and warns when "Download as
+CBZ" or FlareSolverr is off in Suwayomi (FlareSolverr is set in Suwayomi itself, e.g. ``http://<unraid-ip>:8191``).
 
 The status is checked live the first time the section is shown (off the UI thread, with the stored login) and by Test.
 Passwords and tokens stay write-only: the forms never show a stored one, the cards never mention one.
@@ -10,13 +15,14 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional
 
-from PySide6.QtWidgets import QMessageBox, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QFormLayout, QLineEdit, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from ..services.mangapixer import client as mpc
 from ..store.mangapixer import MangaPixerCache
 from .background import BackgroundCall, start_call
 from .download_widgets import button, hbox, label
-from .downloads_backend import BackendError, DownloadsBackend
+from .downloads_backend import BackendError, DownloadsBackend, SuwayomiSettingsView
 from .mangapixer_dialog import ClientFactory, MangaPixerPanel
 from .qbittorrent_dialog import QbittorrentPanel
 from .settings_common import SectionPage, ServiceCard, back_link, clear_layout
@@ -27,8 +33,19 @@ MANGAPIXER_WHAT = ("Series links, volume lists and Completion for the folders Ma
 QBT_WHAT = "Downloads torrents in its own \"mangalist\" category."
 SUWAYOMI_WHAT = "Downloads chapters from scanlation and official sites."
 SUWAYOMI_INFO = ("Suwayomi is a self-hosted manga server that can download chapters from scanlation groups and official "
-                 "sites (MangaDex and others). MangaList will use it for the \"Missing chapters\" group of the Download "
-                 "tab. Connecting it comes in a later version.")
+                 "sites (MangaDex and others). MangaList uses it for the \"Missing chapters\" group of the Download "
+                 "tab: it finds the series (MangaDex by the id MangaPixer links), lists the missing chapters with their "
+                 "scanlation groups and sends the ones you pick; finished chapters are filed into the series folder.")
+SUWAYOMI_INTRO = ("MangaList asks Suwayomi-Server (GraphQL, tested with v2.4.2366) for chapters. Install the extensions "
+                  "of your sources in Suwayomi first (MangaDex, ...); which of them MangaList may use is set under "
+                  "Download sources.")
+SUWAYOMI_FOLDER_HELP = ("Suwayomi's downloads folder (the one that holds \"mangas\") as MangaList sees it. MangaList "
+                        "files each finished chapter from there into the series folder (a hard link on the same share, "
+                        "else a verified copy), then Suwayomi deletes its own copy.")
+SUWAYOMI_FLARESOLVERR_NOTE = ("Sources behind Cloudflare need FlareSolverr: set it in Suwayomi's own settings "
+                              "(FlareSolverr on, URL e.g. http://<unraid-ip>:8191 - the box's address, not localhost).")
+SUWAYOMI_PASSWORD_STORED = "A password is stored (hidden). Leave empty to keep it."
+SUWAYOMI_PASSWORD_EMPTY = "Only when Suwayomi uses basic authentication"
 SCAN_FORBIDDEN_NOTE = ("This token cannot request library scans, so MangaList cannot ask MangaPixer to rescan after "
                        "filing. Create a new token with \"Request library scans\" ticked and enter it under Edit.")
 
@@ -84,6 +101,7 @@ class ServicesPage(SectionPage):
         self._syncing = False
         self.mp_panel: Optional[MangaPixerPanel] = None
         self.qbt_panel: Optional[QbittorrentPanel] = None
+        self.suwayomi_panel: Optional["SuwayomiPanel"] = None
 
         self.stack = QStackedWidget()
         self.body.addWidget(self.stack)
@@ -116,11 +134,11 @@ class ServicesPage(SectionPage):
         self.mp_card.btn_primary.clicked.connect(self.edit_mangapixer)
         self.qbt_card.btn_secondary.clicked.connect(self.test_qbittorrent)
         self.qbt_card.btn_primary.clicked.connect(self.edit_qbittorrent)
-        self.suwayomi_card.btn_secondary.setText("What is it?")
-        self.suwayomi_card.btn_secondary.clicked.connect(lambda: self._info(self, "Suwayomi", SUWAYOMI_INFO))
-        self.suwayomi_card.btn_primary.setText("Set up")
-        self.suwayomi_card.btn_primary.setEnabled(False)
-        self.suwayomi_card.btn_primary.setToolTip("Connecting Suwayomi comes in a later version")
+        self.suwayomi_info = button("What is it?", link=True)
+        self.suwayomi_info.clicked.connect(lambda: self._info(self, "Suwayomi", SUWAYOMI_INFO))
+        self.suwayomi_card.buttons.insertWidget(0, self.suwayomi_info)
+        self.suwayomi_card.btn_secondary.clicked.connect(self.test_suwayomi)
+        self.suwayomi_card.btn_primary.clicked.connect(self.edit_suwayomi)
         self.suwayomi_card.set_status("Not set up", "muted")
         self.refresh()
 
@@ -129,6 +147,35 @@ class ServicesPage(SectionPage):
     def refresh(self) -> None:
         self._refresh_mangapixer()
         self._refresh_qbittorrent()
+        self._refresh_suwayomi()
+
+    def _suwayomi_backend(self) -> bool:
+        return self._backend is not None and callable(getattr(self._backend, "load_suwayomi", None))
+
+    def _refresh_suwayomi(self) -> None:
+        card = self.suwayomi_card
+        if not self._suwayomi_backend():
+            card.set_status("Downloads off" if self._backend is None else "Not available", "muted")
+            card.detail_label.setText("Downloads are switched off in this installation (MANGALIST_DOWNLOADS)."
+                                      if self._backend is None else "This build cannot talk to Suwayomi.")
+            card.btn_secondary.setEnabled(False)
+            card.btn_primary.setEnabled(False)
+            return
+        view = self._backend.load_suwayomi()
+        card.btn_primary.setEnabled(True)
+        card.btn_primary.setText("Edit" if view.base_url else "Set up")
+        card.detail_label.setText(f"{view.base_url or 'no address'} · download folder "
+                                  f"{view.download_dir or 'not set'}")
+        card.btn_secondary.setEnabled(bool(view.base_url))
+        if not view.base_url:
+            card.set_status("Not set up", "muted")
+            card.set_note("")
+        elif not view.download_dir:
+            card.set_status("No download folder", "warn")
+            card.set_note("Set the folder MangaList reads Suwayomi's downloads from (Edit), or finished chapters "
+                          "cannot be filed.")
+        elif card.badge.text() in ("Not set up", "Downloads off", "Not available", "No download folder"):
+            card.set_status("Not checked", "muted")
 
     def _refresh_mangapixer(self) -> None:
         card = self.mp_card
@@ -181,6 +228,7 @@ class ServicesPage(SectionPage):
         self._checked = True
         self.test_mangapixer()
         self.test_qbittorrent()
+        self.test_suwayomi()
 
     def _spawn(self, fn, on_done, on_error) -> None:
         made: list = []
@@ -292,6 +340,31 @@ class ServicesPage(SectionPage):
         self.qbt_card.btn_secondary.setEnabled(True)
         self.qbt_card.set_note(message, "bad")
 
+    def test_suwayomi(self) -> bool:
+        if not self._suwayomi_backend():
+            return False
+        backend = self._backend
+        view = backend.load_suwayomi()
+        if not view.base_url:
+            return False
+        self.suwayomi_card.btn_secondary.setEnabled(False)
+        self.suwayomi_card.set_status("Checking...", "muted")
+        self.suwayomi_card.set_note("")
+        self._spawn(lambda: backend.test_suwayomi(view, None), self._suwayomi_ok, self._suwayomi_failed)
+        return True
+
+    def _suwayomi_ok(self, check) -> None:
+        card = self.suwayomi_card
+        card.btn_secondary.setEnabled(True)
+        card.set_status(f"Connected {check.version}".strip(), "ok")
+        notes = check.notes()
+        card.set_note(" ".join(notes), "warn" if notes else "muted")
+
+    def _suwayomi_failed(self, message: str) -> None:
+        self.suwayomi_card.set_status("Not connected", "bad")
+        self.suwayomi_card.btn_secondary.setEnabled(True)
+        self.suwayomi_card.set_note(message, "bad")
+
     # --- the editors ------------------------------------------------------------------------------------------
 
     def _open_editor(self, title: str, widget: QWidget, *buttons) -> None:
@@ -326,6 +399,25 @@ class ServicesPage(SectionPage):
         self._open_editor("qBittorrent", panel, cancel, save)
         return panel
 
+    def edit_suwayomi(self) -> Optional["SuwayomiPanel"]:
+        if not self._suwayomi_backend():
+            return None
+        self._clear_editor()
+        panel = SuwayomiPanel(self._backend, self.editor_page)
+        panel.saved_changes.connect(self._suwayomi_saved)
+        self.suwayomi_panel = panel
+        save = button("Save", primary=True)
+        save.clicked.connect(panel.save)
+        cancel = button("Cancel")
+        cancel.clicked.connect(self.close_editor)
+        self._open_editor("Suwayomi", panel, cancel, save)
+        return panel
+
+    def _suwayomi_saved(self) -> None:
+        self.downloads_changed.emit()
+        self.close_editor()
+        self.test_suwayomi()
+
     def _qbt_saved(self) -> None:
         self.downloads_changed.emit()
         self.close_editor()
@@ -340,10 +432,10 @@ class ServicesPage(SectionPage):
             self.test_mangapixer()
 
     def _clear_editor(self) -> None:
-        for panel in (self.mp_panel, self.qbt_panel):
+        for panel in (self.mp_panel, self.qbt_panel, self.suwayomi_panel):
             if panel is not None:
                 panel.stop()
-        self.mp_panel = self.qbt_panel = None
+        self.mp_panel = self.qbt_panel = self.suwayomi_panel = None
         clear_layout(self.editor_layout)
 
     def stop(self) -> None:
@@ -351,3 +443,119 @@ class ServicesPage(SectionPage):
             call.abandon()
         self._calls.clear()
         self._clear_editor()
+
+
+class SuwayomiPanel(QWidget):
+    """Suwayomi's connection form: address, user name, password (write-only), the download folder MangaList reads, and
+    Test connection (off the UI thread, against the values as typed; nothing is stored before Save)."""
+
+    saved_changes = Signal()
+
+    def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setObjectName("suwayomiPanel")
+        self._backend = backend
+        self._call: Optional[BackgroundCall] = None
+        self._view = SuwayomiSettingsView()
+        self.saved = False
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(label(SUWAYOMI_INTRO, wrap=True))
+        form = QFormLayout()
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("http://192.168.1.10:4567")
+        form.addRow("Address:", self.url_edit)
+        self.user_edit = QLineEdit()
+        self.user_edit.setPlaceholderText("Only when Suwayomi uses basic authentication")
+        form.addRow("Username:", self.user_edit)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Password:", self.password_edit)
+        self.folder_edit = QLineEdit()
+        self.folder_edit.setPlaceholderText("/data/appdata/suwayomi/downloads")
+        folder = QWidget()
+        fl = QVBoxLayout(folder)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.setSpacing(2)
+        fl.addWidget(self.folder_edit)
+        fl.addWidget(label(SUWAYOMI_FOLDER_HELP, "muted", wrap=True))
+        form.addRow("Download folder:", folder)
+        outer.addLayout(form)
+        outer.addWidget(label(SUWAYOMI_FLARESOLVERR_NOTE, "muted", wrap=True))
+        self.btn_test = button("Test connection")
+        self.btn_test.clicked.connect(self.test_connection)
+        outer.addLayout(hbox(self.btn_test, None))
+        self.status_label = label("", wrap=True, selectable=True)
+        outer.addWidget(self.status_label)
+        outer.addStretch(1)
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            self._view = self._backend.load_suwayomi()
+        except BackendError as exc:
+            self._say(f"Could not read the saved settings: {exc}", "bad")
+        v = self._view
+        self.url_edit.setText(v.base_url)
+        self.user_edit.setText(v.username)
+        self.password_edit.clear()
+        self.password_edit.setPlaceholderText(SUWAYOMI_PASSWORD_STORED if v.has_password else SUWAYOMI_PASSWORD_EMPTY)
+        self.folder_edit.setText(v.download_dir)
+
+    def typed(self) -> SuwayomiSettingsView:
+        url = self.url_edit.text().strip()
+        if not url:
+            raise ValueError("Enter Suwayomi's address, for example http://192.168.1.10:4567")
+        return SuwayomiSettingsView(base_url=url, username=self.user_edit.text().strip(),
+                                    has_password=self._view.has_password, download_dir=self.folder_edit.text().strip())
+
+    def _say(self, text: str, tone: str = "") -> None:
+        from .download_style import set_tone
+
+        set_tone(self.status_label, tone)
+        self.status_label.setText(text)
+
+    def save(self) -> bool:
+        try:
+            view = self.typed()
+            self._backend.save_suwayomi(view, self.password_edit.text() or None)
+        except (ValueError, BackendError) as exc:
+            self._say(f"Could not save: {exc}", "bad")
+            return False
+        self.saved = True
+        self.password_edit.clear()             # never shown again
+        self._view = self._backend.load_suwayomi()
+        self.password_edit.setPlaceholderText(SUWAYOMI_PASSWORD_STORED if self._view.has_password
+                                              else SUWAYOMI_PASSWORD_EMPTY)
+        self._say("Saved.", "ok")
+        self.saved_changes.emit()
+        return True
+
+    def test_connection(self) -> bool:
+        if self._call is not None:
+            return False
+        try:
+            view = self.typed()
+        except ValueError as exc:
+            self._say(str(exc), "bad")
+            return False
+        password = self.password_edit.text() or None
+        backend = self._backend
+        self.btn_test.setEnabled(False)
+        self._say("Testing the connection...")
+        self._call = start_call(lambda: backend.test_suwayomi(view, password), self._tested,
+                                lambda message: self._say(f"Connection failed: {message}", "bad"), self._test_done)
+        return True
+
+    def _tested(self, check) -> None:
+        notes = check.notes()
+        self._say(f"Connected: Suwayomi {check.version}." + (" " + " ".join(notes) if notes else ""),
+                  "warn" if notes else "ok")
+
+    def _test_done(self) -> None:
+        self._call = None
+        self.btn_test.setEnabled(True)
+
+    def stop(self) -> None:
+        if self._call is not None:
+            self._call.abandon()
