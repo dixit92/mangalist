@@ -222,6 +222,13 @@ def test_torrents_maps_the_fields(client, qbt):
     assert t.save_path == "/data/appdata/torrents/mangalist"
     assert t.content_path == "/data/appdata/torrents/mangalist/Series v01"
     assert t.complete and t.stopped_complete
+    assert t.size == 123456                                      # the selected files' bytes (the download budget)
+
+
+def test_an_unknown_torrent_size_reads_as_zero(client, qbt):
+    qbt.put_torrent(HASH_A)
+    qbt.torrents[HASH_A]["size"] = -1                            # a magnet before its metadata
+    assert client.torrents("mangalist")[0].size == 0
 
 
 def test_torrents_lists_only_the_asked_category_exactly(client, qbt):

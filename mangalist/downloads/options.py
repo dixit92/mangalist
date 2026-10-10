@@ -13,6 +13,7 @@ KEY_NYAA = "downloads.nyaa"                        # dict of the NyaaOptions fie
 KEY_MU_AUTOSTART = "mu_autostart"                  # the old "Auto-start MU" (config.py's key): look new series up
 KEY_SCAN_AFTER_FILING = "mangapixer.scan_after_filing"   # ask MangaPixer to rescan a library after filing into it
 KEY_PARTIAL_DOWNLOADS = "downloads.partial"        # a pack's release panel starts with "only the missing volumes" ticked
+KEY_BUDGET_GB = "downloads.budget_gb"              # the download budget: at most this many GB downloading or seeding
 
 DEFAULTS: Dict[str, bool] = {KEY_MU_AUTOSTART: False, KEY_SCAN_AFTER_FILING: True, KEY_PARTIAL_DOWNLOADS: True}
 
@@ -73,3 +74,28 @@ def get_flag(store: Any, key: str) -> bool:
 
 def set_flag(store: Any, key: str, on: bool) -> None:
     store.set_setting(key, bool(on))
+
+
+# --- the download budget -----------------------------------------------------------------------------------------
+
+#: Owner, 2026-10-09: "I set MangaList to use a maximum of 50 GB" - the default cap. 0 = no limit.
+DEFAULT_BUDGET_GB = 50
+MAX_BUDGET_GB = 1_000_000                           # a sanity bound for a stored value (1 PB), not a policy
+
+
+def get_budget_gb(store: Any) -> float:
+    """The cap in GB (1 GB = 1024^3 bytes, as every size MangaList shows); 0 = no limit. A stored value of the wrong
+    type, negative or absurd falls back to the default."""
+    value = store.get_setting(KEY_BUDGET_GB, None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= MAX_BUDGET_GB:
+        return float(DEFAULT_BUDGET_GB)
+    return float(value)
+
+
+def set_budget_gb(store: Any, gb: float) -> None:
+    """Store the cap (None / 0 / negative: no limit). Whole numbers are stored as ints (``50``, not ``50.0``)."""
+    value = float(gb or 0)
+    if value <= 0:
+        value = 0.0
+    value = min(value, float(MAX_BUDGET_GB))
+    store.set_setting(KEY_BUDGET_GB, int(value) if value == int(value) else round(value, 3))
