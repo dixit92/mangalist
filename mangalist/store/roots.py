@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 from dataclasses import dataclass, field
@@ -11,6 +12,9 @@ from typing import List, Optional, Sequence
 from .db import utcnow
 from .exclusions import ExclusionSet, normalize_pattern
 from .schema import ENFORCE_NAMING, ENFORCE_NAMING_DEFAULT, ORIGIN_HINTS
+
+
+_log = logging.getLogger(__name__)
 
 
 class RootError(ValueError):
@@ -117,6 +121,8 @@ class RootsMixin:
                  root.staging_folder, root.position, now, now))
             root.id = int(cur.lastrowid)
             _write_exclusions(con, root.id, root.exclusions)
+        _log.info("Root added: %s (%s), %d exclusion%s", root.name or "unnamed", root.path, len(root.exclusions),
+                  "" if len(root.exclusions) == 1 else "s")
         return root
 
     def update_root(self, root: Root) -> Root:
@@ -133,6 +139,8 @@ class RootsMixin:
                 (root.name, root.path, root.origin_hint, root.enforce_naming, root.naming_scheme,
                  root.staging_folder, root.position, utcnow(), root.id))
             _write_exclusions(con, root.id, root.exclusions)
+        _log.info("Root changed: %s (%s), %d exclusion%s", root.name or "unnamed", root.path, len(root.exclusions),
+                  "" if len(root.exclusions) == 1 else "s")
         return root
 
     def remove_root(self, root_id: int) -> None:
@@ -140,6 +148,7 @@ class RootsMixin:
         MangaUpdates links cache keeps its rows (keyed by folder), so adding the root again restores them."""
         with self.connect() as con:
             con.execute("DELETE FROM roots WHERE id = ?", (root_id,))
+        _log.info("Root removed (id %d); its files are untouched", root_id)
 
     def set_exclusions(self, root_id: int, patterns: Sequence[str]) -> List[str]:
         root = self.get_root(root_id)

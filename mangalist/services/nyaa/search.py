@@ -78,6 +78,8 @@ class NyaaSearch:
             if found and len(asked) >= ALWAYS_ASKED:
                 break
             _log.info("nyaa: nothing usable for %r; trying the next title", query)
+        _log.info("nyaa: %d usable release%s for %d title%s asked", len(found), "" if len(found) == 1 else "s",
+                  len(asked), "" if len(asked) == 1 else "s")
         return order(found.values())
 
 

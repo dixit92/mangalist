@@ -198,9 +198,9 @@ class Scheduler:
             st.schedule = job.schedule.describe()
         self.store.save()
         took = (finished - started).total_seconds()
-        _log.info("%s: %s in %.1f s%s%s", job.name, result.status, took,
-                  f" - {result.message}" if result.message else "",
-                  f"; next run {self._fmt(st.next_run)}" if reschedule and st.next_run else "")
+        _log.log(logging.ERROR if result.status == "error" else logging.INFO, "%s: %s in %.1f s%s%s",
+                 job.name, result.status, took, f" - {result.message}" if result.message else "",
+                 f"; next run {self._fmt(st.next_run)}" if reschedule and st.next_run else "")
         return result
 
     def run_once(self) -> int:

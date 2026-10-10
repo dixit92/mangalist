@@ -180,6 +180,8 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
                                       number=canonical_number(number), files=tuple(files), usual_group=usual))
     out.sort(key=lambda g: (g.title.casefold(), g.folder, _directory(g), 0 if g.kind == KIND_VOLUME else 1,
                             Decimal(g.number)))
+    _log.info("Duplicates: %d number%s held more than once (%d files) in %d root%s", len(out),
+              "" if len(out) == 1 else "s", sum(len(g.files) for g in out), len(roots), "" if len(roots) == 1 else "s")
     return out
 
 
@@ -429,6 +431,8 @@ def discard_duplicates(db, selections: Sequence[Tuple[DuplicateGroup, Collection
         for lock in locks.values():
             if lock is not None:
                 lock.release()
+    done = sum(1 for o in outcomes if o.deleted)
+    _log.info("Duplicates: %d of %d requested file%s discarded", done, len(outcomes), "" if len(outcomes) == 1 else "s")
     return outcomes
 
 

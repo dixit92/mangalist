@@ -81,7 +81,7 @@ AREAS: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
     ("matching", "Matching (MangaUpdates, AniList)",
      ("mangalist.mu_match", "mangalist.mu_client", "mangalist.mu_cache", "mangalist.matcher",
       "mangalist.anilist_client", "mangalist.gui.mu_worker")),
-    ("mangapixer", "MangaPixer", ("mangalist.services.mangapixer", "mangalist.identity.mangapixer")),
+    ("mangapixer", "MangaPixer", ("mangalist.services.mangapixer", "mangalist.identity.mangapixer", "mangalist.store.mangapixer")),
     ("nyaa", "nyaa", ("mangalist.services.nyaa",)),
     ("qbittorrent", "qBittorrent", ("mangalist.services.qbittorrent",)),
     ("filing", "Filing downloads", ("mangalist.downloads", "mangalist.headless.downloads_job",
