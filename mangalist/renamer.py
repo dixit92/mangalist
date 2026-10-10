@@ -404,8 +404,8 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
         if not exists(path):
             first.append(FilePlan(path, None, LEFT_ALONE, layer, "the file is gone since the last scan"))
             continue
-        if parsed is None or not getattr(parsed, "has_units", True) and not getattr(parsed, "is_extra", False):
-            first.append(FilePlan(path, None, LEFT_ALONE, layer, "the name says no volume or chapter number"))
+        if parsed is None:
+            first.append(FilePlan(path, None, LEFT_ALONE, layer, "the name could not be read"))
             continue
         ext = os.path.splitext(name)[1]
         try:
@@ -419,6 +419,7 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
             continue
         if target is None:
             why = ("an extra (no chapter number)" if getattr(parsed, "is_extra", False)
+                   else "the name says no volume or chapter number" if not getattr(parsed, "has_units", True)
                    else "the name could not be read with certainty")
             first.append(FilePlan(path, None, LEFT_ALONE, layer, why))
             continue
