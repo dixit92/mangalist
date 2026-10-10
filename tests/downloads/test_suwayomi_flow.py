@@ -316,3 +316,27 @@ def test_without_the_naming_module_nothing_is_moved_and_the_record_says_why(worl
     assert rec.status == S.DOWNLOADED and "naming scheme is not available" in (rec.error or "")
     assert status_text(rec).startswith("Downloaded - the naming scheme is not available")
     assert "MangaListDeleteDownloaded" not in session.names()
+
+
+def test_the_flow_files_under_the_real_naming_scheme(world):
+    """Integrator check at merge (2026-10-10): the default namer is lane A's real :mod:`mangalist.naming` - the same flow
+    files the chapters under the scheme's own names (no fake namer)."""
+    import re
+
+    db, session, sid, sdir = world["db"], world["session"], world["sid"], world["dir"]
+    backend = Backend(db, chapter_client_factory=lambda conn: SuwayomiClient(conn, session=session))   # default namer
+    world["backend"] = backend
+    link_mangadex(db, world["root"].id)
+    connect(world)
+    lookup = backend.chapter_lookup(sid, ("1", "2"), (SERIES,))
+    outcome = backend.send_chapters(sid, lookup.match, [row.default for row in lookup.rows], str(sdir),
+                                    lookup.manga_title, lookup.source_name)
+    assert outcome.error is None
+    session.answers["MangaListQueue"] = "status_idle.json"
+    session.answers["MangaListChaptersById"] = "downloaded.json"
+    finish(world, 1), finish(world, 2)
+    message = backend.check_now()
+    assert "chapters: 2 checked: 2 filed, 0 failed, 0 waiting" in message, message
+    scheme = re.compile(r"^Ch\. 000[12]\.00( Vol\. \d{3})? \(Example Title [12]\) \[Alpha Scans\]\.cbz$")
+    filed = [n for n in os.listdir(sdir) if n.startswith("Ch. ")]
+    assert len(filed) == 2 and all(scheme.match(n) for n in filed), filed
