@@ -264,7 +264,7 @@ def _read_tags(text: str):
 # --- 3b. labelled chapters ----------------------------------------------------------------------------
 
 _LABELLED = re.compile(
-    rf"(?<![A-Za-z0-9]){CHAPTER_LABELS}\.?\s*[#-]?\s*(?P<n>{UNIT})(?:-(?P<n2>{UNIT}))?(?![\d.]\d)", re.IGNORECASE)
+    rf"(?<![A-Za-z0-9]){CHAPTER_LABELS}\.?[\s_]*[#-]?[\s_]*(?P<n>{UNIT})(?:-(?P<n2>{UNIT}))?(?![\d.]\d)", re.IGNORECASE)
 _TITLE_SEPARATOR = re.compile(r"^(?:\s{2,}|\s*[-\u2013\u2014:\uff1a]\s+|\.\s+|\s*_\s*)")
 _TRAILING_TAGS = re.compile(r"(?:\s*(?:\([^()]*\)|\[[^\[\]]*\]))*\s*$")
 _VOLUME_BEFORE = re.compile(rf"(?<![A-Za-z])(?:vol(?:ume)?\.?|v)\s*(?P<v>{UNIT})\s*[-_]?\s*$", re.IGNORECASE)
