@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..renamer import ENFORCE_LABELS
 from ..store import Root, RootError
 from ..store.exclusions import InvalidPattern, TreeListing, list_tree, normalize_pattern, preview
 from ..store.roots import validate_root
@@ -40,7 +41,13 @@ from ..store.schema import ENFORCE_NAMING_DEFAULT
 BrowseFn = Callable[[QWidget, str, str], str]
 
 ORIGIN_CHOICES = [("No hint", None), ("Manga", "manga"), ("Manhwa", "manhwa"), ("Webcomic", "webcomic")]
-ENFORCE_CHOICES = [("Off", "off"), ("Ask (preview, then apply)", "ask"), ("Automatic", "automatic")]
+ENFORCE_CHOICES = [(ENFORCE_LABELS["off"], "off"), (ENFORCE_LABELS["ask"], "ask"),
+                   (ENFORCE_LABELS["automatic"], "automatic")]
+ENFORCE_TIP = ("What happens to files whose names do not follow the naming scheme:\n"
+               "Off - never renamed, never listed.\n"
+               "Ask before renaming - listed as \"Rename pending\"; you rename them (with a preview) from the List.\n"
+               "Rename automatically - the scheduled rescan renames them, once you have started this library's "
+               "conversion in the Renamer window (List > Rename library…). Every batch is logged and can be undone.")
 PREVIEW_LIMIT = 500
 
 
@@ -127,9 +134,9 @@ class RootsEditor(QWidget):
         self.enforce_combo = QComboBox()
         for label, value in ENFORCE_CHOICES:
             self.enforce_combo.addItem(label, value)
-        self.enforce_combo.setToolTip("What happens to names that do not follow the naming scheme")
+        self.enforce_combo.setToolTip(ENFORCE_TIP)
         self.enforce_combo.currentIndexChanged.connect(self._on_form_edited)
-        form.addRow("Enforce naming:", self.enforce_combo)
+        form.addRow("Files not named by the scheme:", self.enforce_combo)
         self.staging_edit = QLineEdit()
         self.staging_edit.setPlaceholderText("None")
         self.staging_edit.setToolTip("Where arrivals wait before filing (on the same share as the root)")
@@ -137,10 +144,10 @@ class RootsEditor(QWidget):
         btn_staging = self._button("Browse")
         btn_staging.clicked.connect(self._on_browse_staging)
         form.addRow("Staging folder:", self._with_button(self.staging_edit, btn_staging))
-        # Origin hint, Enforce naming and Staging folder are kept and saved, but nothing uses them yet (the renamer and
-        # the origin evidence are later phases; finished downloads wait in qBittorrent's download folder): hidden
-        # until then, so no field here does nothing (owner, 2026-10-09).
-        for row in (2, 3, 4):
+        # Origin hint and Staging folder are kept and saved, but nothing uses them yet (the origin evidence is a later
+        # phase; finished downloads wait in qBittorrent's download folder): hidden until then, so no field here does
+        # nothing (owner, 2026-10-09). The naming row is the renamer's (renamer cycle, 2026-10-10).
+        for row in (2, 4):
             form.setRowVisible(row, False)
         rv.addWidget(settings)
 

@@ -66,11 +66,11 @@ jobs:
         run: pip install pytest pytest-xdist regex platformdirs requests
 
       - name: Import check
-        run: python -c "import sys, mangalist.matcher, mangalist.mu_match, mangalist.paths, mangalist.parsing, mangalist.headless, mangalist.store, mangalist.services.mangapixer, mangalist.inventory, mangalist.scanner, mangalist.knowledge, mangalist.states, mangalist.official_sources, mangalist.identity, mangalist.downloads, mangalist.downloads.adapter, mangalist.services.nyaa, mangalist.services.qbittorrent, mangalist.gui.downloads_backend, mangalist.gui.volumes_target, mangalist.gui.shell, mangalist.duplicates, mangalist.downloads.options, mangalist.gui.download_rules, mangalist.gui.list_text, mangalist.torrent_files, mangalist.downloads.partial, mangalist.upgrades, mangalist.store.replacements, mangalist.downloads.budget, mangalist.downloads.queueing, mangalist.log_config; assert 'PySide6' not in sys.modules"
+        run: python -c "import sys, mangalist.matcher, mangalist.mu_match, mangalist.paths, mangalist.parsing, mangalist.headless, mangalist.store, mangalist.services.mangapixer, mangalist.inventory, mangalist.scanner, mangalist.knowledge, mangalist.states, mangalist.official_sources, mangalist.identity, mangalist.downloads, mangalist.downloads.adapter, mangalist.services.nyaa, mangalist.services.qbittorrent, mangalist.gui.downloads_backend, mangalist.gui.volumes_target, mangalist.gui.shell, mangalist.duplicates, mangalist.downloads.options, mangalist.gui.download_rules, mangalist.gui.list_text, mangalist.torrent_files, mangalist.downloads.partial, mangalist.upgrades, mangalist.store.replacements, mangalist.downloads.budget, mangalist.downloads.queueing, mangalist.log_config, mangalist.renamer; assert 'PySide6' not in sys.modules"
 
       - name: Run tests
         env:
           PYTEST_ADDOPTS: -n auto       # pytest-xdist: one worker per core
         run: >
           python -m pytest -q tests/matcher tests/golden tests/test_mu_match.py tests/test_mu_cache.py
-          tests/test_paths.py tests/test_classifier.py tests/parsing tests/headless tests/store tests/services tests/inventory tests/states tests/test_phase1_integration.py tests/identity tests/downloads tests/duplicates tests/upgrades
+          tests/test_paths.py tests/test_classifier.py tests/parsing tests/headless tests/store tests/services tests/inventory tests/states tests/test_phase1_integration.py tests/identity tests/downloads tests/duplicates tests/upgrades tests/renamer

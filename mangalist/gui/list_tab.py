@@ -31,7 +31,7 @@ from .chips import ChipButton, FlowLayout
 from .detail_panel import DetailPanel
 from .list_delegates import ROW_HEIGHT, MonoDelegate, SecondaryDelegate, StateBadgeDelegate, TitleDelegate
 from .table_model import (
-    COL_ENGLISH, COL_FILES, COL_GAPS, COL_LIBRARY, COL_STATE, COL_TITLE, COL_VERDICT, STATE_FILTERS,
+    COL_ENGLISH, COL_FILES, COL_GAPS, COL_LIBRARY, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, STATE_FILTERS,
 )
 
 DUPLICATES = "duplicates"               # the Duplicates chip's key (not a state filter)
@@ -58,6 +58,7 @@ class ListTab(QWidget):
     filter_changed = Signal(object)     # a chip's key: None (All), a STATE_FILTERS key, or DUPLICATES
     details_toggled = Signal(bool)
     add_root_clicked = Signal()
+    rename_library_clicked = Signal()   # "Rename library…": the library picked (or every library) to the naming scheme
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -133,13 +134,17 @@ class ListTab(QWidget):
         self.btn_details.setToolTip("Show the details panel")
         self.btn_details.clicked.connect(lambda: self.set_details_visible(True, emit=True))
         self.btn_details.setVisible(False)
+        self.btn_rename = QPushButton("Rename library…")
+        self.btn_rename.setToolTip("Bring the file names of the library picked (or of every library) to the naming "
+                                   "scheme: a preview first, then renames in batches you can undo")
+        self.btn_rename.clicked.connect(self.rename_library_clicked)
         self.btn_mu_start = QPushButton("MU lookup")
         self.btn_mu_start.setToolTip("Look up every series on MangaUpdates (series MangaPixer knows are skipped)")
         self.btn_mu_stop = QPushButton("Stop")
         self.btn_mu_stop.setToolTip("Stop the MangaUpdates lookup")
         self.btn_mu_stop.setVisible(False)
         self.btn_mu_stop.setEnabled(False)
-        for b in (self.btn_details, self.btn_mu_start, self.btn_mu_stop):
+        for b in (self.btn_details, self.btn_rename, self.btn_mu_start, self.btn_mu_stop):
             row.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         return bar
 
@@ -164,7 +169,7 @@ class ListTab(QWidget):
         self._delegates = {COL_TITLE: TitleDelegate(table), COL_STATE: StateBadgeDelegate(table),
                            COL_GAPS: MonoDelegate(table), COL_FILES: MonoDelegate(table),
                            COL_ENGLISH: SecondaryDelegate(table), COL_VERDICT: SecondaryDelegate(table),
-                           COL_LIBRARY: SecondaryDelegate(table)}
+                           COL_LIBRARY: SecondaryDelegate(table), COL_RENAME: MonoDelegate(table)}
         for col, delegate in self._delegates.items():
             table.setItemDelegateForColumn(col, delegate)
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
