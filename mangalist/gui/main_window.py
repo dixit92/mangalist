@@ -321,6 +321,9 @@ class MainWindow(QMainWindow):
         self._scan_pos: Optional[Tuple[int, int, str]] = None   # (which root, how many, its name) being read
 
         self._thread: QThread | None = None
+        self._scanning_ids: List[int] = []                 # the roots the running scan reads
+        self._scan_queued: Optional[List[Root]] = None     # roots asked for while a scan ran: scanned next
+        self._scan_queue_all = False                       # ... or every root
         self._worker: ScanWorker | None = None
         self._mu_thread: QThread | None = None
         self._mu_worker: MuWorker | None = None
@@ -872,6 +875,7 @@ class MainWindow(QMainWindow):
             win.activateWindow()
             return win
         win = RenamerWindow(self._make_renamer(), scope, self, run=self._renamer_runner)
+        win.rescan_follows = True           # _on_library_renamed rescans; the window looks again after it
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         win.library_changed.connect(self._on_library_renamed)
         win.duplicates_requested.connect(self.review_duplicates)
@@ -1099,7 +1103,14 @@ class MainWindow(QMainWindow):
 
     def _start_scan(self, roots: Optional[Sequence[Root]] = None) -> None:
         if self._thread is not None:
-            return  # scan already running
+            # a scan is running: this one follows it (a rename's rescan used to be dropped here)
+            if roots is None:
+                self._scan_queue_all = True
+            elif not self._scan_queue_all:
+                queued = {r.id: r for r in (self._scan_queued or [])}
+                queued.update({r.id: r for r in roots})
+                self._scan_queued = list(queued.values())
+            return
         roots = list(roots) if roots is not None else self._roots()
         if not roots:
             return
@@ -1107,6 +1118,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid folder",
                                 "Not a directory:\n" + "\n".join(r.path for r in roots))
             return
+        self._scanning_ids = [r.id for r in roots]
 
         self._top.set_scanning(True)
         label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
@@ -1300,6 +1312,14 @@ class MainWindow(QMainWindow):
         self._show_roots()
         if self._duplicates_view is not None and hasattr(self._duplicates_view, "set_blocked"):
             self._duplicates_view.set_blocked(None)
+        scanned, self._scanning_ids = self._scanning_ids, []
+        queued_all, queued = self._scan_queue_all, self._scan_queued
+        self._scan_queue_all, self._scan_queued = False, None
+        if queued_all or queued:
+            QTimer.singleShot(0, lambda: self._start_scan(None if queued_all else queued))
+        win = self._renamer_window
+        if win is not None and hasattr(win, "library_rescanned"):
+            win.library_rescanned(scanned)
 
     def _stop_scan(self, wait_ms: int = 5000) -> None:
         if self._worker is not None:

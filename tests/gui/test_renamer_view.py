@@ -16,7 +16,7 @@ from mangalist.gui.download_widgets import ROLE_CHIPS, ROLE_SUB  # noqa: E402
 from mangalist.gui.renamer_view import (  # noqa: E402
     NOT_AVAILABLE, PILOT_LIBRARY, PILOT_SERIES, SCOPE_ALL, SCOPE_ROOT, STATUS_COLORS, RenamerWindow, Scope)
 from mangalist.gui.table_model import COL_RENAME, COL_STATE  # noqa: E402
-from mangalist.renamer import COLLISION, RENAME, Renamer  # noqa: E402
+from mangalist.renamer import COLLISION, RENAME, UNCHANGED, Renamer  # noqa: E402
 
 from ..renamer.conftest import fmd2, make_library, payload  # noqa: E402
 from ..renamer.fakes import FakeNamer, Recorder  # noqa: E402
@@ -319,5 +319,30 @@ def test_series_already_in_the_scheme_are_hidden_until_asked_for(qapp, db, tmp_p
         win.apply()                                         # Series A renamed: nothing left to list
         assert titles() == [] and win.show_done.text() == "Show series already in the scheme (2)"
         assert win.preview.topLevelItemCount() == 0
+    finally:
+        win.deleteLater()
+
+
+def test_after_a_rename_the_preview_waits_for_the_rescan(qapp, db, made):
+    # owner, 2026-10-10: right after a library's rename every renamed file showed under its old name, "left alone: the
+    # file is gone since the last scan" - the preview had looked before the rescan
+    from ..renamer.conftest import rescan
+
+    win = _window(qapp, _renamer(db), Scope.root(made.id, "Manga"))
+    win.rescan_follows = True
+    changed = []
+    win.library_changed.connect(changed.append)
+    try:
+        win.apply()
+        assert changed == [[made.id]]
+        assert "Rescanning the library" in win.summary_label.text() and win.series_list.count() == 0
+        assert not win.btn_undo.isEnabled() and not win.btn_apply.isEnabled()
+        rescan(db)                                          # the host's rescan
+        win.library_rescanned([999])                        # another library: still waiting
+        assert "Rescanning the library" in win.summary_label.text()
+        win.library_rescanned([made.id])
+        assert win.dry_run.count(RENAME) == 0 and win.dry_run.count(UNCHANGED) == 2      # the new names, in the scheme
+        assert not any("gone" in (f.reason or "") for s in win.dry_run.series for f in s.files)
+        assert win.btn_undo.isEnabled()
     finally:
         win.deleteLater()
