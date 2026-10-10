@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
@@ -64,6 +65,17 @@ from .links import open_link
 
 
 _log = logging.getLogger(__name__)
+
+
+def root_of(path: str, roots: Sequence[Root]) -> Optional[Root]:
+    """The library folder *path* is in (the deepest one, when folders nest), else None."""
+    norm = os.path.normcase(os.path.abspath(path))
+    best = None
+    for r in roots:
+        base = os.path.normcase(os.path.abspath(r.path)).rstrip("/\\")
+        if (norm == base or norm.startswith(base + os.sep)) and (best is None or len(r.path) > len(best.path)):
+            best = r
+    return best
 
 
 class _ScanStopped(Exception):
@@ -309,6 +321,9 @@ class MainWindow(QMainWindow):
         self._scan_pos: Optional[Tuple[int, int, str]] = None   # (which root, how many, its name) being read
 
         self._thread: QThread | None = None
+        self._scanning_ids: List[int] = []                 # the roots the running scan reads
+        self._scan_queued: Optional[List[Root]] = None     # roots asked for while a scan ran: scanned next
+        self._scan_queue_all = False                       # ... or every root
         self._worker: ScanWorker | None = None
         self._mu_thread: QThread | None = None
         self._mu_worker: MuWorker | None = None
@@ -750,14 +765,28 @@ class MainWindow(QMainWindow):
     def _on_replaced_chapters_moved(self, folders) -> None:
         """The Download tab filed downloads, or restored, moved or deleted replaced chapter files: rescan so the table,
         the To get list and the database follow."""
-        n = len(list(folders))
+        folders = list(folders)
+        n = len(folders)
         self._status_label.setText(f"Files changed in {n} series - rescanning" if n else "Files changed - rescanning")
-        self._start_scan()
+        self._start_scan(self._roots_holding(folders))
 
     def _on_files_deleted(self, paths) -> None:
         """Lane C's view deleted duplicate files: rescan so the table and the database follow."""
         self._status_label.setText(f"{len(paths)} duplicate file(s) deleted - rescanning")
-        self._start_scan()
+        self._start_scan(self._roots_holding(paths))
+
+    def _roots_holding(self, paths) -> Optional[List[Root]]:
+        """The library folders that hold *paths* - only they are rescanned (owner, 2026-10-10: discarding duplicates in
+        one library rescanned every library). None (every library) when a path is in none of them, or none is given."""
+        roots = self._roots()
+        found: List[Root] = []
+        for p in paths:
+            root = root_of(str(p), roots)
+            if root is None:
+                return None
+            if root not in found:
+                found.append(root)
+        return found or None
 
     def _count_duplicate_files(self) -> None:
         """Lane C's duplicate-numbers finder, off the UI thread, for the Duplicates chip's count."""
@@ -846,6 +875,7 @@ class MainWindow(QMainWindow):
             win.activateWindow()
             return win
         win = RenamerWindow(self._make_renamer(), scope, self, run=self._renamer_runner)
+        win.rescan_follows = True           # _on_library_renamed rescans; the window looks again after it
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         win.library_changed.connect(self._on_library_renamed)
         win.duplicates_requested.connect(self.review_duplicates)
@@ -1073,7 +1103,14 @@ class MainWindow(QMainWindow):
 
     def _start_scan(self, roots: Optional[Sequence[Root]] = None) -> None:
         if self._thread is not None:
-            return  # scan already running
+            # a scan is running: this one follows it (a rename's rescan used to be dropped here)
+            if roots is None:
+                self._scan_queue_all = True
+            elif not self._scan_queue_all:
+                queued = {r.id: r for r in (self._scan_queued or [])}
+                queued.update({r.id: r for r in roots})
+                self._scan_queued = list(queued.values())
+            return
         roots = list(roots) if roots is not None else self._roots()
         if not roots:
             return
@@ -1081,6 +1118,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid folder",
                                 "Not a directory:\n" + "\n".join(r.path for r in roots))
             return
+        self._scanning_ids = [r.id for r in roots]
 
         self._top.set_scanning(True)
         label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
@@ -1274,6 +1312,14 @@ class MainWindow(QMainWindow):
         self._show_roots()
         if self._duplicates_view is not None and hasattr(self._duplicates_view, "set_blocked"):
             self._duplicates_view.set_blocked(None)
+        scanned, self._scanning_ids = self._scanning_ids, []
+        queued_all, queued = self._scan_queue_all, self._scan_queued
+        self._scan_queue_all, self._scan_queued = False, None
+        if queued_all or queued:
+            QTimer.singleShot(0, lambda: self._start_scan(None if queued_all else queued))
+        win = self._renamer_window
+        if win is not None and hasattr(win, "library_rescanned"):
+            win.library_rescanned(scanned)
 
     def _stop_scan(self, wait_ms: int = 5000) -> None:
         if self._worker is not None:
