@@ -227,7 +227,8 @@ class DownloadRecord:
 
 class DownloadStore(Protocol):
     def create(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
-               target_dir: str) -> DownloadRecord: ...
+               target_dir: str, *, status: str = DownloadStatus.SENT, only_missing: bool = False,
+               size_bytes: Optional[int] = None, size_source: Optional[str] = None) -> DownloadRecord: ...
 
     def get(self, record_id: int) -> Optional[DownloadRecord]: ...
 

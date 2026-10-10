@@ -111,9 +111,15 @@ class BudgetState:
         first come, first served: while anything waits in it a new send queues behind it, even one that would fit."""
         if self.too_big(size):
             return TOO_BIG
-        if not self.fits(size) or (self.queued and not ignore_queue):
+        if not self.fits(size) or (self.waiting and not ignore_queue):
             return OVER
         return FITS
+
+    @property
+    def waiting(self) -> Tuple[DownloadRecord, ...]:
+        """The queued downloads a hand-over will send in turn: not those bigger than the cap on their own (they wait
+        for the owner, and never hold up the others)."""
+        return tuple(r for r in self.queued if not self.too_big(r.size_bytes))
 
     def usage_text(self) -> str:
         """``using 12.3 GB of 50 GB`` (``using 12.3 GB, no limit`` without a cap)."""
@@ -168,8 +174,8 @@ def size_note(size: int, source: str) -> str:
 
 def over_cap_text(state: BudgetState, size: int) -> str:
     """The confirmation's sentence for a send that would go over the cap (or wait behind the queue)."""
-    if state.queued and state.fits(size):
-        n = len(state.queued)
+    if state.waiting and state.fits(size):
+        n = len(state.waiting)
         return (f"{n} download{'s are' if n != 1 else ' is'} already waiting in the queue, so this one would wait "
                 f"behind {'them' if n != 1 else 'it'} ({state.usage_text()}; this adds {gb_text(size)}).")
     return (f"This would go over the download budget: MangaList is {state.usage_text()}, and this adds "

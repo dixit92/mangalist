@@ -1,5 +1,7 @@
 """The ``downloads`` job for the headless runner: one arrivals pass (file finished ``mangalist`` torrents into
-their series folders, then "Remove Completed"; :mod:`mangalist.downloads.arrivals`).
+their series folders, then "Remove Completed"; :mod:`mangalist.downloads.arrivals`), then one pass of the download
+queue (:func:`mangalist.downloads.queueing.run_queue`: sizes from qBittorrent, then queued downloads handed over in
+order while they fit under the download budget - the room Remove Completed just freed is used at once).
 
 Registered by :func:`mangalist.headless.jobs.build_registry`, enabled only when downloads are on
 (``MANGALIST_DOWNLOADS``), every ``MANGALIST_DOWNLOADS_SCHEDULE`` (default ``every 1h``). Skipped while no
@@ -71,6 +73,15 @@ def replaced_chapters_step(ledger) -> Optional[str]:
     return after_filing(ledger.store, ledger).summary() or None
 
 
+def _queue_work(ledger) -> bool:
+    """True when the queue pass has something to do without any download in progress: a queued download to hand over,
+    or a failed one still counted against the budget (the pass looks whether its torrent is still in qBittorrent)."""
+    from ..downloads.contracts import DownloadStatus
+
+    return any(r.status == DownloadStatus.QUEUED or (r.status == DownloadStatus.FAILED and r.in_client)
+               for r in ledger.all_records())
+
+
 def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
                        client_factory: Optional[Callable[[object], object]] = None,
                        after: Optional[Callable[[JobContext, object, object], Optional[str]]] = after_pass,
@@ -111,7 +122,9 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
             from ..store import get_store
 
             ledger = DownloadLedger(get_store())
-        if not ledger.active():
+        active = bool(ledger.active())
+        queue_work = _queue_work(ledger)
+        if not active and not queue_work:
             notes = [n for n in (_replaced(ledger),          # waiting batches retried, the holding folder emptied
                                  _after(ctx, ledger, _NoReport())) if n]   # pending MangaPixer scans are retried too
             return JobResult("skipped", "no downloads in progress" + "".join(f"; {n}" for n in notes))
@@ -123,7 +136,10 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         if client is None:
             _log.warning("Downloads: no qBittorrent client available in this build; skipped")
             return JobResult("skipped", "no qBittorrent client available")
-        report = run_arrivals(client, ledger, should_stop=lambda: ctx.stop_requested)
+        from ..downloads.arrivals import ArrivalsReport
+        from ..downloads.queueing import run_queue
+
+        report = run_arrivals(client, ledger, should_stop=lambda: ctx.stop_requested) if active else ArrivalsReport()
         if ctx.stop_requested:
             raise Cancelled()
         extra = report.summary()
@@ -131,9 +147,16 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         extra["waiting_records"] = [{"id": i, "why": why} for i, why in report.waiting]
         if report.error:
             return JobResult("error", report.error, extra)
-        status = "error" if report.errors else "ok"
+        queue = run_queue(client, ledger, should_stop=lambda: ctx.stop_requested)
+        if ctx.stop_requested:
+            raise Cancelled()
+        extra.update(queue.summary())
+        extra["queue_failed_records"] = [{"id": i, "why": why} for i, why in queue.failed]
+        status = "error" if report.errors or queue.error else "ok"
         message = (f"{report.checked} checked: {len(report.filed)} filed, {len(report.removed)} removed, "
                    f"{len(report.failed)} failed, {len(report.waiting)} waiting")
+        if queue.text():
+            message += f"; {queue.text()}"
         replaced_note = _replaced(ledger)
         if replaced_note:
             message += f"; {replaced_note}"

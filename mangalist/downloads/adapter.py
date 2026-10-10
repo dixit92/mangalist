@@ -13,6 +13,12 @@ politeness rules apply: one client, one lock) and returns the :class:`~mangalist
 release panel shows before sending; it never raises for a file list that cannot be read - the selection says so and the
 whole pack is what a send then downloads. :meth:`Backend.send` takes ``only_missing`` (False unless the caller says so)
 and keeps what the send did with the pack for :meth:`Backend.take_pack_outcome`.
+
+**The download budget.** :meth:`Backend.send` goes through :func:`~mangalist.downloads.queueing.submit`: it sends when
+the release fits under the cap, else queues it - or sends it past the cap when the owner chose so (``over_cap``).
+:meth:`Backend.budget_status` is the cap and the usage (the release panel's confirmation, the In progress list, Settings);
+:meth:`Backend.send_queued_now`, :meth:`Backend.move_to_front` and :meth:`Backend.remove_from_queue` are the In progress
+list's overrides. The hand-over of the queue runs in :meth:`Backend.check_now` (the downloads job).
 """
 
 from __future__ import annotations
@@ -30,13 +36,24 @@ from ..services.nyaa import NyaaError, NyaaSearch
 from ..services.nyaa.client import NyaaClient
 from ..services.nyaa.ranking import order
 from ..services.qbittorrent import QbtError, client_from_connection, normalize_base_url
-from ..store.downloads import DownloadLedger
+from ..store.downloads import DownloadLedger, StatusConflict
 from ..torrent_files import TorrentError, read_torrent
 from .contracts import DownloadRecord, NyaaCandidate, Placement, QbtConnection, TorrentClient
-from .options import KEY_PARTIAL_DOWNLOADS, NyaaOptions, get_flag, load_nyaa_options, save_nyaa_options, set_flag
+from .budget import OVER_CAP_QUEUE, SIZE_SELECTED, BudgetState
+from .options import (
+    KEY_PARTIAL_DOWNLOADS,
+    NyaaOptions,
+    get_budget_gb,
+    get_flag,
+    load_nyaa_options,
+    save_nyaa_options,
+    set_budget_gb,
+    set_flag,
+)
 from .partial import PackOutcome, PackSelection, choose_files, hint_for, log_selection
 from .placement import placement_for
-from .service import PackSetupError, SendRefused, send_pick
+from .queueing import ClientDown, budget_state, move_to_front, refresh, remove_from_queue, send_now, submit
+from .service import PackSetupError, SendRefused
 
 _log = logging.getLogger(__name__)
 
@@ -161,19 +178,63 @@ class Backend:
     # --- qBittorrent -----------------------------------------------------------------------------------
 
     def send(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str], target_dir: str,
-             only_missing: bool = False) -> DownloadRecord:
+             only_missing: bool = False, over_cap: str = OVER_CAP_QUEUE,
+             size_bytes: Optional[int] = None) -> DownloadRecord:
+        """Send the release - or queue it when it would go over the download budget (``over_cap="queue"``, the
+        default), or send it past the cap (``"send"``, the owner's override). *size_bytes*: what it counts (a partial
+        send: the selected files' total; default the release's size). Returns the record: SENT or QUEUED."""
         conn = self.ledger.connection()
         if conn is None or not conn.base_url:
             raise BackendError("qBittorrent is not set up yet (toolbar: qBittorrent...)")
         placement = replace(self.placement(series_id), target_dir=target_dir, options=())
         key = candidate.info_hash.lower()
         self._outcomes.pop(key, None)
+        client = self._client_factory(conn)
         try:
-            return send_pick(self._client_factory(conn), self.ledger, series_id, candidate, wanted_volumes,
-                             placement, self.ledger.save_path(), only_missing=only_missing,
-                             on_pack=lambda outcome: self._outcomes.__setitem__(key, outcome))
+            refresh(client, self.ledger)            # the budget with qBittorrent's own sizes, when it answers
+        except Exception as exc:  # noqa: BLE001 - the send itself reports an unreachable qBittorrent
+            _log.info("Budget: sizes not refreshed before the send (%s)", type(exc).__name__)
+        try:
+            return submit(client, self.ledger, series_id, candidate, wanted_volumes, placement,
+                          self.ledger.save_path(), only_missing=only_missing, size_bytes=size_bytes,
+                          size_source=SIZE_SELECTED if only_missing and size_bytes else None, over_cap=over_cap,
+                          on_pack=lambda outcome: self._outcomes.__setitem__(key, outcome))
         except (SendRefused, QbtError, PackSetupError) as exc:
             raise BackendError(str(exc)) from None
+
+    # --- the download budget ---------------------------------------------------------------------------------
+
+    def budget_status(self) -> BudgetState:
+        """The cap and what counts against it now (one database read: quick)."""
+        return budget_state(self.ledger)
+
+    def budget_gb(self) -> float:
+        return get_budget_gb(self.db)
+
+    def set_budget_gb(self, gb: float) -> None:
+        set_budget_gb(self.db, gb)
+
+    def send_queued_now(self, record_id: int) -> DownloadRecord:
+        """A queued download, to qBittorrent now, past the cap (the owner's override)."""
+        conn = self.ledger.connection()
+        if conn is None or not conn.base_url:
+            raise BackendError("qBittorrent is not set up yet")
+        try:
+            return send_now(self._client_factory(conn), self.ledger, record_id)
+        except (SendRefused, ClientDown, QbtError) as exc:
+            raise BackendError(str(exc)) from None
+
+    def move_to_front(self, record_id: int) -> DownloadRecord:
+        try:
+            return move_to_front(self.ledger, record_id)
+        except StatusConflict as exc:
+            raise BackendError(f"not moved: {exc}") from None
+
+    def remove_from_queue(self, record_id: int) -> DownloadRecord:
+        try:
+            return remove_from_queue(self.ledger, record_id)
+        except StatusConflict as exc:
+            raise BackendError(f"not removed: {exc}") from None
 
     def records(self, series_id: Optional[int] = None) -> Sequence[DownloadRecord]:
         return self.ledger.for_series(series_id) if series_id is not None else self.ledger.all_records()
