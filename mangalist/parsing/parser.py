@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import PurePath
 from typing import Iterable, Optional, Tuple, Union
 
-from ._common import ENDS_IN_UNIT_WORD
+from ._common import DANGLING_CHAPTER, ENDS_IN_UNIT_WORD, real_group, series_qualifier, split_extension
 from .layers import parse_bare, parse_fmd2, parse_generic, parse_labelled, parse_release, parse_scheme
 from .model import Kind, Layer, ParsedName
 from .template import MANGALIST_CHAPTER_SCHEME, MANGALIST_VOLUME_SCHEME, Template, compile_template
@@ -81,7 +81,29 @@ def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseCont
     result = _first(name, ctx, file_size)
     if result is None:
         return ParsedName(name=name, notes=("no layer recognised the name",))
-    return _apply_hint(result, ctx.kind_hint)
+    return _finish(_apply_hint(result, ctx.kind_hint))
+
+
+def _finish(result: ParsedName) -> ParsedName:
+    """What every layer's result gets (renamer dry run, 2026-10-10):
+
+    - a placeholder group (``[no group]``, ``(Unknown)``, ``N/A``) is no group;
+    - the series' "Season N" / "Part N" is the ``qualifier`` (layer 1 reads it from the scheme itself);
+    - a name cut off after a chapter word (``0001 [Vol. 0001 Ch.cbz``: the chapter number is lost) is a chapter
+      without a number, flagged ``ambiguous`` - never a volume."""
+    changes = {}
+    group = real_group(result.group)
+    if group != result.group:
+        changes["group"] = group
+    if result.qualifier is None and result.layer is not Layer.SCHEME:
+        qualifier = series_qualifier(result.series)
+        if qualifier is not None:
+            changes["qualifier"] = qualifier
+    if result.chapter is None and (result.volume is not None or result.number is not None) \
+            and DANGLING_CHAPTER.search(split_extension(result.name)[0]):
+        changes.update(kind=Kind.CHAPTER, number=None, guessed=False, ambiguous=True, is_extra=False,
+                       notes=result.notes + ("cut off after a chapter word: the chapter number is lost",))
+    return replace(result, **changes) if changes else result
 
 
 def _first(name: str, ctx: ParseContext, file_size: int) -> Optional[ParsedName]:

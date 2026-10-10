@@ -137,9 +137,11 @@ class ParsedName:
     edition: Optional[str] = None               # "Digital", "Digital-Compilation", ...
     fix: Optional[str] = None                   # "f", "f2" (release fix suffix)
     tags: Tuple[str, ...] = ()                  # every trailing (...) / [...] tag of a release name, as written
+    qualifier: Optional[str] = None             # "Season 2" / "Part 5" of the series stated in the name
     guessed: bool = False                       # the kind is a guess (a bare number after the series title read
                                                 # as a chapter); the series' "volumes or chapters?" answer settles it
-    ambiguous: bool = False                     # the generic layer found several volume or chapter numbers
+    ambiguous: bool = False                     # the generic layer found several volume or chapter numbers, or
+                                                # the name is cut off after a chapter word ("[Vol. 0001 Ch")
     notes: Tuple[str, ...] = field(default=(), compare=False)  # diagnostics: why this layer read it so
 
     @property
