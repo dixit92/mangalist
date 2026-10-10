@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **The Library picker moved to the top bar** ("Library: All libraries ▾"), next to the scan time: it applies to the
+  List and the Download tab alike, which the List's filter bar did not make clear. The top bar no longer repeats the
+  library names beside it.
+- Filing missing volumes into a series held as **volumes only** is now noted plainly ("the series holds no chapter
+  files") - it used to give reasons about MangaPixer's chapter lists, as if chapters were involved.
+
 ## [2026.10.10] - 2026-10-09
 
 The ninth MangaList release (testing build): the Download tab shows one group at a time (Missing volumes, Upgrades, Missing chapters) with resizable panels, an upgrade says so in the release panel, the holding folder can be emptied early, and a series can be excluded from its library from the List's right-click menu.

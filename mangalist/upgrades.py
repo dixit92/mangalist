@@ -394,10 +394,15 @@ def examine(db, ledger, record) -> NewBatch:
                   volume_files=volume_files)
     if not filed:
         return nothing("no volume was filed", **common)
+    units = db.list_units(series.id)
+    if not any(u.kind == "chapter" for u in units):
+        # a series held as volumes only: missing volumes were filed, no chapter can be replaced (owner, 2026-10-09:
+        # "don't both of those series only have volumes in the folder anyway?") - say that, not MangaPixer's gaps
+        return nothing("the series holds no chapter files", **common)
     volumes, why = _knowledge_volumes(db, series)
     if volumes is None:
         return nothing(f"{why}; no chapter is replaced", **common)
-    coverage = chapters_replaced(db.list_units(series.id), volumes, filed)
+    coverage = chapters_replaced(units, volumes, filed)
     files: List[ReplacedFile] = []
     kept = list(coverage.kept)
     for rel, chapters, volume in coverage.replaced:

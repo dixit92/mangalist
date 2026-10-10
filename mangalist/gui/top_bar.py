@@ -9,11 +9,14 @@ from typing import Optional, Sequence, Tuple
 from PySide6.QtCore import QByteArray, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QButtonGroup, QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QWidget
 
 from . import theme
 from .app_icon import render_app_icon
 from .chips import TabButton
+from .library_picker import LibraryPicker
+
+ALL_LIBRARIES = "All libraries"
 
 TAB_LIST = 0
 TAB_DOWNLOAD = 1
@@ -54,6 +57,7 @@ class TopBar(QWidget):
     rescan_clicked = Signal()           # every library folder
     rescan_root_clicked = Signal(int)   # one library folder (its root id)
     settings_clicked = Signal()
+    library_changed = Signal(object)    # the Library picker: a root id, or None (All libraries)
     missing_clicked = Signal()
 
     def __init__(self, parent=None):
@@ -92,6 +96,25 @@ class TopBar(QWidget):
         self.tab_download.setVisible(False)
         row.addLayout(nav)
         row.addStretch(1)
+
+        # The Library picker applies to both tabs, so it lives here, next to what was scanned (owner, 2026-10-09: the
+        # Download tab following the List's picker was not clear). Hidden with fewer than two library folders.
+        self.library_label = QLabel("Library")
+        self.library_label.setProperty("role", "status")
+        self.library_picker = LibraryPicker()
+        self.library_picker.setObjectName("libraryPicker")
+        self.library_picker.setAccessibleName("Library")
+        self.library_picker.setToolTip("Show one library folder, or all of them - in the List and the Download tab")
+        self.library_picker.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.library_picker.setMinimumWidth(150)
+        self.library_picker.addItem(ALL_LIBRARIES, None)
+        self.library_picker.activated.connect(lambda i: self.library_changed.emit(self.library_picker.itemData(i)))
+        lib = QHBoxLayout()
+        lib.setSpacing(8)
+        lib.addWidget(self.library_label)
+        lib.addWidget(self.library_picker)
+        row.addLayout(lib)
+        self._show_picker(False)
 
         self.status = QLabel("")
         self.status.setProperty("role", "status")
@@ -148,6 +171,45 @@ class TopBar(QWidget):
 
     def current(self) -> int:
         return TAB_DOWNLOAD if self.tab_download.isChecked() else TAB_LIST
+
+    # --- the Library picker ------------------------------------------------------------------------------
+
+    def _show_picker(self, shown: bool) -> None:
+        self.library_label.setVisible(shown)
+        self.library_picker.setVisible(shown)
+
+    def picker_shown(self) -> bool:
+        return not self.library_picker.isHidden()
+
+    def set_libraries(self, roots: Sequence[Tuple[int, str, str]], current: Optional[int] = None) -> None:
+        """The picker's items from ``(root id, name, path)`` of every library folder; *current* (a root id, or None for
+        all) is picked again when it is still there. Nothing is emitted. One library folder: no picker."""
+        picker = self.library_picker
+        picker.blockSignals(True)
+        picker.clear()
+        picker.addItem(ALL_LIBRARIES, None)
+        for root_id, name, path in roots:
+            picker.addItem(name, root_id)
+            picker.setItemData(picker.count() - 1, path, Qt.ItemDataRole.ToolTipRole)
+        found = picker.findData(current) if current is not None else 0
+        picker.setCurrentIndex(found if found >= 0 else 0)
+        picker.blockSignals(False)
+        self._show_picker(len(roots) > 1)
+
+    def current_library(self) -> Optional[int]:
+        return self.library_picker.currentData()
+
+    def library_name(self) -> str:
+        """What the picker shows now ("All libraries" or the root's name)."""
+        return self.library_picker.currentText()
+
+    def set_library(self, root_id: Optional[int], emit: bool = False) -> None:
+        index = self.library_picker.findData(root_id) if root_id is not None else 0
+        self.library_picker.blockSignals(True)
+        self.library_picker.setCurrentIndex(index if index >= 0 else 0)
+        self.library_picker.blockSignals(False)
+        if emit:
+            self.library_changed.emit(self.current_library())
 
     def set_status(self, text: str, tooltip: str = "") -> None:
         self.status.setText(text)

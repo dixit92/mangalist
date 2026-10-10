@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -30,7 +29,6 @@ from PySide6.QtWidgets import (
 from ..states import State
 from .chips import ChipButton, FlowLayout
 from .detail_panel import DetailPanel
-from .library_picker import LibraryPicker
 from .list_delegates import ROW_HEIGHT, MonoDelegate, SecondaryDelegate, StateBadgeDelegate, TitleDelegate
 from .table_model import (
     COL_ENGLISH, COL_FILES, COL_GAPS, COL_LIBRARY, COL_STATE, COL_TITLE, COL_VERDICT, STATE_FILTERS,
@@ -52,14 +50,12 @@ _CHIP_KEYS = {key for key, _ in CHIPS}
 #: The other state filters (Wanted, Upcoming, Needs attention, ...) sit behind "More".
 MORE_FILTERS: List[Tuple[str, str]] = [(k, label) for k, label in STATE_FILTERS if k not in _CHIP_KEYS]
 
-ALL_LIBRARIES = "All libraries"
 PAGE_TABLE, PAGE_DUPLICATES, PAGE_EMPTY = 0, 1, 2
 DETAILS_WIDTH = 380
 
 
 class ListTab(QWidget):
     filter_changed = Signal(object)     # a chip's key: None (All), a STATE_FILTERS key, or DUPLICATES
-    library_changed = Signal(object)    # the picker: a root id, or None (All libraries)
     details_toggled = Signal(bool)
     add_root_clicked = Signal()
 
@@ -108,18 +104,6 @@ class ListTab(QWidget):
         self.search.setMaximumWidth(320)
         self.search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row.addWidget(self.search, 1, Qt.AlignmentFlag.AlignTop)
-
-        # "All libraries · <root> · <root> ..." - a dropdown, so many roots never crowd the bar (hidden with one).
-        self.library_picker = LibraryPicker()
-        self.library_picker.setObjectName("libraryPicker")
-        self.library_picker.setAccessibleName("Library")
-        self.library_picker.setToolTip("Show one library folder, or all of them")
-        self.library_picker.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.library_picker.setMinimumWidth(150)
-        self.library_picker.addItem(ALL_LIBRARIES, None)
-        self.library_picker.setVisible(False)
-        self.library_picker.activated.connect(self._on_library_activated)
-        row.addWidget(self.library_picker, 0, Qt.AlignmentFlag.AlignTop)
 
         chip_box = QWidget()
         chips = FlowLayout(chip_box, spacing=6)
@@ -248,39 +232,6 @@ class ListTab(QWidget):
     def _open_more(self) -> None:
         self.chip_more.setChecked(self._filter in self._more_actions)        # only the menu decides
         self.more_menu.exec(self.chip_more.mapToGlobal(self.chip_more.rect().bottomLeft()))
-
-    def _on_library_activated(self, index: int) -> None:
-        self.library_changed.emit(self.library_picker.itemData(index))
-
-    def set_libraries(self, roots: Sequence[Tuple[int, str, str]], current: Optional[int] = None) -> None:
-        """The picker's items from ``(root id, name, path)`` of every library folder; *current* (a root id, or None for
-        all) is picked again when it is still there. Nothing is emitted. One library folder: no picker."""
-        picker = self.library_picker
-        picker.blockSignals(True)
-        picker.clear()
-        picker.addItem(ALL_LIBRARIES, None)
-        for root_id, name, path in roots:
-            picker.addItem(name, root_id)
-            picker.setItemData(picker.count() - 1, path, Qt.ItemDataRole.ToolTipRole)
-        found = picker.findData(current) if current is not None else 0
-        picker.setCurrentIndex(found if found >= 0 else 0)
-        picker.blockSignals(False)
-        picker.setVisible(len(roots) > 1)
-
-    def current_library(self) -> Optional[int]:
-        return self.library_picker.currentData()
-
-    def library_name(self) -> str:
-        """What the picker shows now ("All libraries" or the root's name)."""
-        return self.library_picker.currentText()
-
-    def set_library(self, root_id: Optional[int], emit: bool = False) -> None:
-        index = self.library_picker.findData(root_id) if root_id is not None else 0
-        self.library_picker.blockSignals(True)
-        self.library_picker.setCurrentIndex(index if index >= 0 else 0)
-        self.library_picker.blockSignals(False)
-        if emit:
-            self.library_changed.emit(self.current_library())
 
     def current_filter(self) -> Optional[str]:
         return self._filter

@@ -57,7 +57,7 @@ class Lib:
 
     def pick(self, win, name):
         """The owner picks *name* ("All libraries" too) in the dropdown."""
-        picker = win._list.library_picker
+        picker = win._top.library_picker
         index = picker.findText(name)
         assert index >= 0, name
         picker.setCurrentIndex(index)
@@ -133,7 +133,7 @@ def _two_libraries(lib, **kw):
 
 def test_the_picker_lists_all_libraries_then_each_root_and_hides_itself_with_one(lib):
     win = lib.make_window()
-    picker = win._list.library_picker
+    picker = win._top.library_picker
     assert picker.isHidden() and [picker.itemText(i) for i in range(picker.count())] == ["All libraries"]
     win._db.add_root(str(lib.dirs[MANGA]), MANGA)
     win._show_roots()
@@ -144,7 +144,7 @@ def test_the_picker_lists_all_libraries_then_each_root_and_hides_itself_with_one
     assert not picker.isHidden()
     assert [picker.itemText(i) for i in range(picker.count())] == ["All libraries", MANGA, MANHWA, COMICS]
     assert picker.itemData(2, Qt.ItemDataRole.ToolTipRole) == str(lib.dirs[MANHWA])
-    assert picker.itemData(2) == lib.root(win, MANHWA).id and win._list.current_library() is None
+    assert picker.itemData(2) == lib.root(win, MANHWA).id and win._top.current_library() is None
 
 
 def test_picking_a_library_filters_the_table_the_counts_and_the_status(lib):
@@ -176,13 +176,13 @@ def test_the_choice_is_remembered_and_comes_back_in_the_next_window(lib):
     assert config.load()["list_library"] == str(lib.dirs[MANHWA])
     again = lib.make_window()
     again._show_roots()
-    assert again._list.library_name() == MANHWA and again._library == lib.root(again, MANHWA).id
+    assert again._top.library_name() == MANHWA and again._library == lib.root(again, MANHWA).id
     assert again._model.scope() == again._library
     lib.pick(again, "All libraries")
     assert config.load()["list_library"] == ""                    # "all" is written too: the store keeps old keys
     third = lib.make_window()
     third._show_roots()
-    assert third._library is None and third._list.library_name() == "All libraries"
+    assert third._library is None and third._top.library_name() == "All libraries"
 
 
 def test_a_remembered_library_that_is_gone_falls_back_to_all(lib):
@@ -190,8 +190,8 @@ def test_a_remembered_library_that_is_gone_falls_back_to_all(lib):
     lib.pick(win, MANHWA)
     win._db.remove_root(lib.root(win, MANHWA).id)
     win._show_roots()
-    assert win._list.library_name() == "All libraries" and win._library is None
-    assert win._list.library_picker.isHidden()                      # one root left: no picker, every series shows
+    assert win._top.library_name() == "All libraries" and win._library is None
+    assert win._top.library_picker.isHidden()                      # one root left: no picker, every series shows
 
 
 def test_the_duplicates_chip_counts_inside_the_picked_library(lib, qapp):
@@ -258,7 +258,7 @@ def test_a_series_picked_from_elsewhere_switches_to_its_library(lib):
     win = _two_libraries(lib)
     lib.pick(win, MANGA)
     win.show_folder_in_list(str(lib.dirs[MANHWA].resolve() / "Korean Quest"))      # e.g. from the Download tab
-    assert win._list.library_name() == MANHWA and win._library == lib.root(win, MANHWA).id
+    assert win._top.library_name() == MANHWA and win._library == lib.root(win, MANHWA).id
     sel = win._table.selectionModel().selectedRows()
     assert [win._model.entry_at(win._proxy.mapToSource(i).row()).title for i in sel] == ["Korean Quest"]
 
@@ -348,22 +348,22 @@ def test_the_top_bar_names_the_root_being_read(lib):
     win._thread = object()                                         # a scan is "running" (this test drives the slots)
     try:
         win._on_root_started(1, 2, MANGA)
-        assert win._top.status.text() == "Manga, Manhwa · scanning Manga (1 of 2)…"
+        assert win._top.status.text() == "Scanning Manga (1 of 2)…"
         assert win._status_label.text() == "Scanning Manga…"
         win._on_progress(3, 8, "Manga: Example Quest")
         assert win._status_label.text() == "Scanning (3/8): Manga: Example Quest"
         win._on_root_started(2, 2, MANHWA)
-        assert win._top.status.text() == "Manga, Manhwa · scanning Manhwa (2 of 2)…"
+        assert win._top.status.text() == "Scanning Manhwa (2 of 2)…"
         assert win._progress.maximum() == 0                        # busy again until the next root's first folder
         win._scan_pos = (1, 1, MANHWA)                             # a one-root rescan
         win._show_roots()
-        assert win._top.status.text() == "Manga, Manhwa · scanning Manhwa…"
+        assert win._top.status.text() == "Scanning Manhwa…"
         win._on_root_scanned(scan_one_root(lib.root(win, MANHWA)), [])
         assert win._status_label.text() == "Manhwa: 2 series"
     finally:
         win._thread = None
     win._show_roots()
-    assert "scanning" not in win._top.status.text() and "scanned " in win._top.status.text()
+    assert "scanning" not in win._top.status.text().lower() and "scanned " in win._top.status.text().lower()
 
 
 def test_one_root_shows_no_root_name_while_scanning(lib):
@@ -527,3 +527,13 @@ def test_a_series_moved_to_another_root_keeps_its_data_through_the_windows_scan(
     moved = next(e for e in win._model.entries() if e.title == "Example Quest")
     assert moved.root_id == manhwa.id and moved.examined and str(new) in win._cfg["examined"]
     assert "1 renamed / moved series kept their data" in win._status_label.text()
+
+
+def test_the_picker_lives_in_the_top_bar_for_both_tabs(lib):
+    # owner, 2026-10-09: the Download tab following the List's picker was not clear - one picker, in the top bar
+    win = lib.make_window()
+    for name in (MANGA, MANHWA):
+        win._db.add_root(str(lib.dirs[name]), name)
+    win._show_roots()
+    assert win._top.picker_shown() and win._top.library_label.text() == "Library"
+    assert not hasattr(win._list, "library_picker")
