@@ -43,6 +43,18 @@ class NyaaOptions:
         return tuple(out)
 
 
+    def source_languages(self) -> tuple:
+        """The Suwayomi source languages these settings mean (owner, 2026-10-10: show only English sources by default,
+        as nyaa's English-translated setting): ``en`` when English (or nothing) is ticked, ``ja`` with Raw, and ``all``
+        (an extension's one multi-language source) always."""
+        out = ["all"]
+        if self.english or not self.raw:
+            out.append("en")
+        if self.raw:
+            out.append("ja")
+        return tuple(out)
+
+
 _FIXED_ON = ("digital_first", "hide_no_seeders")
 
 

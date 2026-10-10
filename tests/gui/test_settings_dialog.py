@@ -579,6 +579,33 @@ def test_suwayomi_sources_are_read_from_suwayomi_ticked_and_ordered(qapp, db, ca
     assert sources(page) == [("MangaDex (EN)", False), ("Weeb Example", True)] and backend.allowed == [WEEB.id]
 
 
+def test_suwayomi_sources_show_the_nyaa_languages_and_the_ones_in_use(qapp, db, cache):
+    """Owner, 2026-10-10: "Seventy-two rows to find five in is clumsy" - English (nyaa's setting) and the ticked ones;
+    the rest behind "Show all languages"; "Reset to default" for a list ticked by hand."""
+    from dataclasses import replace
+
+    french = replace(MANGADEX, id="4505830566611664829", display_name="MangaDex (FR)", lang="fr")
+    german = replace(MANGADEX, id="5098537545549490547", display_name="MangaDex (DE)", lang="de")
+    backend = FakeChapterBackend()
+    backend.installed = [MANGADEX, WEEB, french, german]
+    backend.allowed = [MANGADEX.id, german.id]                   # a German source ticked by hand: it stays in view
+    dlg, _ = make(qapp, db, cache, backend)
+    page = dlg.pages[SECTION_SOURCES]
+    dlg.show_section(SECTION_SOURCES)
+    wait_until(qapp, lambda: page._sources_call is None)
+    assert sources(page) == [("MangaDex (EN)", True), ("MangaDex (DE)", True), ("Weeb Example", False)]
+    assert page.all_langs_check.isVisibleTo(page) and page.all_langs_check.text() == "Show all languages (1 more)"
+    page.all_langs_check.setChecked(True)
+    assert [n for n, _t in sources(page)] == ["MangaDex (EN)", "MangaDex (DE)", "Weeb Example", "MangaDex (FR)"]
+    page.all_langs_check.setChecked(False)
+    assert len(sources(page)) == 3
+    page.btn_sources_reset.click()                                # back to MangaDex in English alone
+    wait_until(qapp, lambda: page._sources_call is None)
+    assert backend.allowed is None
+    assert sources(page) == [("MangaDex (EN)", True), ("Weeb Example", False)]
+    assert page.all_langs_check.text() == "Show all languages (2 more)"
+
+
 def test_suwayomi_sources_say_when_suwayomi_cannot_be_read_or_has_none(qapp, db, cache):
     backend = FakeChapterBackend()
     backend.sources_error = "Suwayomi could not be reached at http://192.0.2.10:4567 (ConnectionError)"

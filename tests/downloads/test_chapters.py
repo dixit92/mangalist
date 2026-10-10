@@ -270,3 +270,26 @@ def test_connection_is_kept_out_of_settings(db):
     assert SuwayomiSettings(db).series_choice(7) == {"source_id": WEEB.id}
     store.forget_connection()
     assert store.connection() is None
+
+
+def test_the_default_is_mangadex_in_the_owners_languages_not_every_language():
+    """Owner, 2026-10-10: every MangaDex language came ticked - "I have to manually untick all the others"."""
+    from dataclasses import replace
+
+    french = replace(MANGADEX, id="4505830566611664829", display_name="MangaDex (FR)", lang="fr")
+    japanese = replace(MANGADEX, id="1411768577036936240", display_name="MangaDex (JA)", lang="ja")
+    installed = [french, WEEB, japanese, MANGADEX]
+    assert chm.allowed_sources(installed, None) == [MANGADEX]                       # English only, by default
+    assert chm.allowed_sources(installed, None, ("all", "en", "ja")) == [MANGADEX, japanese]   # nyaa's Raw ticked
+    assert chm.allowed_sources(installed, [french.id]) == [french]                  # the owner's choice stands
+
+
+def test_reset_forgets_the_owners_source_choice(tmp_path):
+    from mangalist import store
+
+    store.reset_stores()
+    settings = SuwayomiSettings(store.get_store())
+    settings.set_sources(["1", "2"])
+    assert settings.sources() == ["1", "2"]
+    settings.reset_sources()
+    assert settings.sources() is None

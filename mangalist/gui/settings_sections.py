@@ -146,8 +146,12 @@ class SourcesPage(SectionPage):
         self.suwayomi_badge = pill("Suwayomi not set up", "warn")
         self.btn_sources_reload = button("Reload", link=True, tip="Read the installed sources from Suwayomi again")
         self.btn_sources_reload.clicked.connect(self.load_suwayomi_sources)
+        self.btn_sources_reset = button("Reset to default", link=True,
+                                        tip="Use MangaDex alone, in your nyaa languages (English unless Raw is ticked)")
+        self.btn_sources_reset.clicked.connect(self.reset_suwayomi_sources)
         sv.addLayout(hbox(label("Suwayomi sources", "name"), label("Chapters · needs Suwayomi", "muted"),
-                          self.suwayomi_badge, None, self.btn_sources_reload, self.btn_suwayomi, spacing=10))
+                          self.suwayomi_badge, None, self.btn_sources_reset, self.btn_sources_reload, self.btn_suwayomi,
+                          spacing=10))
         sv.addWidget(label(SUWAYOMI_EXPLAIN, "lead", wrap=True))
         self.sources_list = QListWidget()
         self.sources_list.setObjectName("suwayomiSources")
@@ -159,6 +163,12 @@ class SourcesPage(SectionPage):
         self.btn_down = button("Move down")
         self.btn_down.clicked.connect(lambda: self._move_source(1))
         sv.addWidget(self.sources_list)
+        # owner, 2026-10-10: "Seventy-two rows to find five in is clumsy" - the sources in nyaa's languages (English by
+        # default) and the ones in use; the rest behind this switch
+        self.all_langs_check = checkbox("Show all languages")
+        self.all_langs_check.toggled.connect(lambda _on: self._render_sources())
+        sv.addWidget(self.all_langs_check)
+        self._source_rows: list = []
         self.sources_note = label("", "muted", wrap=True)
         sv.addLayout(hbox(self.btn_up, self.btn_down, self.sources_note, None, spacing=8))
         self.suwayomi_rows = suwayomi
@@ -181,7 +191,7 @@ class SourcesPage(SectionPage):
         self.suwayomi_badge.setText("Ready" if ready else "Suwayomi not set up")
         set_prop(self.suwayomi_badge, "badge", "ok" if ready else "warn")
         self.btn_suwayomi.setVisible(not ready)
-        for w in (self.sources_list, self.btn_up, self.btn_down, self.btn_sources_reload):
+        for w in (self.sources_list, self.btn_up, self.btn_down, self.btn_sources_reload, self.btn_sources_reset):
             w.setEnabled(ready)
         if not ready:
             self.sources_note.setText("Connect Suwayomi first (Settings > Connected services).")
@@ -203,12 +213,34 @@ class SourcesPage(SectionPage):
 
     def show_sources(self, sources) -> None:
         """``[(SuwayomiSource, allowed)]`` in order (the backend's answer)."""
+        self._source_rows = list(sources)
+        self._render_sources()
+
+    def _source_shown(self, source, allowed: bool) -> bool:
+        """A source in the list: every one with "Show all languages", else the ones in nyaa's languages and any in use
+        (a ticked source never disappears)."""
+        if allowed or self.all_langs_check.isChecked():
+            return True
+        return source.lang in load_nyaa_options(self._db).source_languages()
+
+    def _render_sources(self) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QListWidgetItem
 
+        if self.sources_list.count():                       # keep the order and ticks shown so far
+            ticked = set(self.allowed_source_ids())
+            order = [self.sources_list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.sources_list.count())]
+            rank = {sid: i for i, sid in enumerate(order)}
+            self._source_rows = sorted(((src, src.id in ticked) for src, _a in self._source_rows),
+                                       key=lambda row: rank.get(row[0].id, len(rank)))
+        sources = self._source_rows
+        shown = [(src, allowed) for src, allowed in sources if self._source_shown(src, allowed)]
+        hidden = len(sources) - len(shown)
+        self.all_langs_check.setText(f"Show all languages ({hidden} more)" if hidden else "Show all languages")
+        self.all_langs_check.setVisible(bool(hidden) or self.all_langs_check.isChecked())
         self._loading_sources = True
         self.sources_list.clear()
-        for source, allowed in sources:
+        for source, allowed in shown:
             item = QListWidgetItem(f"{source.display_name}  ·  {source.lang}")
             item.setData(Qt.ItemDataRole.UserRole, source.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -216,9 +248,19 @@ class SourcesPage(SectionPage):
             item.setToolTip(f"Source id {source.id} · {source.extension or 'extension unknown'}")
             self.sources_list.addItem(item)
         self._loading_sources = False
-        n = sum(1 for _s, allowed in sources if allowed)
+        n = sum(1 for _s, allowed in shown if allowed)
         self.sources_note.setText(f"{n} of {len(sources)} in use" if sources else
                                   "Suwayomi has no sources yet: install extensions in Suwayomi (MangaDex first).")
+
+    def reset_suwayomi_sources(self) -> bool:
+        """Forget the ticks and the order: MangaDex alone in the nyaa languages, then read the list again."""
+        reset = getattr(self._backend, "reset_suwayomi_sources", None) if self._backend is not None else None
+        if not callable(reset):
+            return False
+        reset()
+        self.sources_list.clear()                           # the new order comes from the backend, not the old rows
+        self.downloads_changed.emit()
+        return self.load_suwayomi_sources()
 
     def allowed_source_ids(self) -> list:
         from PySide6.QtCore import Qt
