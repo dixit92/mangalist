@@ -187,13 +187,13 @@ def test_without_a_backend_downloads_are_said_to_be_off(qapp, db, cache):
 
 
 def test_library_lists_the_roots_with_their_series_and_mangapixer_library(qapp, db, cache, library):
-    root = db.add_root(str(library), "Manga-Concluded")
+    root = db.add_root(str(library), "Finished Manga")
     db.connect().__enter__()                                   # (the store opens connections per use)
     dlg, _ = make(qapp, db, cache)
     page = dlg.pages[SECTION_LIBRARY]
     assert "MangaList files downloads only into these" in page.lead_label.text()
     text = all_text(page)
-    assert "Manga-Concluded" in text and str(library) in text and "0 series" in text
+    assert "Finished Manga" in text and str(library) in text and "0 series" in text
     assert "File naming" in text and "Rename to the scheme…" in text and "Windows server" in text
     assert root.id is not None
 
@@ -205,11 +205,11 @@ def test_library_keeps_the_windows_server_name_for_the_length_rule(qapp, db, cac
     dlg, _ = make(qapp, db, cache)
     page = dlg.pages[SECTION_LIBRARY]
     assert page.server_edit.text() == ""
-    page.server_edit.setText("  \\\\SMIT-SERVER\\ ")
-    assert page.save_server() and renamer.windows_server(db) == "SMIT-SERVER"
-    assert page.server_edit.text() == "SMIT-SERVER"
-    page.server_edit.setText("SMIT SERVER")                     # not a server name: kept as it was, said why
-    assert not page.save_server() and renamer.windows_server(db) == "SMIT-SERVER"
+    page.server_edit.setText("  \\\\MYSERVER\\ ")
+    assert page.save_server() and renamer.windows_server(db) == "MYSERVER"
+    assert page.server_edit.text() == "MYSERVER"
+    page.server_edit.setText("MY SERVER")                     # not a server name: kept as it was, said why
+    assert not page.save_server() and renamer.windows_server(db) == "MYSERVER"
     assert not page.server_error.isHidden() and "letters, digits" in page.server_error.text()
     page.server_edit.setText("")
     assert page.save_server() and renamer.windows_server(db) is None and page.server_error.isHidden()
@@ -226,18 +226,18 @@ def test_library_says_which_mangapixer_library_each_root_is_part_of(qapp, db, ca
             self.id, self.display_name, self.kind = id, name, kind
             self.folder_count = self.item_count = self.last_scan_at = None
 
-    whole = db.add_root(str(library), "Manga-Ongoing")
+    whole = db.add_root(str(library), "Current Manga")
     inside = db.add_root(str(tmp_path / "other" / "M" / "Manga"), "Other manga")
     mine = db.add_root(str(tmp_path / "comics"), "Comics")
     fresh = db.add_root(str(tmp_path / "new"), "New")
     assert "MangaPixer" not in all_text(make(qapp, db, cache)[0].pages[SECTION_LIBRARY])   # not connected: no line
     cache.set_connection(base_url="mangapixer.example:8080", token="t")
-    cache.save_libraries([Lib("ongoing", "Manga-Ongoing"), Lib("other", "Other", None)])
+    cache.save_libraries([Lib("ongoing", "Current Manga"), Lib("other", "Other", None)])
     cache.save_mapping(Mapping(root_id=whole.id, library_id="ongoing", prefix=[], matched=290, unmatched=6))
     cache.save_mapping(Mapping(root_id=inside.id, library_id="other", prefix=["M", "Manga"], matched=12, unmatched=0))
     mp_map.set_manual_mapping(cache, mine.id, None)
     text = all_text(make(qapp, db, cache)[0].pages[SECTION_LIBRARY])
-    assert "MangaPixer: Manga-Ongoing · 290 of 296 series" in text
+    assert "MangaPixer: Current Manga · 290 of 296 series" in text
     assert "MangaPixer: Other › M/Manga · 12 of 12 series" in text
     assert "MangaPixer: not paired (your choice)" in text
     assert "MangaPixer: not paired yet - it pairs after the next scan" in text            # the new root
@@ -372,7 +372,7 @@ def test_the_mangapixer_card_lists_libraries_and_root_mapping_and_warns_about_sc
     from mangalist.store.mangapixer import Mapping
 
     connect_mangapixer(cache)
-    root = db.add_root(str(library), "Manga-Concluded")
+    root = db.add_root(str(library), "Finished Manga")
     cache.save_libraries([mpc.Library("lib0", "Manga", kind="manga"), mpc.Library("lib1", "Comics", kind="comic")])
     cache.save_mapping(Mapping(root_id=root.id, library_id="lib0", prefix=(), manual=False))
     dlg, _ = make(qapp, db, cache)
@@ -380,7 +380,7 @@ def test_the_mangapixer_card_lists_libraries_and_root_mapping_and_warns_about_sc
     text = card.detail_label.text()
     assert "https://mangapixer.example · token: stored" in text and TOKEN not in text
     assert "Libraries: Manga, Comics (kind skipped)" in text
-    assert "Roots: Manga-Concluded → Manga" in text
+    assert "Roots: Finished Manga → Manga" in text
     assert card.note_label.isHidden()
     cache.scan_forbidden_at = lambda: "2026-10-08T10:00:00Z"                      # MangaPixer said 403 to a scan request
     dlg.pages[SECTION_SERVICES].refresh()

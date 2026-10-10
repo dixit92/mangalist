@@ -164,13 +164,13 @@ def test_batches_keep_series_whole_and_roots_apart():
     assert [b.n_files for b in batches] == [6, 5, 1]
 
 
-@pytest.mark.parametrize("text,expected", [("SMIT-SERVER", "SMIT-SERVER"), ("\\\\SMIT-SERVER\\", "SMIT-SERVER"),
+@pytest.mark.parametrize("text,expected", [("MYSERVER", "MYSERVER"), ("\\\\MYSERVER\\", "MYSERVER"),
                                            ("  ", None), (None, None), ("nas.local", "nas.local")])
 def test_server_names(text, expected):
     assert normalize_server(text) == expected
 
 
-@pytest.mark.parametrize("bad", ["SMIT SERVER", "\\\\srv\\share", "a/b", "-x"])
+@pytest.mark.parametrize("bad", ["MY SERVER", "\\\\srv\\share", "a/b", "-x"])
 def test_bad_server_names(bad):
     with pytest.raises(ValueError):
         normalize_server(bad)

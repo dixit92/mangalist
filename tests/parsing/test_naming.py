@@ -261,7 +261,7 @@ def test_bytes_not_characters_count():
 
 
 def test_the_windows_path_limit():
-    folder = "/data/Reading/Manga/" + "F" * 150
+    folder = "/data/Comics/Manga/" + "F" * 150
     r = chapter_name("1", volume=2, title="T" * 120, group="Grp", folder=folder, limits=WIN)
     wp = windows_path(f"{folder}/{r.name}", "SERVER")
     assert r.fits and len(wp) <= 259 and r.shortened == ("title",)
@@ -318,20 +318,20 @@ def test_name_fits():
 # --- Windows paths ----------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("path, server, expected", [
-    ("/data/Reading/Manga/Series/Ch. 0001.00.cbz", "SERVER", "\\\\SERVER\\Reading\\Manga\\Series\\Ch. 0001.00.cbz"),
-    ("/data/Reading", "SERVER", "\\\\SERVER\\Reading"),
-    ("/data/Reading/", "SERVER", "\\\\SERVER\\Reading"),
-    ("/data//Reading//a", "SERVER", "\\\\SERVER\\Reading\\a"),
-    ("/data/Reading/a", "\\\\SERVER", "\\\\SERVER\\Reading\\a"),
-    ("/data/Reading/a", " SERVER\\ ", "\\\\SERVER\\Reading\\a"),
+    ("/data/Comics/Manga/Series/Ch. 0001.00.cbz", "SERVER", "\\\\SERVER\\Comics\\Manga\\Series\\Ch. 0001.00.cbz"),
+    ("/data/Comics", "SERVER", "\\\\SERVER\\Comics"),
+    ("/data/Comics/", "SERVER", "\\\\SERVER\\Comics"),
+    ("/data//Comics//a", "SERVER", "\\\\SERVER\\Comics\\a"),
+    ("/data/Comics/a", "\\\\SERVER", "\\\\SERVER\\Comics\\a"),
+    ("/data/Comics/a", " SERVER\\ ", "\\\\SERVER\\Comics\\a"),
     ("/data/My Share/a b/c", "srv", "\\\\srv\\My Share\\a b\\c"),
     ("/data", "SERVER", None),
     ("/data/", "SERVER", None),
-    ("/mnt/user/Reading/a", "SERVER", None),
+    ("/mnt/user/Comics/a", "SERVER", None),
     ("/database/x", "SERVER", None),
     ("relative/data/x", "SERVER", None),
-    ("/data/Reading/../x", "SERVER", None),
-    ("/data/Reading/a", "", None),
+    ("/data/Comics/../x", "SERVER", None),
+    ("/data/Comics/a", "", None),
     ("", "SERVER", None),
 ])
 def test_windows_path(path, server, expected):
