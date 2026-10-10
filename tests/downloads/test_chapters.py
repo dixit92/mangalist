@@ -148,6 +148,21 @@ def test_build_lookup_marks_queued_and_in_hand(cledger, cseries):
     assert look.source_name == "MangaDex (EN)" and look.manga_title == "Example Manga"
 
 
+def test_extras_the_source_has_are_offered_within_the_folders_range(cledger, cseries):
+    # owner, 2026-10-10: MangaFire had 71.5 and other extras the panel never offered
+    sid, _folder = cseries
+    chs = [chapter(i, n) for i, n in enumerate(["0.5", "2.5", "3.5", "4", "4.5", "5", "5.5", "9.5"], start=1)]
+    held = {D(1): ["Alpha Scans"], D(2): ["Alpha Scans"], D(3): ["Alpha Scans"], D("3.5"): ["Alpha Scans"]}
+    # 0.5 is below the first chapter (it may sit in a held volume), 3.5 is held, 9.5 is past the last one known
+    assert chm.extra_numbers(chs, ["4", "5", "6"], held) == [D("2.5"), D("4.5"), D("5.5")]
+    assert chm.extra_numbers(chs, [], {}) == []
+    look = chm.build_lookup(FakeSuwayomi(chapters=chs), series_id=sid, missing=["4", "5", "6"],
+                            match=chm.MangaMatch(MANGADEX, MANGA, chm.HOW_MANGADEX), held=held, stored_group=None)
+    assert [(r.number, r.extra) for r in look.rows] == [("2.5", True), ("4", False), ("4.5", True), ("5", False),
+                                                         ("5.5", True), ("6", False)]
+    assert look.missing == ("4", "5", "6") and look.not_available == ["6"]      # extras never count as missing
+
+
 def test_held_chapter_groups_and_placement(db, cseries):
     sid, folder = cseries
     assert chm.held_chapter_groups(db, sid) == {D(1): ["Alpha Scans"], D(2): ["Alpha Scans"], D(3): ["Alpha Scans"]}
