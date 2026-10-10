@@ -214,3 +214,51 @@ def test_remove_completed_series_titles_and_next_check(db, series, qbt):
     assert b.next_check() == "2026-10-08T11:21:00+00:00"
     state.write_text("{not json", encoding="utf-8")
     assert b.next_check() is None
+
+
+# --- the download budget ------------------------------------------------------------------------------------
+
+
+def test_send_queues_over_the_cap_and_the_overrides(db, series, qbt, tmp_path):
+    from mangalist.downloads.budget import GB
+
+    sid, sdir = series
+    b = _backend(db, qbt)
+    b.save_settings(QbtSettings(base_url="box:8080", username="admin", save_path=str(tmp_path / "torrents")), "pw")
+    assert b.budget_gb() == 50
+    b.set_budget_gb(20)
+    first = b.send(sid, candidate(size_bytes=15 * GB), ["2"], str(sdir))
+    second = b.send(sid, candidate(info_hash="cd" * 20, size_bytes=10 * GB), ["2"], str(sdir))
+    third = b.send(sid, candidate(info_hash="ef" * 20, size_bytes=1 * GB), ["2"], str(sdir), over_cap="send")
+    assert (first.status, second.status, third.status) == (DownloadStatus.SENT, DownloadStatus.QUEUED,
+                                                           DownloadStatus.SENT)
+    state = b.budget_status()
+    assert state.usage_text() == "using 16 GB of 20 GB" and [r.id for r in state.queued] == [second.id]
+    with pytest.raises(BackendError, match="already queued"):
+        b.send(sid, candidate(info_hash="cd" * 20, size_bytes=10 * GB), ["2"], str(sdir))
+    with pytest.raises(BackendError, match="bigger than the download budget of 20 GB"):
+        b.send(sid, candidate(info_hash="12" * 20, size_bytes=21 * GB), ["2"], str(sdir))
+    fourth = b.send(sid, candidate(info_hash="34" * 20, size_bytes=1 * GB), ["2"], str(sdir))
+    assert b.move_to_front(fourth.id).queue_position == 1
+    assert b.remove_from_queue(fourth.id).status == DownloadStatus.CANCELLED
+    with pytest.raises(BackendError, match="not removed"):
+        b.remove_from_queue(fourth.id)
+    with pytest.raises(BackendError, match="not moved"):
+        b.move_to_front(first.id)
+    assert b.send_queued_now(second.id).status == DownloadStatus.SENT
+    with pytest.raises(BackendError, match="only a queued download"):
+        b.send_queued_now(second.id)
+
+
+def test_a_partial_send_counts_the_size_the_panel_gives(db, series, qbt, tmp_path):
+    from mangalist.downloads.budget import GB, SIZE_SELECTED
+
+    sid, sdir = series
+    b = _backend(db, qbt)
+    b.save_settings(QbtSettings(base_url="box:8080", username="admin", save_path=str(tmp_path / "torrents")), "pw")
+    b.set_budget_gb(20)
+    b.send(sid, candidate(size_bytes=15 * GB), ["2"], str(sdir))
+    rec = b.send(sid, candidate(info_hash="cd" * 20, size_bytes=60 * GB), ["2"], str(sdir), only_missing=True,
+                 size_bytes=6 * GB)                # 15 + 6 > 20: queued (never sent here)
+    assert rec.status == DownloadStatus.QUEUED and (rec.size_bytes, rec.size_source) == (6 * GB, SIZE_SELECTED)
+    assert b.ledger.request(rec.id)["only_missing"] is True

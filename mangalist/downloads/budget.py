@@ -67,8 +67,18 @@ def counts(record: DownloadRecord) -> bool:
     return record.status == DownloadStatus.FAILED and record.in_client
 
 
+def _counted(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
+    """The records that count, each torrent once: a release sent again after its record failed (the torrent still in
+    the client) is one torrent on the disk, counted by its newest record that is not FAILED."""
+    by_hash = {}
+    for r in sorted(records, key=lambda r: (r.status != DownloadStatus.FAILED, r.id)):
+        if counts(r):
+            by_hash[r.info_hash.lower() or f"#{r.id}"] = r
+    return list(by_hash.values())
+
+
 def used_bytes(records: Iterable[DownloadRecord]) -> int:
-    return sum(max(0, r.size_bytes) for r in records if counts(r))
+    return sum(max(0, r.size_bytes) for r in _counted(records))
 
 
 def queue_of(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
@@ -85,6 +95,7 @@ class BudgetState:
     used_bytes: int
     queued: Tuple[DownloadRecord, ...] = ()     # in hand-over order
     unknown_sizes: int = 0              # counted downloads whose size is not known (counted as 0)
+    hashes: frozenset = frozenset()     # the torrents counted (lowercase info hashes)
 
     @property
     def limited(self) -> bool:
@@ -142,9 +153,10 @@ class BudgetState:
 
 def state_of(records: Sequence[DownloadRecord], cap_gb: float) -> BudgetState:
     """The budget over *records* (every record of every client) under a cap of *cap_gb* GB (0: no limit)."""
-    counted = [r for r in records if counts(r)]
-    return BudgetState(cap_bytes=gb_bytes(cap_gb), used_bytes=used_bytes(counted), queued=tuple(queue_of(records)),
-                       unknown_sizes=sum(1 for r in counted if r.size_bytes <= 0))
+    counted = _counted(records)
+    return BudgetState(cap_bytes=gb_bytes(cap_gb), used_bytes=sum(max(0, r.size_bytes) for r in counted),
+                       queued=tuple(queue_of(records)), unknown_sizes=sum(1 for r in counted if r.size_bytes <= 0),
+                       hashes=frozenset(r.info_hash.lower() for r in counted if r.info_hash))
 
 
 def ordinal(n: int) -> str:

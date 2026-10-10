@@ -100,7 +100,8 @@ def submit(client: TorrentClient, ledger, series_id: int, candidate: NyaaCandida
     target = check_pick(ledger, candidate, wanted_volumes, placement, save_path)
     with _HAND_OVER:
         state = budget_state(ledger)
-        verdict = state.verdict(size)
+        # A torrent that already counts (a failed download's, still in qBittorrent) adds nothing when sent again.
+        verdict = state.verdict(0 if candidate.info_hash.lower() in state.hashes else size)
         if verdict == TOO_BIG and over_cap != OVER_CAP_SEND:
             _log.info("Budget: %s refused: %s is bigger than the whole cap of %s on its own (send it past the cap, or "
                       "not at all)", candidate.title, gb_text(size), gb_text(state.cap_bytes))
@@ -172,20 +173,15 @@ def refresh(client: TorrentClient, ledger, report: Optional[QueueReport] = None)
     client cannot list its torrents (nothing is changed then)."""
     report = report or QueueReport()
     torrents = {t.info_hash.lower(): t for t in client.torrents(QBITTORRENT_CATEGORY)}
-    records = list(ledger.all_records())
-    # A torrent sent again after its record failed belongs to the new record: the failed one must not count it twice.
-    tracked = {r.info_hash.lower() for r in records if r.status in COUNTED}
-    for rec in records:
+    for rec in ledger.all_records():
         if rec.status not in (*COUNTED, DownloadStatus.FAILED):
             continue
         t = torrents.get(rec.info_hash.lower())
         if rec.status == DownloadStatus.FAILED:
-            held = t is not None and rec.info_hash.lower() not in tracked
-            if rec.in_client != held and ledger.note_in_client(rec.id, held):
-                if not held:
-                    report.released.append(rec.id)
-                    _log.info("Budget: failed download %d (%s) is no longer in qBittorrent (or belongs to a newer "
-                              "download); its %s no longer count", rec.id, rec.title, gb_text(rec.size_bytes))
+            if rec.in_client != (t is not None) and ledger.note_in_client(rec.id, t is not None) and t is None:
+                report.released.append(rec.id)
+                _log.info("Budget: failed download %d (%s) is no longer in qBittorrent; its %s no longer count",
+                          rec.id, rec.title, gb_text(rec.size_bytes))
         if t is not None and t.size > 0 and (t.size != rec.size_bytes or rec.size_source != SIZE_CLIENT):
             if ledger.note_size(rec.id, t.size, SIZE_CLIENT):
                 report.sized.append(rec.id)
