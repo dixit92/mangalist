@@ -627,8 +627,8 @@ class LoggingPage(SectionPage):
     def _show_help(self, s: "log_config.LogSettings") -> None:
         self.level_help.setText(LOG_LEVEL_HELP[s.level])
         total = s.max_mb * (s.backups + 1)
-        self.space_label.setText(f"At most {total} MB per log file name ({s.max_mb} MB now plus {s.backups} old "
-                                 f"file{'s' if s.backups != 1 else ''}); the oldest is deleted first.")
+        self.space_label.setText(f"Up to {total} MB on disk for each log (the file being written, {s.max_mb} MB, plus "
+                                 f"{s.backups} old file{'s' if s.backups != 1 else ''}); the oldest is deleted first.")
 
     def _changed(self, *_args) -> None:
         if self._loading:
