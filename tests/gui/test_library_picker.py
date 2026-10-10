@@ -363,7 +363,7 @@ def test_the_top_bar_names_the_root_being_read(lib):
     finally:
         win._thread = None
     win._show_roots()
-    assert "scanning" not in win._top.status.text() and "scanned " in win._top.status.text()
+    assert "scanning" not in win._top.status.text().lower() and "scanned " in win._top.status.text().lower()
 
 
 def test_one_root_shows_no_root_name_while_scanning(lib):
