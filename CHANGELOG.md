@@ -7,6 +7,14 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.18] - 2026-10-10
+
+The seventeenth MangaList release (testing build): rescans after duplicates and downloads cover only the libraries that changed, a rescan asked for during another is no longer lost, and the Renamer shows the new names after a rename.
+
+- **Only the libraries that changed are rescanned** after deleting duplicates or after the Download tab files, restores or moves files. Before, discarding duplicates in one library rescanned every library.
+- **The Renamer waits for its rescan.** Right after a rename, every renamed file showed under its old name as "left alone: the file is gone since the last scan". The window now says "Rescanning the library to show the new names…" and shows the preview once that rescan is done; Undo last batch stays off meanwhile.
+- **A rescan asked for while another scan runs is no longer dropped**: it runs after the current scan. A rename's or a deletion's rescan could be lost this way.
+
 ## [2026.10.17] - 2026-10-10
 
 The sixteenth MangaList release (testing build): the chapters panel offers a source's extra chapters and has Select all, MangaFire's "unofficial" label is not used as a group, and the Renamer hides series already in the scheme.
