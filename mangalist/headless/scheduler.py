@@ -13,6 +13,11 @@ Semantics:
 - **Shutdown.** :meth:`Scheduler.stop` (SIGTERM / SIGINT) wakes the loop; a running job is asked
   to stop at its next check and is recorded as ``cancelled`` with its due time unchanged, so the
   next start catches it up once.
+- **Edited schedules.** Each loop (at least once a ``max_sleep``) the scheduler asks ``reload_schedules`` for the
+  schedules now in force (the owner edits them in Settings, stored in the database) and applies a change to a job at
+  once: its next run is the new schedule's first slot after "now", logged at INFO; a job switched off is unscheduled.
+  ``on_tick`` runs at the same moment (the runner re-reads the logging settings there). Neither may stop the loop:
+  a failure is logged once per distinct message and the current schedules stay.
 - **Clock.** The loop sleeps at most ``max_sleep`` seconds at a time and re-reads the clock, so a
   suspended host or a clock change is noticed within that time.
 """
@@ -22,10 +27,10 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, tzinfo
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Mapping, Optional
 
 from .jobs import Cancelled, Job, JobContext, JobRegistry, JobResult
-from .schedule import UTC, is_missed
+from .schedule import UTC, Schedule, is_missed
 from .state import JobState, StateStore
 
 _log = logging.getLogger(__name__)
@@ -38,7 +43,9 @@ def utc_now() -> datetime:
 class Scheduler:
     def __init__(self, registry: JobRegistry, store: StateStore, tz: tzinfo,
                  now: Callable[[], datetime] = utc_now, max_sleep: float = 60.0,
-                 wait: Optional[Callable[[float], bool]] = None):
+                 wait: Optional[Callable[[float], bool]] = None,
+                 reload_schedules: Optional[Callable[[], Mapping[str, Optional[Schedule]]]] = None,
+                 on_tick: Optional[Callable[[], None]] = None):
         self.registry = registry
         self.store = store
         self.tz = tz
@@ -47,6 +54,9 @@ class Scheduler:
         self._stop = threading.Event()
         self._wait = wait or self._stop.wait
         self.current_job: Optional[str] = None
+        self._reload = reload_schedules
+        self._on_tick = on_tick
+        self._tick_problems: Dict[str, str] = {}
 
     # --- control ----------------------------------------------------------------------------
 
@@ -92,6 +102,57 @@ class Scheduler:
             else:
                 _log.info("%s: next run %s", name, self._fmt(when))
         return planned
+
+    def refresh(self) -> bool:
+        """Re-read what the owner can change while the runner is up (schedules, logging); True if a schedule changed."""
+        if self._on_tick is not None:
+            try:
+                self._on_tick()
+                self._tick_problems.pop("tick", None)
+            except Exception as exc:  # noqa: BLE001 - never stop the runner for this
+                self._problem("tick", "Could not refresh the logging settings", exc)
+        if self._reload is None:
+            return False
+        try:
+            wanted = self._reload()
+            self._tick_problems.pop("schedules", None)
+        except Exception as exc:  # noqa: BLE001 - keep the schedules in force
+            self._problem("schedules", "Could not re-read the schedules; keeping the current ones", exc)
+            return False
+        return self.apply_schedules(wanted)
+
+    def _problem(self, key: str, what: str, exc: Exception) -> None:
+        text = f"{type(exc).__name__}: {exc}"
+        if self._tick_problems.get(key) != text:             # once per distinct problem, not once a minute
+            self._tick_problems[key] = text
+            _log.warning("%s (%s)", what, text, exc_info=True)
+
+    def apply_schedules(self, wanted: Mapping[str, Optional[Schedule]]) -> bool:
+        """Switch the jobs named in *wanted* to their new schedules; a changed job's next run is the first slot after
+        now (an edited schedule never fires at once). Persists and logs each change."""
+        now = self._now()
+        changed = False
+        for job in self.registry.all():
+            if job.name not in wanted or wanted[job.name] == job.schedule:
+                continue
+            new = wanted[job.name]
+            was = job.schedule.describe() if job.schedule else "off"
+            job.set_schedule(new)
+            st = self.store.get(job.name)
+            changed = True
+            if job.active:
+                st.next_run = new.next_after(now, self.tz)  # type: ignore[union-attr]
+                st.schedule = new.describe()                # type: ignore[union-attr]
+                _log.info("%s: schedule changed (%s -> %s); next run %s", job.name, was, new.describe(),  # type: ignore[union-attr]
+                          self._fmt(st.next_run))
+            else:
+                st.next_run = None
+                st.schedule = ""
+                _log.info("%s: schedule changed (%s -> %s); not scheduled (%s)", job.name, was,
+                          new.describe() if new else "off", "disabled" if not job.enabled and new else "no schedule")
+        if changed:
+            self.store.save()
+        return changed
 
     def due_jobs(self, now: Optional[datetime] = None) -> List[Job]:
         now = now or self._now()
@@ -155,6 +216,7 @@ class Scheduler:
     def run_forever(self) -> None:
         self.plan()
         while not self.stopping:
+            self.refresh()
             self.run_once()
             if self.stopping:
                 break
