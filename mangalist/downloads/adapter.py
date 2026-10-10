@@ -516,6 +516,19 @@ class Backend:
                     out[number] = rec
         return out
 
+    def other_candidates(self, series_id: int, titles: Sequence[str],
+                         exclude_source: Optional[str] = None) -> List[MangaMatch]:
+        """The series by title on the owner's allowed sources other than *exclude_source* (the one it is matched on,
+        which lacks some missing chapters) - candidates for the owner to confirm."""
+        client = self._chapter_client()
+        try:
+            sources = allowed_sources(list(client.sources()), self.suwayomi.sources(), self._source_languages())
+            return title_candidates(client, [s for s in sources if s.id != str(exclude_source or "")], titles)
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
     def confirm_match(self, series_id: int, match: MangaMatch) -> None:
         """The owner confirmed a title match: it is the series' Suwayomi manga from now on."""
         self.suwayomi.set_series_choice(series_id, source_id=match.source.id, manga_id=int(match.manga.id),

@@ -212,3 +212,38 @@ def test_chapters_already_in_hand_are_not_offered(qapp):
     open_series(qapp, panel)
     assert table(panel)[0] == (False, "41", "Alpha Scans", "Downloading ch 41")
     assert [c.id for c in panel.picks()] == [42, 43]
+
+
+def test_chapters_the_source_lacks_can_come_from_another_source(qapp):
+    # owner, 2026-10-10: MangaDex had 3 of 90 missing chapters and the rest could not be picked
+    panel, backend, _ = make(qapp)
+    open_series(qapp, panel)
+    assert not panel.btn_other.isHidden()                            # ch 44 is not on MangaDex (EN)
+    assert panel.other_sources()
+    settle(qapp, panel)
+    assert backend.other_searches == [(4, ("Example Webcomic",), MANGADEX.id)]
+    assert threading.get_ident() not in backend.threads                # off the UI thread
+    assert panel.stack.currentIndex() == cp.PAGE_CANDIDATES and panel.cand_table.rowCount() == 1
+    assert "does not have ch 44" in panel.cand_note.text() and not panel.btn_cand_back.isHidden()
+    assert panel.btn_other.isHidden()
+    panel.btn_cand_back.click()                                        # keep MangaDex
+    assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS and backend.confirmed == []
+    assert panel.other_sources()
+    settle(qapp, panel)
+    panel.cand_table.selectRow(0)
+    assert panel.confirm_selected()
+    settle(qapp, panel)
+    ((sid, match),) = backend.confirmed
+    assert sid == 4 and match.manga == WEEB_MANGA
+    assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS and "confirmed by you" in panel.match_label.text()
+
+
+def test_no_other_source_has_it_says_so_and_keeps_the_chapters(qapp):
+    backend = FakeChapterBackend()
+    backend.no_others = True
+    panel, _, _ = make(qapp, backend)
+    open_series(qapp, panel)
+    assert panel.other_sources()
+    settle(qapp, panel)
+    assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS
+    assert "None of your other Suwayomi sources has this series" in panel.status_label.text()

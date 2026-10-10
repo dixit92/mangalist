@@ -66,6 +66,8 @@ available:
 ``set_suwayomi_sources(ids)``             quick: the allowed source ids, in order.
 ``chapter_lookup(series_id, missing,      find the series in Suwayomi and list its missing chapters with the groups
  titles)``                                that have them -> :class:`~mangalist.downloads.chapters.ChapterLookup`.
+``other_candidates(series_id, titles,     optional: the series by title on the allowed sources other than
+ exclude_source)``                        *exclude_source* (the matched one lacks some chapters) -> ``[MangaMatch]``.
 ``confirm_match(series_id, match)``       the owner confirmed a title match (stored for the series).
 ``forget_match(series_id)``               look the series up again from scratch.
 ``set_series_group(series_id, group)``    the series' scanlation group (None: back to the default rule).

@@ -269,6 +269,18 @@ def test_a_title_match_on_another_source_waits_for_the_owners_confirmation(world
     assert backend.chapter_lookup(sid, ("1", "2"), (SERIES,)).match is None
 
 
+def test_other_sources_by_title_leave_out_the_matched_one(world):
+    # owner, 2026-10-10: MangaDex had 3 of 90 missing chapters - the rest must be reachable on another source
+    backend, session, sid = world["backend"], world["session"], world["sid"]
+    connect(world)
+    session.answers["MangaListSources"] = with_other_source()
+    session.answers["MangaListSearch"] = titles_on_other_source()
+    backend.set_suwayomi_sources([MANGADEX_EN, OTHER])
+    found = backend.other_candidates(sid, (SERIES,), MANGADEX_EN)
+    assert found and {c.source.id for c in found} == {OTHER} and {c.how for c in found} == {chm.HOW_TITLE}
+    assert not any(r["name"] == "MangaListChapters" for r in session.requests)     # candidates only, nothing listed
+
+
 def test_the_series_group_is_remembered_and_wins_over_the_default(world):
     backend, sid = world["backend"], world["sid"]
     link_mangadex(world["db"], world["root"].id)
