@@ -117,8 +117,10 @@ def test_volume_with_loose_chapters():
 def test_bare_numbers_are_unknown_until_answered():
     names = ["01.cbz", "02.cbz", "Title 03.cbz"]
     i = inv(names)
-    assert i.volumes == () and i.chapters == ()
-    assert i.unknown == tuple(names)
+    # Next Cycle Design section 10 (2026-10-10): a bare number AFTER the series title is a chapter by guess (the
+    # series still asks "volumes or chapters?"); a name that is only a number stays unknown.
+    assert i.volumes == () and i.chapters == (D("3"),)
+    assert i.unknown == ("01.cbz", "02.cbz")
     assert inv(names, hint="volumes").volumes == (D("1"), D("2"), D("3"))
     assert inv(names, hint="chapters").chapters == (D("1"), D("2"), D("3"))
     assert inv(names, hint="chapters").unknown == ()

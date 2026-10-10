@@ -155,9 +155,13 @@ class FileHit:
 
     @property
     def needs_kind(self) -> bool:
-        """A bare number (``01.cbz``) whose kind neither the name nor the series' answer gives."""
+        """A bare number (``01.cbz``) whose kind neither the name nor the series' answer gives - also one read as a
+        chapter only by guess (``Title 07.cbz``, :attr:`~mangalist.parsing.ParsedName.guessed`): the question stays
+        open until the owner answers."""
         p = self.parsed
-        return p is not None and getattr(p.kind, "value", p.kind) == "unknown" and p.number is not None
+        if p is None or p.number is None:
+            return False
+        return getattr(p.kind, "value", p.kind) == "unknown" or bool(getattr(p, "guessed", False))
 
 
 @dataclass

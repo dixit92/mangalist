@@ -34,6 +34,7 @@ class Layer(str, Enum):
     SCHEME = "scheme"      # 1. the root's own naming scheme, inverted
     FMD2 = "fmd2"          # 2. FMD2 exact: NNNN [ ... ] / Title - NNNN [ ... ]
     RELEASE = "release"    # 3. release names: Title vNN (Year) (Digital) (Group)
+    LABELLED = "labelled"  # 3b. a site's own chapter label: Title - Episode 35, Title [Pact 0015]
     GENERIC = "generic"    # 4. today's classifier tokens, unchanged
     BARE = "bare"          # 5. bare numbers: 01.cbz, Title 01.cbz
     NONE = "none"          # nothing recognised
@@ -115,7 +116,10 @@ class ParsedName:
 
     ``index`` is FMD2's numbering index (its download-list position, ``%NUMBERING%``), never the chapter
     number. ``number`` is a bare number whose kind is not stated in the name (``01.cbz``); when the
-    caller's kind hint decides it, the same range is also put into ``volume`` or ``chapter``.
+    caller's kind hint decides it, the same range is also put into ``volume`` or ``chapter``. A bare
+    number after the series title (``Title 07.cbz``) with no hint is read as a chapter by guess
+    (``guessed``; Next Cycle Design section 10, 2026-10-10: most such files in the owner's library are
+    chapters) - a "volumes" answer turns it into a volume.
     """
 
     name: str                                   # the file name as given
@@ -133,6 +137,9 @@ class ParsedName:
     edition: Optional[str] = None               # "Digital", "Digital-Compilation", ...
     fix: Optional[str] = None                   # "f", "f2" (release fix suffix)
     tags: Tuple[str, ...] = ()                  # every trailing (...) / [...] tag of a release name, as written
+    guessed: bool = False                       # the kind is a guess (a bare number after the series title read
+                                                # as a chapter); the series' "volumes or chapters?" answer settles it
+    ambiguous: bool = False                     # the generic layer found several volume or chapter numbers
     notes: Tuple[str, ...] = field(default=(), compare=False)  # diagnostics: why this layer read it so
 
     @property
