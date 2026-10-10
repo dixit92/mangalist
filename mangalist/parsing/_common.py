@@ -86,6 +86,9 @@ ENDS_IN_UNIT_WORD = re.compile(r"(?<![A-Za-z])(?:v|vol(?:ume)?|ch(?:apter|ap|p)?
 PLACEHOLDER_GROUPS = frozenset({
     "no group", "no-group", "nogroup", "no groups", "no scanlator", "no scanlation group", "unknown", "unknown group",
     "none", "n/a", "na", "null", "nil", "-", "?", "tbd",
+    # MangaFire labels each chapter "official" / "unofficial" where other sources name the group; "unofficial" says
+    # nothing about who translated it (owner, 2026-10-10). "official" is kept: it says the translation is the publisher's.
+    "unofficial",
 })
 
 
