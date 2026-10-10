@@ -94,7 +94,7 @@ class SourcesPage(SectionPage):
 
         nyaa = card("true")
         nv = QVBoxLayout(nyaa)
-        nv.setContentsMargins(16, 14, 16, 14)
+        nv.setContentsMargins(20, 16, 20, 16)
         nv.setSpacing(10)
         self.nyaa_badge = pill("Ready", "ok")
         self.on_check = checkbox("On")
@@ -138,7 +138,7 @@ class SourcesPage(SectionPage):
 
         suwayomi = card("true")
         sv = QVBoxLayout(suwayomi)
-        sv.setContentsMargins(16, 14, 16, 14)
+        sv.setContentsMargins(20, 16, 20, 16)
         sv.setSpacing(10)
         self.btn_suwayomi = button("Set up Suwayomi")
         self.btn_suwayomi.clicked.connect(lambda: self.section_requested.emit(SECTION_SERVICES))
@@ -260,7 +260,7 @@ class SourcesPage(SectionPage):
 
         budget = card("true")
         bv = QVBoxLayout(budget)
-        bv.setContentsMargins(16, 14, 16, 14)
+        bv.setContentsMargins(20, 16, 20, 16)
         bv.setSpacing(10)
         self.budget_usage = label("", "muted")
         bv.addLayout(hbox(label("Download budget", "name"), label("Torrents (qBittorrent)", "muted"), None,
@@ -537,7 +537,7 @@ class AutomationPage(SectionPage):
     def _build_replaced(self) -> None:
         box = card("true")
         bv = QVBoxLayout(box)
-        bv.setContentsMargins(16, 14, 16, 14)
+        bv.setContentsMargins(20, 16, 20, 16)
         bv.setSpacing(8)
         bv.addWidget(label("Replaced chapters", "name"))
         bv.addWidget(label(self.REPLACED_LEAD, "lead", wrap=True))
@@ -748,7 +748,7 @@ class LoggingPage(SectionPage):
 
         box = card("true")
         bv = QVBoxLayout(box)
-        bv.setContentsMargins(16, 14, 16, 14)
+        bv.setContentsMargins(20, 16, 20, 16)
         bv.setSpacing(10)
         self.level_combo = QComboBox()
         self.level_combo.setAccessibleName("Log level")
@@ -764,7 +764,7 @@ class LoggingPage(SectionPage):
 
         areas = card("true")
         av = QVBoxLayout(areas)
-        av.setContentsMargins(16, 14, 16, 14)
+        av.setContentsMargins(20, 16, 20, 16)
         av.setSpacing(8)
         av.addWidget(label("Levels for one part of the app", "name"))
         av.addWidget(label("Optional. Turn one part up to Debug while you look into a problem, or down to Error "
@@ -788,7 +788,7 @@ class LoggingPage(SectionPage):
 
         files = card("true")
         fv = QVBoxLayout(files)
-        fv.setContentsMargins(16, 14, 16, 14)
+        fv.setContentsMargins(20, 16, 20, 16)
         fv.setSpacing(8)
         fv.addWidget(label("Log files", "name"))
         self.size_spin = QSpinBox()

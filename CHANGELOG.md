@@ -7,6 +7,7 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Number boxes show their up / down arrows again** (Settings > Download sources > Download budget, Logging): the stylesheet had hidden them. Settings cards have a little more room inside their border.
 - **No personal examples in the app**: the Windows server field and its explanation use a neutral example (`MYSERVER`); test data no longer borrows real library or share names.
 
 ## [2026.10.14] - 2026-10-10
