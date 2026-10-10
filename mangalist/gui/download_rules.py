@@ -287,9 +287,21 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 
 # --- Settings: schedules ---------------------------------------------------------------------------------
 
-SCHEDULE_ROWS = (("Rescan the library", "MANGALIST_RESCAN_SCHEDULE", "daily@03:30"),
-                 ("Sync with MangaPixer", "MANGALIST_MANGAPIXER_SYNC_SCHEDULE", "daily@03:15"),
-                 ("File finished downloads", "MANGALIST_DOWNLOADS_SCHEDULE", "every 1h"))
+# The schedules the Automation section edits (owner, 2026-10-09). The dispatch batch is left out: it is a stub that
+# dispatches nothing yet, so a time for it would only confuse. Stored in the database; the container's variables only
+# seed them (see mangalist/headless/settings.py).
+SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads")
+SCHEDULE_HINT = "daily@03:30, every 12h or off"
+
+
+@dataclass(frozen=True)
+class ScheduleEntry:
+    job: str
+    label: str
+    edit_text: str          # what the field holds: the canonical text, or a bad container value as it is
+    when: str               # the plain-words reading ("daily 03:30"), or "<text> (not understood)"
+    source: str             # headless.settings.SOURCE_STORED / SOURCE_ENV / SOURCE_DEFAULT
+    valid: bool
 
 
 def schedule_text(described: str) -> str:
@@ -302,25 +314,39 @@ def schedule_text(described: str) -> str:
     return described
 
 
-def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, str, bool]]:
-    """(what, when, from the environment?) for the Automation section. The schedules come from the container's
-    environment; a bad value is shown as it is, flagged, rather than hidden."""
-    import os
-
+def schedule_entries(db, env: Optional[Mapping[str, str]] = None) -> List[ScheduleEntry]:
+    """The schedules for the Automation section: what is in force and where it comes from (set in Settings, the
+    container's variable, or the default). A bad value is shown as it is, flagged, rather than hidden."""
     from ..headless.schedule import parse_schedule
+    from ..headless.settings import SCHEDULE_BY_JOB, resolve_schedule
 
-    env = os.environ if env is None else env
     rows = []
-    for label, name, default in SCHEDULE_ROWS:
-        raw = env.get(name)
-        text = default if raw is None else raw
+    for job in SCHEDULE_JOBS:
+        spec = SCHEDULE_BY_JOB[job]
+        choice = resolve_schedule(spec, db, env)
         try:
-            parsed = parse_schedule(text)
+            parsed = parse_schedule(choice.text)
         except ValueError:
-            when = f"{text} (not understood)"
-        else:
-            when = schedule_text(parsed.describe()) if parsed is not None else "off"
-            if name == "MANGALIST_DOWNLOADS_SCHEDULE" and parsed is not None:
-                when += " (and Check qBittorrent now)"
-        rows.append((label, when, raw is not None))
+            rows.append(ScheduleEntry(job, spec.label, choice.text, f"{choice.text} (not understood)", choice.source,
+                                      False))
+            continue
+        canonical = parsed.describe() if parsed is not None else "off"
+        when = schedule_text(canonical) if parsed is not None else "off"
+        if job == "downloads" and parsed is not None:
+            when += " (and Check qBittorrent now)"
+        rows.append(ScheduleEntry(job, spec.label, canonical, when, choice.source, True))
     return rows
+
+
+def save_schedule_text(db, job: str, text: str) -> str:
+    """Check and store the schedule typed for *job*; the stored text. ValueError with a plain message for the owner."""
+    from ..headless.settings import SCHEDULE_BY_JOB, save_schedule
+
+    return save_schedule(db, SCHEDULE_BY_JOB[job], text)
+
+
+def reset_schedule_text(db, job: str) -> None:
+    """Forget the stored schedule of *job*: the container's value applies again."""
+    from ..headless.settings import SCHEDULE_BY_JOB, reset_schedule
+
+    reset_schedule(db, SCHEDULE_BY_JOB[job])
