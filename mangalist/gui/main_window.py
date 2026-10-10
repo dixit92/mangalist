@@ -364,7 +364,7 @@ class MainWindow(QMainWindow):
         self._btn_mu_start.clicked.connect(self._on_mu_start)
         self._btn_mu_stop.clicked.connect(self._on_mu_stop)
         lst.filter_changed.connect(self._on_filter_changed)
-        lst.library_changed.connect(self._on_library_changed)
+        self._top.library_changed.connect(self._on_library_changed)
         lst.details_toggled.connect(self._on_details_toggled)
         lst.add_root_clicked.connect(lambda: self._on_choose_root())
         self._detail.get_requested.connect(self._on_get_requested)
@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
 
     def _scope_note(self) -> str:
         """`` (Manhwa)`` while one library is picked, else nothing - for the footer's messages."""
-        return f" ({self._list.library_name()})" if self._library is not None else ""
+        return f" ({self._top.library_name()})" if self._library is not None else ""
 
     def _refresh_libraries(self) -> None:
         """Rebuild the picker and the Rescan menu from the library folders (when they changed) and re-pick the remembered
@@ -516,7 +516,7 @@ class MainWindow(QMainWindow):
         picked = next((r.id for r in roots if r.path == remembered), None) if len(roots) > 1 else None
         self._model.set_root_names({r.id: r.name for r in roots})
         self._top.set_rescan_targets(targets)
-        self._list.set_libraries(targets, picked)
+        self._top.set_libraries(targets, picked)
         self._apply_library(picked)
 
     def _apply_library(self, root_id: Optional[int]) -> None:
@@ -529,7 +529,7 @@ class MainWindow(QMainWindow):
 
     def _on_library_changed(self, root_id) -> None:
         """The owner picked a library (or All libraries): remember it, then everything that follows the table follows."""
-        _log.info("Library picked: %s", self._list.library_name())
+        _log.info("Library picked: %s", self._top.library_name())
         root = next((r for r in self._roots() if r.id == root_id), None) if root_id is not None else None
         if root_id is not None and root is None:
             root_id = None
@@ -825,7 +825,8 @@ class MainWindow(QMainWindow):
             parts = ["No library folder"]
             tip = "No library folder yet: add one in Settings"
         else:
-            parts = [", ".join(r.name for r in roots) if len(roots) <= 2 else f"{len(roots)} library folders"]
+            # with the Library picker next to it, the status does not repeat the names
+            parts = [] if self._top.picker_shown() else [", ".join(r.name for r in roots)]
             tip = "\n".join(f"{r.name}: {r.path}" for r in roots)
         if self._thread is not None:
             parts.append(self._scanning_text(len(roots)))
@@ -834,7 +835,8 @@ class MainWindow(QMainWindow):
         synced = self._mangapixer_synced()
         if synced is not None:
             parts.append(f"MangaPixer synced {_when(synced)}")
-        self._top.set_status(" · ".join(parts), tip)
+        text = " · ".join(parts)
+        self._top.set_status(text[:1].upper() + text[1:], tip)                    # "Scanned 14:52 · MangaPixer ..."
         self._update_page()
 
     def _scanning_text(self, n_roots: int) -> str:
@@ -1402,7 +1404,7 @@ class MainWindow(QMainWindow):
         if not self._model.in_scope(src_row):       # another library is picked: go to the series' own
             entry = self._model.entry_at(src_row)
             own = entry.root_id if entry is not None and any(r.id == entry.root_id for r in self._roots()) else None
-            self._list.set_library(own)
+            self._top.set_library(own)
             self._on_library_changed(own)
         idx = self._proxy.mapFromSource(src)
         if not idx.isValid() or self._list.current_filter() == DUPLICATES:

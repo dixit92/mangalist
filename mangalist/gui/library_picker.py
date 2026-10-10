@@ -1,4 +1,4 @@
-"""The List tab's Library picker: a combo box that also draws its dropdown chevron. The theme styles every combo's
+"""The Library picker (top bar): a combo box that also draws its dropdown chevron. The theme styles every combo's
 drop-down area with no border and no arrow image (:mod:`.theme`), which leaves the picker looking like a second
 search box; the chevron is painted here, like the chips paint their own counts (:mod:`.chips`)."""
 
