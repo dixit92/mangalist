@@ -44,9 +44,11 @@ def test_a_spin_box_in_the_settings_sheet_shows_dark_arrow_pixels(qapp):
     assert dark > 6, "no arrow drawn in the button area"
 
 
-def test_without_the_arrow_files_no_rules_are_added(qapp, monkeypatch):
+def test_without_the_arrow_files_no_rules_are_added(qapp, monkeypatch, tmp_path):
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("x")                                             # a folder cannot be made under a file, on any OS
     monkeypatch.setattr(spin_arrows, "_made", {})
-    monkeypatch.setattr(spin_arrows, "_cache_dir", lambda: "/proc/nowhere/mangalist")
+    monkeypatch.setattr(spin_arrows, "_cache_dir", lambda: str(blocker / "ui"))
     assert spin_arrows.spin_rules(color="#123456") == ""
 
 
