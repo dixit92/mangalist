@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Dict, Mapping, Optional
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTime, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSpinBox,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -46,7 +47,18 @@ from ..downloads.options import (
     set_flag,
 )
 from .background import start_call
-from .download_rules import SCHEDULE_HINT, reset_schedule_text, save_schedule_text, schedule_entries
+from .download_rules import (
+    CHOICE_DAILY,
+    CHOICE_WEEKLY,
+    DAY_NAMES,
+    ScheduleChoice,
+    choice_of,
+    held_size_text,
+    reset_schedule_text,
+    save_schedule_text,
+    schedule_choices,
+    schedule_entries,
+)
 from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
 from .downloads_backend import BackendError, DownloadsBackend
@@ -63,8 +75,7 @@ AUTOMATION_LEAD = "What runs on its own in the container."
 LOGGING_LEAD = "What MangaList writes to its log files, and where they are."
 SCHEDULE_NOTE = ("These times are used by MangaList's background runner in the Docker / Unraid container, in the "
                  "container's time zone; the desktop app on its own runs nothing on a timer. A change reaches the "
-                 "runner within a minute - no restart. Write daily@03:30 (every day at 03:30, 24-hour clock), "
-                 "every 12h (every 12 hours) or off.")
+                 "runner within a minute - no restart.")
 SUWAYOMI_EXPLAIN = ("Once connected: the sources Suwayomi offers (MangaDex, official English sites, ...) in the order "
                     "MangaList tries them, which to never use, and the preferred scanlation groups - for all series, "
                     "or per series.")
@@ -310,31 +321,47 @@ class AutomationPage(SectionPage):
     # Schedules (owner, 2026-10-09: "This should be configurable by the user"): stored in the database, so the runner in
     # the container re-reads them; the container's variables only seed them.
     def _build_schedules(self) -> None:
+        """One row per schedule: a choice (Weekly, Daily, Every 12 hours, Every 6 hours, Off - owner, 2026-10-10), the
+        day and the time where the choice needs them, then the reading in words and where it comes from."""
         grid = QGridLayout()
-        grid.setColumnMinimumWidth(0, 260)
+        grid.setColumnMinimumWidth(0, 200)
+        grid.setColumnMinimumWidth(1, 160 + 130 + 80 + 16)      # Weekly's three controls, so every row lines up
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(10)
-        self.schedule_edits: Dict[str, QLineEdit] = {}
+        self.schedule_modes: Dict[str, QComboBox] = {}
+        self.schedule_days: Dict[str, QComboBox] = {}
+        self.schedule_times: Dict[str, QTimeEdit] = {}
         self.schedule_reading: Dict[str, QLabel] = {}
         self.schedule_reset: Dict[str, QPushButton] = {}
         self.schedule_source: Dict[str, QLabel] = {}
         for row, entry in enumerate(schedule_entries(self._db, self._env)):
-            edit = QLineEdit()
-            edit.setAccessibleName(entry.label)
-            edit.setPlaceholderText(SCHEDULE_HINT)
-            edit.setMaximumWidth(180)
+            mode = QComboBox()
+            mode.setAccessibleName(entry.label)
+            mode.setFixedWidth(160)                             # the same width whether the day / time show or not
+            day = QComboBox()
+            day.setAccessibleName(f"{entry.label}: day")
+            day.setFixedWidth(130)
+            for i, name in enumerate(DAY_NAMES):
+                day.addItem(name, i)
+            at = QTimeEdit()
+            at.setDisplayFormat("HH:mm")
+            at.setAccessibleName(f"{entry.label}: time")
             reset = button("Use the container's value", link=True,
                            tip="Forget the time set here; the container's own setting (or the default) applies again")
-            source = label("", "muted")
-            reading = label("", "mono")
+            source = label("", "muted", wrap=True)
+            reading = label("", "mono", wrap=True)              # wraps in a narrow window instead of widening it
             grid.addWidget(label(entry.label), row, 0)
-            grid.addWidget(edit, row, 1)
+            grid.addLayout(hbox(mode, day, at, None, spacing=8), row, 1)
             grid.addLayout(hbox(reading, source, reset, None, spacing=12), row, 2)
-            self.schedule_edits[entry.job] = edit
+            self.schedule_modes[entry.job] = mode
+            self.schedule_days[entry.job] = day
+            self.schedule_times[entry.job] = at
             self.schedule_reading[entry.job] = reading
             self.schedule_source[entry.job] = source
             self.schedule_reset[entry.job] = reset
-            edit.editingFinished.connect(lambda job=entry.job: self._schedule_edited(job))
+            mode.currentIndexChanged.connect(lambda _i, job=entry.job: self._schedule_edited(job))
+            day.currentIndexChanged.connect(lambda _i, job=entry.job: self._schedule_edited(job))
+            at.editingFinished.connect(lambda job=entry.job: self._schedule_edited(job))
             reset.clicked.connect(lambda _=False, job=entry.job: self._schedule_reset(job))
         grid.setColumnStretch(2, 1)
         self.body.addLayout(grid)
@@ -344,13 +371,36 @@ class AutomationPage(SectionPage):
         self._show_schedules()
 
     def _show_schedules(self) -> None:
-        for entry in schedule_entries(self._db, self._env):
-            self.schedule_edits[entry.job].setText(entry.edit_text)
-            self.schedule_reading[entry.job].setText(entry.when)
-            stored = entry.source == SOURCE_STORED
-            self.schedule_source[entry.job].setText("set here" if stored else "from the container")
-            self.schedule_reset[entry.job].setVisible(stored)
-            set_prop(self.schedule_reading[entry.job], "tone", "" if entry.valid else "bad")
+        was, self._loading = self._loading, True               # setting the controls is not an edit
+        try:
+            for entry in schedule_entries(self._db, self._env):
+                job, now = entry.job, choice_of(entry.edit_text)
+                mode, day, at = self.schedule_modes[job], self.schedule_days[job], self.schedule_times[job]
+                mode.clear()
+                for value, text in schedule_choices(job, entry.edit_text):
+                    mode.addItem(text, value)
+                mode.setCurrentIndex(max(0, mode.findData(now.choice)))
+                day.setCurrentIndex(now.weekday)
+                at.setTime(QTime(now.hour, now.minute))
+                self._show_day_time(job)
+                self.schedule_reading[job].setText(entry.when)
+                stored = entry.source == SOURCE_STORED
+                self.schedule_source[job].setText("set here" if stored else "from the container")
+                self.schedule_reset[job].setVisible(stored)
+                set_prop(self.schedule_reading[job], "tone", "" if entry.valid else "bad")
+        finally:
+            self._loading = was
+
+    def _show_day_time(self, job: str) -> None:
+        choice = self.schedule_modes[job].currentData()
+        self.schedule_days[job].setVisible(choice == CHOICE_WEEKLY)
+        self.schedule_times[job].setVisible(choice in (CHOICE_WEEKLY, CHOICE_DAILY))
+
+    def schedule_choice(self, job: str) -> ScheduleChoice:
+        """What *job*'s controls say now."""
+        at = self.schedule_times[job].time()
+        return ScheduleChoice(self.schedule_modes[job].currentData() or "", self.schedule_days[job].currentData() or 0,
+                              at.hour(), at.minute())
 
     def _say_schedule(self, text: str, tone: str = "") -> None:
         self.schedule_status.setText(text)
@@ -359,14 +409,16 @@ class AutomationPage(SectionPage):
     def _schedule_edited(self, job: str) -> None:
         if self._loading:
             return
-        edit = self.schedule_edits[job]
+        self._show_day_time(job)
         current = next(e for e in schedule_entries(self._db, self._env) if e.job == job)
-        if edit.text().strip() == current.edit_text:
-            return
+        text = self.schedule_choice(job).text()
+        if text == current.edit_text or (not current.valid and text == choice_of(current.edit_text).choice):
+            return                                              # nothing changed (or the bad value still chosen)
         try:
-            save_schedule_text(self._db, job, edit.text())
+            save_schedule_text(self._db, job, text)
         except ValueError as exc:
             self._say_schedule(f"{current.label}: {exc} Nothing was changed.", "bad")
+            self._show_schedules()
             return
         self._show_schedules()
         self._say_schedule(f"{current.label}: saved. The runner uses it within a minute.", "ok")
@@ -442,9 +494,9 @@ class AutomationPage(SectionPage):
 
     def _show_held(self) -> None:
         held = self._held()
-        files = sum(len(b.files) for b in held)
-        self.held_label.setText(f"{len(held)} batch{'es' if len(held) != 1 else ''}, {files} "
-                                f"file{'s' if files != 1 else ''} held" if held else "Nothing is held")
+        files = sum(len(b.files) for b in held)          # the space first (owner, 2026-10-10)
+        self.held_label.setText(f"{held_size_text(held)} held ({len(held)} batch{'es' if len(held) != 1 else ''}, "
+                                f"{files} file{'s' if files != 1 else ''})" if held else "Nothing is held")
         self.btn_empty_holding.setEnabled(bool(held) and self._empty_call is None)
 
     def _ask_empty_all(self, held) -> bool:

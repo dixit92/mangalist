@@ -40,6 +40,7 @@ def test_lists_records_newest_first_with_status_wording(qapp):
                                           wanted=("1",)), record(3, series_id=9, status=S.REMOVED)])
     dlg = DownloadsList(backend, series_name=lambda i: {7: "Example Series"}.get(i, f"Series #{i}"))
     wait_until(qapp, lambda: dlg.records)
+    dlg.toggle_finished()                                                       # the finished one too
     rows = [[dlg.table.item(r, 0).text(), dlg.table.item(r, 1).text(), dlg.table.cellWidget(r, 2).findChild(QLabel).text(),
              dlg.table.cellWidget(r, 2).findChild(QLabel).property("badge")] for r in range(dlg.table.rowCount())]
     assert [r[2] for r in rows] == ["Filed v03-v05 - done", "Failed: no space left", "Filed v03-v05 - seeding"]
@@ -59,6 +60,35 @@ def test_empty_list_is_explicit_and_refresh_picks_up_new_records(qapp):
     assert dlg.refresh()
     wait_until(qapp, lambda: dlg.table.rowCount() == 1)
     assert dlg.table.cellWidget(0, 2).findChild(QLabel).text() == "Downloading" and dlg.status_label.text() == ""
+
+
+def test_finished_downloads_are_hidden_until_asked(qapp):
+    """Owner, 2026-10-10: "do they just stay in the In progress table? They are not in progress anymore"."""
+    backend = FakeBackend(records=[record(1, status=S.FILED), record(2, series_id=8, status=S.FAILED, error="no space"),
+                                   record(3, series_id=9, status=S.REMOVED), record(4, series_id=9, status=S.CANCELLED)])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.records)
+    assert dlg.table.rowCount() == 2 and [r.id for r in dlg.shown_records()] == [2, 1]     # failed stays in view
+    assert dlg.btn_finished.isVisibleTo(dlg) and dlg.btn_finished.text() == "Show finished (2)"
+    dlg.btn_finished.click()
+    assert dlg.table.rowCount() == 4 and dlg.btn_finished.text() == "Hide finished (2)"
+    dlg.btn_finished.click()
+    assert dlg.table.rowCount() == 2
+
+
+def test_only_finished_downloads_say_nothing_is_in_progress(qapp):
+    backend = FakeBackend(records=[record(3, series_id=9, status=S.REMOVED)])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.records)
+    assert dlg.table.rowCount() == 0 and dlg.status_label.text() == "Nothing is in progress."
+    assert dlg.btn_finished.text() == "Show finished (1)"
+
+
+def test_no_finished_downloads_no_button(qapp):
+    backend = FakeBackend(records=[record(1, status=S.SENT)])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.records)
+    assert not dlg.btn_finished.isVisibleTo(dlg)
 
 
 def test_read_error_is_shown(qapp):

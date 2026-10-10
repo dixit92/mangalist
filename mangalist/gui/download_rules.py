@@ -137,10 +137,19 @@ def replaced_bar_text(batches: Sequence) -> Tuple[str, str]:
         if waiting:
             text += f" ({len(waiting)} could not be moved yet)"
         return text, "warn"
-    if held:
+    if held:                            # the space first (owner, 2026-10-10: more useful than the number of files)
         n = sum(len(b.files) for b in held)
-        return f"{_files(n)} replaced by volumes are in the holding folder ({len(held)} series)", "muted"
+        series = len({b.series_dir for b in held})
+        return (f"{held_size_text(held)} of replaced chapters in the holding folder ({_files(n)}, {series} series)",
+                "muted")
     return "", ""
+
+
+def held_size_text(batches: Sequence) -> str:
+    """The space the held batches take in the holding folder ("1.2 GB", "340 MB")."""
+    from ..downloads.partial import size_text
+
+    return size_text(sum(f.size for b in batches for f in b.files))
 
 
 def batch_status_text(batch) -> str:
@@ -234,6 +243,17 @@ def in_hand(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
 BADGE_RUN, BADGE_OK, BADGE_DONE, BADGE_BAD, BADGE_QUEUED = "run", "ok", "done", "bad", "muted"
 
 
+#: Downloads that are over: their torrent left qBittorrent at its seed goal ("Filed v03 - done") or was cancelled. The
+#: In progress list hides them unless asked (owner, 2026-10-10: "They are not in progress anymore"); a failed one
+#: stays in view - it wants a look.
+FINISHED = (DownloadStatus.REMOVED, DownloadStatus.CANCELLED)
+
+
+def in_progress(records: Iterable[DownloadRecord], show_finished: bool = False) -> List[DownloadRecord]:
+    """The records the In progress list shows, in the order given."""
+    return [r for r in records if show_finished or r.status not in FINISHED]
+
+
 def badge_kind(record: DownloadRecord) -> str:
     """queued: waiting under the download budget (muted grey); run: on its way (blue); ok: filed, still seeding
     (green); done: finished or cancelled (grey); bad: failed (red)."""
@@ -306,7 +326,68 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 # dispatches nothing yet, so a time for it would only confuse. Stored in the database; the container's variables only
 # seed them (see mangalist/headless/settings.py).
 SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads")
-SCHEDULE_HINT = "daily@03:30, every 12h or off"
+
+#: The choices each schedule offers (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6
+#: hours"), plus Off. Filing finished downloads also keeps Every hour - its default; without it filing could not run
+#: more often than every 6 hours. A current value that is none of these (a container variable such as "every 3h") is
+#: offered as one more choice, so it is never changed silently.
+CHOICE_WEEKLY, CHOICE_DAILY, CHOICE_OFF = "weekly", "daily", "off"
+SCHEDULE_CHOICES: Tuple[Tuple[str, str], ...] = ((CHOICE_WEEKLY, "Weekly"), (CHOICE_DAILY, "Daily"),
+                                                 ("every 12h", "Every 12 hours"), ("every 6h", "Every 6 hours"),
+                                                 (CHOICE_OFF, "Off"))
+HOURLY_CHOICE: Tuple[str, str] = ("every 1h", "Every hour")
+DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+DEFAULT_AT = (3, 30)                    # the time a schedule switched to Weekly or Daily starts from
+DEFAULT_WEEKDAY = 6                     # ... and the day (Sunday) a Weekly one starts from
+
+
+@dataclass(frozen=True)
+class ScheduleChoice:
+    """A schedule as the Automation section's controls hold it: the choice (``weekly``, ``daily``, ``off`` or an
+    interval such as ``every 12h``), and the day / time Weekly and Daily use."""
+
+    choice: str
+    weekday: int = DEFAULT_WEEKDAY
+    hour: int = DEFAULT_AT[0]
+    minute: int = DEFAULT_AT[1]
+
+    def text(self) -> str:
+        """The canonical schedule text to store (``weekly@sun 03:30``, ``daily@03:30``, ``every 12h``, ``off``)."""
+        from ..headless.schedule import WEEKDAYS
+
+        if self.choice == CHOICE_WEEKLY:
+            return f"weekly@{WEEKDAYS[self.weekday]} {self.hour:02d}:{self.minute:02d}"
+        if self.choice == CHOICE_DAILY:
+            return f"daily@{self.hour:02d}:{self.minute:02d}"
+        return self.choice
+
+
+def schedule_choices(job: str, current: str) -> List[Tuple[str, str]]:
+    """(choice, label) for *job*'s dropdown; *current* (canonical text) is added when it is none of them."""
+    out = list(SCHEDULE_CHOICES)
+    if job == "downloads":
+        out.insert(0, HOURLY_CHOICE)
+    choice = choice_of(current).choice
+    if choice not in {c for c, _l in out}:
+        out.insert(len(out) - 1, (choice, f"{schedule_text(choice)[:1].upper()}{schedule_text(choice)[1:]}"))
+    return out
+
+
+def choice_of(canonical: str) -> ScheduleChoice:
+    """The controls' state for a canonical schedule text (what :func:`schedule_entries` gives)."""
+    from ..headless.schedule import DailyAt, WeeklyAt, parse_schedule
+
+    try:
+        parsed = parse_schedule(canonical)
+    except ValueError:
+        return ScheduleChoice(canonical)                    # not understood: shown as it is
+    if parsed is None:
+        return ScheduleChoice(CHOICE_OFF)
+    if isinstance(parsed, WeeklyAt):
+        return ScheduleChoice(CHOICE_WEEKLY, parsed.weekday, parsed.hour, parsed.minute)
+    if isinstance(parsed, DailyAt):
+        return ScheduleChoice(CHOICE_DAILY, hour=parsed.hour, minute=parsed.minute)
+    return ScheduleChoice(parsed.describe())
 
 
 @dataclass(frozen=True)
@@ -320,7 +401,14 @@ class ScheduleEntry:
 
 
 def schedule_text(described: str) -> str:
-    """``daily@03:30`` -> ``daily 03:30``; ``every 1h`` -> ``every hour``; ``every 12h`` -> ``every 12 hours``."""
+    """``weekly@sun 03:30`` -> ``every Sunday 03:30``; ``daily@03:30`` -> ``daily 03:30``; ``every 1h`` -> ``every hour``;
+    ``every 12h`` -> ``every 12 hours``."""
+    if described.startswith("weekly@"):
+        from ..headless.schedule import WEEKDAYS
+
+        day, _sp, at = described[len("weekly@"):].partition(" ")
+        name = DAY_NAMES[WEEKDAYS.index(day)] if day in WEEKDAYS else day
+        return f"every {name} {at}"
     if described.startswith("daily@"):
         return "daily " + described[len("daily@"):]
     if described.startswith("every ") and described.endswith("h"):

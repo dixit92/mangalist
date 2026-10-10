@@ -8,6 +8,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QTime  # noqa: E402
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit  # noqa: E402
 
 from mangalist import config, store  # noqa: E402
@@ -462,57 +463,78 @@ def test_matching_has_only_the_switch_that_works_and_it_is_the_old_auto_start_mu
     assert config.load()["mu_autostart"] is True                                  # what the window reads after a scan
 
 
-def test_automation_schedules_are_editable_and_say_who_uses_them(qapp, db, cache):
+def _choices(page, job):
+    combo = page.schedule_modes[job]
+    return [combo.itemText(i) for i in range(combo.count())]
+
+
+def _pick(page, job, label):
+    combo = page.schedule_modes[job]
+    combo.setCurrentIndex(combo.findText(label))
+
+
+def test_automation_schedules_are_choices_and_say_who_uses_them(qapp, db, cache):
     dlg, _ = make(qapp, db, cache, env={"MANGALIST_RESCAN_SCHEDULE": "daily@02:15"})
     page = dlg.pages[SECTION_AUTOMATION]
-    assert {job: e.text() for job, e in page.schedule_edits.items()} == {
-        "rescan": "daily@02:15", "mangapixer-sync": "daily@03:15", "downloads": "every 1h"}
+    assert {job: c.currentText() for job, c in page.schedule_modes.items()} == {
+        "rescan": "Daily", "mangapixer-sync": "Daily", "downloads": "Every hour"}
+    assert _choices(page, "rescan") == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]   # owner, 2026-10-10
+    assert _choices(page, "downloads") == ["Every hour", "Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]
+    assert page.schedule_times["rescan"].time().toString("HH:mm") == "02:15"
+    assert not page.schedule_times["rescan"].isHidden() and page.schedule_days["rescan"].isHidden()
+    assert page.schedule_times["downloads"].isHidden() and page.schedule_days["downloads"].isHidden()
     assert {job: l.text() for job, l in page.schedule_reading.items()} == {
         "rescan": "daily 02:15", "mangapixer-sync": "daily 03:15",
         "downloads": "every hour (and Check qBittorrent now)"}
     assert all(btn.isHidden() for btn in page.schedule_reset.values()), "nothing stored yet: nothing to reset"
     text = all_text(page)
     assert "background runner in the Docker / Unraid container" in text and "no restart" in text
-    assert "daily@03:30" in text and "every 12h" in text and "off" in text
+    assert "daily@03:30" not in text                            # no syntax to learn any more
     assert "Automatic downloads" in text and "next phase" in text
 
 
-def test_a_schedule_typed_in_settings_is_stored_and_beats_the_container(qapp, db, cache):
+def test_a_schedule_chosen_in_settings_is_stored_and_beats_the_container(qapp, db, cache):
     dlg, _ = make(qapp, db, cache, env={"MANGALIST_RESCAN_SCHEDULE": "daily@02:15"})
     page = dlg.pages[SECTION_AUTOMATION]
-    edit = page.schedule_edits["rescan"]
-    edit.setText("4:05")                                        # any form the parser knows ...
-    edit.editingFinished.emit()
-    assert db.get_setting("schedule_rescan") == "daily@04:05"   # ... is stored in the one canonical form
-    assert edit.text() == "daily@04:05" and page.schedule_reading["rescan"].text() == "daily 04:05"
+    at = page.schedule_times["rescan"]
+    at.setTime(QTime(4, 5))
+    at.editingFinished.emit()
+    assert db.get_setting("schedule_rescan") == "daily@04:05"
+    assert page.schedule_reading["rescan"].text() == "daily 04:05"
     assert not page.schedule_reset["rescan"].isHidden() and "saved" in page.schedule_status.text()
+    _pick(page, "rescan", "Weekly")                             # the day appears; the time is kept
+    assert db.get_setting("schedule_rescan") == "weekly@sun 04:05"
+    assert not page.schedule_days["rescan"].isHidden() and page.schedule_reading["rescan"].text() == "every Sunday 04:05"
+    page.schedule_days["rescan"].setCurrentIndex(2)             # Wednesday
+    assert db.get_setting("schedule_rescan") == "weekly@wed 04:05"
+    _pick(page, "rescan", "Every 6 hours")
+    assert db.get_setting("schedule_rescan") == "every 6h" and page.schedule_times["rescan"].isHidden()
+    _pick(page, "rescan", "Off")
+    assert db.get_setting("schedule_rescan") == "off" and page.schedule_reading["rescan"].text() == "off"
     page.schedule_reset["rescan"].click()                       # "Use the container's value"
     assert db.get_setting("schedule_rescan") is None
-    assert edit.text() == "daily@02:15" and page.schedule_reset["rescan"].isHidden()
+    assert page.schedule_modes["rescan"].currentText() == "Daily" and page.schedule_reset["rescan"].isHidden()
+    assert page.schedule_times["rescan"].time().toString("HH:mm") == "02:15"
 
 
-def test_a_bad_schedule_is_refused_with_a_message_and_nothing_is_stored(qapp, db, cache):
-    dlg, _ = make(qapp, db, cache)
+def test_a_value_outside_the_choices_is_kept_as_its_own_choice(qapp, db, cache):
+    dlg, _ = make(qapp, db, cache, env={"MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "every 3h"})
     page = dlg.pages[SECTION_AUTOMATION]
-    for typed, said in (("sometimes", "Not understood"), ("25:00", "Not understood"), ("", "Enter a time"),
-                        ("every 1m", "Not understood"), ("every 0.1h", "too often")):
-        edit = page.schedule_edits["mangapixer-sync"]
-        edit.setText(typed)
-        edit.editingFinished.emit()
-        assert said in page.schedule_status.text(), typed
-        assert page.schedule_status.property("tone") == "bad" and "Nothing was changed" in page.schedule_status.text()
-        assert db.get_setting("schedule_mangapixer_sync") is None
-    edit.setText("off")
-    edit.editingFinished.emit()
-    assert db.get_setting("schedule_mangapixer_sync") == "off"
-    assert page.schedule_reading["mangapixer-sync"].text() == "off"
+    assert page.schedule_modes["mangapixer-sync"].currentText() == "Every 3 hours"
+    assert _choices(page, "mangapixer-sync") == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Every 3 hours",
+                                                 "Off"]
+    assert db.get_setting("schedule_mangapixer_sync") is None   # showing it changes nothing
 
 
 def test_a_bad_container_value_is_shown_flagged_not_hidden(qapp, db, cache):
     dlg, _ = make(qapp, db, cache, env={"MANGALIST_RESCAN_SCHEDULE": "whenever"})
     page = dlg.pages[SECTION_AUTOMATION]
-    assert page.schedule_edits["rescan"].text() == "whenever"
+    assert page.schedule_modes["rescan"].currentData() == "whenever"
     assert page.schedule_reading["rescan"].text() == "whenever (not understood)"
+    assert page.schedule_reading["rescan"].property("tone") == "bad"
+    assert db.get_setting("schedule_rescan") is None
+    _pick(page, "rescan", "Daily")                              # choosing a real one fixes it
+    assert db.get_setting("schedule_rescan") == "daily@03:30" and page.schedule_reading["rescan"].property("tone") == ""
 
 
 def test_remove_completed_goes_to_the_backend_and_back(qapp, db, cache):
@@ -593,31 +615,10 @@ def test_automation_empties_the_holding_folder_now_after_a_yes(qapp, db, cache, 
     dlg, _ = make(qapp, db, cache, section=SECTION_AUTOMATION)
     page = dlg.pages[SECTION_AUTOMATION]
     assert page.held_label.text() == "Nothing is held" and not page.btn_empty_holding.isEnabled()
-    held = [type("B", (), {"files": (1, 2, 3)})()]
+    held = [type("B", (), {"files": tuple(type("F", (), {"size": 400 * 1024 * 1024})() for _ in range(3))})()]
     monkeypatch.setattr(page, "_held", lambda: held)
     page._show_held()
-    assert page.held_label.text() == "1 batch, 3 files held" and page.btn_empty_holding.isEnabled()
-    calls = []
-    monkeypatch.setattr(upgrades, "empty_all_now", lambda db: calls.append(1) or ([7], [(8, "not emptied: v02.cbz is no longer in the library")]))
-    page.confirm_empty_all = lambda h: False
-    assert not page.empty_holding_now() and calls == []                     # Cancel: nothing
-    page.confirm_empty_all = lambda h: True
-    assert page.empty_holding_now()
-    wait_until(qapp, lambda: page._empty_call is None)
-    assert calls == [1] and "Emptied 1 batch." in page.replaced_status.text()
-    assert "v02.cbz is no longer in the library" in page.replaced_status.text()
-
-
-def test_automation_empties_the_holding_folder_now_after_a_yes(qapp, db, cache, monkeypatch):
-    from mangalist import upgrades
-
-    dlg, _ = make(qapp, db, cache, section=SECTION_AUTOMATION)
-    page = dlg.pages[SECTION_AUTOMATION]
-    assert page.held_label.text() == "Nothing is held" and not page.btn_empty_holding.isEnabled()
-    held = [type("B", (), {"files": (1, 2, 3)})()]
-    monkeypatch.setattr(page, "_held", lambda: held)
-    page._show_held()
-    assert page.held_label.text() == "1 batch, 3 files held" and page.btn_empty_holding.isEnabled()
+    assert page.held_label.text() == "1.2 GB held (1 batch, 3 files)" and page.btn_empty_holding.isEnabled()
     calls = []
     monkeypatch.setattr(upgrades, "empty_all_now",
                         lambda db: calls.append(1) or ([7], [(8, "not emptied: v02.cbz is no longer in the library")]))

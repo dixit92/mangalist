@@ -1,4 +1,4 @@
-"""Batch windows for the headless runner: "daily at HH:MM" and "every N hours".
+"""Batch windows for the headless runner: "weekly on a day at HH:MM", "daily at HH:MM" and "every N hours".
 
 All instants are timezone-aware. Persisted times are UTC; daily times are wall-clock times in the
 runner's time zone (the container's ``TZ``), so a daily 03:30 job stays at 03:30 local time across
@@ -12,6 +12,7 @@ daylight-saving changes:
 
 Text forms (environment variables, settings):
 
+    weekly@sun 03:30   weekly sunday 03:30  -> WeeklyAt(6, 3, 30)    (days: mon ... sun, Monday = 0)
     daily@03:30   daily 03:30   03:30      -> DailyAt(3, 30)
     every 12h     every:12h     12h        -> EveryHours(12)
     off           none          disabled   -> None (job not scheduled)
@@ -72,6 +73,41 @@ class DailyAt:
         return f"daily@{self.hour:02d}:{self.minute:02d}"
 
 
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+@dataclass(frozen=True)
+class WeeklyAt:
+    """Once a week, on ``weekday`` (Monday = 0) at ``hour:minute`` local (wall-clock) time (owner, 2026-10-10: the
+    schedule choices are weekly, daily, every 12 hours and every 6 hours)."""
+
+    weekday: int
+    hour: int
+    minute: int = 0
+
+    def __post_init__(self) -> None:
+        if not (0 <= self.weekday <= 6):
+            raise ValueError(f"invalid weekday {self.weekday}")
+        if not (0 <= self.hour <= 23 and 0 <= self.minute <= 59):
+            raise ValueError(f"invalid time of day {self.hour}:{self.minute}")
+
+    def next_after(self, after: datetime, tz: tzinfo) -> datetime:
+        """The first run strictly after ``after`` (UTC)."""
+        _require_aware(after)
+        at = time(self.hour, self.minute)
+        day = after.astimezone(tz).date() - timedelta(days=1)
+        for _ in range(10):                 # the weekday comes within eight days; one spare around a DST change
+            if day.weekday() == self.weekday:
+                candidate = resolve_local(day, at, tz)
+                if candidate > after:
+                    return candidate
+            day += timedelta(days=1)
+        raise AssertionError("unreachable: a weekly slot exists within nine days")
+
+    def describe(self) -> str:
+        return f"weekly@{WEEKDAYS[self.weekday]} {self.hour:02d}:{self.minute:02d}"
+
+
 @dataclass(frozen=True)
 class EveryHours:
     """Every ``hours`` hours of elapsed time, counted from the previous run."""
@@ -95,9 +131,10 @@ class EveryHours:
         return f"every {h}h"
 
 
-Schedule = Union[DailyAt, EveryHours]
+Schedule = Union[WeeklyAt, DailyAt, EveryHours]
 
 _OFF = {"", "off", "none", "never", "disabled", "disable", "0", "false", "no"}
+_WEEKLY = re.compile(r"^weekly\s*[@: ]\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+(\d{1,2}):(\d{2})$")
 _DAILY = re.compile(r"^(?:daily\s*[@: ]\s*)?(\d{1,2}):(\d{2})$")
 _EVERY = re.compile(r"^(?:every\s*[: ]?\s*)?(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours)$")
 
@@ -111,6 +148,9 @@ def parse_schedule(text: Optional[str]) -> Optional[Schedule]:
     value = (text or "").strip().lower()
     if value in _OFF:
         return None
+    m = _WEEKLY.match(value)
+    if m:
+        return WeeklyAt(WEEKDAYS.index(m.group(1)), int(m.group(2)), int(m.group(3)))
     m = _DAILY.match(value)
     if m:
         return DailyAt(int(m.group(1)), int(m.group(2)))
@@ -118,7 +158,7 @@ def parse_schedule(text: Optional[str]) -> Optional[Schedule]:
     if m:
         return EveryHours(float(m.group(1)))
     raise ValueError(
-        f"unrecognised schedule {text!r}; use e.g. 'daily@03:30', 'every 12h' or 'off'")
+        f"unrecognised schedule {text!r}; use e.g. 'weekly@sun 03:30', 'daily@03:30', 'every 12h' or 'off'")
 
 
 MIN_EVERY_HOURS = 0.25      # the settings refuse "every 1m": a rescan or a MangaPixer sync that often helps nobody
@@ -126,14 +166,15 @@ MIN_EVERY_HOURS = 0.25      # the settings refuse "every 1m": a rescan or a Mang
 
 def validate_schedule(text: Optional[str]) -> str:
     """The text a user typed in Settings > Automation, checked and rewritten in the canonical form for storing
-    (``daily@03:30``, ``every 12h`` or ``off``).
+    (``weekly@sun 03:30``, ``daily@03:30``, ``every 12h`` or ``off``).
 
     Accepts everything :func:`parse_schedule` does (so ``03:30``, ``daily 3:30``, ``12h`` work); raises ValueError with
     a message to show as it is. An empty entry is refused (it is easy to clear a field by accident: write ``off``).
     """
     value = (text or "").strip()
     if not value:
-        raise ValueError("Enter a time such as daily@03:30, an interval such as every 12h, or off to stop it.")
+        raise ValueError("Enter a time such as daily@03:30 or weekly@sun 03:30, an interval such as every 12h, or off "
+                         "to stop it.")
     try:
         parsed = parse_schedule(value)
     except ValueError as exc:
@@ -145,8 +186,8 @@ def validate_schedule(text: Optional[str]) -> str:
     return parsed.describe()
 
 
-_BAD_SCHEDULE = ("Not understood. Write daily@03:30 (every day at 03:30, 24-hour clock), every 12h (every 12 hours) "
-                 "or off.")
+_BAD_SCHEDULE = ("Not understood. Write weekly@sun 03:30 (Sundays at 03:30), daily@03:30 (every day at 03:30, 24-hour "
+                 "clock), every 12h (every 12 hours) or off.")
 
 
 def is_missed(next_run: Optional[datetime], now: datetime) -> bool:

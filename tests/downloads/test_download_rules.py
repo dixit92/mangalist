@@ -184,3 +184,19 @@ def test_a_queued_download_is_a_muted_chip_and_counts_as_in_hand():
     assert "Queued, 2nd in line" in tip and "Size: 3 GB (the release's size on nyaa" in tip
     assert "Counts against the download budget: 3 GB (as qBittorrent reports it)" in status_tooltip(
         record(S.FILED, size_bytes=3 * 1024 ** 3, size_source="qbittorrent"))
+
+
+# --- schedule choices (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6 hours") --------
+
+def test_schedule_choices_and_their_text():
+    labels = [l for _c, l in rules.schedule_choices("rescan", "daily@03:30")]
+    assert labels == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]
+    assert [l for _c, l in rules.schedule_choices("downloads", "every 1h")][0] == "Every hour"
+    assert ("every 3h", "Every 3 hours") in rules.schedule_choices("rescan", "every 3h")     # kept, never lost
+    assert rules.ScheduleChoice("weekly", 2, 4, 5).text() == "weekly@wed 04:05"
+    assert rules.ScheduleChoice("daily", hour=23, minute=0).text() == "daily@23:00"
+    assert rules.ScheduleChoice("every 6h").text() == "every 6h"
+    assert rules.choice_of("weekly@sat 01:02") == rules.ScheduleChoice("weekly", 5, 1, 2)
+    assert rules.choice_of("daily@02:15") == rules.ScheduleChoice("daily", hour=2, minute=15)
+    assert rules.choice_of("off").choice == "off" and rules.choice_of("whenever").choice == "whenever"
+    assert rules.schedule_text("weekly@sun 03:30") == "every Sunday 03:30"
