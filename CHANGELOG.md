@@ -7,6 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.16] - 2026-10-10
+
+The fifteenth MangaList release (testing build): choose where a series' chapters come from, Rescan follows the library you picked, empty scanlation-only folders can get their chapters, and the Renamer's preview reads as a preview.
+
+- **Change where a series' chapters come from.** The chapters panel's "Change source…" lists the series on MangaDex (by the link MangaPixer has) and on your other Suwayomi sources (by title), leaving out the one in use; pick one with "Use this series" and its chapters can be ticked. The choice is remembered for the series and never falls back to MangaDex on its own; "Back to the chapters" keeps the current source. Before, the other sources were offered only when MangaDex had none of the missing chapters, so a series with a few chapters on MangaDex could not get the rest. "Change source…" replaces "Not this series?", which did not say what it did.
+- **"Look up again" is now "Refresh from source"**: it asks Suwayomi for the source's chapter list as it is now.
+- **Rescan follows the library picker.** With one library picked, the Rescan button scans only that library; with All libraries, or the arrow's "All libraries", it scans every one. The tooltip says which.
+- **An empty folder of a series with no English edition lists its chapters.** "Wanted - scanlation only" now counts every chapter up to the latest known one as missing, so the Download tab's Missing chapters group offers them from Suwayomi.
+- **The Renamer's preview reads as a preview**: its status column says "will be renamed" (it said "renamed" before anything had changed) and "keeps its name: name collision", under a "What happens" heading.
+
 ## [2026.10.15] - 2026-10-10
 
 The fourteenth MangaList release (testing build): Suwayomi sources default to MangaDex in your languages with a language filter and a reset, the Download tab follows what a check filed, "Check downloads now", clearer Renamer rows and Settings fixes (number-box arrows, card padding, no personal examples).
