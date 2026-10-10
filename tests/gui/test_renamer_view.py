@@ -118,6 +118,8 @@ def test_the_dry_run_summary_the_preview_and_the_notes(qapp, db, made):
         assert ("omake.cbz", "(as it is)", "left alone") in rows
         item = win.preview.topLevelItem(0)
         assert item.foreground(0).color().name() == STATUS_COLORS[RENAME]
+        assert item.text(2).startswith("will be renamed")                # a preview, not a result (owner, 2026-10-10)
+        assert win.preview.headerItem().text(2) == "What happens"
         # the collision series offers the duplicates review
         win.series_list.setCurrentRow(1)
         assert {r[2] for r in _preview_rows(win)} == {COLLISION}

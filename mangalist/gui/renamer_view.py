@@ -59,8 +59,9 @@ class _SeriesRowDelegate(TwoLineDelegate):
         return hint
 
 STATUS_COLORS = {RENAME: "#1f4fb8", UNCHANGED: "#6b6b67", LEFT_ALONE: "#9a5b00", COLLISION: "#8b1d1d"}
-STATUS_TEXT = {RENAME: "renamed", UNCHANGED: "already named by the scheme", LEFT_ALONE: "left alone",
-               COLLISION: "not renamed: name collision"}
+# A preview: the table always shows what renaming WOULD do (applying re-runs the preview) - owner, 2026-10-10.
+STATUS_TEXT = {RENAME: "will be renamed", UNCHANGED: "already named by the scheme", LEFT_ALONE: "left alone",
+               COLLISION: "keeps its name: name collision"}
 
 PATTERN_LABELS = {"scheme": "already in a scheme", "fmd2": "FMD2 names", "release": "release names",
                   "generic": "other chapter / volume names", "bare": "bare numbers", "none": "unreadable"}
@@ -190,7 +191,7 @@ class RenamerWindow(QDialog):
         self.series_list.currentRowChanged.connect(self._show_series)
         self.preview = QTreeWidget()
         self.preview.setColumnCount(3)
-        self.preview.setHeaderLabels(["Now", "After", ""])
+        self.preview.setHeaderLabels(["Now", "After", "What happens"])
         self.preview.setRootIsDecorated(False)
         self.preview.setUniformRowHeights(True)
         self.preview.setColumnWidth(0, 360)
