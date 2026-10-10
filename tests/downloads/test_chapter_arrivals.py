@@ -213,6 +213,18 @@ def test_without_the_naming_module_it_waits(cledger, sent, suwa, downloads, monk
     assert any("naming scheme is not available" in why for _i, why in report.waiting)
 
 
+def test_a_name_the_scheme_refuses_fails_with_the_reason_and_moves_nothing(cledger, sent, suwa, downloads, cseries):
+    class Refusing(FakeNamer):
+        def chapter_file_name(self, chapter, **kwargs):
+            raise ValueError("a chapter number cannot be negative")
+
+    src = suwa.finish(4)
+    report = run(suwa, cledger, downloads, Refusing())
+    rec = cledger.get(sent[0].id)
+    assert rec.status == S.FAILED and "naming scheme gave no name" in rec.error and src.exists()
+    assert not report.errors and report.failed
+
+
 def test_a_copy_when_no_hard_link_is_possible(cledger, sent, suwa, downloads, cseries, monkeypatch):
     real_link = os.link
 

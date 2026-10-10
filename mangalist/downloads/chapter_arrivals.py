@@ -295,6 +295,8 @@ class _ChapterPass:
             self._wait(rec, note)
             self._note(rec, note)
             return None
+        except ValueError as exc:                   # e.g. a chapter number the scheme cannot write
+            return self._fail(rec, f"the naming scheme gave no name ({exc}); nothing filed")
         if not name or "/" in name or "\\" in name or name in (".", ".."):
             return self._fail(rec, f"the naming scheme gave no usable name ({name!r}); nothing filed")
         dst = os.path.join(rec.target_dir, name)
