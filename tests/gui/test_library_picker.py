@@ -276,7 +276,7 @@ def test_the_library_column_is_hidden_until_chosen_and_names_the_root(lib):
     assert model.headerData(COL_LIBRARY, Qt.Orientation.Horizontal) == "Library"
     win._toggle_column(COL_LIBRARY)
     assert not header.isSectionHidden(COL_LIBRARY) and "Library" not in config.load()["list_hidden_columns"]
-    assert config.load()["list_columns_version"] == 2
+    assert config.load()["list_columns_version"] == 3
     asc = [model.data(model.index(r, COL_LIBRARY), Qt.ItemDataRole.UserRole) for r in range(model.rowCount())]
     assert set(asc) == {"manga", "manhwa"}
 

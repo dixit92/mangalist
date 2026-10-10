@@ -187,8 +187,27 @@ def test_library_lists_the_roots_with_their_series_and_mangapixer_library(qapp, 
     assert "MangaList files downloads only into these" in page.lead_label.text()
     text = all_text(page)
     assert "Manga-Concluded" in text and str(library) in text and "0 series" in text
-    assert "File naming - one naming scheme per root, applied by the renamer (phase 2)." in text
+    assert "File naming" in text and "Rename to the scheme…" in text and "Windows server" in text
     assert root.id is not None
+
+
+def test_library_keeps_the_windows_server_name_for_the_length_rule(qapp, db, cache, library):
+    from mangalist import renamer
+
+    db.add_root(str(library), "Manga")
+    dlg, _ = make(qapp, db, cache)
+    page = dlg.pages[SECTION_LIBRARY]
+    assert page.server_edit.text() == ""
+    page.server_edit.setText("  \\\\SMIT-SERVER\\ ")
+    assert page.save_server() and renamer.windows_server(db) == "SMIT-SERVER"
+    assert page.server_edit.text() == "SMIT-SERVER"
+    page.server_edit.setText("SMIT SERVER")                     # not a server name: kept as it was, said why
+    assert not page.save_server() and renamer.windows_server(db) == "SMIT-SERVER"
+    assert not page.server_error.isHidden() and "letters, digits" in page.server_error.text()
+    page.server_edit.setText("")
+    assert page.save_server() and renamer.windows_server(db) is None and page.server_error.isHidden()
+    again, _ = make(qapp, db, cache)
+    assert again.pages[SECTION_LIBRARY].server_edit.text() == ""
 
 
 def test_library_says_which_mangapixer_library_each_root_is_part_of(qapp, db, cache, library, tmp_path):

@@ -1,7 +1,10 @@
 """Settings > Library: the roots MangaList manages (name, folder, how many series, the MangaPixer library each maps to),
-Add a root, Edit (the roots editor with its exclusions and live preview), and the file-naming placeholder (phase 2).
+Add a root, Edit (the roots editor with its exclusions and live preview, and what happens to files not named by the
+scheme), and File naming: the scheme in plain words and the Windows server name the length rule uses
+(:data:`mangalist.renamer.KEY_WINDOWS_SERVER`, saved when the field is left).
 
-Editing is on copies, written only by Save in the editor (Cancel leaves everything as it was). Nothing on disk is changed.
+Editing roots is on copies, written only by Save in the editor (Cancel leaves everything as it was). Nothing on disk is
+changed here.
 """
 
 from __future__ import annotations
@@ -9,14 +12,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLineEdit, QStackedWidget, QVBoxLayout, QWidget
 
+from .. import renamer
 from .download_widgets import button, card, hbox, label
 from .roots_dialog import BrowseFn, RootsEditor
-from .settings_common import SectionPage, back_link, clear_layout, placeholder
+from .settings_common import SectionPage, back_link, clear_layout
 
 LEAD = "The folders MangaList manages. MangaList files downloads only into these."
-NAMING_TEXT = "File naming - one naming scheme per root, applied by the renamer (phase 2)."
+NAMING_TITLE = "File naming"
+NAMING_TEXT = ("Every library uses MangaList's naming scheme: chapters as \"Ch. 0102.00 Vol. 012 (chapter title) [group]\", "
+               "volumes as \"Series title - Vol. 001 [group]\" (each part only when known). Edit a library to choose what "
+               "happens to files named differently: Off, Ask before renaming, or Rename automatically. To rename, "
+               "right-click a series in the List and choose \"Rename to the scheme…\", or use \"Rename library…\".")
+SERVER_TEXT = ("Windows server name (optional). If you open these files from a Windows PC over the network "
+               "(\\\\SERVER\\share\\...), enter the server's name as Windows shows it, e.g. SMIT-SERVER. Windows cannot open "
+               "a path longer than 259 characters, so MangaList then shortens long chapter titles (and after them long "
+               "group names) wherever the whole Windows path would be too long. Leave it empty if you never open the "
+               "library from Windows; file names are still kept to 255 bytes.")
 NO_ROOTS = "No roots yet. Add the folder that holds your series folders."
 
 
@@ -46,7 +59,7 @@ class LibraryPage(SectionPage):
         self.btn_add = button("Add a root")
         self.btn_add.clicked.connect(self.add_root)
         ov.addLayout(hbox(self.btn_add, None))
-        ov.addWidget(placeholder(NAMING_TEXT))
+        ov.addWidget(self._naming_card())
         ov.addStretch(1)
         self.stack.addWidget(overview)
 
@@ -56,6 +69,46 @@ class LibraryPage(SectionPage):
         self.editor_layout.setSpacing(10)
         self.stack.addWidget(self.editor_page)
         self.refresh()
+
+    # --- file naming ---------------------------------------------------------------------------------------
+
+    def _naming_card(self) -> QFrame:
+        box = card("true")
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(8)
+        lay.addWidget(label(NAMING_TITLE, "name"))
+        self.naming_note = label(NAMING_TEXT, wrap=True)
+        lay.addWidget(self.naming_note)
+        self.server_note = label(SERVER_TEXT, "muted", wrap=True)
+        lay.addWidget(self.server_note)
+        self.server_edit = QLineEdit()
+        self.server_edit.setPlaceholderText("e.g. SMIT-SERVER (empty: not opened from Windows)")
+        self.server_edit.setAccessibleName("Windows server name")
+        self.server_edit.setMaximumWidth(320)
+        self.server_edit.setText(renamer.windows_server(self._db) or "")
+        self.server_edit.editingFinished.connect(self.save_server)
+        self.server_error = label("", wrap=True)
+        self.server_error.setProperty("tone", "bad")
+        self.server_error.setVisible(False)
+        lay.addLayout(hbox(label("Windows server:"), self.server_edit, None))
+        lay.addWidget(self.server_error)
+        return box
+
+    def save_server(self) -> bool:
+        """Store the server name typed (empty clears it); a name that is not a plain server name is not stored."""
+        text = self.server_edit.text()
+        try:
+            stored = renamer.normalize_server(text)
+        except ValueError as exc:
+            self.server_error.setText(str(exc))
+            self.server_error.setVisible(True)
+            return False
+        self.server_error.setVisible(False)
+        if stored != renamer.windows_server(self._db):
+            renamer.set_windows_server(self._db, stored)
+        self.server_edit.setText(stored or "")
+        return True
 
     # --- the overview ------------------------------------------------------------------------------------
 
