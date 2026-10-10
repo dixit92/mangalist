@@ -182,7 +182,8 @@ def test_a_file_changed_since_it_was_listed_is_left_in_the_library(db, ledger, l
     assert f"{SERIES} c002.cbz" in names(sdir) and f"{SERIES} c001.cbz" not in names(sdir)
 
 
-def test_the_purge_empties_only_expired_batches_and_never_a_library(db, ledger, library, holding, known, tmp_path):
+def test_the_purge_empties_only_expired_batches_and_never_a_library(db, ledger, library, holding, known, tmp_path,
+                                                                    caplog):
     sid, sdir = make_series(db, library, chapter_files(CH + ("007", "008")))
     file_volumes(ledger, tmp_path, sid, sdir, ("1",), info_hash="aa" * 20)
     upgrades.after_filing(db, ledger, now=NOW)
@@ -191,8 +192,9 @@ def test_the_purge_empties_only_expired_batches_and_never_a_library(db, ledger, 
     first, second = batches(db)
     assert first.status == second.status == "held"
     library_before = names(sdir)
-    purged = upgrades.purge_expired(db, now=NOW + timedelta(days=31))
-    assert purged == [first.id]
+    with caplog.at_level(logging.INFO):
+        purged = upgrades.purge_expired(db, now=NOW + timedelta(days=31))
+    assert purged == [first.id] and "holding period over, deleted" in caplog.text
     assert ReplacementStore(db).get(first.id).status == "purged" and not os.path.exists(first.holding_dir)
     assert ReplacementStore(db).get(second.id).status == "held" and len(names(holding)) == 2
     assert names(sdir) == library_before
@@ -386,13 +388,16 @@ def test_a_root_no_longer_configured_is_never_written(db, ledger, library, holdi
 # --- Empty now (owner, 2026-10-09: "as long as the contents are filled in the real roots") ---------------------
 
 def test_empty_now_empties_a_held_batch_while_its_volumes_are_in_the_library(db, ledger, library, holding, known,
-                                                                             tmp_path):
+                                                                             tmp_path, caplog):
     sid, sdir = make_series(db, library, chapter_files(CH))
     file_volumes(ledger, tmp_path, sid, sdir, ("1",))
     upgrades.after_filing(db, ledger, now=NOW)
     (batch,) = batches(db)
     library_before = names(sdir)
-    after = upgrades.empty_now(db, batch.id)                          # well before its 30 days
+    with caplog.at_level(logging.INFO):
+        after = upgrades.empty_now(db, batch.id)                      # well before its 30 days
+    assert "emptied early, on the owner's word, deleted" in caplog.text
+    assert "holding period over" not in caplog.text
     assert after.status == "purged" and not os.path.exists(batch.holding_dir) and names(sdir) == library_before
     with pytest.raises(ReplacementConflict):                          # not held any more
         upgrades.empty_now(db, batch.id)

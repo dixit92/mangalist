@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Emptying the holding folder early is logged as such.** "Empty now" used to log each deletion as "holding period over"; it now says "emptied early, on the owner's word". The automatic purge after the holding period keeps its wording.
+
 ## [2026.10.11] - 2026-10-09
 
 The tenth MangaList release (testing build): the Library picker moves to the top bar (it applies to both tabs), and filing into a series held as volumes only is noted plainly.
