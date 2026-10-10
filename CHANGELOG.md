@@ -15,6 +15,7 @@ The fourteenth MangaList release (testing build): Suwayomi sources default to Ma
 - **"Check qBittorrent now" is now "Check downloads now"**: it asks Suwayomi as well (files finished chapters), so the old name was misleading.
 - **Suwayomi sources: only your languages, and only MangaDex (English) ticked to start.** Every MangaDex language used to arrive ticked. The list now shows the sources in your nyaa languages (English unless Raw is ticked) plus any you use; "Show all languages" shows the rest. "Reset to default" undoes a list ticked by hand.
 - **Number boxes show their up / down arrows again** (Settings > Download sources > Download budget, Logging): the stylesheet had hidden them. Settings cards have a little more room inside their border.
+- **Clearer Renamer window**: each series shows its title on its own line, the counts smaller and grey under it, and collisions as a red chip; long titles shorten instead of widening the list. A series with only collisions or files left alone says "nothing to rename".
 - **No personal examples in the app**: the Windows server field and its explanation use a neutral example (`MYSERVER`); test data no longer borrows real library or share names.
 
 ## [2026.10.14] - 2026-10-10
