@@ -196,15 +196,20 @@ class ChaptersPanel(QWidget):
         self.group_combo.setMinimumWidth(220)
         self.group_combo.currentIndexChanged.connect(self._on_group_changed)
         self.group_reason = label("", "muted")
-        # owner, 2026-10-10: "there's no 'check all' box" - ticks every chapter that can be sent, or none
-        self.check_all = QCheckBox("Select all")
-        self.check_all.setToolTip("Tick every chapter that can be sent (extras included), or untick them all")
-        self.check_all.clicked.connect(self._check_all_clicked)
-        pv.addLayout(hbox(label("Group"), self.group_combo, self.group_reason, None, self.check_all, spacing=8))
+        pv.addLayout(hbox(label("Group"), self.group_combo, self.group_reason, None, spacing=8))
         self.table = flat_table("chaptersTable", COLUMNS, select_rows=False)
         self.table.setSortingEnabled(False)
         resizable_columns(self.table, {COL_PICK: 36, COL_CHAPTER: 90, COL_GROUP: 220, COL_TITLE: 360, COL_STATUS: 180})
         self.table.itemChanged.connect(self._update_send)
+        # owner, 2026-10-10: "there's no 'check all' box" - in the header, above the row ticks: every chapter that can
+        # be sent, or none
+        header = self.table.horizontalHeader()
+        self.check_all = QCheckBox(header)
+        self.check_all.setToolTip("Select all: tick every chapter that can be sent (extras included), or none")
+        self.check_all.setAccessibleName("Select all")
+        self.check_all.clicked.connect(self._check_all_clicked)
+        header.sectionResized.connect(lambda *_a: self._place_check_all())
+        header.geometriesChanged.connect(self._place_check_all)
         pv.addWidget(self.table, 1)
         self.note_label = label(FOOTER_NOTE, "muted", wrap=True)
         self.btn_send = button("Send to Suwayomi", primary=True)
@@ -514,6 +519,16 @@ class ChaptersPanel(QWidget):
     def _sendable_items(self) -> List[QTableWidgetItem]:
         items = [self.table.item(r, COL_PICK) for r in range(self.table.rowCount())]
         return [i for i in items if i is not None and i.flags() & Qt.ItemFlag.ItemIsUserCheckable]
+
+    def _place_check_all(self) -> None:
+        header = self.table.horizontalHeader()
+        hint = self.check_all.sizeHint()
+        x = header.sectionViewportPosition(COL_PICK) + max(0, (header.sectionSize(COL_PICK) - hint.width()) // 2)
+        self.check_all.setGeometry(x, max(0, (header.height() - hint.height()) // 2), hint.width(), hint.height())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt
+        super().resizeEvent(event)
+        self._place_check_all()
 
     def _sync_check_all(self) -> None:
         """Select all follows the ticks: checked when every sendable chapter is ticked, partly when some are."""
