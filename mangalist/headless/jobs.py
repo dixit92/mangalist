@@ -3,7 +3,10 @@
 - ``rescan``: re-scans every configured library root with the existing scanner (read-only; the
   owner and other tools keep adding files, so whatever is on disk is simply the new truth) and records it in
   the library database like the GUI (series, units, kind answers, archive rows, moves, series carry-over),
-  then signs new archives in the background order (series identity).
+  then signs new archives in the background order (series identity). Last, the renamer's automatic pass
+  (:meth:`mangalist.renamer.Renamer.automatic_pass`): roots set to "Rename automatically" whose conversion the
+  owner started in the GUI get their pending renames through the journal (every batch logged; the touched roots are
+  scanned again and MangaPixer is asked to scan). The downloads job's rescan after filing runs it too.
 - ``dispatch-batch``: the batched download dispatch. Downloads are phase 3+ and opt-in: the job is
   registered but DISABLED unless downloads are turned on, and even then it only logs for now.
   Nothing is ever dispatched on discovery - only in these scheduled batches. (The volumes MVP sends on the
@@ -216,15 +219,24 @@ class ConfigRootsProvider:
 
 # --- the jobs -----------------------------------------------------------------------------------
 
+def automatic_renames(db: Any, ctx: JobContext) -> str:
+    """The renamer's automatic pass over *db* (roots set to "Rename automatically"). Returns its summary."""
+    from ..renamer import Renamer
+
+    return Renamer(db).automatic_pass(should_stop=lambda: ctx.stop_requested).summary()
+
+
 def make_rescan(provider: RootsProvider,
                 scan: Optional[Callable[..., list]] = None, *, backfill: bool = True,
-                backfill_delay: Optional[float] = None) -> JobFunc:
+                backfill_delay: Optional[float] = None,
+                renames: Optional[Callable[[Any, JobContext], str]] = automatic_renames) -> JobFunc:
     """A rescan over ``provider.roots()``; ``scan`` defaults to :func:`mangalist.scanner.scan_root`.
 
     Roots of the library database (``provider.database()``) are recorded like the GUI records a scan:
     series rows, units with the stored kind answers, archive rows, move detection and series carry-over
     across all roots (:func:`mangalist.scanner.record_library_scan`), then the background signature backfill
-    (*backfill*). Plain paths (``MANGALIST_ROOTS`` without a database row) are only scanned."""
+    (*backfill*), then *renames* (the renamer's automatic pass; None: none). Plain paths (``MANGALIST_ROOTS``
+    without a database row) are only scanned."""
 
     def rescan(ctx: JobContext) -> JobResult:
         scan_root = scan
@@ -287,9 +299,20 @@ def make_rescan(provider: RootsProvider,
         ok = len(roots) - failed
         status = "ok" if failed == 0 else "error"
         extra_out: Dict[str, Any] = {"roots": per_root}
+        message = f"{ok} of {len(roots)} roots scanned"
         if recorded is not None and db is not None:
             extra_out["identity"] = _record(db, recorded, ctx, backfill, backfill_delay)
-        return JobResult(status, f"{ok} of {len(roots)} roots scanned", extra_out)
+            if renames is not None:
+                ctx.check()
+                try:
+                    extra_out["renames"] = renames(db, ctx)
+                except Cancelled:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - the scan is recorded; renames are tried next time
+                    _log.exception("Rescan: the automatic renames failed")
+                    extra_out["renames"] = f"renames: failed ({type(exc).__name__})"
+                message += f"; {extra_out['renames']}"
+        return JobResult(status, message, extra_out)
 
     return rescan
 

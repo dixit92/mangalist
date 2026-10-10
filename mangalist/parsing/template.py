@@ -14,7 +14,10 @@ digits or more digits without a leading zero, text tokens never start or end wit
 (``%G``) is balanced brackets one level deep (``[Team [X]]``). One ambiguity remains by construction: a
 chapter title that itself ends in ``[...]`` with no group after it reads back as the group.
 
-The token table is extensible (:func:`register_token`); phase 2 builds the full naming engine on it.
+The token table is extensible (:func:`register_token`); phase 2 builds the full naming engine on it. MangaList's
+own scheme (owner, 2026-10-10; :mod:`mangalist.naming`) adds ``%CN`` (the chapter number with at least two decimals:
+``%CN4`` -> ``0102.00``), ``%CE`` (the end of a chapter range, same form), ``%VE`` (the end of a volume range) and
+``%SQ`` (the season / part of the series a volume belongs to: ``Season 2``, ``Part 5``).
 """
 
 from __future__ import annotations
@@ -123,6 +126,42 @@ def _render_chapter_fraction(values: Values, width: Optional[int]) -> str:
     return f".{frac}" if frac else ""
 
 
+def _end(v: Any) -> Optional[Decimal]:
+    """The end of a range value (a :class:`UnitRange` that is a range); None otherwise."""
+    return v.end if isinstance(v, UnitRange) and v.is_range else None
+
+
+def scheme_number(d: Decimal, width: Optional[int], decimals: int = 0) -> str:
+    """A unit number as MangaList's scheme writes it: the whole part padded to ``width`` and at least
+    ``decimals`` decimals, more only when the number has more (``Decimal("10.5")`` -> ``0010.50`` for
+    width 4 / 2 decimals, ``291.999`` -> ``0291.999``, ``102`` -> ``0102.00``). Trailing zeros past
+    ``decimals`` are dropped, so ``3.1`` and ``3.10`` both read ``0003.10`` (the same number)."""
+    whole, _, frac = plain(d).partition(".")
+    frac = frac.rstrip("0").ljust(decimals, "0")
+    return _pad(int(whole), width) + (f".{frac}" if frac else "")
+
+
+def _render_scheme_chapter(values: Values, width: Optional[int]) -> str:
+    d = _start(_get(values, "chapter"))
+    return "" if d is None else scheme_number(d, width, 2)
+
+
+def _render_scheme_chapter_end(values: Values, width: Optional[int]) -> str:
+    v = _get(values, "chapter_end")
+    d = _start(v) if v is not None else _end(_get(values, "chapter"))
+    return "" if d is None else scheme_number(d, width, 2)
+
+
+def _render_volume_end(values: Values, width: Optional[int]) -> str:
+    v = _get(values, "volume_end")
+    d = _start(v) if v is not None else _end(_get(values, "volume"))
+    return "" if d is None else scheme_number(d, width)
+
+
+def _two_decimals(width: Optional[int]) -> str:
+    return _padded(width) + r"\.\d{2,}"
+
+
 def _text_renderer(key: str) -> Callable[[Values, Optional[int]], str]:
     def render(values: Values, width: Optional[int]) -> str:
         v = _get(values, key)
@@ -138,6 +177,14 @@ for _spec in (
     TokenSpec("V", "volume", lambda w: _padded(w) + r"(?:\.\d+)?", _render_volume, takes_width=True, numeric=True),
     TokenSpec("C", "chapter_whole", _padded, _render_chapter_whole, takes_width=True, numeric=True),
     TokenSpec("CF", "chapter_fraction", lambda w: r"(?:\.\d+)?", _render_chapter_fraction),
+    # MangaList's own scheme (owner, 2026-10-10): the chapter number with ALWAYS two decimals ("0102.00"), the end of
+    # a chapter range, and the end of a volume range.
+    TokenSpec("CN", "chapter", _two_decimals, _render_scheme_chapter, takes_width=True, numeric=True),
+    TokenSpec("CE", "chapter_end", _two_decimals, _render_scheme_chapter_end, takes_width=True, numeric=True),
+    TokenSpec("VE", "volume_end", lambda w: _padded(w) + r"(?:\.\d+)?", _render_volume_end, takes_width=True,
+              numeric=True),
+    # The season / part of the series a volume belongs to ("Season 2", "Part 5"; renamer dry run, 2026-10-10).
+    TokenSpec("SQ", "qualifier", lambda w: r"(?:Season|Part) (?:0|[1-9]\d*)(?:\.\d+)?", _text_renderer("qualifier")),
     TokenSpec("CT", "title", lambda w: _TEXT, _text_renderer("title")),
     TokenSpec("G", "group", lambda w: _GROUP_TEXT, _text_renderer("group")),
     TokenSpec("T", "series", lambda w: _TEXT, _text_renderer("series")),
@@ -318,7 +365,7 @@ def values_of(parsed: ParsedName) -> Dict[str, Any]:
     return {
         "index": parsed.index, "volume": parsed.volume, "chapter": parsed.chapter, "title": parsed.title,
         "group": parsed.group, "series": parsed.series, "year": parsed.year, "edition": parsed.edition,
-        "fix": parsed.fix,
+        "fix": parsed.fix, "qualifier": parsed.qualifier,
     }
 
 
@@ -332,7 +379,16 @@ def compile_template(template: Union[str, Template]) -> Template:
     return template if isinstance(template, Template) else _compile_cached(template)
 
 
-# The owner's FMD2 scheme as MangaList's default (PD 6). %I = FMD2's numbering index (C1 open for phase 2).
+# MangaList's own scheme (owner, 2026-10-10; Next Cycle Design sections 10-12) - the default of every root whose
+# naming scheme is empty, and always read back by the parser (layer 1). Chapters: "Ch. 0102.00 Vol. 012 (<chapter
+# title>) [<group>]" - the number first, so a plain sort is the reading order and a volume learned later never moves
+# a file; each later part only when known; a range "Ch. 0010.00-0012.00". Volumes: "<Series title> - Vol. 001
+# [<group>]", a range "Vol. 001-003", a season / part of the series "<Series title> Season 2 - Vol. 001". mangalist.naming renders them (sanitising, length rule).
+MANGALIST_CHAPTER_SCHEME = "Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}"
+MANGALIST_VOLUME_SCHEME = "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
+
+# The owner's FMD2 scheme (PD 6; MangaList's default until 2026-10-10, now only what FMD2 writes). %I = FMD2's
+# numbering index (C1 open for phase 2).
 FMD2_CHAPTER_SCHEME = "%I4 [{Vol. %V4 }Ch. %C4%CF{ - %CT}{ [%G]}]"
 # Volumes keep their release name.
 FMD2_VOLUME_SCHEME = "%O"

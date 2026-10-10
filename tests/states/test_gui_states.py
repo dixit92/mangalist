@@ -23,6 +23,7 @@ from mangalist.gui.table_model import (  # noqa: E402
     COL_STATE,
     COLUMNS,
     COL_LIBRARY,
+    COL_RENAME,
     STATE_FILTERS,
     MangaTableModel,
     state_matches,
@@ -85,8 +86,9 @@ def test_new_columns_are_appended_and_keep_the_old_ones(model):
     assert COLUMNS[:15] == ["✓", "Dupe", "Title", "Alternative Title", "Files", "Subfolders", "Vol %", "Ch %",
                             "Both %", "Verdict", "Last Modified", "MU Title", "Licensed", "Behind", "Completed"]
     assert COLUMNS[COL_STATE] == "State" and COLUMNS[COL_GAPS] == "Gaps" and COLUMNS[COL_OFFICIAL] == "Official source"
-    assert COLUMNS[COL_ENGLISH] == "English" and model.columnCount() == 20
-    assert COLUMNS[COL_LIBRARY] == "Library" and COL_LIBRARY == len(COLUMNS) - 1       # appended: no index moved
+    assert COLUMNS[COL_ENGLISH] == "English" and model.columnCount() == 21
+    assert COLUMNS[COL_LIBRARY] == "Library" and COL_LIBRARY == 19
+    assert COLUMNS[COL_RENAME] == "Rename" and COL_RENAME == len(COLUMNS) - 1         # appended: no index moved
     assert model.headerData(9, Qt.Horizontal) == "Kind"          # "Verdict" keeps its name in the settings
 
 
@@ -268,3 +270,20 @@ def test_old_columns_follow_mangapixer_and_stay_empty_when_not_a_series(model):
     model.set_state_providers(knowledge_for=lambda e: known if e.title == "Bravo Chapters" else None)
     assert _cell(model, 1, COL_MU_TITLE) == "✔ Example Quest"
     assert _cell(model, 1, COL_LICENSED) == "Yes"
+
+
+def test_rename_pending_is_a_flag_a_column_and_a_filter(model):
+    from mangalist.gui.table_model import state_matches
+
+    folder = str(model.entry_at(1).folder)
+    assert model.rename_count_at(1) == 0 and not state_matches(model.state_at(1), "rename")
+    model.set_rename_counts({folder: 3, "/elsewhere": 0})
+    st = model.state_at(1)
+    assert st.rename_pending and st.rename_count == 3 and state_matches(st, "rename")
+    assert _cell(model, 1, COL_STATE).endswith("Rename pending")
+    assert "Rename pending: 3 files not named by the scheme" in _cell(model, 1, COL_STATE, Qt.ToolTipRole)
+    assert _cell(model, 1, COL_RENAME) == "3 files" and _cell(model, 1, COL_RENAME, Qt.UserRole) == 3
+    assert "right-click: Rename to the scheme" in _cell(model, 1, COL_RENAME, Qt.ToolTipRole)
+    assert _cell(model, 0, COL_RENAME) == "" and not model.state_at(0).rename_pending
+    model.set_rename_counts({})
+    assert not model.state_at(1).rename_pending and _cell(model, 1, COL_RENAME) == ""

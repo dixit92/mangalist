@@ -8,6 +8,13 @@ Registered by :func:`mangalist.headless.jobs.build_registry`, enabled only when 
 qBittorrent connection is stored, or while no client is wired. The qBittorrent client comes from
 :func:`mangalist.services.qbittorrent.client_from_connection` (the Sources lane; the integrator wires it), or
 from *client_factory* (tests).
+
+**Chapter downloads** (the Suwayomi MVP, 2026-10-10): when chapter records are in progress, the same job first runs one
+chapter arrivals pass (:mod:`mangalist.downloads.chapter_arrivals`: chapters Suwayomi finished -> the series folder,
+named by the scheme; Suwayomi then deletes its copy) with the client from
+:func:`mangalist.services.suwayomi.client_from_connection` (or *chapter_client_factory*, tests) and the stored download
+folder. The qBittorrent part then runs exactly as before; the after-filing step (rescan, MangaPixer scan) sees the
+chapters filed too. Without chapter records nothing about the job changes.
 """
 
 from __future__ import annotations
@@ -48,7 +55,8 @@ def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
     from ..services.mangapixer.scans import libraries_for_series, request_scans
 
     store = ledger.store
-    series_ids = [rec.series_id for rec in (ledger.get(i) for i in report.filed) if rec is not None]
+    every = ledger.for_tool(None) if callable(getattr(ledger, "for_tool", None)) else ledger    # chapters filed too
+    series_ids = [rec.series_id for rec in (every.get(i) for i in report.filed) if rec is not None]
     notes = []
     if series_ids:
         from .jobs import StoreRootsProvider, make_rescan
@@ -82,13 +90,75 @@ def _queue_work(ledger) -> bool:
                for r in ledger.all_records())
 
 
+def _default_chapter_client_factory(conn):
+    try:
+        from ..services import suwayomi
+    except ImportError:         # pragma: no cover - the client ships with MangaList
+        return None
+    return suwayomi.client_from_connection(conn)
+
+
+class _Merged:
+    """The filed records of both passes, for the after-filing step."""
+
+    def __init__(self, *reports) -> None:
+        self.filed = tuple(i for r in reports if r is not None for i in r.filed)
+
+
+def chapters_pass(ctx: JobContext, ledger, chapter_client_factory=None, namer=None):
+    """One chapter arrivals pass when chapter downloads are in progress: ``(report, note)``; ``(None, None)`` when there
+    is nothing to do (or *ledger* keeps no chapter records). *note* says why the pass could not run (no Suwayomi set up)."""
+    from ..downloads.contracts import TOOL_SUWAYOMI
+
+    for_tool = getattr(ledger, "for_tool", None)
+    if not callable(for_tool):
+        return None, None
+    chapters = for_tool(TOOL_SUWAYOMI)
+    if not chapters.active():
+        return None, None
+    from ..store.downloads import SuwayomiSettings
+
+    conn = SuwayomiSettings(ledger.store).connection()
+    if conn is None:
+        _log.info("Downloads: chapter downloads are in progress but no Suwayomi connection is set up; skipped")
+        return None, "chapters: no Suwayomi connection set up"
+    client = (chapter_client_factory or _default_chapter_client_factory)(conn)
+    if client is None:
+        return None, "chapters: no Suwayomi client available"
+    from ..downloads.chapter_arrivals import run_chapter_arrivals
+
+    try:
+        report = run_chapter_arrivals(client, chapters, download_dir=conn.download_dir, namer=namer,
+                                      should_stop=lambda: ctx.stop_requested)
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+    if ctx.stop_requested:
+        raise Cancelled()
+    return report, None
+
+
+def chapters_text(report, note: Optional[str]) -> Optional[str]:
+    """``chapters: 3 checked: 2 filed, 0 failed, 1 waiting`` (or the note; None when there was nothing to do)."""
+    if report is None:
+        return note
+    if report.error:
+        return f"chapters: {report.error}"
+    return (f"chapters: {report.checked} checked: {len(report.filed)} filed, {len(report.failed)} failed, "
+            f"{len(report.waiting)} waiting")
+
+
 def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
                        client_factory: Optional[Callable[[object], object]] = None,
                        after: Optional[Callable[[JobContext, object, object], Optional[str]]] = after_pass,
-                       replaced: Optional[Callable[[object], Optional[str]]] = replaced_chapters_step) -> JobFunc:
+                       replaced: Optional[Callable[[object], Optional[str]]] = replaced_chapters_step,
+                       chapter_client_factory: Optional[Callable[[object], object]] = None,
+                       namer=None) -> JobFunc:
     """The job function. *open_ledger* / *client_factory* are for tests (default: the data folder's database and
     a client built from its stored connection); *after* runs after each pass (None: nothing); *replaced* is the
-    replaced-chapters step (None: nothing)."""
+    replaced-chapters step (None: nothing). *chapter_client_factory* / *namer*: the Suwayomi client and the naming
+    scheme of the chapter pass (tests; default: the stored connection's client, ``mangalist.naming``)."""
 
     def _replaced(ledger) -> Optional[str]:
         if replaced is None:
@@ -122,19 +192,27 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
             from ..store import get_store
 
             ledger = DownloadLedger(get_store())
+        chapter_report, chapter_note = chapters_pass(ctx, ledger, chapter_client_factory, namer)
+        chapter_line = chapters_text(chapter_report, chapter_note)
         active = bool(ledger.active())
         queue_work = _queue_work(ledger)
         if not active and not queue_work:
+            if chapter_line is not None:                    # chapter downloads only
+                return _chapters_only(ctx, ledger, chapter_report, chapter_line)
             notes = [n for n in (_replaced(ledger),          # waiting batches retried, the holding folder emptied
                                  _after(ctx, ledger, _NoReport())) if n]   # pending MangaPixer scans are retried too
             return JobResult("skipped", "no downloads in progress" + "".join(f"; {n}" for n in notes))
         conn = ledger.connection()
         if conn is None:
             _log.info("Downloads: no qBittorrent connection is set up; skipped")
+            if chapter_report is not None:
+                return _chapters_only(ctx, ledger, chapter_report, chapter_line + "; no qBittorrent connection set up")
             return JobResult("skipped", "no qBittorrent connection set up")
         client = (client_factory or _default_client_factory)(conn)
         if client is None:
             _log.warning("Downloads: no qBittorrent client available in this build; skipped")
+            if chapter_report is not None:
+                return _chapters_only(ctx, ledger, chapter_report, chapter_line + "; no qBittorrent client available")
             return JobResult("skipped", "no qBittorrent client available")
         from ..downloads.arrivals import ArrivalsReport
         from ..downloads.queueing import run_queue
@@ -157,11 +235,34 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
                    f"{len(report.failed)} failed, {len(report.waiting)} waiting")
         if queue.text():
             message += f"; {queue.text()}"
+        if chapter_line:
+            message += f"; {chapter_line}"
+            extra.update(_chapter_extra(chapter_report))
+            if chapter_report is not None and (chapter_report.errors or chapter_report.error):
+                status = "error"
         replaced_note = _replaced(ledger)
         if replaced_note:
             message += f"; {replaced_note}"
             extra["replaced"] = replaced_note
-        note = _after(ctx, ledger, report)
+        note = _after(ctx, ledger, _Merged(report, chapter_report) if chapter_report is not None else report)
+        if note:
+            message += f"; {note}"
+            extra["after"] = note
+        _log.info("Downloads: %s", message)
+        return JobResult(status, message, extra)
+
+    def _chapters_only(ctx: JobContext, ledger, chapter_report, line: str) -> JobResult:
+        """The job's result when only chapter downloads were in progress (or qBittorrent could not run)."""
+        extra = _chapter_extra(chapter_report)
+        if chapter_report is None:                      # the pass could not run (no Suwayomi set up)
+            return JobResult("skipped", line, extra)
+        status = "error" if chapter_report.error or chapter_report.errors else "ok"
+        message = line
+        replaced_note = _replaced(ledger)
+        if replaced_note:
+            message += f"; {replaced_note}"
+            extra["replaced"] = replaced_note
+        note = _after(ctx, ledger, _Merged(chapter_report))
         if note:
             message += f"; {note}"
             extra["after"] = note
@@ -169,3 +270,14 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         return JobResult(status, message, extra)
 
     return downloads
+
+
+def _chapter_extra(report) -> dict:
+    if report is None:
+        return {}
+    extra = {f"chapters_{k}": v for k, v in report.summary().items()}
+    extra["chapters_failed_records"] = [{"id": i, "why": why} for i, why in report.failed]
+    extra["chapters_waiting_records"] = [{"id": i, "why": why} for i, why in report.waiting]
+    if report.error:
+        extra["chapters_error"] = report.error
+    return extra

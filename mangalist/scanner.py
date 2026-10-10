@@ -7,7 +7,8 @@ directly in a root is not a series: it is reported as "not in a series folder" (
 matched. Scans only read; they never take the root lock, and files other tools add are simply seen.
 
 Every archive is parsed by the layered parser (:mod:`mangalist.parsing`) with its series' context: the
-folder title, the root's naming scheme (when set) and the series' stored "volumes or chapters?" answer
+folder title, the root's naming scheme (MangaList's own scheme when the root has none) and the series' stored
+"volumes or chapters?" answer
 (Design Decisions C12). :func:`record_library_scan` stores each archive's units per series in the
 database (``units`` table) and applies stored answers; :func:`answer_series_kind` records a new answer.
 
@@ -357,9 +358,19 @@ class LibraryScan:
         return [f"{r.root_name}: {r.error}" for r in self.roots if r.error]
 
 
+def _schemes_of(scheme: Optional[str]) -> Tuple[str, ...]:
+    """The naming scheme(s) a root's files are parsed with: its own ``naming_scheme``, or - when that is empty -
+    MangaList's scheme (:data:`mangalist.naming.DEFAULT_SCHEMES`, owner 2026-10-10: the default of every root). The
+    parser also reads MangaList's scheme after a root's own, so its names are read exactly in every root."""
+    if isinstance(scheme, str) and scheme.strip():
+        return (scheme,)
+    from .naming import DEFAULT_SCHEMES
+
+    return DEFAULT_SCHEMES
+
+
 def _root_schemes(root) -> Tuple[str, ...]:
-    scheme = getattr(root, "naming_scheme", None)
-    return (scheme,) if isinstance(scheme, str) and scheme.strip() else ()
+    return _schemes_of(getattr(root, "naming_scheme", None))
 
 
 def scan_one_root(
@@ -548,7 +559,7 @@ def _root_of(db, root_id: int):
 def _record_units(db, rs: RootScan, scheme: Optional[str] = None) -> None:
     from .inventory import units_of_entry
 
-    schemes = (scheme,) if isinstance(scheme, str) and scheme.strip() else ()
+    schemes = _schemes_of(scheme)
     rows = {s.rel_path: s for s in db.list_series(rs.root_id)}
     by_series: Dict[int, Dict[str, list]] = {}
     for entry in rs.entries:
@@ -575,7 +586,7 @@ def answer_series_kind(db, entry: MangaEntry, kind: Optional[str]) -> bool:
     k = normalize_kind_hint(kind)
     located = db._locate(entry.folder)
     root = _root_of(db, located[0]) if located else None
-    apply_kind_hint(entry, k, _root_schemes(root) if root is not None else ())
+    apply_kind_hint(entry, k, _root_schemes(root) if root is not None else _schemes_of(None))
     if located is None or not db.set_series_kind(located[0], located[1], k):
         return False
     row = db.get_series(*located)

@@ -1,0 +1,17 @@
+{
+ "data": {
+  "settings": {
+   "downloadAsCbz": true,
+   "downloadsPath": "",
+   "authMode": "NONE",
+   "flareSolverrEnabled": false,
+   "flareSolverrUrl": "http://localhost:8191"
+  },
+  "aboutServer": {
+   "name": "Suwayomi-Server",
+   "version": "v2.4.2366",
+   "buildType": "Stable",
+   "revision": "r2366"
+  }
+ }
+}

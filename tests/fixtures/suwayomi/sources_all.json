@@ -1,0 +1,44 @@
+{
+ "data": {
+  "sources": {
+   "nodes": [
+    {
+     "id": "0",
+     "name": "Local source",
+     "lang": "localsourcelang",
+     "displayName": "Local source",
+     "contentWarning": "SAFE",
+     "supportsLatest": true,
+     "extension": {
+      "pkgName": "eu.kanade.tachiyomi.source.local",
+      "name": "Local Source fake extension"
+     }
+    },
+    {
+     "id": "1411768577036936240",
+     "name": "MangaDex",
+     "lang": "ja",
+     "displayName": "MangaDex (JA)",
+     "contentWarning": "MIXED",
+     "supportsLatest": true,
+     "extension": {
+      "pkgName": "eu.kanade.tachiyomi.extension.all.mangadex",
+      "name": "MangaDex"
+     }
+    },
+    {
+     "id": "2499283573021220255",
+     "name": "MangaDex",
+     "lang": "en",
+     "displayName": "MangaDex (EN)",
+     "contentWarning": "MIXED",
+     "supportsLatest": true,
+     "extension": {
+      "pkgName": "eu.kanade.tachiyomi.extension.all.mangadex",
+      "name": "MangaDex"
+     }
+    }
+   ]
+  }
+ }
+}

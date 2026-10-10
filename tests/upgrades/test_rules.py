@@ -49,8 +49,10 @@ def test_the_replaced_line_asks_for_pending_and_tells_where_held_files_are():
     assert text == "Replace 25 chapter files of 2 series with the volumes filed?" and tone == "warn"
     text, _ = rules.replaced_bar_text([batch(files=2, mode="holding", error="the root is busy")])
     assert text.endswith("(1 could not be moved yet)")
-    text, tone = rules.replaced_bar_text([batch("held", files=1)])
-    assert text == "1 chapter file replaced by volumes are in the holding folder (1 series)" and tone == "muted"
+    text, tone = rules.replaced_bar_text([batch("held", files=1)])        # the space first (owner, 2026-10-10)
+    assert text == "100 B of replaced chapters in the holding folder (1 chapter file, 1 series)" and tone == "muted"
+    text, _ = rules.replaced_bar_text([batch("held", files=3), batch("held", files=2, series="/lib/Other")])
+    assert text == "500 B of replaced chapters in the holding folder (5 chapter files, 2 series)"
 
 
 def test_a_batch_state_in_words():

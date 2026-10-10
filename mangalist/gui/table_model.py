@@ -40,6 +40,7 @@ COLUMNS = [
     "Official source",
     "English",
     "Library",  # the root the series lies in (hidden by default; useful under "All libraries")
+    "Rename",   # files not named by the root's naming scheme (Rename pending; hidden by default)
 ]
 
 # What the header shows where it differs from the column's name (the name is what the settings remember).
@@ -67,6 +68,7 @@ COL_GAPS = 16
 COL_OFFICIAL = 17
 COL_ENGLISH = 18
 COL_LIBRARY = 19
+COL_RENAME = 20
 STATE_COLUMNS = (COL_STATE, COL_GAPS, COL_OFFICIAL)
 
 # Extra roles for the List tab's delegates (list_delegates.py).
@@ -78,7 +80,7 @@ STATE_ROLE = Qt.UserRole + 3        # State: the SeriesState (the badge's colour
 STATE_FILTERS: List[Tuple[Optional[str], str]] = (
     [(None, "All states"), ("wanted", "Wanted (any)"), ("missing", "Missing (volumes or chapters)")]
     + [(st.value, st.value) for st in STATE_ORDER]
-    + [("upcoming", "Upcoming"), ("attention", "Needs attention")]
+    + [("upcoming", "Upcoming"), ("attention", "Needs attention"), ("rename", "Rename pending")]
 )
 
 
@@ -96,6 +98,8 @@ def state_matches(state: Optional[SeriesState], key: Optional[str]) -> bool:
         return state.upcoming
     if key == "attention":
         return bool(state.needs_attention)
+    if key == "rename":
+        return state.rename_pending
     if key == State.UPGRADE.value:  # incl. Complete + Upgrade available (owner rule c)
         return state.state == State.UPGRADE or state.complete_with_upgrade
     return state.state.value == key
@@ -120,6 +124,8 @@ class MangaTableModel(QAbstractTableModel):
         # series folder -> (volume numbers, chapter numbers) held by more than one file (lane C's finder, counted by
         # the window off the UI thread)
         self._dupe_files: Dict[str, Tuple[int, int]] = {}
+        # series folder -> how many files the renamer would rename (Rename pending; counted off the UI thread)
+        self._rename_counts: Dict[str, int] = {}
         # Rescan state + official sources per row, computed on first use and dropped when the row changes.
         self._state_cache: Dict[int, Tuple[SeriesState, List[OfficialLink]]] = {}
         self._today: Optional[datetime.date] = None
@@ -194,6 +200,7 @@ class MangaTableModel(QAbstractTableModel):
         if inventory is None:
             inventory = fallback_inventory_from_entry(e)
         st = compute_state(inventory, knowledge, folder_empty=e.n_files == 0, needs_kind=self._needs_kind_for(e),
+                           rename_count=self._rename_counts.get(str(e.folder), 0),
                            behind_override=e.behind_override, today=self._today)
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
         self._state_cache[row] = (st, links, knowledge)
@@ -310,6 +317,26 @@ class MangaTableModel(QAbstractTableModel):
         if self._entries:
             self.dataChanged.emit(self.index(0, COL_DUPE), self.index(len(self._entries) - 1, COL_DUPE),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def set_rename_counts(self, counts: Dict[str, int]) -> None:
+        """Per series folder: how many files the renamer would rename (Rename pending: a flag in the State column, the
+        Rename column and the "Rename pending" filter). Folders not listed have nothing pending."""
+        new = {str(k): int(v) for k, v in counts.items() if int(v) > 0}
+        if new == self._rename_counts:
+            return
+        self._rename_counts = new
+        self._state_cache.clear()
+        if self._entries:
+            self.dataChanged.emit(self.index(0, COL_STATE), self.index(len(self._entries) - 1, COL_ENGLISH),
+                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+            self.dataChanged.emit(self.index(0, COL_RENAME), self.index(len(self._entries) - 1, COL_RENAME),
+                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def rename_count_at(self, row: int) -> int:
+        """How many files of row *row*'s folder the renamer would rename (0: none, or not counted yet)."""
+        if row < 0 or row >= len(self._entries):
+            return 0
+        return self._rename_counts.get(str(self._entries[row].folder), 0)
 
     def duplicate_files_at(self, row: int) -> Tuple[int, int]:
         """(volume numbers, chapter numbers) of row *row*'s folder held by more than one file."""
@@ -450,6 +477,9 @@ class MangaTableModel(QAbstractTableModel):
                 return e.english_title or ""
             if col == COL_LIBRARY:
                 return self.library_name(e.root_id)
+            if col == COL_RENAME:
+                n = self.rename_count_at(index.row())
+                return f"{n} file{'s' if n != 1 else ''}" if n else ""
             if col == COL_FILES:
                 return e.n_files
             if col == COL_SUBS:
@@ -502,7 +532,7 @@ class MangaTableModel(QAbstractTableModel):
             return self.state_at(index.row())
 
         if role == Qt.TextAlignmentRole:
-            if col in (COL_FILES, COL_SUBS, COL_VOL, COL_CH, COL_BOTH, COL_MTIME):
+            if col in (COL_FILES, COL_SUBS, COL_VOL, COL_CH, COL_BOTH, COL_MTIME, COL_RENAME):
                 return int(Qt.AlignRight | Qt.AlignVCenter)
             if col in (COL_VERDICT, COL_EXAMINED, COL_LICENSED, COL_BEHIND, COL_COMPLETED, COL_DUPE):
                 return int(Qt.AlignCenter)
@@ -520,6 +550,10 @@ class MangaTableModel(QAbstractTableModel):
                 return "Examined" if e.examined else "Not examined"
             if col == COL_DUPE:
                 return self._duplicates_tip(index.row())
+            if col == COL_RENAME:
+                n = self.rename_count_at(index.row())
+                return (f"{n} file{'s' if n != 1 else ''} not named by the naming scheme (right-click: Rename to the "
+                        "scheme)") if n else None
             if col == COL_MU_TITLE:
                 tip = match_tooltip(e)
                 if tip is not None:
@@ -576,6 +610,8 @@ class MangaTableModel(QAbstractTableModel):
                 return (e.english_title or "").lower()
             if col == COL_LIBRARY:
                 return self.library_name(e.root_id).lower()
+            if col == COL_RENAME:
+                return self.rename_count_at(index.row())
             if col == COL_MTIME:
                 return e.last_modified
             if col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED):

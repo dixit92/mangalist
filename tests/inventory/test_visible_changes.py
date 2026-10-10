@@ -43,6 +43,17 @@ CHANGES = [
     ("Title v10 + 085-086 (2021) (Digital) (G).cbz", ("volume", 10.0, None), ("volume", D("10"), D("86"), False)),
     # Release names: the tags (group, edition) are never read for numbers.
     ("Title v01 (2019) (Digital) (Group c2).cbz", ("chapter", 1.0, 2.0), ("volume", D("1"), None, False)),
+    # Renamer cycle (Next Cycle Design section 10, 2026-10-10): a bare number after the series title is a chapter
+    # by guess (the series still asks "volumes or chapters?"); a site's chapter label is a chapter; a bracket that
+    # starts with a zero-padded number names the chapter; the last volume token of a release name is its volume.
+    ("Title 012 (2019) (Digital) (G).cbz", ("ambiguous", None, None), ("chapter", None, D("12"), False)),
+    ("Title - Episode 35 (2023) (Digital) (G).cbz", ("ambiguous", None, None), ("chapter", None, D("35"), False)),
+    ("0076 [0076  Arc Title (3)].cbz", ("ambiguous", None, None), ("chapter", None, D("76"), False)),
+    ("0012 [Contact. 0001 - Title [G]].cbz", ("ambiguous", None, None), ("chapter", None, D("1"), False)),
+    ("Title - Part 5 - Sub v05 (2022) (Digital) (G).cbz", ("volume", 5.0, None), ("volume", D("5"), None, False)),
+    # MangaList's own scheme: the title in parentheses is never read for numbers.
+    ("Ch. 0010.00 (The Vol 2 Begins) [G].cbz", ("chapter", 2.0, 10.0), ("chapter", None, D("10"), False)),
+    ("Ch. 0010.00 (Chapter 5 of the Ch. 3 Arc) [G].cbz", ("chapter", None, 10.0), ("chapter", None, D("10"), False)),
 ]
 
 
@@ -58,7 +69,7 @@ UNCHANGED = [
     "Title - 0012 [Ch. 12].cbz", "0005 [Ch. 5 - Episode 30].cbz", "0012 [Vol. 3].cbz", "0012 [Ch. 10-12].cbz",
     "Title v01 (2019) (Digital) (G).cbz", "Title c012 (v03) (G).cbz", "Title Vol. 3 Ch. 12.cbz",
     "Title_ch_007.zip", "[Group] Title - c001 [v2].cbz", "Title Volume 1 Chapter 2.cbz", "Ch.12.5.cbz",
-    "01.cbz", "Title 012 (2019) (Digital) (G).cbz",
+    "01.cbz",
 ]
 
 

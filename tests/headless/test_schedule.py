@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mangalist.headless.schedule import UTC, DailyAt, EveryHours, is_missed, parse_schedule
+from mangalist.headless.schedule import UTC, DailyAt, EveryHours, WeeklyAt, is_missed, parse_schedule, validate_schedule
 
 from .conftest import zone
 
@@ -25,20 +25,23 @@ from .conftest import zone
     ("", None),
     (None, None),
     ("disabled", None),
+    ("weekly@sun 03:30", WeeklyAt(6, 3, 30)),
+    ("Weekly Wednesday 4:05", WeeklyAt(2, 4, 5)),
+    ("weekly:mon 00:00", WeeklyAt(0, 0, 0)),
 ])
 def test_parse_schedule(text, expected):
     assert parse_schedule(text) == expected
 
 
 @pytest.mark.parametrize("text", ["daily@25:00", "daily@03:60", "every 0h", "weekly", "every 12m",
-                                  "3:30pm"])
+                                  "3:30pm", "weekly@sun", "weekly@funday 03:30", "weekly@sun 24:00"])
 def test_parse_schedule_rejects_typos(text):
     with pytest.raises(ValueError):
         parse_schedule(text)
 
 
 def test_describe_round_trips():
-    for s in (DailyAt(3, 30), EveryHours(12), EveryHours(1.5)):
+    for s in (DailyAt(3, 30), EveryHours(12), EveryHours(1.5), WeeklyAt(6, 3, 30), WeeklyAt(0, 23, 59)):
         assert parse_schedule(s.describe()) == s
 
 
@@ -123,3 +126,30 @@ def test_is_missed():
     assert is_missed(now, now)
     assert not is_missed(now + timedelta(seconds=1), now)
     assert not is_missed(None, now)
+
+
+
+# --- weekly (owner, 2026-10-10: the choices are weekly, daily, every 12 hours, every 6 hours) -----------------------
+
+def test_weekly_runs_on_its_day_at_its_local_time():
+    tz = zone("America/New_York")
+    sunday = WeeklyAt(6, 3, 30)
+    # Friday 2026-10-09 23:00 local -> Sunday 2026-10-11 03:30 local (EDT, UTC-4)
+    after = datetime(2026, 10, 10, 3, 0, tzinfo=UTC)
+    assert sunday.next_after(after, tz) == datetime(2026, 10, 11, 7, 30, tzinfo=UTC)
+    # exactly at the slot -> the next week
+    assert sunday.next_after(datetime(2026, 10, 11, 7, 30, tzinfo=UTC), tz) == datetime(2026, 10, 18, 7, 30, tzinfo=UTC)
+    # later the same Sunday -> the next week
+    assert sunday.next_after(datetime(2026, 10, 11, 12, 0, tzinfo=UTC), tz) == datetime(2026, 10, 18, 7, 30, tzinfo=UTC)
+
+
+def test_weekly_keeps_its_wall_clock_time_across_the_fall_back():
+    tz = zone("America/New_York")
+    # DST ends Sunday 2026-11-01: 03:30 local is EST (UTC-5) from then on
+    nxt = WeeklyAt(6, 3, 30).next_after(datetime(2026, 10, 26, 12, 0, tzinfo=UTC), tz)
+    assert nxt == datetime(2026, 11, 1, 8, 30, tzinfo=UTC)
+    assert nxt.astimezone(tz).strftime("%a %H:%M") == "Sun 03:30"
+
+
+def test_validate_stores_weekly_in_its_canonical_form():
+    assert validate_schedule("Weekly Wednesday 4:05") == "weekly@wed 04:05"

@@ -23,6 +23,12 @@ from typing import Mapping, Optional, Protocol, Sequence, Tuple
 ENV_DOWNLOADS = "MANGALIST_DOWNLOADS"  # the same switch as mangalist.headless.settings
 _TRUE = {"1", "true", "yes", "y", "on", "enable", "enabled"}
 
+#: The download clients a ledger record can belong to (the ledger's ``tool`` column). The volumes MVP's records are all
+#: qBittorrent's; the Suwayomi MVP (chapters, 2026-10-10) adds Suwayomi's.
+TOOL_QBITTORRENT = "qbittorrent"
+TOOL_SUWAYOMI = "suwayomi"
+TOOLS = (TOOL_QBITTORRENT, TOOL_SUWAYOMI)
+
 #: The only qBittorrent category MangaList adds to, watches, or deletes from.
 QBITTORRENT_CATEGORY = "mangalist"
 
@@ -223,6 +229,17 @@ class DownloadRecord:
     size_source: str = ""               # where that size comes from: 'release' | 'selected files' | 'qbittorrent'
     in_client: bool = True              # as last seen, the torrent is still in the client (only a FAILED one can say no)
     queue_position: int = 0             # QUEUED: its place in the queue, 1 = handed over next; 0 otherwise
+    # The Suwayomi MVP (chapters; :mod:`mangalist.downloads.chapters`). A chapter download is one record per chapter:
+    # ``info_hash`` then holds Suwayomi's chapter id (the ledger's ``external_ref``), ``wanted_volumes`` is empty.
+    tool: str = TOOL_QBITTORRENT        # TOOL_QBITTORRENT | TOOL_SUWAYOMI
+    wanted_chapters: Tuple[str, ...] = ()   # a chapter download: its chapter number (exact strings)
+    batch: str = ""                     # a chapter download: the Send it came from (the GUI shows a batch as one row)
+    source: str = ""                    # a chapter download: the Suwayomi source's name (e.g. 'MangaDex (EN)')
+    group: str = ""                     # a chapter download: the scanlation group ('' when the source names none)
+
+    @property
+    def is_chapters(self) -> bool:
+        return self.tool == TOOL_SUWAYOMI
 
 
 class DownloadStore(Protocol):
@@ -237,3 +254,98 @@ class DownloadStore(Protocol):
     def active(self) -> Sequence[DownloadRecord]:
         """Every record in qBittorrent's hands: SENT / DOWNLOADED / FILED (not QUEUED: nothing was added yet)."""
         ...
+
+
+# --- Suwayomi (the Suwayomi MVP: chapters, 2026-10-10) ---------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SuwayomiConnection:
+    """Suwayomi-Server's address, its optional basic-auth login, and the folder MangaList reads its downloads from
+    (as MangaList sees it: Suwayomi's ``downloads`` folder, the one holding ``mangas/``)."""
+
+    base_url: str                       # e.g. http://192.168.1.10:4567
+    username: str = ""
+    password: str = field(default="", repr=False)   # never logged, never repr'd
+    download_dir: str = ""
+
+
+@dataclass(frozen=True)
+class SuwayomiSource:
+    """One source Suwayomi has installed (from an extension), stored by its numeric id - stable, unlike its name."""
+
+    id: str                             # Suwayomi's source id: a 64-bit integer as a string
+    name: str                           # e.g. 'MangaDex'
+    display_name: str                   # e.g. 'MangaDex (EN)' - also the folder Suwayomi downloads into
+    lang: str                           # e.g. 'en'; 'localsourcelang' for the local source
+    extension: str = ""                 # the extension's package name (e.g. eu.kanade.tachiyomi.extension.all.mangadex)
+
+    @property
+    def is_mangadex(self) -> bool:
+        return self.extension.endswith(".mangadex") or self.name.casefold() == "mangadex"
+
+
+@dataclass(frozen=True)
+class SuwayomiManga:
+    id: int                             # Suwayomi's manga id
+    title: str
+    url: str                            # the source's own path, e.g. /manga/<uuid> on MangaDex
+    source_id: str
+    in_library: bool = False
+
+
+@dataclass(frozen=True)
+class SuwayomiChapter:
+    id: int                             # Suwayomi's chapter id: what is enqueued, and the ledger's external_ref
+    manga_id: int
+    name: str                           # as the source names it (MangaDex: 'Vol.1 Ch.2 - <title>')
+    number: str                         # exact decimal string ('2', '10.5'); '-1' when the source gives none
+    scanlator: Optional[str]            # the scanlation group, None when the source names none
+    url: str = ""
+    real_url: str = ""
+    upload_date: str = ""               # epoch milliseconds, as Suwayomi gives it
+    downloaded: bool = False
+    source_order: int = 0
+
+
+@dataclass(frozen=True)
+class MangaChapters:
+    """A manga's details and chapters as Suwayomi fetched them from the source just now."""
+
+    manga: SuwayomiManga
+    source_name: str                    # the source's display name ('MangaDex (EN)'): Suwayomi's download folder
+    chapters: Tuple[SuwayomiChapter, ...] = ()
+
+
+@dataclass(frozen=True)
+class QueuedChapter:
+    """One entry of Suwayomi's download queue. A finished chapter leaves the queue (and reads ``downloaded``)."""
+
+    chapter_id: int
+    state: str                          # QUEUED | DOWNLOADING | FINISHED | ERROR
+    progress: float = 0.0
+    tries: int = 0
+
+
+class ChapterClient(Protocol):
+    """What MangaList asks Suwayomi (:class:`mangalist.services.suwayomi.SuwayomiClient`)."""
+
+    def version(self) -> str: ...
+
+    def sources(self) -> Sequence[SuwayomiSource]: ...
+
+    def search(self, source_id: str, query: str) -> Sequence[SuwayomiManga]: ...
+
+    def chapters(self, manga_id: int) -> MangaChapters:
+        """The manga and its chapters, fetched from the source now (Suwayomi refreshes its own list)."""
+        ...
+
+    def add_to_library(self, manga_id: int) -> None: ...
+
+    def enqueue(self, chapter_ids: Sequence[int]) -> Sequence[QueuedChapter]: ...
+
+    def queue(self) -> Sequence[QueuedChapter]: ...
+
+    def chapters_by_id(self, chapter_ids: Sequence[int]) -> Sequence[SuwayomiChapter]: ...
+
+    def delete_downloaded(self, chapter_ids: Sequence[int]) -> None: ...

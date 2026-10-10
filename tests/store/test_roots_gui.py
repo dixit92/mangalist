@@ -168,8 +168,12 @@ def test_fields_nothing_uses_yet_are_hidden(qapp, db, lib):
         dlg.show()
         ed = dlg.editor
         assert ed.name_edit.isVisibleTo(dlg) and ed.path_edit.isVisibleTo(dlg)
-        for w in (ed.origin_combo, ed.enforce_combo, ed.staging_edit):        # renamer / origin evidence: later phases
+        for w in (ed.origin_combo, ed.staging_edit):                          # origin evidence / staging: later phases
             assert not w.isVisibleTo(dlg)
+        assert ed.enforce_combo.isVisibleTo(dlg)                               # the renamer's: per root
+        assert [ed.enforce_combo.itemText(i) for i in range(ed.enforce_combo.count())] == [
+            "Off", "Ask before renaming", "Rename automatically"]
+        assert "Rename automatically - the scheduled rescan renames them" in ed.enforce_combo.toolTip()
     finally:
         dlg.close()
         dlg.deleteLater()

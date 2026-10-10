@@ -52,7 +52,7 @@ from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
     COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MU_TITLE,
-    COL_OFFICIAL, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
+    COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .links import open_link
@@ -252,15 +252,17 @@ class MainWindow(QMainWindow):
     _DEFAULT_COL_ORDER = [
         "Title", "Library", "State", "Gaps", "English", "Verdict", "Files",
         "✓", "Dupe", "MU Title", "Behind", "Licensed", "Completed", "Official source", "Alternative Title",
-        "Last Modified", "Subfolders", "Vol %", "Ch %", "Both %",
+        "Last Modified", "Subfolders", "Vol %", "Ch %", "Both %", "Rename",
     ]
     _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
     _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 170, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
                        COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180,
-                       COL_LIBRARY: 130}
+                       COL_LIBRARY: 130, COL_RENAME: 90}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
-    _CFG_COLUMNS_VERSION = "list_columns_version"     # 2: the Library column exists (hidden unless the owner showed it)
+    # 2: the Library column exists, 3: the Rename column exists (each hidden unless the owner showed it)
+    _CFG_COLUMNS_VERSION = "list_columns_version"
+    _COLUMNS_VERSION = 3
     _CFG_LIBRARY = "list_library"                      # the picked library folder's path ("" or absent: all libraries)
     _CFG_SPLITTER = "list_splitter_sizes"
     _CFG_DETAILS = "details_panel"
@@ -313,6 +315,15 @@ class MainWindow(QMainWindow):
         self._mu_entries: List[MangaEntry] = []
         self._sig_thread: QThread | None = None
         self._sig_worker: SignatureWorker | None = None
+        # The renamer: its window, and "Rename pending" counted after each scan (off the UI thread). Tests swap
+        # _background for a synchronous call and _make_renamer for one with a fake namer.
+        self._renamer_window = None
+        self._rename_call = None
+        self._rename_again = False
+        self._renamer_runner = None                 # the Renamer window's runner (None: its own threads)
+        from .background import start_call as _start_call
+
+        self._background = _start_call
         self._build_ui()
 
         # Debounce timer so rapid column-resize events don't thrash config I/O.
@@ -369,6 +380,7 @@ class MainWindow(QMainWindow):
         self._top.library_changed.connect(self._on_library_changed)
         lst.details_toggled.connect(self._on_details_toggled)
         lst.add_root_clicked.connect(lambda: self._on_choose_root())
+        lst.rename_library_clicked.connect(self.rename_library)
         self._detail.get_requested.connect(self._on_get_requested)
 
         header = self._table.horizontalHeader()
@@ -790,6 +802,84 @@ class MainWindow(QMainWindow):
     def _on_duplicate_count_finished(self) -> None:
         self._dupe_call = None
 
+    # --- The renamer -------------------------------------------------------
+
+    def _make_renamer(self):
+        """The renamer over the library database; this window rescans after a batch itself (the table follows)."""
+        from ..renamer import Renamer
+
+        return Renamer(self._db, rescan=None)
+
+    def _count_rename_pending(self) -> None:
+        """"Rename pending" per series (the files the naming scheme would rename), off the UI thread, after a scan."""
+        if self._rename_call is not None:
+            self._rename_again = True           # a scan finished meanwhile: count again once this count is in
+            return
+        entries = self._model.entries()
+        renamer = self._make_renamer()
+        self._rename_again = False
+        self._rename_call = self._background(lambda: renamer.pending_counts(entries), self._on_rename_counted,
+                                             lambda msg: _log.warning("Counting Rename pending failed: %s", msg),
+                                             self._on_rename_count_finished)
+
+    def _on_rename_counted(self, counts) -> None:
+        self._model.set_rename_counts(dict(counts or {}))
+        self._update_counts()
+
+    def _on_rename_count_finished(self) -> None:
+        self._rename_call = None
+        if self._rename_again:
+            self._count_rename_pending()
+
+    def open_renamer(self, scope):
+        """The Renamer window on *scope* (:class:`.renamer_view.Scope`); one window, re-aimed when it is open."""
+        from .renamer_view import RenamerWindow
+
+        win = self._renamer_window
+        if win is not None and win.isVisible():
+            if not win.busy:
+                win.set_scope(scope)
+            win.raise_()
+            win.activateWindow()
+            return win
+        win = RenamerWindow(self._make_renamer(), scope, self, run=self._renamer_runner)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        win.library_changed.connect(self._on_library_renamed)
+        win.duplicates_requested.connect(self.review_duplicates)
+        win.destroyed.connect(lambda *_a: setattr(self, "_renamer_window", None))
+        self._renamer_window = win
+        win.show()
+        return win
+
+    def rename_series(self, entries) -> None:
+        """Row menu "Rename to the scheme…": the window on these series (one series is the pilot)."""
+        from .renamer_view import Scope
+
+        renamer = self._make_renamer()
+        ids = [i for i in (renamer.series_id_for_folder(e.folder) for e in entries) if i is not None]
+        if not ids:
+            self._status_label.setText("Not scanned into the library yet - rescan first")
+            return
+        label = str(entries[0].title) if len(ids) == 1 else f"{len(ids)} series"
+        self.open_renamer(Scope.series(ids, label))
+
+    def rename_library(self, root_id: Optional[int] = None) -> None:
+        """"Rename library…": the library picked (or *root_id*), else every library."""
+        from .renamer_view import Scope
+
+        root_id = root_id if root_id is not None else self._library
+        root = next((r for r in self._roots() if r.id == root_id), None) if root_id is not None else None
+        self.open_renamer(Scope.root(root.id, root.name) if root is not None else Scope.all())
+
+    def _on_library_renamed(self, root_ids) -> None:
+        """The Renamer window renamed (or put back) files: rescan those libraries so the table and Rename pending
+        follow."""
+        roots = [r for r in self._roots() if r.id in set(root_ids)]
+        self._status_label.setText(f"Files renamed in {len(roots)} librar{'y' if len(roots) == 1 else 'ies'} - "
+                                   "rescanning")
+        if roots:
+            self._start_scan(roots)
+
     # --- Slots -----------------------------------------------------------
 
     # --- Roots -----------------------------------------------------------
@@ -903,6 +993,8 @@ class MainWindow(QMainWindow):
             _log.warning("Reading MangaPixer's carried series failed", exc_info=True)
         self._update_missing_count()
         self._show_roots()
+        # MangaPixer's titles and volume lists name the files: a volume learned, a new title -> Rename pending again.
+        self._count_rename_pending()
 
     def _mp_item_for(self, entry: MangaEntry):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
@@ -1143,6 +1235,7 @@ class MainWindow(QMainWindow):
         self._refresh_derived()
         self._show_roots()
         self._count_duplicate_files()
+        self._count_rename_pending()
         if self._duplicates_view is not None and self._list.current_filter() == DUPLICATES:
             self._duplicates_view.refresh()
         self._start_signatures()
@@ -1487,8 +1580,11 @@ class MainWindow(QMainWindow):
         if not isinstance(hidden, list):
             return {name for name in COLUMNS if name not in self._DEFAULT_SHOWN}
         hidden = set(hidden)
-        if self._cfg.get(self._CFG_COLUMNS_VERSION, 1) < 2:
+        version = self._cfg.get(self._CFG_COLUMNS_VERSION, 1)
+        if version < 2:
             hidden.add("Library")           # a list saved before the column existed: it stays hidden until chosen
+        if version < 3:
+            hidden.add("Rename")
         return hidden
 
     def _apply_hidden_columns(self) -> None:
@@ -1525,7 +1621,7 @@ class MainWindow(QMainWindow):
         else:
             hidden.add(name)
         self._cfg[self._CFG_HIDDEN] = sorted(hidden)
-        self._cfg[self._CFG_COLUMNS_VERSION] = 2
+        self._cfg[self._CFG_COLUMNS_VERSION] = self._COLUMNS_VERSION
         config.save(self._cfg)
         self._apply_hidden_columns()
 
@@ -1597,6 +1693,7 @@ class MainWindow(QMainWindow):
         act_get = None
         act_dupes = act_mangapixer = None
         act_exclude = None
+        act_rename = act_rename_library = None
 
         if n == 1:
             if getattr(entries[0], "needs_kind", False):
@@ -1610,6 +1707,12 @@ class MainWindow(QMainWindow):
             act_exclude = menu.addAction("Exclude from its library…")
             act_exclude.setToolTip("Add this folder to its library's exclusions: MangaList stops scanning it (its files "
                                    "are not touched; Settings > Library undoes it)")
+            pending = self._model.rename_count_at(rows[0])
+            act_rename = menu.addAction(f"Rename to the scheme ({pending} file{'s' if pending != 1 else ''})…"
+                                        if pending else "Rename to the scheme…")
+            act_rename.setToolTip("Preview the naming scheme's names for this series' files, then rename them "
+                                  "(undoable) - the first step before a whole library")
+            act_rename_library = menu.addAction("Rename its whole library…")
             menu.addSeparator()
             act_fix_mu = menu.addAction("Fix MangaUpdates match…")
             entry0 = entries[0]
@@ -1644,6 +1747,7 @@ class MainWindow(QMainWindow):
             menu.addAction(f"{n} folders selected").setEnabled(False)
             menu.addSeparator()
             act_exclude = menu.addAction(f"Exclude {n} folders from their libraries…")
+            act_rename = menu.addAction(f"Rename {n} series to the scheme…")
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
             menu.addSeparator()
 
@@ -1699,6 +1803,10 @@ class MainWindow(QMainWindow):
             self._open_url(link_actions[chosen])
         elif act_exclude is not None and chosen is act_exclude:
             self.exclude_from_library(entries)
+        elif act_rename is not None and chosen is act_rename:
+            self.rename_series(entries)
+        elif act_rename_library is not None and chosen is act_rename_library:
+            self.rename_library(entries[0].root_id)
         elif chosen is act_open and entries:
             self._open_in_explorer(entries[0].folder)
         elif chosen is act_get and act_get is not None:
@@ -1899,6 +2007,10 @@ class MainWindow(QMainWindow):
             self._download_tab.stop()
         if self._dupe_call is not None:
             self._dupe_call.abandon()
+        if self._rename_call is not None and hasattr(self._rename_call, "abandon"):
+            self._rename_call.abandon()
+        if self._renamer_window is not None:
+            self._renamer_window.close()
         self._derived_timer.stop()
         self._stop_scan()
         self._stop_mu()

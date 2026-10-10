@@ -2,8 +2,9 @@
 
 **Download sources** - where releases come from. nyaa (volumes; needs qBittorrent) with the options the search already
 supports (English / raw, hide light novels, only trusted uploaders) and two shown fixed because that is how the search
-always works (Digital first, no 0-seeder releases); Suwayomi sources (chapters; needs Suwayomi) greyed out until
-Suwayomi is connected. **Matching** - where series information comes from. **Automation** - the schedules (editable,
+always works (Digital first, no 0-seeder releases); Suwayomi sources (chapters; needs Suwayomi): the sources Suwayomi has
+installed, read from Suwayomi when the section is shown - which MangaList may use (ticked) and in what order it tries them
+(MangaDex first by default); stored by Suwayomi's source id. **Matching** - where series information comes from. **Automation** - the schedules (editable,
 stored in the database; the container's variables only seed them), Remove Completed, "ask MangaPixer to rescan after
 filing". **Logging** - the level of the log files (and optionally of one area), their size, and the log folder.
 
@@ -15,13 +16,12 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Dict, Mapping, Optional
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTime, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QComboBox,
-    QGraphicsOpacityEffect,
     QGridLayout,
     QLabel,
     QLineEdit,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSpinBox,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -46,7 +47,18 @@ from ..downloads.options import (
     set_flag,
 )
 from .background import start_call
-from .download_rules import SCHEDULE_HINT, reset_schedule_text, save_schedule_text, schedule_entries
+from .download_rules import (
+    CHOICE_DAILY,
+    CHOICE_WEEKLY,
+    DAY_NAMES,
+    ScheduleChoice,
+    choice_of,
+    held_size_text,
+    reset_schedule_text,
+    save_schedule_text,
+    schedule_choices,
+    schedule_entries,
+)
 from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
 from .downloads_backend import BackendError, DownloadsBackend
@@ -63,11 +75,11 @@ AUTOMATION_LEAD = "What runs on its own in the container."
 LOGGING_LEAD = "What MangaList writes to its log files, and where they are."
 SCHEDULE_NOTE = ("These times are used by MangaList's background runner in the Docker / Unraid container, in the "
                  "container's time zone; the desktop app on its own runs nothing on a timer. A change reaches the "
-                 "runner within a minute - no restart. Write daily@03:30 (every day at 03:30, 24-hour clock), "
-                 "every 12h (every 12 hours) or off.")
-SUWAYOMI_EXPLAIN = ("Once connected: the sources Suwayomi offers (MangaDex, official English sites, ...) in the order "
-                    "MangaList tries them, which to never use, and the preferred scanlation groups - for all series, "
-                    "or per series.")
+                 "runner within a minute - no restart.")
+SUWAYOMI_EXPLAIN = ("The sources installed in Suwayomi (from their extensions). Tick the ones MangaList may use, in "
+                    "the order it tries them: MangaDex first - it is found by the MangaDex id MangaPixer links; the "
+                    "others by title, and you confirm the match once per series. The scanlation group is chosen per "
+                    "series in the Download tab.")
 AUTOMATIC_DOWNLOADS = "Automatic downloads - off / notify / automatic, per series and a default (next phase)."
 FIXED_DIGITAL = "Always on: the ranking puts Digital releases first."
 FIXED_SEEDERS = "Always on: releases nobody is seeding are never shown."
@@ -110,26 +122,7 @@ class SourcesPage(SectionPage):
                            "for every send.", "muted", wrap=True))
         self.body.addWidget(nyaa)
 
-        suwayomi = card("quiet")
-        sv = QVBoxLayout(suwayomi)
-        sv.setContentsMargins(16, 14, 16, 14)
-        sv.setSpacing(10)
-        self.btn_suwayomi = button("Set up Suwayomi")
-        self.btn_suwayomi.clicked.connect(lambda: self.section_requested.emit(SECTION_SERVICES))
-        sv.addLayout(hbox(label("Suwayomi sources", "name"), label("Chapters · needs Suwayomi", "muted"),
-                          pill("Suwayomi not set up", "warn"), None, self.btn_suwayomi, spacing=10))
-        sv.addWidget(label(SUWAYOMI_EXPLAIN, "lead", wrap=True))
-        for number, name, note in (("1", "MangaDex", "preferred groups: any"),
-                                   ("2", "[Official English source]", "when it has the chapter")):
-            row = hbox(label(number, "mono"), label(name), label(note, "muted"), None, spacing=10)
-            holder = QWidget()
-            holder.setLayout(row)
-            fade = QGraphicsOpacityEffect(holder)          # the mockup's greyed-out example rows
-            fade.setOpacity(0.55)
-            holder.setGraphicsEffect(fade)
-            sv.addWidget(holder)
-        self.suwayomi_rows = suwayomi
-        self.body.addWidget(suwayomi)
+        self.body.addWidget(self._suwayomi_card())
         self.body.addWidget(self._budget_card())
 
         self.refresh()
@@ -137,6 +130,126 @@ class SourcesPage(SectionPage):
             box.toggled.connect(self._changed)
         self.partial_check.toggled.connect(self._partial_changed)
         self.budget_spin.valueChanged.connect(self._budget_changed)
+
+    # Suwayomi sources (the Suwayomi MVP, 2026-10-10): the installed sources as Suwayomi lists them, ticked = allowed,
+    # in order. Read off the UI thread when the section is shown; every change is stored at once.
+    def _suwayomi_card(self) -> QWidget:
+        from PySide6.QtWidgets import QAbstractItemView, QListWidget
+
+        suwayomi = card("true")
+        sv = QVBoxLayout(suwayomi)
+        sv.setContentsMargins(16, 14, 16, 14)
+        sv.setSpacing(10)
+        self.btn_suwayomi = button("Set up Suwayomi")
+        self.btn_suwayomi.clicked.connect(lambda: self.section_requested.emit(SECTION_SERVICES))
+        self.suwayomi_badge = pill("Suwayomi not set up", "warn")
+        self.btn_sources_reload = button("Reload", link=True, tip="Read the installed sources from Suwayomi again")
+        self.btn_sources_reload.clicked.connect(self.load_suwayomi_sources)
+        sv.addLayout(hbox(label("Suwayomi sources", "name"), label("Chapters · needs Suwayomi", "muted"),
+                          self.suwayomi_badge, None, self.btn_sources_reload, self.btn_suwayomi, spacing=10))
+        sv.addWidget(label(SUWAYOMI_EXPLAIN, "lead", wrap=True))
+        self.sources_list = QListWidget()
+        self.sources_list.setObjectName("suwayomiSources")
+        self.sources_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.sources_list.setMinimumHeight(140)
+        self.sources_list.itemChanged.connect(self._sources_changed)
+        self.btn_up = button("Move up")
+        self.btn_up.clicked.connect(lambda: self._move_source(-1))
+        self.btn_down = button("Move down")
+        self.btn_down.clicked.connect(lambda: self._move_source(1))
+        sv.addWidget(self.sources_list)
+        self.sources_note = label("", "muted", wrap=True)
+        sv.addLayout(hbox(self.btn_up, self.btn_down, self.sources_note, None, spacing=8))
+        self.suwayomi_rows = suwayomi
+        self._sources_call = None
+        self._loading_sources = False
+        self._show_suwayomi_state()
+        return suwayomi
+
+    def _suwayomi_ready(self) -> bool:
+        ready = getattr(self._backend, "suwayomi_ready", None) if self._backend is not None else None
+        try:
+            return bool(ready()) if callable(ready) else False
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _show_suwayomi_state(self) -> None:
+        from .download_style import set_prop
+
+        ready = self._suwayomi_ready()
+        self.suwayomi_badge.setText("Ready" if ready else "Suwayomi not set up")
+        set_prop(self.suwayomi_badge, "badge", "ok" if ready else "warn")
+        self.btn_suwayomi.setVisible(not ready)
+        for w in (self.sources_list, self.btn_up, self.btn_down, self.btn_sources_reload):
+            w.setEnabled(ready)
+        if not ready:
+            self.sources_note.setText("Connect Suwayomi first (Settings > Connected services).")
+
+    def load_suwayomi_sources(self) -> bool:
+        """Read the installed sources from Suwayomi (off the UI thread)."""
+        loader = getattr(self._backend, "suwayomi_sources", None) if self._backend is not None else None
+        if not callable(loader) or not self._suwayomi_ready() or self._sources_call is not None:
+            return False
+        self.sources_note.setText("Reading the sources from Suwayomi...")
+
+        def done() -> None:
+            self._sources_call = None
+
+        self._sources_call = start_call(loader, self.show_sources,
+                                        lambda message: self.sources_note.setText(f"Could not read them: {message}"),
+                                        done)
+        return True
+
+    def show_sources(self, sources) -> None:
+        """``[(SuwayomiSource, allowed)]`` in order (the backend's answer)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QListWidgetItem
+
+        self._loading_sources = True
+        self.sources_list.clear()
+        for source, allowed in sources:
+            item = QListWidgetItem(f"{source.display_name}  ·  {source.lang}")
+            item.setData(Qt.ItemDataRole.UserRole, source.id)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if allowed else Qt.CheckState.Unchecked)
+            item.setToolTip(f"Source id {source.id} · {source.extension or 'extension unknown'}")
+            self.sources_list.addItem(item)
+        self._loading_sources = False
+        n = sum(1 for _s, allowed in sources if allowed)
+        self.sources_note.setText(f"{n} of {len(sources)} in use" if sources else
+                                  "Suwayomi has no sources yet: install extensions in Suwayomi (MangaDex first).")
+
+    def allowed_source_ids(self) -> list:
+        from PySide6.QtCore import Qt
+
+        out = []
+        for i in range(self.sources_list.count()):
+            item = self.sources_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                out.append(item.data(Qt.ItemDataRole.UserRole))
+        return out
+
+    def _sources_changed(self, *_args) -> None:
+        if self._loading_sources:
+            return
+        setter = getattr(self._backend, "set_suwayomi_sources", None)
+        if callable(setter):
+            setter(self.allowed_source_ids())           # quick: one setting
+            n, total = len(self.allowed_source_ids()), self.sources_list.count()
+            self.sources_note.setText(f"{n} of {total} in use")
+            self.downloads_changed.emit()
+
+    def _move_source(self, step: int) -> None:
+        row = self.sources_list.currentRow()
+        to = row + step
+        if row < 0 or not 0 <= to < self.sources_list.count():
+            return
+        self._loading_sources = True
+        item = self.sources_list.takeItem(row)
+        self.sources_list.insertItem(to, item)
+        self.sources_list.setCurrentRow(to)
+        self._loading_sources = False
+        self._sources_changed()
 
     # The download budget (owner, 2026-10-09: "I set MangaList to use a maximum of 50 GB"): one cap over every download
     # client, so it has its own card under the sources. Its imports are local, to keep this lane's change inside the class.
@@ -150,7 +263,7 @@ class SourcesPage(SectionPage):
         bv.setContentsMargins(16, 14, 16, 14)
         bv.setSpacing(10)
         self.budget_usage = label("", "muted")
-        bv.addLayout(hbox(label("Download budget", "name"), label("Every download client", "muted"), None,
+        bv.addLayout(hbox(label("Download budget", "name"), label("Torrents (qBittorrent)", "muted"), None,
                           self.budget_usage, spacing=10))
         self.budget_spin = QSpinBox()
         self.budget_spin.setRange(0, MAX_BUDGET_GB)
@@ -162,7 +275,8 @@ class SourcesPage(SectionPage):
         bv.addWidget(label("Counts every download MangaList has sent and not yet removed: downloading, waiting to be "
                            "filed, and seeding (a partial download counts only its selected files). A send that would go "
                            "over it waits in a queue and goes to qBittorrent by itself once Remove Completed has made "
-                           "room. Lowering it removes nothing; new sends then wait.", "muted", wrap=True))
+                           "room. Lowering it removes nothing; new sends then wait. Chapter downloads (Suwayomi) do not "
+                           "count: they do not seed.", "muted", wrap=True))
         return budget
 
     def _budget_cap(self) -> float:
@@ -254,6 +368,9 @@ class SourcesPage(SectionPage):
     def on_show(self) -> None:
         self._update_badge(load_nyaa_options(self._db))
         self._show_budget_usage()
+        self._show_suwayomi_state()
+        if self.sources_list.count() == 0:
+            self.load_suwayomi_sources()
 
 
 class MatchingPage(SectionPage):
@@ -310,31 +427,47 @@ class AutomationPage(SectionPage):
     # Schedules (owner, 2026-10-09: "This should be configurable by the user"): stored in the database, so the runner in
     # the container re-reads them; the container's variables only seed them.
     def _build_schedules(self) -> None:
+        """One row per schedule: a choice (Weekly, Daily, Every 12 hours, Every 6 hours, Off - owner, 2026-10-10), the
+        day and the time where the choice needs them, then the reading in words and where it comes from."""
         grid = QGridLayout()
-        grid.setColumnMinimumWidth(0, 260)
+        grid.setColumnMinimumWidth(0, 200)
+        grid.setColumnMinimumWidth(1, 160 + 130 + 80 + 16)      # Weekly's three controls, so every row lines up
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(10)
-        self.schedule_edits: Dict[str, QLineEdit] = {}
+        self.schedule_modes: Dict[str, QComboBox] = {}
+        self.schedule_days: Dict[str, QComboBox] = {}
+        self.schedule_times: Dict[str, QTimeEdit] = {}
         self.schedule_reading: Dict[str, QLabel] = {}
         self.schedule_reset: Dict[str, QPushButton] = {}
         self.schedule_source: Dict[str, QLabel] = {}
         for row, entry in enumerate(schedule_entries(self._db, self._env)):
-            edit = QLineEdit()
-            edit.setAccessibleName(entry.label)
-            edit.setPlaceholderText(SCHEDULE_HINT)
-            edit.setMaximumWidth(180)
+            mode = QComboBox()
+            mode.setAccessibleName(entry.label)
+            mode.setFixedWidth(160)                             # the same width whether the day / time show or not
+            day = QComboBox()
+            day.setAccessibleName(f"{entry.label}: day")
+            day.setFixedWidth(130)
+            for i, name in enumerate(DAY_NAMES):
+                day.addItem(name, i)
+            at = QTimeEdit()
+            at.setDisplayFormat("HH:mm")
+            at.setAccessibleName(f"{entry.label}: time")
             reset = button("Use the container's value", link=True,
                            tip="Forget the time set here; the container's own setting (or the default) applies again")
-            source = label("", "muted")
-            reading = label("", "mono")
+            source = label("", "muted", wrap=True)
+            reading = label("", "mono", wrap=True)              # wraps in a narrow window instead of widening it
             grid.addWidget(label(entry.label), row, 0)
-            grid.addWidget(edit, row, 1)
+            grid.addLayout(hbox(mode, day, at, None, spacing=8), row, 1)
             grid.addLayout(hbox(reading, source, reset, None, spacing=12), row, 2)
-            self.schedule_edits[entry.job] = edit
+            self.schedule_modes[entry.job] = mode
+            self.schedule_days[entry.job] = day
+            self.schedule_times[entry.job] = at
             self.schedule_reading[entry.job] = reading
             self.schedule_source[entry.job] = source
             self.schedule_reset[entry.job] = reset
-            edit.editingFinished.connect(lambda job=entry.job: self._schedule_edited(job))
+            mode.currentIndexChanged.connect(lambda _i, job=entry.job: self._schedule_edited(job))
+            day.currentIndexChanged.connect(lambda _i, job=entry.job: self._schedule_edited(job))
+            at.editingFinished.connect(lambda job=entry.job: self._schedule_edited(job))
             reset.clicked.connect(lambda _=False, job=entry.job: self._schedule_reset(job))
         grid.setColumnStretch(2, 1)
         self.body.addLayout(grid)
@@ -344,13 +477,36 @@ class AutomationPage(SectionPage):
         self._show_schedules()
 
     def _show_schedules(self) -> None:
-        for entry in schedule_entries(self._db, self._env):
-            self.schedule_edits[entry.job].setText(entry.edit_text)
-            self.schedule_reading[entry.job].setText(entry.when)
-            stored = entry.source == SOURCE_STORED
-            self.schedule_source[entry.job].setText("set here" if stored else "from the container")
-            self.schedule_reset[entry.job].setVisible(stored)
-            set_prop(self.schedule_reading[entry.job], "tone", "" if entry.valid else "bad")
+        was, self._loading = self._loading, True               # setting the controls is not an edit
+        try:
+            for entry in schedule_entries(self._db, self._env):
+                job, now = entry.job, choice_of(entry.edit_text)
+                mode, day, at = self.schedule_modes[job], self.schedule_days[job], self.schedule_times[job]
+                mode.clear()
+                for value, text in schedule_choices(job, entry.edit_text):
+                    mode.addItem(text, value)
+                mode.setCurrentIndex(max(0, mode.findData(now.choice)))
+                day.setCurrentIndex(now.weekday)
+                at.setTime(QTime(now.hour, now.minute))
+                self._show_day_time(job)
+                self.schedule_reading[job].setText(entry.when)
+                stored = entry.source == SOURCE_STORED
+                self.schedule_source[job].setText("set here" if stored else "from the container")
+                self.schedule_reset[job].setVisible(stored)
+                set_prop(self.schedule_reading[job], "tone", "" if entry.valid else "bad")
+        finally:
+            self._loading = was
+
+    def _show_day_time(self, job: str) -> None:
+        choice = self.schedule_modes[job].currentData()
+        self.schedule_days[job].setVisible(choice == CHOICE_WEEKLY)
+        self.schedule_times[job].setVisible(choice in (CHOICE_WEEKLY, CHOICE_DAILY))
+
+    def schedule_choice(self, job: str) -> ScheduleChoice:
+        """What *job*'s controls say now."""
+        at = self.schedule_times[job].time()
+        return ScheduleChoice(self.schedule_modes[job].currentData() or "", self.schedule_days[job].currentData() or 0,
+                              at.hour(), at.minute())
 
     def _say_schedule(self, text: str, tone: str = "") -> None:
         self.schedule_status.setText(text)
@@ -359,14 +515,16 @@ class AutomationPage(SectionPage):
     def _schedule_edited(self, job: str) -> None:
         if self._loading:
             return
-        edit = self.schedule_edits[job]
+        self._show_day_time(job)
         current = next(e for e in schedule_entries(self._db, self._env) if e.job == job)
-        if edit.text().strip() == current.edit_text:
-            return
+        text = self.schedule_choice(job).text()
+        if text == current.edit_text or (not current.valid and text == choice_of(current.edit_text).choice):
+            return                                              # nothing changed (or the bad value still chosen)
         try:
-            save_schedule_text(self._db, job, edit.text())
+            save_schedule_text(self._db, job, text)
         except ValueError as exc:
             self._say_schedule(f"{current.label}: {exc} Nothing was changed.", "bad")
+            self._show_schedules()
             return
         self._show_schedules()
         self._say_schedule(f"{current.label}: saved. The runner uses it within a minute.", "ok")
@@ -442,9 +600,9 @@ class AutomationPage(SectionPage):
 
     def _show_held(self) -> None:
         held = self._held()
-        files = sum(len(b.files) for b in held)
-        self.held_label.setText(f"{len(held)} batch{'es' if len(held) != 1 else ''}, {files} "
-                                f"file{'s' if files != 1 else ''} held" if held else "Nothing is held")
+        files = sum(len(b.files) for b in held)          # the space first (owner, 2026-10-10)
+        self.held_label.setText(f"{held_size_text(held)} held ({len(held)} batch{'es' if len(held) != 1 else ''}, "
+                                f"{files} file{'s' if files != 1 else ''})" if held else "Nothing is held")
         self.btn_empty_holding.setEnabled(bool(held) and self._empty_call is None)
 
     def _ask_empty_all(self, held) -> bool:

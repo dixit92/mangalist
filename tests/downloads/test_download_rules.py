@@ -184,3 +184,74 @@ def test_a_queued_download_is_a_muted_chip_and_counts_as_in_hand():
     assert "Queued, 2nd in line" in tip and "Size: 3 GB (the release's size on nyaa" in tip
     assert "Counts against the download budget: 3 GB (as qBittorrent reports it)" in status_tooltip(
         record(S.FILED, size_bytes=3 * 1024 ** 3, size_source="qbittorrent"))
+
+
+# --- schedule choices (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6 hours") --------
+
+def test_schedule_choices_and_their_text():
+    labels = [l for _c, l in rules.schedule_choices("rescan", "daily@03:30")]
+    assert labels == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]
+    assert [l for _c, l in rules.schedule_choices("downloads", "every 1h")][0] == "Every hour"
+    assert ("every 3h", "Every 3 hours") in rules.schedule_choices("rescan", "every 3h")     # kept, never lost
+    assert rules.ScheduleChoice("weekly", 2, 4, 5).text() == "weekly@wed 04:05"
+    assert rules.ScheduleChoice("daily", hour=23, minute=0).text() == "daily@23:00"
+    assert rules.ScheduleChoice("every 6h").text() == "every 6h"
+    assert rules.choice_of("weekly@sat 01:02") == rules.ScheduleChoice("weekly", 5, 1, 2)
+    assert rules.choice_of("daily@02:15") == rules.ScheduleChoice("daily", hour=2, minute=15)
+    assert rules.choice_of("off").choice == "off" and rules.choice_of("whenever").choice == "whenever"
+    assert rules.schedule_text("weekly@sun 03:30") == "every Sunday 03:30"
+
+
+# --- chapter downloads (the Suwayomi MVP) ---------------------------------------------------------------------------
+
+def chapter_rec(id, number, status=S.SENT, batch="b1", group="Alpha Scans", error=None):
+    from mangalist.downloads.contracts import TOOL_SUWAYOMI
+
+    return record(status, id=id, info_hash=str(id), title=f"Vol.1 Ch.{number} - Example", wanted_volumes=(),
+                  tool=TOOL_SUWAYOMI, wanted_chapters=(number,), batch=batch, source="MangaDex (EN)", group=group,
+                  error=error, updated_at=f"2026-10-10T10:0{id % 10}:00+00:00")
+
+
+def test_the_chapters_group_note_and_why_a_series_cannot_be_looked_up():
+    assert rules.group_note(GROUP_CHAPTERS) == rules.GROUP_NOTES[GROUP_CHAPTERS]
+    assert rules.group_note(GROUP_CHAPTERS)[0] == "needs Suwayomi"
+    assert rules.group_note(GROUP_CHAPTERS, True) == ("Suwayomi", "muted")
+    assert rules.group_note(GROUP_VOLUMES, True) == rules.GROUP_NOTES[GROUP_VOLUMES]
+    series = ws("C", GROUP_CHAPTERS, missing=("41",))
+    assert "not set up" in rules.chapters_reason(series, False)
+    assert rules.chapters_reason(series, True) == ""
+    assert "rescan first" in rules.chapters_reason(WantedSeries(None, "/lib/C", "C", GROUP_CHAPTERS, "Ch. 41"), True)
+    assert "not known" in rules.chapters_reason(ws("C", GROUP_CHAPTERS, missing=()), True)
+
+
+def test_one_send_of_chapters_is_one_row_and_one_chip():
+    torrent = record(S.SENT, id=9)
+    recs = [chapter_rec(1, "101"), chapter_rec(2, "103"), chapter_rec(3, "102", group="Beta Group"), torrent,
+            chapter_rec(4, "104", status=S.FAILED, error="Suwayomi did not take the download: x"),
+            chapter_rec(5, "200", batch="b2")]
+    merged = rules.merge_batches(recs)
+    assert [r.id for r in merged] == [3, 9, 4, 5]                      # the first member's place, the newest id
+    first = merged[0]
+    assert first.wanted_chapters == ("101", "102", "103") and first.title == "Ch. 101-103 · Alpha Scans + Beta Group · " \
+                                                                              "MangaDex (EN)"
+    assert merged[1] is torrent and merged[2].wanted_chapters == ("104",)
+    assert merged[3].title == "Vol.1 Ch.200 - Example"                  # a Send of one keeps its own title
+    chips = rules.row_chips([r for r in recs if r.is_chapters], rules.SEARCH_READY, rules.CHAPTER_CHIPS)
+    assert chips[:2] == [("Downloading ch 200", "run"), ("Failed: Suwayomi did not take the download: x", "bad")]
+    assert chips[2] == ("+1", "muted") and chips[-1] == ("Chapters ready", "ready")
+    # Not torrents: never "in qBittorrent", never in hand for a release.
+    assert rules.in_qbittorrent(recs) == [torrent] and rules.in_hand(recs) == [torrent]
+
+
+def test_chapter_chips_and_status_texts():
+    from mangalist.gui.volumes_target import status_text, units_text
+
+    assert units_text(chapter_rec(1, "10.5")) == "ch 10.5"
+    assert rules.download_chip(chapter_rec(1, "7", S.FILED)) == ("Filed ch 7", "ok")           # no seeding
+    assert rules.download_chip(chapter_rec(1, "7", S.REMOVED))[0] == "Filed ch 7"
+    assert status_text(chapter_rec(1, "7", S.SENT)) == "Downloading"
+    assert status_text(chapter_rec(1, "7", S.SENT, error="Suwayomi could not download it")) == \
+        "Downloading - Suwayomi could not download it"
+    assert status_text(chapter_rec(1, "7", S.FILED, error="Suwayomi's copy kept: x")) == "Filed ch 7 - Suwayomi's copy kept: x"
+    assert status_text(chapter_rec(1, "7", S.REMOVED)) == "Filed ch 7 - done"
+    assert status_text(chapter_rec(1, "7", S.DOWNLOADED)) == "Downloaded"

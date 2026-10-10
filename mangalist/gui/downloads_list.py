@@ -1,6 +1,8 @@
 """The "In progress" list: every download MangaList has sent to qBittorrent or queued, and where it stands (Queued -
 2nd in line, Downloading, Downloaded, Filed v03-v05 - seeding, Failed: <reason>, ...), with Check qBittorrent now, the
-time of the next automatic check and the download budget ("Using 31.2 GB of 50 GB; 2 downloads queued").
+time of the next automatic check and the download budget ("Using 31.2 GB of 50 GB; 2 downloads queued"). Chapter
+downloads (Suwayomi) show here too, one row per Send ("Ch. 101-104 · <group> · MangaDex (EN)": Downloading, Filed ch
+101-104 - done, ...); they have no row menu (no torrent, no queue) and the check files them as well.
 
 The records are read off the UI thread (``refresh``); the Download tab shows this list at the bottom and learns the
 records from :attr:`records_loaded`, the downloads dialog shows it alone.
@@ -21,7 +23,7 @@ from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QVBoxLayout, QWi
 from ..downloads.budget import BudgetState, gb_text
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .background import BackgroundCall, start_call
-from .download_rules import badge_kind, next_check_text, when_text
+from .download_rules import badge_kind, in_progress, merge_batches, next_check_text, when_text
 from .download_style import set_tone
 from .download_widgets import button, flat_table, hbox, label, pill
 from .downloads_backend import DownloadsBackend
@@ -81,6 +83,7 @@ class DownloadsList(QWidget):
         self._next_check: Optional[str] = None
         self.budget: Optional[BudgetState] = None
         self.records: List[DownloadRecord] = []
+        self.show_finished = False                  # done / cancelled downloads are hidden unless asked
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -102,13 +105,17 @@ class DownloadsList(QWidget):
                                                               "they fit the download budget - the same check that runs "
                                                               "every hour on its own")
         self.btn_check.clicked.connect(self.check_now)
+        self.btn_finished = button("", link=True, tip="Downloads whose torrent left qBittorrent at its seed goal, "
+                                                       "or that were cancelled - their volumes stay in the library")
+        self.btn_finished.clicked.connect(self.toggle_finished)
+        self.btn_finished.setVisible(False)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setFixedWidth(90)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
         outer.addLayout(hbox(self.heading_label, self.next_label, self.budget_label, self.progress, None,
-                             self.btn_refresh, self.btn_check, spacing=12))
+                             self.btn_finished, self.btn_refresh, self.btn_check, spacing=12))
 
         self.table = flat_table("progressTable", COLUMNS, select_rows=False)
         resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 240, COL_UPDATED: 110})
@@ -157,6 +164,8 @@ class DownloadsList(QWidget):
         self._show(self.records)
         if not self._check_failed:
             empty = "" if self.records else "Nothing has been sent to qBittorrent yet."
+            if self.records and not self.shown_records():
+                empty = "Nothing is in progress."
             set_tone(self.status_label, "")
             self.status_label.setText(" ".join(t for t in (self._note or "", empty) if t))
         self.records_loaded.emit(list(self.records))
@@ -165,8 +174,24 @@ class DownloadsList(QWidget):
         return (self._titles.get(record.series_id) or self._known_titles.get(record.series_id)
                 or (self._series_name(record.series_id) if self._series_name else f"Series #{record.series_id}"))
 
+    def shown_records(self) -> List[DownloadRecord]:
+        """The rows, top to bottom: everything not finished, or everything with Show finished on. The chapter downloads
+        of one Send (Suwayomi) are one row (:func:`~.download_rules.merge_batches`)."""
+        return in_progress(merge_batches(self.records), self.show_finished)[:MAX_ROWS]
+
+    def toggle_finished(self) -> None:
+        self.show_finished = not self.show_finished
+        self._show(self.records)
+
+    def _show_finished_button(self) -> None:
+        merged = merge_batches(self.records)
+        n = len(merged) - len(in_progress(merged))
+        self.btn_finished.setVisible(n > 0)
+        self.btn_finished.setText(f"Hide finished ({n})" if self.show_finished else f"Show finished ({n})")
+
     def _show(self, records: Sequence[DownloadRecord]) -> None:
-        shown = list(records)[:MAX_ROWS]
+        shown = in_progress(merge_batches(records), self.show_finished)[:MAX_ROWS]
+        self._show_finished_button()
         self.table.setRowCount(len(shown))
         for row, record in enumerate(shown):
             tip = status_tooltip(record)
@@ -237,10 +262,12 @@ class DownloadsList(QWidget):
 
     def _on_context_menu(self, pos: QPoint) -> None:
         row = self.table.rowAt(pos.y())
-        shown = list(self.records)[:MAX_ROWS]
+        shown = self.shown_records()
         if row < 0 or row >= len(shown):
             return
         record = shown[row]
+        if record.is_chapters:              # a chapter download (Suwayomi): no torrent to remove, nothing queued
+            return
         if record.status == DownloadStatus.QUEUED:
             self._queue_menu(record, pos)
             return

@@ -230,6 +230,9 @@ def run_queue(client: TorrentClient, ledger, *, should_stop: Callable[[], bool] 
                 break
             state = budget_state(ledger)
         report.usage = budget_state(ledger).usage_text()
+        if report.sized or report.released:     # the usage moved without a hand-over: one line says so at INFO
+            _log.info("Budget: %d size(s) taken from qBittorrent, %d failed download(s) released; now %s",
+                      len(report.sized), len(report.released), report.usage)
     return report
 
 

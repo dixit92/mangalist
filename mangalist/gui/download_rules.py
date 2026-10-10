@@ -23,6 +23,28 @@ GROUP_NOTES: Mapping[str, Tuple[str, str]] = {GROUP_VOLUMES: ("nyaa", "muted"),
 NOT_NYAA_REASONS: Mapping[str, str] = {
     GROUP_CHAPTERS: "Missing chapters come from Suwayomi, which is not set up yet (Settings > Connected services).",
 }
+#: The Missing chapters group's note once Suwayomi is connected (the Suwayomi MVP).
+CHAPTERS_READY_NOTE: Tuple[str, str] = ("Suwayomi", "muted")
+
+
+def group_note(group: str, suwayomi_ready: bool = False) -> Tuple[str, str]:
+    """(note, tone) at the right of a group's header: Missing chapters says "needs Suwayomi" (amber) until Suwayomi is
+    connected, then "Suwayomi"."""
+    if group == GROUP_CHAPTERS and suwayomi_ready:
+        return CHAPTERS_READY_NOTE
+    return GROUP_NOTES[group]
+
+
+def chapters_reason(series: WantedSeries, suwayomi_ready: bool, series_id: Optional[int] = None) -> str:
+    """Why the chapters panel cannot look a Missing chapters series up ('' when it can): Suwayomi not set up, the
+    folder not scanned yet, or no chapter numbers known."""
+    if not suwayomi_ready:
+        return NOT_NYAA_REASONS[GROUP_CHAPTERS]
+    if (series_id if series_id is not None else series.series_id) is None:
+        return "MangaList has not scanned this folder yet: rescan first."
+    if not series.missing:
+        return "The missing chapter numbers are not known for this series."
+    return ""
 #: The groups whose volumes come from nyaa (an upgrade is a volume held only as chapters).
 NYAA_GROUPS = (GROUP_VOLUMES, GROUP_UPGRADES)
 #: What a shell that does not decide upgrades yet says for them (gui.list_text before the volumes cycle).
@@ -137,10 +159,19 @@ def replaced_bar_text(batches: Sequence) -> Tuple[str, str]:
         if waiting:
             text += f" ({len(waiting)} could not be moved yet)"
         return text, "warn"
-    if held:
+    if held:                            # the space first (owner, 2026-10-10: more useful than the number of files)
         n = sum(len(b.files) for b in held)
-        return f"{_files(n)} replaced by volumes are in the holding folder ({len(held)} series)", "muted"
+        series = len({b.series_dir for b in held})
+        return (f"{held_size_text(held)} of replaced chapters in the holding folder ({_files(n)}, {series} series)",
+                "muted")
     return "", ""
+
+
+def held_size_text(batches: Sequence) -> str:
+    """The space the held batches take in the holding folder ("1.2 GB", "340 MB")."""
+    from ..downloads.partial import size_text
+
+    return size_text(sum(f.size for b in batches for f in b.files))
 
 
 def batch_status_text(batch) -> str:
@@ -164,6 +195,10 @@ Chip = Tuple[str, str]
 SEARCH_CHIPS: Mapping[str, Chip] = {SEARCH_QUEUED: ("Queued", "muted"), SEARCH_RUNNING: ("Searching...", "muted"),
                                     SEARCH_READY: ("Releases ready", "ready"), SEARCH_NONE: ("No releases", "muted"),
                                     SEARCH_FAILED: ("Search failed", "bad")}
+#: The chapter lookup states as chips (a Missing chapters row: the chapters panel's lookup in Suwayomi).
+CHAPTER_CHIPS: Mapping[str, Chip] = {SEARCH_QUEUED: ("Queued", "muted"), SEARCH_RUNNING: ("Looking up...", "muted"),
+                                     SEARCH_READY: ("Chapters ready", "ready"), SEARCH_NONE: ("No chapters", "muted"),
+                                     SEARCH_FAILED: ("Lookup failed", "bad")}
 #: The downloads a row always shows: queued under the download budget, the torrent in qBittorrent (on its way, or filed
 #: and still there), or failed.
 _SHOWN = (DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED,
@@ -174,10 +209,13 @@ MAX_DOWNLOAD_CHIPS = 2
 def download_chip(record: DownloadRecord) -> Chip:
     """One download as a chip: "Queued v36" (grey: waiting under the download budget), "Downloading v36", "Downloaded
     v36", "Seeding v09-v18", "Filed v09-v18 - stopped", "Failed: ...", "Filed v03 - done" - in the In progress list's
-    badge colour. The numbers are the record's wanted units, so a chapter download (later) gets the same chips."""
-    from .volumes_target import numbers_text
-    units = numbers_text(record.wanted_volumes, pad=True)
+    badge colour. The numbers are the record's wanted units, so a chapter download gets the same chips: "Downloading ch
+    101-104", "Filed ch 101-104" (a chapter download does not seed)."""
+    from .volumes_target import units_text
+    units = units_text(record)
     status = record.status
+    if record.is_chapters and status in (DownloadStatus.FILED, DownloadStatus.REMOVED) and not record.error:
+        return (f"Filed {units}" if units else "Filed"), badge_kind(record)
     if status == DownloadStatus.QUEUED:
         text = f"Queued {units}" if units else "Queued"
     elif status == DownloadStatus.SENT:
@@ -191,19 +229,63 @@ def download_chip(record: DownloadRecord) -> Chip:
     return text, badge_kind(record)
 
 
-def row_chips(records: Iterable[DownloadRecord], search: Optional[str]) -> List[Chip]:
+def merge_batches(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
+    """Chapter downloads as the owner sent them: the chapter records of one Send (``batch``) that are in the same status
+    (and, failed, for the same reason) become one record - their chapters together, the newest id and update, the source
+    and group in its title ("Ch. 101-104 · Group · MangaDex (EN)") - so the chips and the In progress list show
+    "Downloading ch 101-104" once, not four times. Torrent records pass unchanged. The order is kept (a merged record
+    takes the place of its first member)."""
+    from dataclasses import replace
+
+    from .volumes_target import numbers_text
+
+    out: List[DownloadRecord] = []
+    groups: Dict[tuple, List[DownloadRecord]] = {}
+    for record in records:
+        if not record.is_chapters:
+            out.append(record)
+            continue
+        key = (record.batch or f"#{record.id}", record.status, record.error or "")
+        if key not in groups:
+            groups[key] = []
+            out.append(record)                  # its place; replaced below
+        groups[key].append(record)
+    from ..knowledge import to_decimal
+
+    merged: Dict[int, DownloadRecord] = {}
+    for members in groups.values():
+        first = members[0]
+        chapters = tuple(dict.fromkeys(c for m in members for c in m.wanted_chapters))
+        chapters = tuple(sorted(chapters, key=lambda c: (to_decimal(c) is None, to_decimal(c) or 0)))
+        parts = [f"Ch. {numbers_text(chapters)}" if chapters else "Chapters"]
+        groups_named = sorted({m.group for m in members if m.group})
+        if groups_named:
+            parts.append(" + ".join(groups_named))
+        if first.source:
+            parts.append(first.source)
+        title = " · ".join(parts) if len(members) > 1 else first.title or " · ".join(parts)
+        merged[first.id] = replace(first, id=max(m.id for m in members), wanted_chapters=chapters, title=title,
+                                   updated_at=max(m.updated_at for m in members),
+                                   filed_files=tuple(f for m in members for f in m.filed_files),
+                                   copied=any(m.copied for m in members))
+    return [merged.get(r.id, r) if r.is_chapters else r for r in out]
+
+
+def row_chips(records: Iterable[DownloadRecord], search: Optional[str],
+              search_chips: Optional[Mapping[str, Chip]] = None) -> List[Chip]:
     """The chips at the right of a "To get" row (owner, 2026-10-09: "user should be aware if there's a torrent
     already under download for a series"): every torrent of the series still in qBittorrent or failed, newest first
     (at most two, then "+N"), then the search state - so a series with a torrent is never shown as plain "Releases
     ready". A queued download (the download budget) shows the same way. A finished download (removed from qBittorrent)
-    shows only when there is nothing else to say."""
-    records = sorted(records, key=lambda r: r.id, reverse=True)
+    shows only when there is nothing else to say. Chapter downloads show by Send (:func:`merge_batches`)."""
+    records = sorted(merge_batches(records), key=lambda r: r.id, reverse=True)
     live = [r for r in records if r.status in _SHOWN]
     chips = [download_chip(r) for r in live[:MAX_DOWNLOAD_CHIPS]]
     if len(live) > MAX_DOWNLOAD_CHIPS:
         chips.append((f"+{len(live) - MAX_DOWNLOAD_CHIPS}", "muted"))
-    if search in SEARCH_CHIPS:
-        chips.append(SEARCH_CHIPS[search])
+    states = SEARCH_CHIPS if search_chips is None else search_chips
+    if search in states:
+        chips.append(states[search])
     if not chips:
         done = next((r for r in records if r.status == DownloadStatus.REMOVED), None)
         if done is not None:
@@ -219,19 +301,30 @@ def chips_text(chips: Sequence[Chip]) -> str:
 def in_qbittorrent(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
     """The series' downloads whose torrent is still in qBittorrent (on its way, or filed and seeding), newest first."""
     keep = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
-    return sorted((r for r in records if r.status in keep), key=lambda r: r.id, reverse=True)
+    return sorted((r for r in records if r.status in keep and not r.is_chapters), key=lambda r: r.id, reverse=True)
 
 
 def in_hand(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
     """:func:`in_qbittorrent` plus the series' QUEUED downloads (waiting under the download budget), newest first: a
     release in either is not sent again."""
     keep = (DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
-    return sorted((r for r in records if r.status in keep), key=lambda r: r.id, reverse=True)
+    return sorted((r for r in records if r.status in keep and not r.is_chapters), key=lambda r: r.id, reverse=True)
 
 
 # --- the In progress list --------------------------------------------------------------------------------
 
 BADGE_RUN, BADGE_OK, BADGE_DONE, BADGE_BAD, BADGE_QUEUED = "run", "ok", "done", "bad", "muted"
+
+
+#: Downloads that are over: their torrent left qBittorrent at its seed goal ("Filed v03 - done") or was cancelled. The
+#: In progress list hides them unless asked (owner, 2026-10-10: "They are not in progress anymore"); a failed one
+#: stays in view - it wants a look.
+FINISHED = (DownloadStatus.REMOVED, DownloadStatus.CANCELLED)
+
+
+def in_progress(records: Iterable[DownloadRecord], show_finished: bool = False) -> List[DownloadRecord]:
+    """The records the In progress list shows, in the order given."""
+    return [r for r in records if show_finished or r.status not in FINISHED]
 
 
 def badge_kind(record: DownloadRecord) -> str:
@@ -306,7 +399,68 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 # dispatches nothing yet, so a time for it would only confuse. Stored in the database; the container's variables only
 # seed them (see mangalist/headless/settings.py).
 SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads")
-SCHEDULE_HINT = "daily@03:30, every 12h or off"
+
+#: The choices each schedule offers (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6
+#: hours"), plus Off. Filing finished downloads also keeps Every hour - its default; without it filing could not run
+#: more often than every 6 hours. A current value that is none of these (a container variable such as "every 3h") is
+#: offered as one more choice, so it is never changed silently.
+CHOICE_WEEKLY, CHOICE_DAILY, CHOICE_OFF = "weekly", "daily", "off"
+SCHEDULE_CHOICES: Tuple[Tuple[str, str], ...] = ((CHOICE_WEEKLY, "Weekly"), (CHOICE_DAILY, "Daily"),
+                                                 ("every 12h", "Every 12 hours"), ("every 6h", "Every 6 hours"),
+                                                 (CHOICE_OFF, "Off"))
+HOURLY_CHOICE: Tuple[str, str] = ("every 1h", "Every hour")
+DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+DEFAULT_AT = (3, 30)                    # the time a schedule switched to Weekly or Daily starts from
+DEFAULT_WEEKDAY = 6                     # ... and the day (Sunday) a Weekly one starts from
+
+
+@dataclass(frozen=True)
+class ScheduleChoice:
+    """A schedule as the Automation section's controls hold it: the choice (``weekly``, ``daily``, ``off`` or an
+    interval such as ``every 12h``), and the day / time Weekly and Daily use."""
+
+    choice: str
+    weekday: int = DEFAULT_WEEKDAY
+    hour: int = DEFAULT_AT[0]
+    minute: int = DEFAULT_AT[1]
+
+    def text(self) -> str:
+        """The canonical schedule text to store (``weekly@sun 03:30``, ``daily@03:30``, ``every 12h``, ``off``)."""
+        from ..headless.schedule import WEEKDAYS
+
+        if self.choice == CHOICE_WEEKLY:
+            return f"weekly@{WEEKDAYS[self.weekday]} {self.hour:02d}:{self.minute:02d}"
+        if self.choice == CHOICE_DAILY:
+            return f"daily@{self.hour:02d}:{self.minute:02d}"
+        return self.choice
+
+
+def schedule_choices(job: str, current: str) -> List[Tuple[str, str]]:
+    """(choice, label) for *job*'s dropdown; *current* (canonical text) is added when it is none of them."""
+    out = list(SCHEDULE_CHOICES)
+    if job == "downloads":
+        out.insert(0, HOURLY_CHOICE)
+    choice = choice_of(current).choice
+    if choice not in {c for c, _l in out}:
+        out.insert(len(out) - 1, (choice, f"{schedule_text(choice)[:1].upper()}{schedule_text(choice)[1:]}"))
+    return out
+
+
+def choice_of(canonical: str) -> ScheduleChoice:
+    """The controls' state for a canonical schedule text (what :func:`schedule_entries` gives)."""
+    from ..headless.schedule import DailyAt, WeeklyAt, parse_schedule
+
+    try:
+        parsed = parse_schedule(canonical)
+    except ValueError:
+        return ScheduleChoice(canonical)                    # not understood: shown as it is
+    if parsed is None:
+        return ScheduleChoice(CHOICE_OFF)
+    if isinstance(parsed, WeeklyAt):
+        return ScheduleChoice(CHOICE_WEEKLY, parsed.weekday, parsed.hour, parsed.minute)
+    if isinstance(parsed, DailyAt):
+        return ScheduleChoice(CHOICE_DAILY, hour=parsed.hour, minute=parsed.minute)
+    return ScheduleChoice(parsed.describe())
 
 
 @dataclass(frozen=True)
@@ -320,7 +474,14 @@ class ScheduleEntry:
 
 
 def schedule_text(described: str) -> str:
-    """``daily@03:30`` -> ``daily 03:30``; ``every 1h`` -> ``every hour``; ``every 12h`` -> ``every 12 hours``."""
+    """``weekly@sun 03:30`` -> ``every Sunday 03:30``; ``daily@03:30`` -> ``daily 03:30``; ``every 1h`` -> ``every hour``;
+    ``every 12h`` -> ``every 12 hours``."""
+    if described.startswith("weekly@"):
+        from ..headless.schedule import WEEKDAYS
+
+        day, _sp, at = described[len("weekly@"):].partition(" ")
+        name = DAY_NAMES[WEEKDAYS.index(day)] if day in WEEKDAYS else day
+        return f"every {name} {at}"
     if described.startswith("daily@"):
         return "daily " + described[len("daily@"):]
     if described.startswith("every ") and described.endswith("h"):

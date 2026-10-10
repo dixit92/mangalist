@@ -4,7 +4,8 @@
 what is known about the series (:class:`~mangalist.knowledge.SeriesKnowledge`) and answers one
 :class:`State` (Product Design 5) with the gaps behind it (missing volume numbers, missing chapter
 ranges incl. holes, volumes that would upgrade chapters held as scanlations - exact decimals) and the
-flags Upcoming, Requested, Needs attention and Rename pending.
+flags Upcoming, Requested, Needs attention and Rename pending (files not named by the root's naming scheme, counted
+by :meth:`mangalist.renamer.Renamer.pending_counts` and passed in).
 
 MangaPixer's Completion answer is a cross-check only: MangaList's own computation decides the state of
 its rows; when the two disagree, the state stays MangaList's and MangaPixer's answer is kept on the
@@ -266,7 +267,8 @@ class SeriesState:
     upcoming_volume: Optional[str] = None
     requested: bool = False                      # placeholder until the dispatch ledger is used
     needs_attention: Tuple[str, ...] = ()        # ATTENTION_* reasons
-    rename_pending: bool = False                 # placeholder until phase 2
+    rename_pending: bool = False                 # files not named by the root's scheme (mangalist.renamer)
+    rename_count: int = 0                        # how many (0: not counted)
     source: Optional[str] = None                 # the knowledge's source
     mangapixer_answer: Optional[str] = None
     mangapixer_reason: Optional[str] = None
@@ -362,7 +364,8 @@ class SeriesState:
         if self.requested:
             lines.append("Requested: dispatched, not arrived yet")
         if self.rename_pending:
-            lines.append("Rename pending")
+            n = f"{self.rename_count} file{'s' if self.rename_count != 1 else ''}" if self.rename_count else "Files"
+            lines.append(f"Rename pending: {n} not named by the scheme (right-click: Rename to the scheme)")
         mp = self.mangapixer_text()
         if mp and self.mangapixer_disagrees:
             lines.append(f"{mp} - differs; MangaList's own count is shown")
@@ -470,6 +473,7 @@ def compute_state(
     needs_kind: bool = False,
     requested: bool = False,
     rename_pending: bool = False,
+    rename_count: int = 0,
     behind_override: Optional[str] = None,
     today: Optional[_dt.date] = None,
 ) -> SeriesState:
@@ -478,17 +482,20 @@ def compute_state(
     *inventory* is an :class:`InventoryLike` (None = nothing held); *knowledge* None = nothing known.
     *folder_empty*: the folder holds no archive at all (A7: wanted). *needs_kind*: the owner has not
     said yet whether the folder's bare numbers are volumes or chapters (C12). *requested* and
-    *rename_pending* are passed through as flags (always False until the ledger / phase 2).
+    *rename_pending* are passed through as flags (*rename_count*: how many files the renamer would rename;
+    a count alone also sets the flag).
     *behind_override* ``"done"``: the owner marked the series up to date - number gaps are kept for the
     tooltip but the state is Up to date (or Complete).
     """
     today = today or _dt.date.today()
+    rename_count = max(0, int(rename_count or 0))
+    rename_pending = bool(rename_pending or rename_count)
     k = knowledge
     if k is not None and k.not_a_series:
         # MangaPixer says this folder is not a series (DontMatch, CollectionAbout, or a link state this build does
         # not know): no numbers, no gaps, not wanted even when empty, nothing to review.
         return SeriesState(state=State.NOT_A_SERIES, reasons=(k.not_a_series_reason,), source=k.source,
-                           rename_pending=rename_pending)
+                           rename_pending=rename_pending, rename_count=rename_count)
     held = _held(inventory, k) if inventory is not None else _held(InventorySnapshot(), k)
 
     attention: List[str] = []
@@ -510,6 +517,7 @@ def compute_state(
         requested=requested,
         needs_attention=tuple(dict.fromkeys(attention)),
         rename_pending=rename_pending,
+        rename_count=rename_count,
         source=k.source if k is not None else None,
     )
     completion = k.completion if k is not None else None

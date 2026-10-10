@@ -14,6 +14,7 @@ from mangalist.parsing import (
     Template,
     TemplateError,
     TokenSpec,
+    UnitRange,
     compile_template,
     parse_name,
     register_token,
@@ -165,3 +166,40 @@ def test_compile_template_caches():
     t = Template("%T")
     assert compile_template(t) is t
     assert t == Template("%T") and hash(t) == hash(Template("%T"))
+
+
+# --- MangaList's own scheme tokens (renamer cycle, owner 2026-10-10) ---------------------------------------------
+
+@pytest.mark.parametrize("values, expected", [
+    ({"chapter": "102"}, "Ch. 0102.00"),
+    ({"chapter": Decimal("10.5")}, "Ch. 0010.50"),
+    ({"chapter": "3.10"}, "Ch. 0003.10"),
+    ({"chapter": "291.999"}, "Ch. 0291.999"),
+    ({"chapter": "10", "chapter_end": "12"}, "Ch. 0010.00-0012.00"),
+    ({"chapter": UnitRange.of("10", "12.5")}, "Ch. 0010.00-0012.50"),
+])
+def test_two_decimal_chapter_tokens(values, expected):
+    assert compile_template("Ch. %CN4{-%CE4}").render(values) == expected
+
+
+def test_volume_end_token():
+    t = compile_template("%T - Vol. %V3{-%VE3}")
+    assert t.render({"series": "S", "volume": 1, "volume_end": 3}) == "S - Vol. 001-003"
+    assert t.render({"series": "S", "volume": UnitRange.of(1, 3)}) == "S - Vol. 001-003"
+    assert t.render({"series": "S", "volume": 1}) == "S - Vol. 001"
+    assert t.parse("S - Vol. 001-003") == {"series": "S", "volume": "001", "volume_end": "003"}
+
+
+def test_two_decimal_tokens_parse_exactly():
+    t = compile_template("Ch. %CN4{-%CE4}")
+    assert t.parse("Ch. 0102.00") == {"chapter": "0102.00"}
+    assert t.parse("Ch. 0010.00-0012.50") == {"chapter": "0010.00", "chapter_end": "0012.50"}
+    for stem in ("Ch. 0102", "Ch. 0102.0", "Ch. 102.00", "Ch. 00102.00"):
+        assert t.parse(stem) is None, stem
+    assert t.parse("Ch. 10200.00") == {"chapter": "10200.00"}
+
+
+def test_new_tokens_leave_the_old_ones_alone():
+    t = compile_template(FMD2_CHAPTER_SCHEME)
+    assert t.render({"index": 1, "chapter": "12.5", "title": "CT"}) == "0001 [Ch. 0012.5 - CT]"
+    assert compile_template("%C%CF").render({"chapter": "3.10"}) == "3.10"
