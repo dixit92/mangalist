@@ -48,3 +48,10 @@ def test_without_the_arrow_files_no_rules_are_added(qapp, monkeypatch):
     monkeypatch.setattr(spin_arrows, "_made", {})
     monkeypatch.setattr(spin_arrows, "_cache_dir", lambda: "/proc/nowhere/mangalist")
     assert spin_arrows.spin_rules(color="#123456") == ""
+
+
+def test_the_value_has_room_before_it(qapp):
+    from PySide6.QtWidgets import QLineEdit
+
+    box = spin_arrows.pad_spin(QSpinBox())
+    assert box.findChild(QLineEdit).textMargins().left() == 8

@@ -61,6 +61,7 @@ from .download_rules import (
 )
 from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
+from .spin_arrows import pad_spin
 from .downloads_backend import BackendError, DownloadsBackend
 from .settings_common import SectionPage, placeholder
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
@@ -265,7 +266,7 @@ class SourcesPage(SectionPage):
         self.budget_usage = label("", "muted")
         bv.addLayout(hbox(label("Download budget", "name"), label("Torrents (qBittorrent)", "muted"), None,
                           self.budget_usage, spacing=10))
-        self.budget_spin = QSpinBox()
+        self.budget_spin = pad_spin(QSpinBox())
         self.budget_spin.setRange(0, MAX_BUDGET_GB)
         self.budget_spin.setSuffix(" GB")
         self.budget_spin.setSpecialValueText("no limit")            # 0 = no limit
@@ -791,11 +792,11 @@ class LoggingPage(SectionPage):
         fv.setContentsMargins(20, 16, 20, 16)
         fv.setSpacing(8)
         fv.addWidget(label("Log files", "name"))
-        self.size_spin = QSpinBox()
+        self.size_spin = pad_spin(QSpinBox())
         self.size_spin.setAccessibleName("Size of a log file")
         self.size_spin.setRange(*log_config.MAX_MB_RANGE)
         self.size_spin.setSuffix(" MB")
-        self.keep_spin = QSpinBox()
+        self.keep_spin = pad_spin(QSpinBox())
         self.keep_spin.setAccessibleName("Old log files kept")
         self.keep_spin.setRange(*log_config.BACKUPS_RANGE)
         fgrid = QGridLayout()

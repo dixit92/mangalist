@@ -85,7 +85,7 @@ def spin_rules(line: str = "#c4c4bf", hover: str = "#f3f3f1", color: str = "#5a5
         return ", ".join(f"{b}{part}" for b in boxes)
 
     return f"""
-{sel("")} {{ padding-left: 10px; padding-right: 26px; }}
+{sel("")} {{ padding-right: 26px; }}
 {sel("::up-button")} {{ subcontrol-origin: border; subcontrol-position: top right; width: 22px; border: none;
     border-left: 1px solid {line}; border-top-right-radius: 6px; background: transparent; }}
 {sel("::down-button")} {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; border: none;
@@ -96,3 +96,15 @@ def spin_rules(line: str = "#c4c4bf", hover: str = "#f3f3f1", color: str = "#5a5
 {sel("::up-arrow:disabled")}, {sel("::up-arrow:off")} {{ image: url("{files['up_off']}"); }}
 {sel("::down-arrow:disabled")}, {sel("::down-arrow:off")} {{ image: url("{files['down_off']}"); }}
 """
+
+
+def pad_spin(box):
+    """Room before the value of a styled spin box: Qt places a spin box's text field itself and ignores the
+    stylesheet's padding (measured 2026-10-10: "50 GB" sat against the left edge), so the text margin is set on the
+    field directly. Returns *box*."""
+    from PySide6.QtWidgets import QLineEdit
+
+    edit = box.findChild(QLineEdit)
+    if edit is not None:
+        edit.setTextMargins(8, 0, 0, 0)
+    return box
