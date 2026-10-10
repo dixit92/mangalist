@@ -113,6 +113,12 @@ def _thread_runner(fn, on_done, on_error):
     return start_call(fn, on_done, on_error)
 
 
+def _in_scheme(s: SeriesPreview) -> bool:
+    """Every file of the series is already named by the scheme: nothing to rename, check or decide."""
+    c = s.counts()
+    return not (c[RENAME] or c[COLLISION] or c[LEFT_ALONE] or s.error)
+
+
 def _plural(n: int, word: str, many: Optional[str] = None) -> str:
     return f"{n} {word if n == 1 else (many or word + 's')}"
 
@@ -202,9 +208,17 @@ class RenamerWindow(QDialog):
         split.setStretchFactor(1, 3)
         split.setSizes([260, 780])
         sp.addWidget(split, 1)
+        # owner, 2026-10-10: after a library's rename every series said a small "in the scheme" - they are hidden now
+        self.show_done = QCheckBox("Show series already in the scheme")
+        self.show_done.toggled.connect(lambda _on: self._fill_series())
         self.show_unchanged = QCheckBox("Show files already named by the scheme")
         self.show_unchanged.toggled.connect(lambda _on: self._show_series(self.series_list.currentRow()))
-        sp.addWidget(self.show_unchanged)
+        toggles = QHBoxLayout()
+        toggles.setSpacing(16)
+        toggles.addWidget(self.show_done)
+        toggles.addWidget(self.show_unchanged)
+        toggles.addStretch(1)
+        sp.addLayout(toggles)
         self.tabs.addTab(series_page, "Series")
         self.notes = QTreeWidget()
         self.notes.setColumnCount(2)
@@ -361,10 +375,23 @@ class RenamerWindow(QDialog):
         self.warning_label.setText("\n".join(dry.warnings))
         self.warning_label.setVisible(bool(dry.warnings))
         # series: the ones with something to do first
+        self._all_series: List[SeriesPreview] = sorted(series, key=lambda s: (not s.renames, not s.collisions,
+                                                                              s.title.casefold()))
+        self._fill_series()
+        self._fill_notes(dry)
+        self._update_buttons()
+
+    def _fill_series(self) -> None:
+        """The series list: series already wholly in the scheme only when "Show series already in the scheme" is on."""
+        everything = getattr(self, "_all_series", [])
+        done = [s for s in everything if _in_scheme(s)]
+        self.show_done.setText(f"Show series already in the scheme ({len(done)})" if done else
+                               "Show series already in the scheme")
+        self.show_done.setEnabled(bool(done))
+        current = self._current_series()
         self.series_list.blockSignals(True)
         self.series_list.clear()
-        self._series: List[SeriesPreview] = sorted(series, key=lambda s: (not s.renames, not s.collisions,
-                                                                          s.title.casefold()))
+        self._series: List[SeriesPreview] = [s for s in everything if self.show_done.isChecked() or not _in_scheme(s)]
         for s in self._series:
             c = s.counts()
             bits = [f"{c[RENAME]} to rename" if c[RENAME] else s.error if s.error
@@ -381,11 +408,10 @@ class RenamerWindow(QDialog):
             self.series_list.addItem(item)
         self.series_list.blockSignals(False)
         if self._series:
-            self.series_list.setCurrentRow(0)
+            again = next((i for i, s in enumerate(self._series) if current is not None and s.folder == current.folder), 0)
+            self.series_list.setCurrentRow(again)
         else:
             self.preview.clear()
-        self._fill_notes(dry)
-        self._update_buttons()
 
     def _current_series(self) -> Optional[SeriesPreview]:
         row = self.series_list.currentRow()
