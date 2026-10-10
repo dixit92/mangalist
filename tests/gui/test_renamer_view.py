@@ -297,3 +297,27 @@ def test_rename_library_takes_the_library_picked_or_every_library(lib):
     assert win._renamer_window is rw                         # one window, aimed at the library picked
     assert rw.scope == Scope.root(lib.root(win, MANHWA).id, MANHWA) and rw.dry_run.count(RENAME) == 2
     rw.close()
+
+
+def test_series_already_in_the_scheme_are_hidden_until_asked_for(qapp, db, tmp_path):
+    # owner, 2026-10-10: after renaming a library every series said a small "in the scheme"
+    folder = tmp_path / "library2" / "Manga"
+    folder.mkdir(parents=True)
+    root = make_library(db, folder, {
+        "Series A": {fmd2(1, "0001", "Start", "G"): payload("a1")},
+        "Series D": {"Ch. 0001.00 (Done) [G].cbz": payload("d1")},
+    })
+    win = _window(qapp, _renamer(db), Scope.root(root.id, "Manga"))
+    try:
+        titles = lambda: [win.series_list.item(i).text() for i in range(win.series_list.count())]  # noqa: E731
+        assert titles() == ["Series A"]
+        assert win.show_done.text() == "Show series already in the scheme (1)" and win.show_done.isEnabled()
+        win.series_list.setCurrentRow(0)
+        win.show_done.setChecked(True)
+        assert titles() == ["Series A", "Series D"] and win.series_list.currentRow() == 0     # the selection stays
+        win.show_done.setChecked(False)
+        win.apply()                                         # Series A renamed: nothing left to list
+        assert titles() == [] and win.show_done.text() == "Show series already in the scheme (2)"
+        assert win.preview.topLevelItemCount() == 0
+    finally:
+        win.deleteLater()
