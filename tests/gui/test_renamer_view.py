@@ -12,6 +12,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 
 from mangalist import renamer as rn  # noqa: E402
+from mangalist.gui.download_widgets import ROLE_CHIPS, ROLE_SUB  # noqa: E402
 from mangalist.gui.renamer_view import (  # noqa: E402
     NOT_AVAILABLE, PILOT_LIBRARY, PILOT_SERIES, SCOPE_ALL, SCOPE_ROOT, STATUS_COLORS, RenamerWindow, Scope)
 from mangalist.gui.table_model import COL_RENAME, COL_STATE  # noqa: E402
@@ -105,7 +106,10 @@ def test_the_dry_run_summary_the_preview_and_the_notes(qapp, db, made):
         assert win.btn_apply.text() == "Rename 2 files…" and win.btn_apply.isEnabled()
         assert win.pilot_note.text() == PILOT_LIBRARY and win.btn_library.isHidden()
         # series with renames first; its old -> new, coloured
-        assert win.series_list.item(0).text().startswith("Series A")
+        first = win.series_list.item(0)
+        assert first.text() == "Series A"                               # the title alone on its line ...
+        assert "to rename" in first.data(ROLE_SUB)                      # ... the counts under it (owner, 2026-10-10)
+        assert first.data(ROLE_CHIPS) == [("2 collisions", "bad")]      # collisions as a red chip
         rows = _preview_rows(win)
         assert (fmd2(1, "0001", "Start", "G"), "Ch. 0001.00 (Start) [G].cbz", RENAME) in rows
         assert ("omake.cbz", "(as it is)", "left alone") in rows

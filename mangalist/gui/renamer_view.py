@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..renamer import COLLISION, LEFT_ALONE, RENAME, UNCHANGED, BatchRecord, BatchResult, DryRun, SeriesPreview
+from .download_widgets import ROLE_CHIPS, ROLE_SUB, TwoLineDelegate
 
 _log = logging.getLogger(__name__)
 
@@ -172,6 +173,10 @@ class RenamerWindow(QDialog):
         sp.setContentsMargins(0, 6, 0, 0)
         split = QSplitter(Qt.Orientation.Horizontal)
         self.series_list = QListWidget()
+        # owner, 2026-10-10: "not a clear distinction between the title and the '224 to rename'" - the title on its own
+        # line in medium weight, the counts smaller and grey under it, collisions as a red chip at the right
+        self.series_list.setItemDelegate(TwoLineDelegate(self.series_list, row_height=48, left_pad=6))
+        self.series_list.setSpacing(2)
         self.series_list.currentRowChanged.connect(self._show_series)
         self.preview = QTreeWidget()
         self.preview.setColumnCount(3)
@@ -356,12 +361,11 @@ class RenamerWindow(QDialog):
                 bits.append(_plural(c[COLLISION], "collision"))
             if c[LEFT_ALONE]:
                 bits.append(f"{c[LEFT_ALONE]} left alone")
-            item = QListWidgetItem(f"{s.title}\n  " + " · ".join(bits))
-            item.setToolTip(s.folder)
+            item = QListWidgetItem(s.title)
+            item.setData(ROLE_SUB, " · ".join(b for b in bits if not b.endswith(("collision", "collisions"))))
             if c[COLLISION]:
-                item.setForeground(QBrush(QColor(STATUS_COLORS[COLLISION])))
-            elif not c[RENAME]:
-                item.setForeground(QBrush(QColor(STATUS_COLORS[UNCHANGED])))
+                item.setData(ROLE_CHIPS, [(_plural(c[COLLISION], "collision"), "bad")])
+            item.setToolTip(f"{s.title}\n{' · '.join(bits)}\n{s.folder}")
             self.series_list.addItem(item)
         self.series_list.blockSignals(False)
         if self._series:
