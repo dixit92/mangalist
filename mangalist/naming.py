@@ -144,7 +144,7 @@ def sanitize_title(text: Optional[str]) -> Optional[str]:
 def sanitize_group(text: Optional[str]) -> Optional[str]:
     """A group as the scheme writes it: ``[ ]`` -> ``( )`` (``"Team [X]"`` -> ``"Team (X)"``), the rest as titles. A
     placeholder (``no group``, ``Unknown``, ``N/A``, ... - MangaDex's "no group") is no group: None."""
-    return real_group(_clean(text, _GROUP_BRACKETS))
+    return real_group(_clean(real_group(text), _GROUP_BRACKETS))
 
 
 _RESTATED = re.compile(r"^(?:(?:chapter|chap|ch|episode|ep|no|#)\.?\s*#?\s*)?(?P<a>\d+(?:\.\d+)?)"

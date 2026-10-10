@@ -79,9 +79,20 @@ _HEAD_LABEL = re.compile(
     rf"\s*(?<![^\W\d_])(?P<word>[^\W\d_]{{2,}})\.?\s*[#-]?\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?{_LABEL_END}")
 
 
+_KNOWN_LABEL = re.compile(CHAPTER_LABELS, re.IGNORECASE)
+_STRONG_END = re.compile(r"$|\s*\[|\s{2,}|\s*[-\u2013\u2014:\uff1a]\s|\.\s|\s*_")
+
+
 def _head_label(body: str, pos: int = 0) -> Optional["re.Match[str]"]:
+    """A word and its number at ``pos`` of a bracket: a known chapter label (``Contact``, ``Episode``) always; any
+    other word (``Hug``, ``No.``) when the number is zero-padded or clearly ends the head - so ``[Love 2 Hate]`` stays
+    a title. The words of NOT_CHAPTER_LABELS never."""
     m = _HEAD_LABEL.match(body, pos)
-    return m if m is not None and m.group("word").casefold() not in NOT_CHAPTER_LABELS else None
+    if m is None or m.group("word").casefold() in NOT_CHAPTER_LABELS:
+        return None
+    if _KNOWN_LABEL.fullmatch(m.group("word")) or _PADDED.match(m.group("c")):
+        return m
+    return m if _STRONG_END.match(body, m.end()) else None
 # A bracket that starts with a number: the chapter (owner's library, 2026-10-10: arc parts "NNNN [NNNN  <arc title>
 # (N)]", "0011 [0011 report011. <title>]"). Accepted when the number is zero-padded ("0076") or clearly ends the head
 # (end of the bracket, two spaces, " - ", ". ", ": ", " ["), so "3 Days Later" stays a title.
@@ -193,7 +204,9 @@ _SERIES_ENDS_IN_LABEL = re.compile(rf"(?<![A-Za-z]){CHAPTER_LABELS}\.?\s*[#-]?$"
 # A zero-padded or fractional number right before the volume token is the chapter of that volume ("<Series> 001 Vol 01",
 # "<Series> 012.5 v02"); a plain number stays part of the title ("<Series> 2049 v01").
 _CHAPTER_NUMBER = r"(?:0\d+(?:\.\d+)?|\d+\.\d+)"
-_SERIES_ENDS_IN_CHAPTER = re.compile(rf"\S\s+(?:-\s+)?{_CHAPTER_NUMBER}$")
+# Not after a word that the number belongs to: "<Series> Season 02 v03" is volume 3 of season 2.
+_SERIES_ENDS_IN_CHAPTER = re.compile(
+    rf"\S(?<!season)(?<!part)(?<!book)(?<!tome)(?<!arc)\s+(?:-\s+)?{_CHAPTER_NUMBER}$", re.IGNORECASE)
 
 _TAG = re.compile(r"\(([^()]*)\)|\[([^\[\]]*)\]")
 _YEAR = re.compile(r"^((?:19|20)\d{2})(?:\s*-\s*(?:19|20)?\d{2})?$")
@@ -316,9 +329,12 @@ _NUMBER_THEN_VOLUME = re.compile(
     rf"(?P<v>{UNIT})(?P<rest>(?:\s.*)?)$", re.IGNORECASE)
 
 
+_NUMBER_WORD = re.compile(r"(?<![A-Za-z])(?:season|part|book|tome|arc)$", re.IGNORECASE)
+
+
 def _number_then_volume(name: str, stem: str) -> Optional[ParsedName]:
     m = _NUMBER_THEN_VOLUME.match(stem)
-    if m is None or _SERIES_ENDS_IN_UNIT.search(m.group("series")):
+    if m is None or _SERIES_ENDS_IN_UNIT.search(m.group("series")) or _NUMBER_WORD.search(m.group("series")):
         return None
     n = m.group("n")
     rest = m.group("rest")
