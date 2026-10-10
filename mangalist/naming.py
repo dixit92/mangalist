@@ -15,7 +15,8 @@ Settled in the Next Cycle Design, sections 10-12 (owner answers 2026-10-10); the
   at its first chapter.
 
 **Volumes** - ``<Series title> - Vol. 001 [<group>].cbz`` (3-digit volume; a range ``Vol. 001-003``; the series title is
-MangaPixer's title, owner 2026-10-10).
+MangaPixer's title, owner 2026-10-10). A season / part the file name states is kept after the title, ``<Series title>
+Season 2 - Vol. 001``, because volume numbers restart with it (renamer dry run, 2026-10-10).
 
 **Why parentheses for the title** (section 12): MangaPixer reads nothing inside ``( )`` / ``[ ]`` when the rest of the
 name states a unit, so a title such as "The Vol 2 Begins" is never read as volume 2 there; MangaList reads its own
@@ -46,6 +47,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Optional, Tuple, Union
 
+from .parsing._common import QUALIFIER, real_group, series_qualifier
 from .parsing.model import Kind, ParsedName, UnitRange, plain, to_decimal
 from .parsing.template import MANGALIST_CHAPTER_SCHEME, MANGALIST_VOLUME_SCHEME, compile_template
 
@@ -140,8 +142,44 @@ def sanitize_title(text: Optional[str]) -> Optional[str]:
 
 
 def sanitize_group(text: Optional[str]) -> Optional[str]:
-    """A group as the scheme writes it: ``[ ]`` -> ``( )`` (``"Team [X]"`` -> ``"Team (X)"``), the rest as titles."""
-    return _clean(text, _GROUP_BRACKETS)
+    """A group as the scheme writes it: ``[ ]`` -> ``( )`` (``"Team [X]"`` -> ``"Team (X)"``), the rest as titles. A
+    placeholder (``no group``, ``Unknown``, ``N/A``, ... - MangaDex's "no group") is no group: None."""
+    return real_group(_clean(real_group(text), _GROUP_BRACKETS))
+
+
+_RESTATED = re.compile(r"^(?:(?:chapter|chap|ch|episode|ep|no|#)\.?\s*#?\s*)?(?P<a>\d+(?:\.\d+)?)"
+                       r"(?:\s*-\s*(?P<b>\d+(?:\.\d+)?))?$", re.IGNORECASE)
+
+
+def restates_number(title: Optional[str], chapter: Decimal, chapter_end: Optional[Decimal] = None) -> bool:
+    """The title only says the chapter number again (``Chapter 144``, ``Ch. 0144``, ``Episode 144``, ``Ep. 144``,
+    ``#144``, ``No. 144``, ``144`` for chapter 144; zero padding and trailing decimal zeros do not matter) - it is
+    dropped from the name (renamer dry run, 2026-10-10: ``Ch. 0144.00 (Chapter 144)``)."""
+    m = _RESTATED.match((title or "").strip())
+    if m is None:
+        return False
+    a, b = to_decimal(m.group("a")), to_decimal(m.group("b")) if m.group("b") else None
+    return a == chapter and (b == chapter_end if chapter_end is not None else b is None or b == chapter)
+
+
+def sanitize_qualifier(text: Optional[str]) -> Optional[str]:
+    """A volume's season / part of the series as the scheme writes it: ``"season 02"`` -> ``"Season 2"``,
+    ``"Part 5"``; None when empty. Raises ValueError for anything else (the scheme reads back only these)."""
+    if text is None or not str(text).strip():
+        return None
+    t = " ".join(str(text).split())
+    q = series_qualifier(t)
+    if q is None or QUALIFIER.fullmatch(t) is None:
+        raise ValueError(f"a volume qualifier is 'Season N' or 'Part N', not {text!r}")
+    return q
+
+
+def _states(series: str, qualifier: str) -> bool:
+    """The series title already says the qualifier ("<Title> Season 2" with "Season 2")."""
+    word, _, number = qualifier.partition(" ")
+    return any(m.group("word").casefold() == word.casefold() and to_decimal(m.group("n")) == to_decimal(number)
+               for m in re.finditer(r"(?<![A-Za-z])(?P<word>season|part)\s*(?P<n>\d+(?:\.\d+)?)(?![\d.])", series,
+                                    re.IGNORECASE))
 
 
 def sanitize_series(text: Optional[str]) -> Optional[str]:
@@ -261,6 +299,8 @@ def chapter_name(chapter: Number, *, chapter_end: Optional[Number] = None, volum
     tpl = compile_template(CHAPTER_SCHEME)
     suffix = _ext(ext)
     base = {"chapter": start, "chapter_end": end, "volume": vol}
+    if restates_number(title, start, end):
+        title = None
 
     def render(t: Optional[str], g: Optional[str]) -> str:
         return tpl.render(dict(base, title=t, group=g), sanitize=None) + suffix
@@ -283,11 +323,14 @@ def chapter_file_name(chapter: Number, *, chapter_end: Optional[Number] = None, 
 
 def volume_name(series_title: str, volume: Number, *, volume_end: Optional[Number] = None,
                 group: Optional[str] = None, ext: str = ".cbz", folder: Optional[str] = None,
-                limits: NameLimits = _DEFAULT_LIMITS) -> NameResult:
+                limits: NameLimits = _DEFAULT_LIMITS, qualifier: Optional[str] = None) -> NameResult:
     """:func:`volume_file_name` with how it was made."""
     series = sanitize_series(series_title)
     if series is None:
         raise ValueError(f"a volume name needs a series title, not {series_title!r}")
+    qual = sanitize_qualifier(qualifier)
+    if qual is not None and _states(series, qual):
+        qual = None
     start = _number(volume, "volume")
     end = _end(start, volume_end, "volume")
     tpl = compile_template(VOLUME_SCHEME)
@@ -296,8 +339,8 @@ def volume_name(series_title: str, volume: Number, *, volume_end: Optional[Numbe
     shortest = _cut(series, 2) or series[:1]           # the volume scheme needs a title: never left out entirely
 
     def render(g: Optional[str], s: Optional[str]) -> str:
-        return tpl.render({"series": s or shortest, "volume": start, "volume_end": end, "group": g},
-                          sanitize=None) + suffix
+        return tpl.render({"series": s or shortest, "qualifier": qual, "volume": start, "volume_end": end,
+                           "group": g}, sanitize=None) + suffix
 
     g, capped = _capped_group(group, limits)
     return _fit(render, g, series, ("group", "series"), lambda n: name_fits(n, folder=folder, limits=limits),
@@ -306,11 +349,14 @@ def volume_name(series_title: str, volume: Number, *, volume_end: Optional[Numbe
 
 def volume_file_name(series_title: str, volume: Number, *, volume_end: Optional[Number] = None,
                      group: Optional[str] = None, ext: str = ".cbz", folder: Optional[str] = None,
-                     limits: NameLimits = _DEFAULT_LIMITS) -> str:
+                     limits: NameLimits = _DEFAULT_LIMITS, qualifier: Optional[str] = None) -> str:
     """The scheme name of a volume archive: ``<Series title> - Vol. 001 [<group>].cbz`` (a range ``Vol. 001-003``).
-    Raises ValueError without a series title or a valid volume number."""
+    ``qualifier``: the season / part of the series the volume belongs to (``"Season 2"``, ``"Part 5"``), written
+    after the title - ``<Series title> Season 2 - Vol. 001`` - unless the title already says it; volume numbers
+    restart with it, so it keeps two seasons' volume 1 apart. Raises ValueError without a series title, a valid
+    volume number, or for a qualifier that is not "Season N" / "Part N"."""
     return volume_name(series_title, volume, volume_end=volume_end, group=group, ext=ext, folder=folder,
-                       limits=limits).name
+                       limits=limits, qualifier=qualifier).name
 
 
 # --- a parsed file's scheme name --------------------------------------------------------------------------------
@@ -329,7 +375,10 @@ def target_name(parsed: Optional[ParsedName], *, ext: str, series_title: Optiona
     - a chapter whose own name states a volume range, or a volume file without a ``series_title``.
 
     A chapter's volume is the one its name states, else ``volume_of(chapter)`` when given (a range only when both
-    ends map to the same volume). The title and group come from the name as parsed."""
+    ends map to the same volume). The title and group come from the name as parsed (a title that only restates the
+    number and a placeholder group are left out); a volume keeps the season / part its name states
+    (:attr:`~mangalist.parsing.ParsedName.qualifier`). A name cut off after a chapter word (``[Vol. 0001 Ch``) is
+    ``ambiguous``: left alone."""
     if parsed is None or parsed.guessed or parsed.ambiguous:
         return None
     try:
@@ -340,7 +389,8 @@ def target_name(parsed: Optional[ParsedName], *, ext: str, series_title: Optiona
                 return None
             rng = parsed.volume
             return volume_file_name(series_title, rng.start, volume_end=rng.end if rng.is_range else None,
-                                    group=parsed.group, ext=ext, folder=folder, limits=limits)
+                                    group=parsed.group, ext=ext, folder=folder, limits=limits,
+                                    qualifier=parsed.qualifier)
     except ValueError:
         _log.debug("Naming: no scheme name for %r", parsed.name, exc_info=True)
     return None
@@ -431,6 +481,7 @@ def volume_lookup(db, series_id: int) -> Callable[[Decimal], Optional[Decimal]]:
 
 __all__ = [
     "CHAPTER_SCHEME", "DEFAULT_SCHEMES", "ELLIPSIS", "NameLimits", "NameResult", "VOLUME_SCHEME", "chapter_file_name",
-    "chapter_name", "name_fits", "sanitize_group", "sanitize_series", "sanitize_title", "target_name",
+    "chapter_name", "name_fits", "restates_number", "sanitize_group", "sanitize_qualifier", "sanitize_series",
+    "sanitize_title", "target_name",
     "volume_file_name", "volume_lookup", "volume_name", "volumes_from_list", "windows_path",
 ]

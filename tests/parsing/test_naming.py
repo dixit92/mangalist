@@ -182,7 +182,7 @@ def test_scheme_names_never_leak_units_from_the_title():
 
 def test_the_schemes_are_templates():
     assert CHAPTER_SCHEME == "Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}"
-    assert VOLUME_SCHEME == "%T - Vol. %V3{-%VE3}{ [%G]}"
+    assert VOLUME_SCHEME == "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
     assert DEFAULT_SCHEMES == (CHAPTER_SCHEME, VOLUME_SCHEME)
 
 
@@ -421,7 +421,7 @@ def _t(name, series="Some Series", volume_of=None, **kw):
     ("Some Series - c001 (v01) [Grp].cbz", "Ch. 0001.00 Vol. 001 [Grp].cbz"),
     ("Some Series v01 (2019) (Digital) (Grp).cbz", "Some Series - Vol. 001 [Grp].cbz"),
     ("Some Series v01-03 (2019) (Digital) (Grp).cbz", "Some Series - Vol. 001-003 [Grp].cbz"),
-    ("Other Name - Part 5 - Sub v05 (2022) (Digital) (Grp).cbz", "Some Series - Vol. 005 [Grp].cbz"),
+    ("Other Name - Part 5 - Sub v05 (2022) (Digital) (Grp).cbz", "Some Series Part 5 - Vol. 005 [Grp].cbz"),
     ("0012 [Contact. 0001 - Hello [G]].cbz", "Ch. 0001.00 (Hello) [G].cbz"),
     ("0076 [0076  The Arc Title (3)].cbz", "Ch. 0076.00 (The Arc Title [3]).cbz"),
     ("Some Series - Episode 35 (2023) (Digital) (Grp).cbz", "Ch. 0035.00 [Grp].cbz"),

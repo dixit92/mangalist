@@ -11,7 +11,8 @@ from typing import List, Optional, Tuple, Union
 from ..classifier import detect_tokens
 from ..models import _RE_CH_NUM, _RE_VOL_NUM
 from ._common import (
-    CHAPTER_LABELS, EXTRA_WORDS, UNIT, clean_title, encloses_whole, split_extension, trailing_bracket,
+    CHAPTER_LABELS, EXTRA_WORDS, NOT_CHAPTER_LABELS, UNIT, clean_title, encloses_whole, split_extension,
+    trailing_bracket,
 )
 from .model import Kind, Layer, ParsedName, UnitRange
 from .template import Template, compile_template
@@ -40,7 +41,7 @@ def parse_scheme(name: str, scheme: Union[str, Template]) -> Optional[ParsedName
     series = next((f[k] for k in ("series", "series_english", "series_romaji", "series_mu") if k in f), None)
     return ParsedName(
         name=name, kind=kind, layer=Layer.SCHEME, volume=volume, chapter=chapter,
-        title=f.get("title"), group=f.get("group"),
+        title=f.get("title"), group=f.get("group"), qualifier=f.get("qualifier"),
         index=int(f["index"]) if "index" in f else None, series=series,
         year=int(f["year"]) if "year" in f else None, edition=f.get("edition"), fix=f.get("fix"),
         notes=(f"scheme {tpl.source!r}",))
@@ -72,8 +73,26 @@ _HEAD_EXTRA = re.compile(r"^\s*(?:vol(?:ume)?\.?\s*\d+\s*)?ch(?:apter)?\.?\s*(?=
 
 # A labelled chapter after the head's volume (or alone): "Contact. 0001", "episode 0035", "report011.", "Ep #12".
 _LABEL_END = r"(?=$|\.(?=\s|$)|[\s\-\u2013\u2014:\uff1a_\[\]])"
+# Any single word does (renamer dry run, 2026-10-10: "[Hug 0001]", "[No. 0001]"), except the words of
+# NOT_CHAPTER_LABELS ("[Season 2]", "[Part 3]", "[Extra 2]" are not chapters).
 _HEAD_LABEL = re.compile(
-    rf"\s*(?<![A-Za-z]){CHAPTER_LABELS}\.?\s*[#-]?\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?{_LABEL_END}", re.IGNORECASE)
+    rf"\s*(?<![^\W\d_])(?P<word>[^\W\d_]{{2,}})\.?\s*[#-]?\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?{_LABEL_END}")
+
+
+_KNOWN_LABEL = re.compile(CHAPTER_LABELS, re.IGNORECASE)
+_STRONG_END = re.compile(r"$|\s*\[|\s{2,}|\s*[-\u2013\u2014:\uff1a]\s|\.\s|\s*_")
+
+
+def _head_label(body: str, pos: int = 0) -> Optional["re.Match[str]"]:
+    """A word and its number at ``pos`` of a bracket: a known chapter label (``Contact``, ``Episode``) always; any
+    other word (``Hug``, ``No.``) when the number is zero-padded or clearly ends the head - so ``[Love 2 Hate]`` stays
+    a title. The words of NOT_CHAPTER_LABELS never."""
+    m = _HEAD_LABEL.match(body, pos)
+    if m is None or m.group("word").casefold() in NOT_CHAPTER_LABELS:
+        return None
+    if _KNOWN_LABEL.fullmatch(m.group("word")) or _PADDED.match(m.group("c")):
+        return m
+    return m if _STRONG_END.match(body, m.end()) else None
 # A bracket that starts with a number: the chapter (owner's library, 2026-10-10: arc parts "NNNN [NNNN  <arc title>
 # (N)]", "0011 [0011 report011. <title>]"). Accepted when the number is zero-padded ("0076") or clearly ends the head
 # (end of the bracket, two spaces, " - ", ". ", ": ", " ["), so "3 Days Later" stays a title.
@@ -101,7 +120,7 @@ def parse_fmd2(name: str) -> Optional[ParsedName]:
     chapter = UnitRange.maybe(head.group("c"), head.group("c2"))
     rest_at, note = head.end(), "units from the bracket head"
     if chapter is None:
-        labelled = _HEAD_LABEL.match(body, head.end()) if volume is not None else _HEAD_LABEL.match(body)
+        labelled = _head_label(body, head.end() if volume is not None else 0)
         if labelled is not None:
             chapter = UnitRange.maybe(labelled.group("c"), labelled.group("c2"))
             rest_at, note = labelled.end(), "a labelled chapter in the bracket head"
@@ -109,7 +128,7 @@ def parse_fmd2(name: str) -> Optional[ParsedName]:
             numbered = _head_number(body)
             if numbered is not None:
                 chapter, rest_at, note = numbered[0], numbered[1], "the number the bracket starts with"
-                same = _HEAD_LABEL.match(body, rest_at)      # "0011 report011. <title>": the label says it again
+                same = _head_label(body, rest_at)           # "0011 report011. <title>": the label says it again
                 if same is not None and UnitRange.maybe(same.group("c"), same.group("c2")) == chapter:
                     rest_at = same.end()
     if volume is not None or chapter is not None:
@@ -182,6 +201,13 @@ _RELEASE_VOLUME_LAST = re.compile(
 # A bare number right after a chapter label ("<Title> - Episode 35 (2023)") is the labelled layer's.
 _SERIES_ENDS_IN_LABEL = re.compile(rf"(?<![A-Za-z]){CHAPTER_LABELS}\.?\s*[#-]?$", re.IGNORECASE)
 
+# A zero-padded or fractional number right before the volume token is the chapter of that volume ("<Series> 001 Vol 01",
+# "<Series> 012.5 v02"); a plain number stays part of the title ("<Series> 2049 v01").
+_CHAPTER_NUMBER = r"(?:0\d+(?:\.\d+)?|\d+\.\d+)"
+# Not after a word that the number belongs to: "<Series> Season 02 v03" is volume 3 of season 2.
+_SERIES_ENDS_IN_CHAPTER = re.compile(
+    rf"\S(?<!season)(?<!part)(?<!book)(?<!tome)(?<!arc)\s+(?:-\s+)?{_CHAPTER_NUMBER}$", re.IGNORECASE)
+
 _TAG = re.compile(r"\(([^()]*)\)|\[([^\[\]]*)\]")
 _YEAR = re.compile(r"^((?:19|20)\d{2})(?:\s*-\s*(?:19|20)?\d{2})?$")
 _EDITION = re.compile(r"^digital(?:\b.*)?$", re.IGNORECASE)
@@ -211,6 +237,8 @@ def parse_release(name: str) -> Optional[ParsedName]:
     series = m.group("series").rstrip(" -_")
     if not series or _SERIES_ENDS_IN_UNIT.search(series):
         return None
+    if m.group("vp") is not None and _SERIES_ENDS_IN_CHAPTER.search(series):
+        return None                                     # "<Series> 001 Vol 01": chapter 1 of volume 1 (layer 3b)
     group, year, edition, fix, tag_volume, tags = _read_tags(m.group("tags"))
 
     volume = chapter = number = None
@@ -290,7 +318,34 @@ def parse_labelled(name: str, series_title: Optional[str] = None) -> Optional[Pa
         parsed = _labelled_at(name, stem, m)
         if parsed is not None:
             return parsed
-    return None
+    return _number_then_volume(name, stem)
+
+
+# "<Series> 001 Vol 01 <chapter title>": a chapter number followed by its volume (renamer dry run, 2026-10-10: read
+# as volume 1, so a whole series collided on "Vol. 001"). The number must be zero-padded or fractional, so
+# "<Series> 2 Vol 3" and "<Series> 2049 Vol 1" (numbers of a title) are not read.
+_NUMBER_THEN_VOLUME = re.compile(
+    rf"^(?P<series>.*?\S)[\s_]+(?:-\s+)?(?P<n>{_CHAPTER_NUMBER})(?:-(?P<n2>{UNIT}))?[\s_]+(?:vol(?:ume)?\.?|v)\s*"
+    rf"(?P<v>{UNIT})(?P<rest>(?:\s.*)?)$", re.IGNORECASE)
+
+
+_NUMBER_WORD = re.compile(r"(?<![A-Za-z])(?:season|part|book|tome|arc)$", re.IGNORECASE)
+
+
+def _number_then_volume(name: str, stem: str) -> Optional[ParsedName]:
+    m = _NUMBER_THEN_VOLUME.match(stem)
+    if m is None or _SERIES_ENDS_IN_UNIT.search(m.group("series")) or _NUMBER_WORD.search(m.group("series")):
+        return None
+    n = m.group("n")
+    rest = m.group("rest")
+    tags_m = _TRAILING_TAGS.search(rest)
+    body = rest[:tags_m.start()]
+    group, year, edition, fix, _tag_volume, tags = _read_tags(tags_m.group(0))
+    return ParsedName(
+        name=name, kind=Kind.CHAPTER, layer=Layer.LABELLED, volume=UnitRange.of(m.group("v")),
+        chapter=UnitRange.maybe(n, m.group("n2")), title=clean_title(body), group=group,
+        series=m.group("series").strip(" -_") or None, year=year, edition=edition, fix=fix, tags=tuple(tags),
+        notes=("a chapter number followed by its volume",))
 
 
 def _labelled_at(name: str, stem: str, m: "re.Match[str]") -> Optional[ParsedName]:

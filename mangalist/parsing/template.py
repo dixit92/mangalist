@@ -16,7 +16,8 @@ chapter title that itself ends in ``[...]`` with no group after it reads back as
 
 The token table is extensible (:func:`register_token`); phase 2 builds the full naming engine on it. MangaList's
 own scheme (owner, 2026-10-10; :mod:`mangalist.naming`) adds ``%CN`` (the chapter number with at least two decimals:
-``%CN4`` -> ``0102.00``), ``%CE`` (the end of a chapter range, same form) and ``%VE`` (the end of a volume range).
+``%CN4`` -> ``0102.00``), ``%CE`` (the end of a chapter range, same form), ``%VE`` (the end of a volume range) and
+``%SQ`` (the season / part of the series a volume belongs to: ``Season 2``, ``Part 5``).
 """
 
 from __future__ import annotations
@@ -182,6 +183,8 @@ for _spec in (
     TokenSpec("CE", "chapter_end", _two_decimals, _render_scheme_chapter_end, takes_width=True, numeric=True),
     TokenSpec("VE", "volume_end", lambda w: _padded(w) + r"(?:\.\d+)?", _render_volume_end, takes_width=True,
               numeric=True),
+    # The season / part of the series a volume belongs to ("Season 2", "Part 5"; renamer dry run, 2026-10-10).
+    TokenSpec("SQ", "qualifier", lambda w: r"(?:Season|Part) (?:0|[1-9]\d*)(?:\.\d+)?", _text_renderer("qualifier")),
     TokenSpec("CT", "title", lambda w: _TEXT, _text_renderer("title")),
     TokenSpec("G", "group", lambda w: _GROUP_TEXT, _text_renderer("group")),
     TokenSpec("T", "series", lambda w: _TEXT, _text_renderer("series")),
@@ -362,7 +365,7 @@ def values_of(parsed: ParsedName) -> Dict[str, Any]:
     return {
         "index": parsed.index, "volume": parsed.volume, "chapter": parsed.chapter, "title": parsed.title,
         "group": parsed.group, "series": parsed.series, "year": parsed.year, "edition": parsed.edition,
-        "fix": parsed.fix,
+        "fix": parsed.fix, "qualifier": parsed.qualifier,
     }
 
 
@@ -380,9 +383,9 @@ def compile_template(template: Union[str, Template]) -> Template:
 # naming scheme is empty, and always read back by the parser (layer 1). Chapters: "Ch. 0102.00 Vol. 012 (<chapter
 # title>) [<group>]" - the number first, so a plain sort is the reading order and a volume learned later never moves
 # a file; each later part only when known; a range "Ch. 0010.00-0012.00". Volumes: "<Series title> - Vol. 001
-# [<group>]", a range "Vol. 001-003". mangalist.naming renders them (sanitising, length rule).
+# [<group>]", a range "Vol. 001-003", a season / part of the series "<Series title> Season 2 - Vol. 001". mangalist.naming renders them (sanitising, length rule).
 MANGALIST_CHAPTER_SCHEME = "Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}"
-MANGALIST_VOLUME_SCHEME = "%T - Vol. %V3{-%VE3}{ [%G]}"
+MANGALIST_VOLUME_SCHEME = "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
 
 # The owner's FMD2 scheme (PD 6; MangaList's default until 2026-10-10, now only what FMD2 writes). %I = FMD2's
 # numbering index (C1 open for phase 2).
