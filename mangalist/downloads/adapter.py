@@ -436,7 +436,7 @@ class Backend:
             raise BackendError(str(exc)) from None
         finally:
             _close(client)
-        allowed = allowed_sources(installed, self.suwayomi.sources())
+        allowed = allowed_sources(installed, self.suwayomi.sources(), self._source_languages())
         ids = {s.id for s in allowed}
         rest = sorted((s for s in installed if s.id not in ids),
                       key=lambda s: (s.lang not in ("en", "all"), not s.is_mangadex, s.display_name.casefold()))
@@ -444,6 +444,18 @@ class Backend:
 
     def set_suwayomi_sources(self, source_ids: Sequence[str]) -> None:
         self.suwayomi.set_sources(source_ids)
+
+    def reset_suwayomi_sources(self) -> None:
+        """Forget the owner's choice: MangaDex in the owner's languages again (Settings > "Reset to default")."""
+        self.suwayomi.reset_sources()
+
+    def _source_languages(self) -> tuple:
+        from .options import load_nyaa_options
+
+        try:
+            return load_nyaa_options(self.db).source_languages()
+        except Exception:  # noqa: BLE001 - English, the default, when the options cannot be read
+            return ("all", "en")
 
     def chapter_lookup(self, series_id: int, missing: Sequence[str], titles: Sequence[str]) -> ChapterLookup:
         """Find the series in Suwayomi and list its missing chapters (see :mod:`mangalist.downloads.chapters`)."""
@@ -454,7 +466,7 @@ class Backend:
             lookup.placement_error = str(exc)
         client = self._chapter_client()
         try:
-            sources = allowed_sources(list(client.sources()), self.suwayomi.sources())
+            sources = allowed_sources(list(client.sources()), self.suwayomi.sources(), self._source_languages())
             if not sources:
                 lookup.error = ("no Suwayomi source is allowed (Settings > Download sources > Suwayomi sources), or "
                                 "the MangaDex extension is not installed in Suwayomi")

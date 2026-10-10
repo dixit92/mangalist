@@ -117,7 +117,7 @@ def test_check_now_runs_the_downloads_job_once(db, series, qbt, tmp_path):
     b.save_settings(QbtSettings(base_url="box:8080", username="admin", save_path=str(tmp_path / "torrents")), "pw")
     rec = b.send(sid, candidate(), ["2"], str(sdir))
     qbt.put(rec.info_hash, "Series A v02 (Digital)", {"Series A v02 (Digital).cbz": b"v02" * 400}, state="uploading")
-    assert b.check_now().startswith("1 checked: 1 filed")
+    assert b.check_now().startswith("torrents: 1 checked: 1 filed")
     assert b.ledger.get(rec.id).status == DownloadStatus.FILED and (sdir / "Series A v02 (Digital).cbz").exists()
 
 

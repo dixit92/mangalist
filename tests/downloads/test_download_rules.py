@@ -81,7 +81,7 @@ def test_times_and_schedules_are_worded_like_the_mockup():
 def test_schedule_rows_read_the_container_environment():
     rows = {w: (when, env) for w, when, env in rules.schedule_rows({})}
     assert rows == {"Rescan the library": ("daily 03:30", False), "Sync with MangaPixer": ("daily 03:15", False),
-                    "File finished downloads": ("every hour (and Check qBittorrent now)", False)}
+                    "File finished downloads": ("every hour (and Check downloads now)", False)}
     rows = {w: (when, env) for w, when, env in rules.schedule_rows(
         {"MANGALIST_RESCAN_SCHEDULE": "off", "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00",
          "MANGALIST_DOWNLOADS_SCHEDULE": "banana"})}

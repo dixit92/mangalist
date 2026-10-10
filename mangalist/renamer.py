@@ -134,7 +134,7 @@ def naming_available(namer: Optional[Namer] = None) -> bool:
 
 
 def windows_server(db) -> Optional[str]:
-    """The Windows server name of the length rule (``SMIT-SERVER``), or None when none is set."""
+    """The Windows server name of the length rule (``MYSERVER``), or None when none is set."""
     try:
         value = db.get_setting(KEY_WINDOWS_SERVER, None)
     except Exception:  # noqa: BLE001 - no setting: no Windows path rule
@@ -143,13 +143,13 @@ def windows_server(db) -> Optional[str]:
 
 
 def normalize_server(text: Optional[str]) -> Optional[str]:
-    """``\\\\SMIT-SERVER\\`` / ``smit-server`` -> the server name; None for empty; :class:`ValueError` when it is not a
+    """``\\\\MYSERVER\\`` / ``myserver`` -> the server name; None for empty; :class:`ValueError` when it is not a
     plain server name (letters, digits, ``-``, ``_``, ``.``)."""
     name = (text or "").strip().strip("\\/").strip()
     if not name:
         return None
     if not _HOSTNAME.match(name):
-        raise ValueError("a server name has letters, digits, '-', '_' or '.' only (e.g. SMIT-SERVER)")
+        raise ValueError("a server name has letters, digits, '-', '_' or '.' only (e.g. MYSERVER)")
     return name
 
 

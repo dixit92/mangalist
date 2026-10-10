@@ -745,10 +745,10 @@ class MainWindow(QMainWindow):
         return added
 
     def _on_replaced_chapters_moved(self, folders) -> None:
-        """The Download tab restored, moved or deleted replaced chapter files: rescan so the table and the database
-        follow."""
+        """The Download tab filed downloads, or restored, moved or deleted replaced chapter files: rescan so the table,
+        the To get list and the database follow."""
         n = len(list(folders))
-        self._status_label.setText(f"Chapter files changed in {n} series - rescanning")
+        self._status_label.setText(f"Files changed in {n} series - rescanning" if n else "Files changed - rescanning")
         self._start_scan()
 
     def _on_files_deleted(self, paths) -> None:

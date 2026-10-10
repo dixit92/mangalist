@@ -106,7 +106,7 @@ def test_both_tools_in_one_run(tmp_path):
                                 chapter_client_factory=lambda conn: suwa, namer=FakeNamer(), replaced=None,
                                 after=lambda ctx, led, report: afters.append(tuple(report.filed)))(JobContext())
     assert result.status == "ok"
-    assert result.message.startswith("1 checked: 0 filed, 0 removed, 0 failed, 1 waiting")
+    assert result.message.startswith("torrents: 1 checked: 0 filed, 0 removed, 0 failed, 1 waiting")
     assert "; chapters: 1 checked: 0 filed, 0 failed, 1 waiting" in result.message
     assert result.extra["checked"] == 1 and result.extra["chapters_checked"] == 1 and afters == [()]
 

@@ -97,6 +97,9 @@ class FakeChapterBackend(FakeBackend):
     def set_suwayomi_sources(self, ids):
         self.allowed = list(ids)
 
+    def reset_suwayomi_sources(self):
+        self.allowed = None
+
     # --- the chapters panel ---
     def chapter_lookup(self, series_id, missing, titles):
         self.threads.append(threading.get_ident())

@@ -75,7 +75,7 @@ class ServiceCard(QFrame):
         super().__init__(parent)
         self.setProperty("card", "true")
         row = QHBoxLayout(self)
-        row.setContentsMargins(16, 14, 16, 14)
+        row.setContentsMargins(20, 16, 20, 16)
         row.setSpacing(16)
         col = QVBoxLayout()
         col.setSpacing(4)

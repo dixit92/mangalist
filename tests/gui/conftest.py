@@ -146,4 +146,4 @@ class FakeBackend:
         self.checks += 1
         if self.check_error:
             raise BackendError(self.check_error)
-        return "1 checked: 1 filed, 0 removed, 0 failed, 0 waiting"
+        return "torrents: 1 checked: 1 filed, 0 removed, 0 failed, 0 waiting"
