@@ -61,7 +61,7 @@ def test_group_notes_and_reasons():
 
 def test_badge_kinds():
     kinds = {s: rules.badge_kind(record(s)) for s in S.ALL}
-    assert kinds == {S.SENT: "run", S.DOWNLOADED: "run", S.FILED: "ok", S.REMOVED: "done", S.FAILED: "bad",
+    assert kinds == {S.QUEUED: "muted", S.SENT: "run", S.DOWNLOADED: "run", S.FILED: "ok", S.REMOVED: "done", S.FAILED: "bad",
                      S.CANCELLED: "done"}
 
 

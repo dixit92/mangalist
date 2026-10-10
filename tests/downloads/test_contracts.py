@@ -11,7 +11,7 @@ def test_downloads_switch():
 
 def test_category_and_statuses():
     assert QBITTORRENT_CATEGORY == "mangalist"
-    assert len(set(DownloadStatus.ALL)) == 6
+    assert len(set(DownloadStatus.ALL)) == 7 and DownloadStatus.QUEUED == "queued"
 
 
 def _torrent(state, progress=1.0):

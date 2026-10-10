@@ -13,6 +13,15 @@
   (:class:`~mangalist.downloads.contracts.QbtConnection` hides it).
 - Settings (plain ``settings`` keys): ``downloads.save_path`` (where qBittorrent saves the ``mangalist``
   category) and ``downloads.remove_completed`` (default on).
+- **The download budget** (2026-10-09, no migration): a QUEUED record (the ledger's own schema-1 ``'queued'``) is a send
+  waiting for room under the cap. Everything a later hand-over needs lives in its ``request`` JSON, written at queueing
+  time: the release (title, ``.torrent`` URL, page, parsed volumes, size, ...), the wanted volumes, ``only_missing``
+  (the partial-or-whole choice) and ``queue_order`` (the queue sorts by it, then by id: oldest first; "move to the
+  front" gives a record an order below every other). The target folder is ``destination``, as for any record. Every
+  record also carries what it counts against the cap: ``budget_bytes`` / ``budget_source`` (the release's size, the
+  selected files' total of a partial send, then qBittorrent's own figure once it reports one) and, for a FAILED record,
+  ``in_client`` (False once the torrent is seen gone from qBittorrent). Older records without these keys count their
+  ``size_bytes`` (the release's size).
 
 :class:`DownloadLedger` wraps a :class:`~mangalist.store.Store` (it uses ``store.connect()`` and the
 settings), so the store class itself is unchanged. It implements
@@ -23,8 +32,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from typing import Any, Dict, List, Optional, Sequence
 
+from ..downloads.budget import SIZE_RELEASE
 from ..downloads.contracts import DownloadRecord, DownloadStatus, NyaaCandidate, QbtConnection
 from .db import utcnow
 from .units import exact_number
@@ -38,6 +49,8 @@ DEFAULT_REMOVE_COMPLETED = True
 
 #: Statuses an arrivals pass still works on.
 ACTIVE = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
+#: ... and every status that means "MangaList has this release in hand": the same torrent is never queued or sent twice.
+TRACKED = (DownloadStatus.QUEUED, *ACTIVE)
 
 
 class DownloadError(ValueError):
@@ -56,15 +69,28 @@ def _loads(text: Optional[str], default):
     return value if isinstance(value, type(default)) else default
 
 
+def _size(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
 def _record(r: sqlite3.Row) -> DownloadRecord:
     req = _loads(r["request"], {})
+    size = _size(req.get("budget_bytes")) or _size(req.get("size_bytes"))
+    source = str(req.get("budget_source") or "") if _size(req.get("budget_bytes")) else (SIZE_RELEASE if size else "")
     return DownloadRecord(id=r["id"], series_id=r["series_id"], info_hash=r["external_ref"] or "",
                           title=str(req.get("title") or ""),
                           wanted_volumes=tuple(str(v) for v in req.get("wanted_volumes") or ()),
                           target_dir=r["destination"] or "", status=r["status"], created_at=r["created_at"],
                           updated_at=r["updated_at"],
                           filed_files=tuple(str(f) for f in _loads(r["filed_files"], [])),
-                          copied=bool(r["copied"]), error=r["error"])
+                          copied=bool(r["copied"]), error=r["error"], size_bytes=size, size_source=source,
+                          in_client=req.get("in_client") is not False)
+
+
+def _queue_key(r: sqlite3.Row):
+    order = _loads(r["request"], {}).get("queue_order")
+    order = order if isinstance(order, (int, float)) and not isinstance(order, bool) else r["id"]
+    return (order, r["id"])
 
 
 def normalize_volumes(volumes: Sequence[str]) -> List[str]:
@@ -89,8 +115,11 @@ class DownloadLedger:
     # --- records (contracts.DownloadStore) ----------------------------------------------------------
 
     def create(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
-               target_dir: str) -> DownloadRecord:
-        """A new SENT record. Refused while another active record tracks the same torrent."""
+               target_dir: str, *, status: str = DownloadStatus.SENT, only_missing: bool = False,
+               size_bytes: Optional[int] = None, size_source: Optional[str] = None) -> DownloadRecord:
+        """A new SENT record (or QUEUED: waiting for room under the download budget, at the end of the queue). Refused
+        while another record tracks the same torrent (queued or in qBittorrent). *size_bytes* / *size_source*: what it
+        counts against the budget (default: the release's size)."""
         info_hash = (candidate.info_hash or "").strip().lower()
         if not info_hash:
             raise DownloadError("a download needs the torrent's info hash")
@@ -99,37 +128,111 @@ class DownloadLedger:
             raise DownloadError("a download needs at least one wanted volume")
         if not target_dir:
             raise DownloadError("a download needs its target folder")
+        if status not in (DownloadStatus.SENT, DownloadStatus.QUEUED):
+            raise DownloadError(f"a new download is sent or queued, not {status!r}")
+        # Everything a queued record needs to be sent later, also kept for a sent one (the same shape for both).
         request = {"title": candidate.title, "wanted_volumes": wanted, "torrent_url": candidate.torrent_url,
                    "view_url": candidate.view_url, "vol_from": candidate.vol_from, "vol_to": candidate.vol_to,
-                   "is_pack": candidate.is_pack, "size_bytes": candidate.size_bytes}
+                   "is_pack": candidate.is_pack, "size_bytes": candidate.size_bytes,
+                   "published": candidate.published, "category": candidate.category, "seeders": candidate.seeders,
+                   "trusted": candidate.trusted, "digital": candidate.digital, "group": candidate.group,
+                   "covers_missing": list(candidate.covers_missing), "only_missing": bool(only_missing),
+                   "budget_bytes": _size(size_bytes) or _size(candidate.size_bytes),
+                   "budget_source": (size_source or SIZE_RELEASE) if _size(size_bytes) else SIZE_RELEASE}
         now = utcnow()
         with self.connect(durable=True) as con:
-            if self._active_ids(con, info_hash):
+            if self._tracked_ids(con, info_hash):
                 raise DownloadError(f"the torrent {info_hash} is already being tracked")
+            if status == DownloadStatus.QUEUED:     # at the end of the queue, whatever was moved to its front
+                orders = [_queue_key(r)[0] for r in self._queued_rows(con)]
+                request["queue_order"] = max(orders) + 1 if orders else 0
             cur = con.execute(
                 "INSERT INTO ledger (created_at, updated_at, series_id, request, tool, destination, status,"
                 " external_ref) VALUES (?,?,?,?,?,?,?,?)",
                 (now, now, int(series_id), json.dumps(request, ensure_ascii=False), TOOL, str(target_dir),
-                 DownloadStatus.SENT, info_hash))
+                 status, info_hash))
             record_id = int(cur.lastrowid)
         return self.get(record_id)  # type: ignore[return-value]
 
     def get(self, record_id: int) -> Optional[DownloadRecord]:
         with self.connect() as con:
             r = con.execute("SELECT * FROM ledger WHERE id = ? AND tool = ?", (record_id, TOOL)).fetchone()
-        return _record(r) if r is not None else None
+            return self._records(con, [r])[0] if r is not None else None
 
     def for_series(self, series_id: int) -> Sequence[DownloadRecord]:
         with self.connect() as con:
             rows = con.execute("SELECT * FROM ledger WHERE tool = ? AND series_id = ? ORDER BY id",
                                (TOOL, series_id)).fetchall()
-        return [_record(r) for r in rows]
+            return self._records(con, rows)
 
     def all_records(self) -> Sequence[DownloadRecord]:
         """Every download record, oldest first (the GUI's Downloads list)."""
         with self.connect() as con:
             rows = con.execute("SELECT * FROM ledger WHERE tool = ? ORDER BY id", (TOOL,)).fetchall()
-        return [_record(r) for r in rows]
+            return self._records(con, rows)
+
+    def _records(self, con, rows) -> List[DownloadRecord]:
+        """The rows as records, a QUEUED one with its place in the queue (read in the same transaction)."""
+        out = [_record(r) for r in rows]
+        if not any(rec.status == DownloadStatus.QUEUED for rec in out):
+            return out
+        places = {r["id"]: n for n, r in enumerate(self._queued_rows(con), start=1)}
+        return [replace(rec, queue_position=places.get(rec.id, 0)) if rec.status == DownloadStatus.QUEUED else rec
+                for rec in out]
+
+    # --- the queue (the download budget) ---------------------------------------------------------------
+
+    def _queued_rows(self, con) -> List[sqlite3.Row]:
+        rows = con.execute("SELECT * FROM ledger WHERE tool = ? AND status = ?",
+                           (TOOL, DownloadStatus.QUEUED)).fetchall()
+        return sorted(rows, key=_queue_key)
+
+    def queued(self) -> List[DownloadRecord]:
+        """The queue, in the order it is handed over (``queue_position`` 1, 2, ...)."""
+        with self.connect() as con:
+            return [replace(_record(r), queue_position=n) for n, r in enumerate(self._queued_rows(con), start=1)]
+
+    def move_to_front(self, record_id: int) -> DownloadRecord:
+        """Put a QUEUED record first in the queue (the owner's override). :class:`StatusConflict` when it is not
+        queued (any more)."""
+        with self.connect(durable=True) as con:
+            con.execute("BEGIN IMMEDIATE")          # read the queue and write the new order as one step
+            rows = self._queued_rows(con)
+            if not any(r["id"] == record_id for r in rows):
+                raise StatusConflict(f"download {record_id} is not queued")
+            first = _queue_key(rows[0])[0]
+            if rows[0]["id"] != record_id:
+                self._set_request(con, record_id, queue_order=first - 1)
+        return self.get(record_id)  # type: ignore[return-value]
+
+    def _set_request(self, con, record_id: int, **changes: Any) -> bool:
+        """Merge *changes* into a record's request JSON (inside the caller's transaction). True when it changed."""
+        r = con.execute("SELECT request FROM ledger WHERE id = ? AND tool = ?", (record_id, TOOL)).fetchone()
+        if r is None:
+            return False
+        req = _loads(r["request"], {})
+        new = {**req, **changes}
+        if new == req:
+            return False
+        con.execute("UPDATE ledger SET request = ? WHERE id = ? AND tool = ?",
+                    (json.dumps(new, ensure_ascii=False), record_id, TOOL))
+        return True
+
+    def note_size(self, record_id: int, size_bytes: int, source: str) -> bool:
+        """Remember what a record counts against the budget (e.g. qBittorrent's own figure, once it reports one).
+        True when it changed. The record's ``updated_at`` is left alone: nothing happened to the download itself."""
+        if _size(size_bytes) == 0:
+            return False
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            return self._set_request(con, record_id, budget_bytes=int(size_bytes), budget_source=source)
+
+    def note_in_client(self, record_id: int, in_client: bool) -> bool:
+        """Remember whether a (FAILED) record's torrent is still in the client - it counts against the budget only
+        while it is. True when it changed."""
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            return self._set_request(con, record_id, in_client=bool(in_client))
 
     def active(self) -> Sequence[DownloadRecord]:
         """Every record not yet REMOVED / FAILED / CANCELLED, oldest first."""
@@ -139,14 +242,15 @@ class DownloadLedger:
         return [_record(r) for r in rows]
 
     def active_for_hash(self, info_hash: str) -> Optional[DownloadRecord]:
+        """The record that has this torrent in hand - queued, or in qBittorrent (None: it may be sent)."""
         with self.connect() as con:
-            ids = self._active_ids(con, info_hash.strip().lower())
+            ids = self._tracked_ids(con, info_hash.strip().lower())
         return self.get(ids[0]) if ids else None
 
-    def _active_ids(self, con, info_hash: str) -> List[int]:
+    def _tracked_ids(self, con, info_hash: str) -> List[int]:
         return [r[0] for r in con.execute(
-            f"SELECT id FROM ledger WHERE tool = ? AND external_ref = ? AND status IN ({','.join('?' * len(ACTIVE))})"
-            " ORDER BY id", (TOOL, info_hash, *ACTIVE))]
+            f"SELECT id FROM ledger WHERE tool = ? AND external_ref = ? AND status IN ({','.join('?' * len(TRACKED))})"
+            " ORDER BY id", (TOOL, info_hash, *TRACKED))]
 
     # --- record details the contract does not carry -----------------------------------------------
 
@@ -200,9 +304,11 @@ class DownloadLedger:
         return self.get(record_id)  # type: ignore[return-value]
 
     def cancel(self, record_id: int) -> DownloadRecord:
-        """Stop tracking a release that is not filed yet (the torrent itself is left alone)."""
+        """Stop tracking a release that is not filed yet (the torrent itself is left alone). A QUEUED one is simply
+        taken out of the queue: nothing was sent."""
         return self.set_status(record_id, DownloadStatus.CANCELLED,
-                               expect=(DownloadStatus.SENT, DownloadStatus.DOWNLOADED), error="cancelled by the owner")
+                               expect=(DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED),
+                               error="cancelled by the owner")
 
     # --- the qBittorrent connection ------------------------------------------------------------------
 
