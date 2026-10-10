@@ -107,11 +107,13 @@ class ScanWorker(QObject):
         except _ScanStopped:
             return
         except Exception as exc:  # noqa: BLE001
+            _log.exception("Scan failed")
             self.failed.emit(str(exc))
             return
         if self._stop:
             return
         if not result.entries and result.errors and len(result.errors) == len(self._roots):
+            _log.error("Scan failed: no root could be read (%s)", "; ".join(result.errors))
             self.failed.emit("\n".join(result.errors))
             return
         self.finished.emit(result)
@@ -463,6 +465,9 @@ class MainWindow(QMainWindow):
         self._cfg = config.load()           # every change this window makes is saved at once: nothing is lost
         if result is None:
             return
+        changed = [name for name, flag in (("roots", "roots_changed"), ("MangaPixer", "mangapixer_changed"),
+                                           ("downloads", "downloads_changed")) if getattr(result, flag, False)]
+        _log.info("Settings closed%s", f"; changed: {', '.join(changed)}" if changed else "")
         if getattr(result, "mangapixer_changed", False):
             self._after_mangapixer_changed(carry_before)
         if getattr(result, "roots_changed", False):
@@ -977,6 +982,7 @@ class MainWindow(QMainWindow):
 
         self._top.set_scanning(True)
         label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
+        _log.info("Scan started: %s", label)
         self._scan_label = label
         self._scan_applied = set()
         self._scan_pos = (1, len(roots), roots[0].name)
@@ -1386,6 +1392,7 @@ class MainWindow(QMainWindow):
 
     def _on_mu_stop(self) -> None:
         if self._mu_worker is not None:
+            _log.info("MangaUpdates lookup stopped by the owner")
             self._mu_worker.abort()
         self._list.set_mu_running(False)
 

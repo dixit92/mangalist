@@ -670,6 +670,8 @@ def purge_expired(db, *, journal=None, now: Optional[datetime] = None) -> List[i
             continue
         if after.status == "purged":
             out.append(after.id)
+    if out:
+        _log.info("Upgrades: %d held batch%s past the holding period emptied", len(out), "" if len(out) == 1 else "es")
     return out
 
 
@@ -724,6 +726,8 @@ def empty_all_now(db, *, journal=None) -> Tuple[List[int], List[Tuple[int, str]]
             refused.append((batch.id, f"{type(exc).__name__}: {exc}"))
             continue
         (emptied.append(after.id) if after.status == "purged" else refused.append((after.id, after.error or "")))
+    _log.info("Upgrades: emptied %d held batch%s now; %d kept", len(emptied), "" if len(emptied) == 1 else "es",
+              len(refused))
     return emptied, refused
 
 

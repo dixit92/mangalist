@@ -61,7 +61,7 @@ def test_group_notes_and_reasons():
 
 def test_badge_kinds():
     kinds = {s: rules.badge_kind(record(s)) for s in S.ALL}
-    assert kinds == {S.SENT: "run", S.DOWNLOADED: "run", S.FILED: "ok", S.REMOVED: "done", S.FAILED: "bad",
+    assert kinds == {S.QUEUED: "muted", S.SENT: "run", S.DOWNLOADED: "run", S.FILED: "ok", S.REMOVED: "done", S.FAILED: "bad",
                      S.CANCELLED: "done"}
 
 
@@ -162,3 +162,25 @@ def test_in_qbittorrent_keeps_the_torrents_still_there_newest_first():
     rows = [record(S.FILED, id=1), record(S.REMOVED, id=2), record(S.SENT, id=3), record(S.FAILED, id=4),
             record(S.DOWNLOADED, id=5), record(S.CANCELLED, id=6)]
     assert [r.id for r in rules.in_qbittorrent(rows)] == [5, 3, 1]
+
+
+# --- the download budget: queued downloads ---------------------------------------------------------------------------
+
+def test_a_queued_download_is_a_muted_chip_and_counts_as_in_hand():
+    from mangalist.gui.volumes_target import status_text, status_tooltip
+
+    queued = record(S.QUEUED, id=7, wanted_volumes=("36",), queue_position=2, size_bytes=3 * 1024 ** 3,
+                    size_source="release")
+    sent = record(S.SENT, id=3)
+    assert rules.download_chip(queued) == ("Queued v36", "muted")
+    assert rules.row_chips([sent, queued], rules.SEARCH_READY) == [("Queued v36", "muted"), ("Downloading v02", "run"),
+                                                                   ("Releases ready", "ready")]
+    assert [r.id for r in rules.in_hand([sent, queued, record(S.FAILED, id=9)])] == [7, 3]
+    assert [r.id for r in rules.in_qbittorrent([sent, queued])] == [3]
+    assert status_text(queued) == "Queued - 2nd in line"
+    noted = record(S.QUEUED, error="bigger than the 20 GB cap on its own (30 GB): send it now, past the cap, or remove it")
+    assert status_text(noted).startswith("Queued - bigger than the 20 GB cap on its own")
+    tip = status_tooltip(queued)
+    assert "Queued, 2nd in line" in tip and "Size: 3 GB (the release's size on nyaa" in tip
+    assert "Counts against the download budget: 3 GB (as qBittorrent reports it)" in status_tooltip(
+        record(S.FILED, size_bytes=3 * 1024 ** 3, size_source="qbittorrent"))

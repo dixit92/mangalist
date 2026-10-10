@@ -58,7 +58,7 @@ def test_empty_list_is_explicit_and_refresh_picks_up_new_records(qapp):
     backend.record_list.append(record(1))
     assert dlg.refresh()
     wait_until(qapp, lambda: dlg.table.rowCount() == 1)
-    assert dlg.table.cellWidget(0, 2).findChild(QLabel).text() == "Sent" and dlg.status_label.text() == ""
+    assert dlg.table.cellWidget(0, 2).findChild(QLabel).text() == "Downloading" and dlg.status_label.text() == ""
 
 
 def test_read_error_is_shown(qapp):

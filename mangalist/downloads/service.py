@@ -19,10 +19,12 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
+from .budget import SIZE_SELECTED, gb_text
 from .contracts import (
     QBITTORRENT_CATEGORY,
     STOPPED_DOWNLOADING_STATES,
     DownloadRecord,
+    DownloadStatus,
     DownloadStore,
     NyaaCandidate,
     Placement,
@@ -216,20 +218,10 @@ def _undo(client: TorrentClient, candidate: NyaaCandidate, added_here: bool, err
                      type(exc).__name__, exc)
 
 
-def send_pick(client: TorrentClient, store: DownloadStore, series_id: int, candidate: NyaaCandidate,
-              wanted_volumes: Sequence[str], placement: Placement, save_path: str, *, only_missing: bool = False,
-              wait: Optional[PackWait] = None,
-              on_pack: Optional[Callable[[PackOutcome], None]] = None) -> DownloadRecord:
-    """Add *candidate* to qBittorrent in the ``mangalist`` category (saving to *save_path*) and record it as SENT.
-
-    ``only_missing``: download only the files that hold *wanted_volumes* (see the module docstring); *on_pack*
-    receives what was done with the pack, before the record is written.
-
-    *placement* must be resolved: an ambiguous one is refused - the GUI asks the owner and passes a
-    :class:`~mangalist.downloads.contracts.Placement` with the chosen ``target_dir`` (inside ``series_dir``).
-    Refused too: no wanted volume, a torrent already tracked, and a *save_path* inside a library root (Remove
-    Completed would then delete library files).
-    """
+def check_pick(store: DownloadStore, candidate: NyaaCandidate, wanted_volumes: Sequence[str], placement: Placement,
+               save_path: str, *, own_record: Optional[int] = None) -> str:
+    """Refuse a pick that cannot be sent as given (:class:`SendRefused`); returns the target folder. *own_record*: the
+    queued record being handed over (its own hash is not a duplicate of itself)."""
     target = placement.target_dir
     if not target:
         raise SendRefused(f"where to file the volumes is not decided ({placement.reason}); choose a folder first")
@@ -240,22 +232,56 @@ def send_pick(client: TorrentClient, store: DownloadStore, series_id: int, candi
     if not (save_path or "").strip() or not os.path.isabs(save_path):
         raise SendRefused("the qBittorrent save path must be an absolute folder")
     active_for_hash = getattr(store, "active_for_hash", None)
-    if active_for_hash is not None and active_for_hash(candidate.info_hash) is not None:
+    existing = active_for_hash(candidate.info_hash) if active_for_hash is not None else None
+    if existing is not None and existing.id != own_record:
+        if existing.status == DownloadStatus.QUEUED:
+            raise SendRefused("this release is already queued for MangaList (the download budget)")
         raise SendRefused("this torrent is already being downloaded for MangaList")
     library: Optional[object] = getattr(store, "store", None)
     for root in (library.list_roots() if library is not None and hasattr(library, "list_roots") else ()):
         if same_or_inside(save_path, root.path) or same_or_inside(root.path, save_path):
             raise SendRefused(f"the qBittorrent save path overlaps the library root {root.path}; downloads must be "
                               "saved outside the library")
+    return target
+
+
+def dispatch(client: TorrentClient, candidate: NyaaCandidate, wanted_volumes: Sequence[str], save_path: str, *,
+             only_missing: bool = False, wait: Optional[PackWait] = None) -> Optional[PackOutcome]:
+    """Hand a checked pick to qBittorrent (no record is written here). Returns what was done with the pack (None for
+    a whole send)."""
     client.ensure_category(QBITTORRENT_CATEGORY, save_path)
-    outcome: Optional[PackOutcome] = None
     if only_missing:
-        outcome = _add_partial(client, candidate, [str(v) for v in wanted_volumes], wait or PackWait())
-    else:
-        _add_whole(client, candidate)
+        return _add_partial(client, candidate, [str(v) for v in wanted_volumes], wait or PackWait())
+    _add_whole(client, candidate)
+    return None
+
+
+def send_pick(client: TorrentClient, store: DownloadStore, series_id: int, candidate: NyaaCandidate,
+              wanted_volumes: Sequence[str], placement: Placement, save_path: str, *, only_missing: bool = False,
+              wait: Optional[PackWait] = None,
+              on_pack: Optional[Callable[[PackOutcome], None]] = None,
+              size_bytes: Optional[int] = None, size_source: Optional[str] = None) -> DownloadRecord:
+    """Add *candidate* to qBittorrent in the ``mangalist`` category (saving to *save_path*) and record it as SENT.
+
+    ``only_missing``: download only the files that hold *wanted_volumes* (see the module docstring); *on_pack*
+    receives what was done with the pack, before the record is written. *size_bytes* / *size_source*: what the record
+    counts against the download budget (default: the release's size; a narrowed pack counts its kept files). The budget
+    itself is decided by the caller (:func:`mangalist.downloads.queueing.submit`): this sends.
+
+    *placement* must be resolved: an ambiguous one is refused - the GUI asks the owner and passes a
+    :class:`~mangalist.downloads.contracts.Placement` with the chosen ``target_dir`` (inside ``series_dir``).
+    Refused too: no wanted volume, a torrent already tracked (or queued), and a *save_path* inside a library root
+    (Remove Completed would then delete library files).
+    """
+    target = check_pick(store, candidate, wanted_volumes, placement, save_path)
+    outcome = dispatch(client, candidate, wanted_volumes, save_path, only_missing=only_missing, wait=wait)
     if outcome is not None and on_pack is not None:
         on_pack(outcome)
-    record = store.create(series_id, candidate, wanted_volumes, target)
-    _log.info("Sent download %d to qBittorrent: %s (volumes %s) -> %s", record.id, candidate.title,
-              ", ".join(record.wanted_volumes), target)
+    if outcome is not None and outcome.partial:
+        size_bytes, size_source = outcome.selection.kept_bytes, SIZE_SELECTED
+    record = store.create(series_id, candidate, wanted_volumes, target, only_missing=only_missing,
+                          size_bytes=size_bytes, size_source=size_source)
+    _log.info("Sent download %d to qBittorrent: %s (volumes %s, %s) -> %s", record.id, candidate.title,
+              ", ".join(record.wanted_volumes), gb_text(record.size_bytes) if record.size_bytes else "size not known",
+              target)
     return record

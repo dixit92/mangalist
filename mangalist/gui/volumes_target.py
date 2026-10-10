@@ -112,11 +112,18 @@ def find_volumes_availability(*, series_id: Optional[int], folder: str, title: s
 
 
 def status_text(record: DownloadRecord) -> str:
-    """"Sent", "Downloaded", "Filed v03-v05 - seeding", "Filed v03-v05 - done", "Failed: <reason>", "Cancelled".
+    """"Queued - 2nd in line", "Downloading", "Downloaded", "Filed v03-v05 - seeding", "Filed v03-v05 - done",
+    "Failed: <reason>", "Cancelled".
 
     The volumes come first: once filed they are in the library, whatever happens to the torrent afterwards - "done"
-    means qBittorrent finished seeding and the torrent with its downloaded copy was removed (never the library's)."""
+    means qBittorrent finished seeding and the torrent with its downloaded copy was removed (never the library's).
+    A queued download waits under the download budget; a note on it (e.g. bigger than the cap on its own) replaces its
+    place in line."""
     status = record.status
+    if status == DownloadStatus.QUEUED:
+        from ..downloads.budget import place_text
+
+        return f"Queued - {record.error}" if record.error else f"Queued - {place_text(record.queue_position)}"
     if status in (DownloadStatus.FILED, DownloadStatus.REMOVED):
         vols = numbers_text(record.wanted_volumes, pad=True)
         filed = f"Filed {vols}" if vols else "Filed"
@@ -125,13 +132,22 @@ def status_text(record: DownloadRecord) -> str:
         return f"{filed} - done"
     if status == DownloadStatus.FAILED:
         return f"Failed: {record.error}" if record.error else "Failed"
-    return {DownloadStatus.SENT: "Sent", DownloadStatus.DOWNLOADED: "Downloaded",
+    return {DownloadStatus.SENT: "Downloading", DownloadStatus.DOWNLOADED: "Downloaded",
             DownloadStatus.CANCELLED: "Cancelled"}.get(status, status.capitalize())
 
 
 def status_tooltip(record: DownloadRecord) -> str:
+    from ..downloads.budget import counts, place_text, size_note
+
     lines = [record.title, f"Volumes: {numbers_text(record.wanted_volumes, pad=True) or '-'}",
              f"Target folder: {record.target_dir}", f"Updated: {record.updated_at}"]
+    if record.status == DownloadStatus.QUEUED:
+        lines.append(f"Queued, {place_text(record.queue_position)}: MangaList hands it to qBittorrent when there is "
+                     "room under the download budget (Settings > Download sources). Right-click to send it now or "
+                     "change its place.")
+        lines.append(f"Size: {size_note(record.size_bytes, record.size_source)}")
+    elif counts(record):
+        lines.append(f"Counts against the download budget: {size_note(record.size_bytes, record.size_source)}")
     if record.status == DownloadStatus.FILED:
         if record.error:
             lines.append(f"The volumes are in the library; the torrent is {record.error} - MangaList leaves it. "

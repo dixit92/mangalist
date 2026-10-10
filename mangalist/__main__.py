@@ -40,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         paths.migrate_legacy_data()
     except OSError:
         logging.getLogger(__name__).warning("Could not migrate the old data folder", exc_info=True)
+    log_config.apply_stored()          # the owner's log level (Settings > Logging); INFO until the database is read
     logging.getLogger(__name__).info("Data folder: %s", paths.data_dir())
     # On Windows, set an explicit AppUserModelID so the taskbar uses our icon
     # instead of grouping under the generic python.exe icon.

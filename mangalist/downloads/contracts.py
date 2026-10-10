@@ -100,6 +100,9 @@ class TorrentInfo:
     # The seed goal qBittorrent applies to this torrent (its own limit, else the global one; None or negative: none):
     max_ratio: Optional[float] = None
     max_seeding_time: Optional[int] = None    # minutes
+    # The bytes of the files selected for download (qBittorrent's ``size``; a partial download counts only its kept
+    # files). 0: not known yet (a magnet before its metadata) - the download budget then keeps the size it had.
+    size: int = 0
 
     @property
     def complete(self) -> bool:
@@ -187,6 +190,10 @@ class Placement:
 
 
 class DownloadStatus:
+    # Owner, 2026-10-09 (the download budget): a send that would take MangaList past its size cap is not handed to the
+    # client but waits here, in a queue, until Remove Completed frees room (or the owner sends it past the cap). The
+    # ledger's own generic 'queued' value (schema 1) is the same word, so no migration was needed.
+    QUEUED = "queued"                   # waiting for room under the download budget; nothing is in qBittorrent yet
     SENT = "sent"                       # added to qBittorrent
     DOWNLOADED = "downloaded"           # torrent complete; filing pending
     FILED = "filed"                     # missing volumes linked (or copied) into the library
@@ -194,7 +201,7 @@ class DownloadStatus:
     FAILED = "failed"                   # see ``error``
     CANCELLED = "cancelled"
 
-    ALL = (SENT, DOWNLOADED, FILED, REMOVED, FAILED, CANCELLED)
+    ALL = (QUEUED, SENT, DOWNLOADED, FILED, REMOVED, FAILED, CANCELLED)
 
 
 @dataclass(frozen=True)
@@ -211,16 +218,22 @@ class DownloadRecord:
     filed_files: Tuple[str, ...] = ()   # library paths created, relative to the series folder
     copied: bool = False                # a copy fallback was used (double space; warned)
     error: Optional[str] = None
+    # The download budget (mangalist.downloads.budget):
+    size_bytes: int = 0                 # what the download counts against the cap (0: not known)
+    size_source: str = ""               # where that size comes from: 'release' | 'selected files' | 'qbittorrent'
+    in_client: bool = True              # as last seen, the torrent is still in the client (only a FAILED one can say no)
+    queue_position: int = 0             # QUEUED: its place in the queue, 1 = handed over next; 0 otherwise
 
 
 class DownloadStore(Protocol):
     def create(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
-               target_dir: str) -> DownloadRecord: ...
+               target_dir: str, *, status: str = DownloadStatus.SENT, only_missing: bool = False,
+               size_bytes: Optional[int] = None, size_source: Optional[str] = None) -> DownloadRecord: ...
 
     def get(self, record_id: int) -> Optional[DownloadRecord]: ...
 
     def for_series(self, series_id: int) -> Sequence[DownloadRecord]: ...
 
     def active(self) -> Sequence[DownloadRecord]:
-        """Every record not yet REMOVED / FAILED / CANCELLED."""
+        """Every record in qBittorrent's hands: SENT / DOWNLOADED / FILED (not QUEUED: nothing was added yet)."""
         ...

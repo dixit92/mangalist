@@ -21,17 +21,20 @@ class FakeQbt:
         self.file_lists: Dict[str, List[TorrentFile]] = {}
         self.calls: List[tuple] = []
         self.unreachable = False
+        self.rejected: set = set()          # links whose add qBittorrent refuses ("Fails.": the release is gone)
+        self.add_error: Exception = None    # raised by every add (e.g. qBittorrent down)
 
     # --- test helpers ---
     def put(self, info_hash: str, name: str, files: Dict[str, bytes], *, state: str = "uploading",
-            progress: float = 1.0, category: str = "mangalist", partial: Dict[str, float] = None) -> TorrentInfo:
+            progress: float = 1.0, category: str = "mangalist", partial: Dict[str, float] = None,
+            size: int = 0) -> TorrentInfo:
         folder = self.save_root / name
         for rel, data in files.items():
             p = folder / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
         info = TorrentInfo(info_hash, name, category, state, progress, str(self.save_root), str(folder), 2.0, 60,
-                           max_ratio=2.0, max_seeding_time=87600)        # at the owner's 2:1 goal
+                           max_ratio=2.0, max_seeding_time=87600, size=size)        # at the owner's 2:1 goal
         self.infos[info_hash] = info
         self.file_lists[info_hash] = [TorrentFile(f"{name}/{rel}", len(data), (partial or {}).get(rel, 1.0))
                                       for rel, data in files.items()]
@@ -49,7 +52,13 @@ class FakeQbt:
     def ensure_category(self, name: str, save_path: str) -> None:
         self.calls.append(("ensure_category", name, save_path))
 
-    def add(self, url: str, *, category: str) -> None:
+    def add(self, url: str, *, category: str, stopped: bool = False) -> None:
+        if self.add_error is not None:
+            raise self.add_error
+        if url in self.rejected:
+            from mangalist.services.qbittorrent import TorrentRejected
+
+            raise TorrentRejected("qBittorrent did not add the torrent: the link is not a valid torrent")
         self.calls.append(("add", url, category))
 
     def torrents(self, category: str):

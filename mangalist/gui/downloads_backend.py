@@ -41,6 +41,15 @@ the file list cannot be read), ``partial_default()`` / ``set_partial_default(on)
 (the panel passes it only when the box is ticked and the pack can be narrowed; otherwise it is called with the four
 arguments above, so older backends keep working).
 
+The download budget (owner, 2026-10-09; :mod:`mangalist.downloads.budget`) adds these, all optional - without
+``budget_status`` the release panel asks nothing about a cap and calls ``send`` as above: ``budget_status()`` (quick: one
+database read; a :class:`~mangalist.downloads.budget.BudgetState` - the cap, the usage, the queue), ``send`` then takes
+``over_cap`` (``"queue"``: queue it when it would go over the cap - the default; ``"send"``: send it now, past the cap)
+and ``size_bytes`` (what it counts: a partial send's selected files) and returns a SENT or a QUEUED record;
+``send_queued_now(record_id)`` / ``move_to_front(record_id)`` / ``remove_from_queue(record_id)`` (the In progress list's
+row menu on a queued download; each returns the record). Settings reads and writes the cap itself
+(:func:`mangalist.downloads.options.get_budget_gb`).
+
 Every method may block (network, database): the GUI calls them off the UI thread, except ``series_id_for`` and
 the settings getter / setter, which must be quick. A failure the owner should read raises :class:`BackendError`
 with a message that is safe to show (never a password, token or URL with credentials); anything else is shown

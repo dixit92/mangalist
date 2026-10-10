@@ -116,3 +116,29 @@ def test_second_runner_on_the_same_data_folder_refuses(tmp_path):
         assert p.returncode == 3, p.stdout + p.stderr
     finally:
         lock.release()
+
+
+def test_status_shows_the_schedule_stored_in_settings_not_the_variable(tmp_path):
+    from mangalist.store import Store
+
+    Store(tmp_path / "data" / "mangalist.db", import_legacy=False).set_setting("schedule_rescan", "every 5h")
+    p = _run("from mangalist.__main__ import main\n"
+             "sys.exit(main(['--headless', '--status']))\n", tmp_path, MANGALIST_RESCAN_SCHEDULE="daily@01:00")
+    assert p.returncode == 0, p.stderr
+    rescan = [line for line in p.stdout.splitlines() if line.startswith("rescan")][0]
+    assert "every 5h" in rescan and "daily@01:00" not in rescan
+
+
+def test_the_log_level_in_settings_reaches_the_runners_file(tmp_path):
+    from mangalist.store import Store
+
+    Store(tmp_path / "data" / "mangalist.db", import_legacy=False).set_setting("log_level", "debug")
+    p = _run("import logging\n"
+             "from mangalist.__main__ import main\n"
+             "from mangalist.headless import runner\n"
+             "rc = main(['--headless', '--status'])\n"
+             "logging.getLogger('mangalist.scanner').debug('scanner detail line')\n"
+             "sys.exit(rc)\n", tmp_path)
+    assert p.returncode == 0, p.stderr
+    assert "scanner detail line" in (tmp_path / "data" / "logs" / "headless.log").read_text(encoding="utf-8")
+    assert "scanner detail line" not in p.stdout, "the console stays at INFO"

@@ -121,6 +121,34 @@ def parse_schedule(text: Optional[str]) -> Optional[Schedule]:
         f"unrecognised schedule {text!r}; use e.g. 'daily@03:30', 'every 12h' or 'off'")
 
 
+MIN_EVERY_HOURS = 0.25      # the settings refuse "every 1m": a rescan or a MangaPixer sync that often helps nobody
+
+
+def validate_schedule(text: Optional[str]) -> str:
+    """The text a user typed in Settings > Automation, checked and rewritten in the canonical form for storing
+    (``daily@03:30``, ``every 12h`` or ``off``).
+
+    Accepts everything :func:`parse_schedule` does (so ``03:30``, ``daily 3:30``, ``12h`` work); raises ValueError with
+    a message to show as it is. An empty entry is refused (it is easy to clear a field by accident: write ``off``).
+    """
+    value = (text or "").strip()
+    if not value:
+        raise ValueError("Enter a time such as daily@03:30, an interval such as every 12h, or off to stop it.")
+    try:
+        parsed = parse_schedule(value)
+    except ValueError as exc:
+        raise ValueError(_BAD_SCHEDULE) from exc
+    if parsed is None:
+        return "off"
+    if isinstance(parsed, EveryHours) and parsed.hours < MIN_EVERY_HOURS:
+        raise ValueError("That is too often: the shortest interval is every 15 minutes (every 0.25h).")
+    return parsed.describe()
+
+
+_BAD_SCHEDULE = ("Not understood. Write daily@03:30 (every day at 03:30, 24-hour clock), every 12h (every 12 hours) "
+                 "or off.")
+
+
 def is_missed(next_run: Optional[datetime], now: datetime) -> bool:
     """A persisted due time that has already passed when the runner (re)starts."""
     return next_run is not None and next_run <= now

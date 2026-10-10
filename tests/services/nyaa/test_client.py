@@ -135,3 +135,17 @@ def test_the_default_session_identifies_the_program_and_ignores_the_environment(
         assert c._session.trust_env is False
     finally:
         c.close()
+
+
+def test_a_search_logs_its_outcome_at_info_and_a_failure_at_warning(clock, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    make(FakeGet(ok()), clock).rss("berserk digital")
+    info = [r for r in caplog.records if r.levelno == logging.INFO and "searched" in r.getMessage()]
+    assert len(info) == 1 and "'berserk digital'" in info[0].getMessage() and "1 releases" in info[0].getMessage()
+    caplog.clear()
+    with pytest.raises(UnexpectedResponse):
+        make(FakeGet(FakeResponse(403)), clock).rss("berserk")
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warned) == 1 and "search for 'berserk' failed" in warned[0].getMessage()

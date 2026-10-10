@@ -116,3 +116,37 @@ def test_scan_requests_switched_off_in_settings_are_not_sent(tmp_path, monkeypat
     result = make_downloads_job(open_ledger=lambda: ledger, client_factory=lambda conn: qbt)(JobContext())
     assert result.extra["filed"] == 1 and asked == []                     # neither the new library nor the pending one
     assert "rescan ok" in result.message and "MangaPixer" not in result.message
+
+
+# --- the download budget: the queue is handed over in the same pass ---------------------------------------------------
+
+def test_remove_completed_frees_room_and_the_queue_is_handed_over_in_the_same_pass(tmp_path, caplog):
+    from mangalist.downloads.budget import GB
+    from mangalist.downloads.options import set_budget_gb
+
+    ledger, qbt, sid, sdir = _setup(tmp_path)
+    ledger.save_connection(QbtConnection("http://qbt.example:8080", "admin", SECRET))
+    set_budget_gb(ledger.store, 50)
+    done = ledger.create(sid, candidate(size_bytes=40 * GB), ["2"], str(sdir))
+    waiting = ledger.create(sid, candidate("cd" * 20, size_bytes=30 * GB, torrent_url="https://nyaa.example/q.torrent"),
+                            ["3"], str(sdir), status="queued")
+    qbt.put(HASH, "Pack", {"Series A v02.cbz": data("v02")}, state="stoppedUP")
+    job = make_downloads_job(open_ledger=lambda: ledger, client_factory=lambda conn: qbt, after=None, replaced=None)
+    with caplog.at_level(logging.INFO):
+        result = job(JobContext())
+    assert ledger.get(done.id).status == "removed" and ledger.get(waiting.id).status == "sent"
+    assert result.status == "ok" and result.extra["queue_sent"] == 1
+    assert "queue: 1 handed over; using 30 GB of 50 GB" in result.message
+    assert "handed to qBittorrent (was 1st in line)" in caplog.text and SECRET not in caplog.text
+
+
+def test_only_queued_downloads_still_run_the_pass(tmp_path):
+    from mangalist.downloads.budget import GB
+
+    ledger, qbt, sid, sdir = _setup(tmp_path)
+    job = make_downloads_job(open_ledger=lambda: ledger, client_factory=lambda conn: qbt, after=None, replaced=None)
+    ledger.create(sid, candidate(size_bytes=1 * GB), ["2"], str(sdir), status="queued")
+    assert job(JobContext()).message == "no qBittorrent connection set up"          # not "no downloads in progress"
+    ledger.save_connection(QbtConnection("http://qbt.example:8080", "admin", SECRET))
+    result = job(JobContext())
+    assert result.status == "ok" and result.extra["queue_sent"] == 1 and result.extra["checked"] == 0

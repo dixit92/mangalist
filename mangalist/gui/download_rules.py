@@ -164,19 +164,23 @@ Chip = Tuple[str, str]
 SEARCH_CHIPS: Mapping[str, Chip] = {SEARCH_QUEUED: ("Queued", "muted"), SEARCH_RUNNING: ("Searching...", "muted"),
                                     SEARCH_READY: ("Releases ready", "ready"), SEARCH_NONE: ("No releases", "muted"),
                                     SEARCH_FAILED: ("Search failed", "bad")}
-#: The downloads a row always shows: the torrent is in qBittorrent (on its way, or filed and still there), or failed.
-_IN_QBITTORRENT = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED, DownloadStatus.FAILED)
+#: The downloads a row always shows: queued under the download budget, the torrent in qBittorrent (on its way, or filed
+#: and still there), or failed.
+_SHOWN = (DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED,
+          DownloadStatus.FAILED)
 MAX_DOWNLOAD_CHIPS = 2
 
 
 def download_chip(record: DownloadRecord) -> Chip:
-    """One download as a chip: "Downloading v36", "Downloaded v36", "Seeding v09-v18", "Filed v09-v18 - stopped",
-    "Failed: ...", "Filed v03 - done" - in the In progress list's badge colour. The numbers are the record's wanted
-    units, so a chapter download (later) gets the same chips."""
+    """One download as a chip: "Queued v36" (grey: waiting under the download budget), "Downloading v36", "Downloaded
+    v36", "Seeding v09-v18", "Filed v09-v18 - stopped", "Failed: ...", "Filed v03 - done" - in the In progress list's
+    badge colour. The numbers are the record's wanted units, so a chapter download (later) gets the same chips."""
     from .volumes_target import numbers_text
     units = numbers_text(record.wanted_volumes, pad=True)
     status = record.status
-    if status == DownloadStatus.SENT:
+    if status == DownloadStatus.QUEUED:
+        text = f"Queued {units}" if units else "Queued"
+    elif status == DownloadStatus.SENT:
         text = f"Downloading {units}" if units else "Downloading"
     elif status == DownloadStatus.DOWNLOADED:
         text = f"Downloaded {units}" if units else "Downloaded"
@@ -191,9 +195,10 @@ def row_chips(records: Iterable[DownloadRecord], search: Optional[str]) -> List[
     """The chips at the right of a "To get" row (owner, 2026-10-09: "user should be aware if there's a torrent
     already under download for a series"): every torrent of the series still in qBittorrent or failed, newest first
     (at most two, then "+N"), then the search state - so a series with a torrent is never shown as plain "Releases
-    ready". A finished download (removed from qBittorrent) shows only when there is nothing else to say."""
+    ready". A queued download (the download budget) shows the same way. A finished download (removed from qBittorrent)
+    shows only when there is nothing else to say."""
     records = sorted(records, key=lambda r: r.id, reverse=True)
-    live = [r for r in records if r.status in _IN_QBITTORRENT]
+    live = [r for r in records if r.status in _SHOWN]
     chips = [download_chip(r) for r in live[:MAX_DOWNLOAD_CHIPS]]
     if len(live) > MAX_DOWNLOAD_CHIPS:
         chips.append((f"+{len(live) - MAX_DOWNLOAD_CHIPS}", "muted"))
@@ -217,14 +222,24 @@ def in_qbittorrent(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
     return sorted((r for r in records if r.status in keep), key=lambda r: r.id, reverse=True)
 
 
+def in_hand(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
+    """:func:`in_qbittorrent` plus the series' QUEUED downloads (waiting under the download budget), newest first: a
+    release in either is not sent again."""
+    keep = (DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
+    return sorted((r for r in records if r.status in keep), key=lambda r: r.id, reverse=True)
+
+
 # --- the In progress list --------------------------------------------------------------------------------
 
-BADGE_RUN, BADGE_OK, BADGE_DONE, BADGE_BAD = "run", "ok", "done", "bad"
+BADGE_RUN, BADGE_OK, BADGE_DONE, BADGE_BAD, BADGE_QUEUED = "run", "ok", "done", "bad", "muted"
 
 
 def badge_kind(record: DownloadRecord) -> str:
-    """run: on its way (blue); ok: filed, still seeding (green); done: finished or cancelled (grey); bad: failed (red)."""
+    """queued: waiting under the download budget (muted grey); run: on its way (blue); ok: filed, still seeding
+    (green); done: finished or cancelled (grey); bad: failed (red)."""
     status = record.status
+    if status == DownloadStatus.QUEUED:
+        return BADGE_QUEUED
     if status in (DownloadStatus.SENT, DownloadStatus.DOWNLOADED):
         return BADGE_RUN
     if status == DownloadStatus.FILED:
@@ -287,9 +302,21 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 
 # --- Settings: schedules ---------------------------------------------------------------------------------
 
-SCHEDULE_ROWS = (("Rescan the library", "MANGALIST_RESCAN_SCHEDULE", "daily@03:30"),
-                 ("Sync with MangaPixer", "MANGALIST_MANGAPIXER_SYNC_SCHEDULE", "daily@03:15"),
-                 ("File finished downloads", "MANGALIST_DOWNLOADS_SCHEDULE", "every 1h"))
+# The schedules the Automation section edits (owner, 2026-10-09). The dispatch batch is left out: it is a stub that
+# dispatches nothing yet, so a time for it would only confuse. Stored in the database; the container's variables only
+# seed them (see mangalist/headless/settings.py).
+SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads")
+SCHEDULE_HINT = "daily@03:30, every 12h or off"
+
+
+@dataclass(frozen=True)
+class ScheduleEntry:
+    job: str
+    label: str
+    edit_text: str          # what the field holds: the canonical text, or a bad container value as it is
+    when: str               # the plain-words reading ("daily 03:30"), or "<text> (not understood)"
+    source: str             # headless.settings.SOURCE_STORED / SOURCE_ENV / SOURCE_DEFAULT
+    valid: bool
 
 
 def schedule_text(described: str) -> str:
@@ -302,25 +329,45 @@ def schedule_text(described: str) -> str:
     return described
 
 
-def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, str, bool]]:
-    """(what, when, from the environment?) for the Automation section. The schedules come from the container's
-    environment; a bad value is shown as it is, flagged, rather than hidden."""
-    import os
-
+def schedule_entries(db, env: Optional[Mapping[str, str]] = None) -> List[ScheduleEntry]:
+    """The schedules for the Automation section: what is in force and where it comes from (set in Settings, the
+    container's variable, or the default). A bad value is shown as it is, flagged, rather than hidden."""
     from ..headless.schedule import parse_schedule
+    from ..headless.settings import SCHEDULE_BY_JOB, resolve_schedule
 
-    env = os.environ if env is None else env
     rows = []
-    for label, name, default in SCHEDULE_ROWS:
-        raw = env.get(name)
-        text = default if raw is None else raw
+    for job in SCHEDULE_JOBS:
+        spec = SCHEDULE_BY_JOB[job]
+        choice = resolve_schedule(spec, db, env)
         try:
-            parsed = parse_schedule(text)
+            parsed = parse_schedule(choice.text)
         except ValueError:
-            when = f"{text} (not understood)"
-        else:
-            when = schedule_text(parsed.describe()) if parsed is not None else "off"
-            if name == "MANGALIST_DOWNLOADS_SCHEDULE" and parsed is not None:
-                when += " (and Check qBittorrent now)"
-        rows.append((label, when, raw is not None))
+            rows.append(ScheduleEntry(job, spec.label, choice.text, f"{choice.text} (not understood)", choice.source,
+                                      False))
+            continue
+        canonical = parsed.describe() if parsed is not None else "off"
+        when = schedule_text(canonical) if parsed is not None else "off"
+        if job == "downloads" and parsed is not None:
+            when += " (and Check qBittorrent now)"
+        rows.append(ScheduleEntry(job, spec.label, canonical, when, choice.source, True))
     return rows
+
+
+def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, str, bool]]:
+    """(what, when, from the container's environment?) as the container's variables alone give them (no database):
+    the schedules before anything is set in Settings."""
+    return [(e.label, e.when, e.source == "env") for e in schedule_entries(None, env)]
+
+
+def save_schedule_text(db, job: str, text: str) -> str:
+    """Check and store the schedule typed for *job*; the stored text. ValueError with a plain message for the owner."""
+    from ..headless.settings import SCHEDULE_BY_JOB, save_schedule
+
+    return save_schedule(db, SCHEDULE_BY_JOB[job], text)
+
+
+def reset_schedule_text(db, job: str) -> None:
+    """Forget the stored schedule of *job*: the container's value applies again."""
+    from ..headless.settings import SCHEDULE_BY_JOB, reset_schedule
+
+    reset_schedule(db, SCHEDULE_BY_JOB[job])

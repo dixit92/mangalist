@@ -374,6 +374,7 @@ class Journal:
             con.executemany("INSERT INTO journal_steps (plan_id, seq, op, src, dst, is_dir, src_size, src_signature,"
                             " state, updated_at) VALUES (?,?, 'move', ?,?,?,?,?, 'planned', ?)",
                             [(plan_id, i, s, d, 1 if isd else 0, sz, sg, now) for i, s, d, isd, sz, sg in rows])
+        _log.info("Journal: plan %d (%s) recorded: %d move%s", plan_id, reason, len(rows), "" if len(rows) == 1 else "s")
         return self.get_plan(plan_id)
 
     def plan_links(self, reason: str, links: Iterable[Union[Link, Tuple]], root_path,
@@ -504,6 +505,8 @@ class Journal:
                     self._set_plan(plan_id, "failed")
                     return self.get_plan(plan_id)
             self._set_plan(plan_id, "applied")
+        _log.info("Journal: plan %d (%s) applied: %d step%s", plan_id, plan.reason, len(plan.steps),
+                  "" if len(plan.steps) == 1 else "s")
         return self.get_plan(plan_id)
 
     def _apply_step(self, step: Step, held: Optional[RootLock]) -> Optional[str]:
@@ -577,6 +580,7 @@ class Journal:
                     self._set_plan(plan_id, "undo_failed")
                     return self.get_plan(plan_id)
             self._set_plan(plan_id, "undone")
+        _log.info("Journal: plan %d (%s) undone", plan_id, plan.reason)
         return self.get_plan(plan_id)
 
     def _undo_step(self, step: Step, held: Optional[RootLock]) -> Optional[str]:

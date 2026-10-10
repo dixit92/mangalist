@@ -159,3 +159,60 @@ def test_download_settings(ledger, db):
     assert ledger.save_path() == "/data/appdata/torrents/other" and ledger.remove_completed() is False
     ledger.set_save_path("  ")
     assert ledger.save_path() == DEFAULT_SAVE_PATH
+
+
+# --- the download budget (no migration: the ledger's own 'queued' and its request JSON) --------------------------
+
+
+def test_the_queue_needs_no_migration(db):
+    assert schema.SCHEMA_VERSION == 6 and DownloadStatus.QUEUED in schema.LEDGER_STATUS
+
+
+def test_queued_records_keep_what_a_later_send_needs(ledger, db):
+    rec = ledger.create(sid(db, 5), candidate(size_bytes=7000, group="Group"), ["3", "02"], "/lib/S5",
+                        status=DownloadStatus.QUEUED, only_missing=True, size_bytes=1500, size_source="selected files")
+    assert (rec.status, rec.queue_position, rec.size_bytes, rec.size_source) == ("queued", 1, 1500, "selected files")
+    req = ledger.request(rec.id)
+    assert (req["torrent_url"], req["wanted_volumes"], req["only_missing"], req["size_bytes"], req["group"]) == \
+        ("https://nyaa.example/download/1.torrent", ["3", "2"], True, 7000, "Group")
+    assert ledger.active() == [] and ledger.active_for_hash(HASH).id == rec.id
+    with pytest.raises(DownloadError, match="already being tracked"):
+        ledger.create(sid(db, 5), candidate(), ["2"], "/lib/S5")
+    with pytest.raises(DownloadError, match="sent or queued"):
+        ledger.create(sid(db, 5), candidate("cd" * 20), ["2"], "/lib/S5", status=DownloadStatus.FILED)
+    assert ledger.cancel(rec.id).status == DownloadStatus.CANCELLED and ledger.queued() == []
+
+
+def test_queue_order_and_move_to_front(ledger, db):
+    ids = [ledger.create(sid(db, 5), candidate(h * 40), ["2"], "/lib/S5", status=DownloadStatus.QUEUED).id
+           for h in "123"]
+    assert [r.id for r in ledger.queued()] == ids and [r.queue_position for r in ledger.queued()] == [1, 2, 3]
+    ledger.move_to_front(ids[2])
+    ledger.move_to_front(ids[1])
+    assert [r.id for r in ledger.queued()] == [ids[1], ids[2], ids[0]]
+    late = ledger.create(sid(db, 5), candidate("4" * 40), ["2"], "/lib/S5", status=DownloadStatus.QUEUED)
+    assert late.queue_position == 4                                    # a new one joins at the end
+    assert {r.id: r.queue_position for r in ledger.for_series(sid(db, 5))}[ids[0]] == 3
+    assert ledger.move_to_front(ids[1]).queue_position == 1            # already first: nothing changes
+    with pytest.raises(StatusConflict):
+        ledger.move_to_front(999)
+
+
+def test_sizes_and_the_in_client_flag(ledger, db):
+    rec = ledger.create(sid(db, 5), candidate(size_bytes=7000), ["2"], "/lib/S5")
+    assert (rec.size_bytes, rec.size_source, rec.in_client) == (7000, "release", True)
+    assert ledger.note_size(rec.id, 5000, "qbittorrent") and not ledger.note_size(rec.id, 5000, "qbittorrent")
+    assert not ledger.note_size(rec.id, 0, "qbittorrent")              # an unknown size never replaces a known one
+    assert ledger.note_in_client(rec.id, False) and not ledger.note_in_client(rec.id, False)
+    got = ledger.get(rec.id)
+    assert (got.size_bytes, got.size_source, got.in_client, got.updated_at) == (5000, "qbittorrent", False,
+                                                                                rec.updated_at)
+
+
+def test_a_record_written_before_the_budget_counts_its_release_size(ledger, db):
+    with ledger.connect() as con:
+        con.execute("INSERT INTO ledger (created_at, updated_at, series_id, request, tool, destination, status,"
+                    " external_ref) VALUES ('t','t',?,?,'qbittorrent','/lib/S5','filed',?)",
+                    (sid(db, 5), '{"title": "Old", "wanted_volumes": ["2"], "size_bytes": 4096}', HASH))
+    old = ledger.all_records()[0]
+    assert (old.size_bytes, old.size_source, old.in_client, old.queue_position) == (4096, "release", True, 0)

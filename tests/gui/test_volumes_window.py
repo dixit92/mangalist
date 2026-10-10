@@ -166,7 +166,7 @@ def test_records_refresh_after_a_send_updates_the_details(make_window, qapp):
     backend.record_list.append(record(1, series_id=1))
     assert win._volumes.refresh_records()                          # queued behind a running read, or started
     wait_until(qapp, lambda: win._volumes.status_for_row(row) is not None)
-    assert win._detail._lbl_download.text() == "Sent"
+    assert win._detail._lbl_download.text() == "Downloading"
 
 
 def test_series_lookup_errors_disable_instead_of_crashing(make_window):
@@ -228,4 +228,4 @@ def test_a_refresh_asked_for_during_a_read_runs_right_after_it(make_window, qapp
     assert win._volumes.refresh_records() and win._volumes._again   # queued, not dropped
     gate.set()
     wait_until(qapp, lambda: len(reads) == 2 and win._volumes._call is None)
-    assert win._volumes.status_for_row(_row(win, QUEST))[0] == "Sent"
+    assert win._volumes.status_for_row(_row(win, QUEST))[0] == "Downloading"

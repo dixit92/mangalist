@@ -1,8 +1,13 @@
-"""The "In progress" list: every download MangaList has sent to qBittorrent and where it stands (Sent, Downloaded,
-Filed v03-v05 - seeding, Failed: <reason>, ...), with Check qBittorrent now and the time of the next automatic check.
+"""The "In progress" list: every download MangaList has sent to qBittorrent or queued, and where it stands (Queued -
+2nd in line, Downloading, Downloaded, Filed v03-v05 - seeding, Failed: <reason>, ...), with Check qBittorrent now, the
+time of the next automatic check and the download budget ("Using 31.2 GB of 50 GB; 2 downloads queued").
 
 The records are read off the UI thread (``refresh``); the Download tab shows this list at the bottom and learns the
 records from :attr:`records_loaded`, the downloads dialog shows it alone.
+
+Row menu (right-click): a filed download offers "Remove now..."; a queued one (owner, 2026-10-09: "the user can override
+the queue") "Send now (past the cap)...", "Move to the front of the queue" and "Remove from the queue...". Sending past
+the cap and removing ask first, as Remove now does; moving to the front does not (it changes no download).
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QVBoxLayout, QWidget
 
+from ..downloads.budget import BudgetState, gb_text
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .background import BackgroundCall, start_call
 from .download_rules import badge_kind, next_check_text, when_text
@@ -32,6 +38,7 @@ class DownloadsSnapshot:
     records: List[DownloadRecord] = field(default_factory=list)
     titles: Dict[int, str] = field(default_factory=dict)       # series id -> the name the backend gave
     next_check: Optional[str] = None                           # ISO 8601 UTC
+    budget: Optional[BudgetState] = None                       # None: the backend keeps no download budget
 
 
 def load_snapshot(backend: DownloadsBackend) -> DownloadsSnapshot:
@@ -40,7 +47,15 @@ def load_snapshot(backend: DownloadsBackend) -> DownloadsSnapshot:
     titles_fn = getattr(backend, "series_titles", None)
     titles = dict(titles_fn({r.series_id for r in records})) if titles_fn and records else {}
     next_fn = getattr(backend, "next_check", None)
-    return DownloadsSnapshot(records, titles, next_fn() if next_fn else None)
+    budget_fn = getattr(backend, "budget_status", None)
+    return DownloadsSnapshot(records, titles, next_fn() if next_fn else None, budget_fn() if budget_fn else None)
+
+
+#: The queue actions of the row menu (the backend method each calls).
+ACT_SEND_NOW = "Send now (past the cap)…"
+ACT_TO_FRONT = "Move to the front of the queue"
+ACT_DEQUEUE = "Remove from the queue…"
+QUEUE_ACTIONS = {ACT_SEND_NOW: "send_queued_now", ACT_TO_FRONT: "move_to_front", ACT_DEQUEUE: "remove_from_queue"}
 
 
 class DownloadsList(QWidget):
@@ -49,9 +64,11 @@ class DownloadsList(QWidget):
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None, autostart: bool = True,
                  heading: str = "In progress", series_name: Optional[Callable[[int], str]] = None,
-                 confirm_remove: Optional[Callable[[DownloadRecord], bool]] = None):
+                 confirm_remove: Optional[Callable[[DownloadRecord], bool]] = None,
+                 confirm_queue: Optional[Callable[[str, DownloadRecord], bool]] = None):
         super().__init__(parent)
         self._confirm_remove = confirm_remove or self._ask_remove
+        self._confirm_queue = confirm_queue or self._ask_queue
         self.setObjectName("downloadsList")
         self._backend = backend
         self._series_name = series_name
@@ -62,6 +79,7 @@ class DownloadsList(QWidget):
         self._known_titles: Mapping[int, str] = {}  # names the host knows (the wanted series)
         self._titles: Dict[int, str] = {}
         self._next_check: Optional[str] = None
+        self.budget: Optional[BudgetState] = None
         self.records: List[DownloadRecord] = []
 
         outer = QVBoxLayout(self)
@@ -69,23 +87,28 @@ class DownloadsList(QWidget):
         outer.setSpacing(8)
         self.heading_label = label(heading, "h3")
         self.next_label = label(next_check_text(None), "muted")
+        self.budget_label = label("", "muted")
+        self.budget_label.setToolTip("The download budget (Settings > Download sources): what MangaList has "
+                                     "downloading or seeding, against its cap. Sends past it wait in the queue.")
+        self.budget_label.setVisible(False)
         # Owner, 2026-10-09: "These labels need to be more clear" - one re-reads MangaList's own list, the other asks
         # qBittorrent; neither talks to MangaPixer.
         self.btn_refresh = button("Reload list", link=True)
         self.btn_refresh.setToolTip("Show the latest saved state of these downloads (asks neither qBittorrent nor "
                                     "MangaPixer)")
         self.btn_refresh.clicked.connect(self.refresh)
-        self.btn_check = button("Check qBittorrent now", tip="Ask qBittorrent now: file finished downloads and remove "
-                                                              "completed torrents - the same check that runs every hour "
-                                                              "on its own")
+        self.btn_check = button("Check qBittorrent now", tip="Ask qBittorrent now: file finished downloads, remove "
+                                                              "completed torrents and hand queued downloads over while "
+                                                              "they fit the download budget - the same check that runs "
+                                                              "every hour on its own")
         self.btn_check.clicked.connect(self.check_now)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setFixedWidth(90)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
-        outer.addLayout(hbox(self.heading_label, self.next_label, self.progress, None, self.btn_refresh,
-                             self.btn_check, spacing=12))
+        outer.addLayout(hbox(self.heading_label, self.next_label, self.budget_label, self.progress, None,
+                             self.btn_refresh, self.btn_check, spacing=12))
 
         self.table = flat_table("progressTable", COLUMNS, select_rows=False)
         resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 240, COL_UPDATED: 110})
@@ -128,6 +151,9 @@ class DownloadsList(QWidget):
         self._titles = snap.titles
         self._next_check = snap.next_check
         self.next_label.setText(next_check_text(snap.next_check))
+        self.budget = snap.budget
+        self.budget_label.setText(f"· {snap.budget.summary()}" if snap.budget is not None else "")
+        self.budget_label.setVisible(snap.budget is not None)
         self._show(self.records)
         if not self._check_failed:
             empty = "" if self.records else "Nothing has been sent to qBittorrent yet."
@@ -212,9 +238,14 @@ class DownloadsList(QWidget):
     def _on_context_menu(self, pos: QPoint) -> None:
         row = self.table.rowAt(pos.y())
         shown = list(self.records)[:MAX_ROWS]
-        if row < 0 or row >= len(shown) or not hasattr(self._backend, "remove_now"):
+        if row < 0 or row >= len(shown):
             return
         record = shown[row]
+        if record.status == DownloadStatus.QUEUED:
+            self._queue_menu(record, pos)
+            return
+        if not hasattr(self._backend, "remove_now"):
+            return
         menu = QMenu(self.table)
         act = menu.addAction("Remove now…")
         filed = record.status == DownloadStatus.FILED
@@ -256,6 +287,80 @@ class DownloadsList(QWidget):
         self._note = None
         set_tone(self.status_label, "bad")
         self.status_label.setText(f"Could not remove it: {message}")
+        self._check_failed = True
+
+    # --- the queue (the download budget): the owner's overrides -------------------------------------------------
+
+    def _queue_menu(self, record: DownloadRecord, pos: QPoint) -> None:
+        if not any(callable(getattr(self._backend, name, None)) for name in QUEUE_ACTIONS.values()):
+            return
+        menu = QMenu(self.table)
+        tips = {ACT_SEND_NOW: "Hand it to qBittorrent now, even though it takes MangaList past its download budget",
+                ACT_TO_FRONT: "Make it the next download handed to qBittorrent when there is room",
+                ACT_DEQUEUE: "Take it out of the queue; nothing was sent to qBittorrent"}
+        acts = {}
+        for text, name in QUEUE_ACTIONS.items():
+            act = menu.addAction(text)
+            act.setToolTip(tips[text])
+            act.setEnabled(self._call is None and callable(getattr(self._backend, name, None))
+                           and not (text == ACT_TO_FRONT and record.queue_position == 1))
+            acts[act] = text
+        menu.setToolTipsVisible(True)
+        chosen = self._exec_menu(menu, self.table.viewport().mapToGlobal(pos))
+        if chosen in acts:
+            self.queue_action(acts[chosen], record)
+
+    def _ask_queue(self, action: str, record: DownloadRecord) -> bool:
+        size = gb_text(record.size_bytes) if record.size_bytes else "of a size not known yet"
+        if action == ACT_SEND_NOW:
+            title, verb = "Send now?", "Send now"
+            usage = f" MangaList is {self.budget.usage_text()}." if self.budget is not None and self.budget.limited \
+                else ""
+            text = (f"Send \"{record.title}\" to qBittorrent now, past the download budget?\n\nIt is {size}.{usage} "
+                    "It then counts like any download; the rest of the queue waits until there is room again.")
+        else:
+            title, verb = "Remove from the queue?", "Remove"
+            text = (f"Remove \"{record.title}\" from the queue?\n\nNothing was sent to qBittorrent. To get it later, "
+                    "send it again from the releases.")
+        box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=self)
+        yes = box.addButton(verb, QMessageBox.ButtonRole.AcceptRole if action == ACT_SEND_NOW
+                            else QMessageBox.ButtonRole.DestructiveRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def queue_action(self, action: str, record: DownloadRecord) -> bool:
+        """One of the queue overrides for a queued *record* (asking first where the action needs it), off the UI
+        thread; the list reloads after."""
+        method = getattr(self._backend, QUEUE_ACTIONS.get(action, ""), None)
+        if self._call is not None or record.status != DownloadStatus.QUEUED or not callable(method):
+            return False
+        if action != ACT_TO_FRONT and not self._confirm_queue(action, record):
+            return False
+        self._busy(True)
+        set_tone(self.status_label, "")
+        self.status_label.setText("Sending to qBittorrent..." if action == ACT_SEND_NOW else "Changing the queue...")
+        self._check_failed = False
+        self._call = start_call(lambda: method(record.id), lambda out: self._on_queue_done(action, out),
+                                self._on_queue_error, self._after_check)
+        return True
+
+    def _on_queue_done(self, action: str, record: DownloadRecord) -> None:
+        if action == ACT_SEND_NOW and record.status == DownloadStatus.FAILED:
+            self._note = None
+            set_tone(self.status_label, "bad")
+            self.status_label.setText(f"Could not send it: {record.error or 'it failed'}")
+            self._check_failed = True
+            return
+        self._note = {ACT_SEND_NOW: f"Sent to qBittorrent past the download budget: {record.title}.",
+                      ACT_TO_FRONT: f"Moved to the front of the queue: {record.title}.",
+                      ACT_DEQUEUE: f"Removed from the queue: {record.title}."}[action]
+
+    def _on_queue_error(self, message: str) -> None:
+        self._note = None
+        set_tone(self.status_label, "bad")
+        self.status_label.setText(f"Could not change the queue: {message}")
         self._check_failed = True
 
     # --- closing ---------------------------------------------------------------------------------------

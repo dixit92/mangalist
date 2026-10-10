@@ -24,6 +24,7 @@ After the libraries are synced, roots without a manual mapping are mapped automa
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -195,7 +196,26 @@ def sync_all(cache: MangaPixerCache, client: Optional[mpc.MangaPixerClient] = No
 
     *manual*: the owner pressed "Sync now" (a stored "token rejected" stop is lifted for this one try).
     A scheduled run (``manual=False``) is skipped while the stop is set.
+
+    Logged: INFO when it starts and how it ended (``skipped`` is INFO too, a failed run WARNING); the details are
+    logged by :func:`sync_library` and the client. Never the token.
     """
+    started = time.monotonic()
+    _log.info("MangaPixer: sync started (%s%s)", "on the owner's request" if manual else "scheduled",
+              ", full" if force_full else "")
+    result = _sync_all(cache, client, force_full, progress, should_stop, manual, list_series, include, limit)
+    took = time.monotonic() - started
+    if result.status == "ok":
+        _log.info("MangaPixer: sync finished in %.1f s: %s", took, result.message)
+    elif result.status == "skipped":
+        _log.info("MangaPixer: sync skipped: %s", result.message)
+    else:
+        _log.warning("MangaPixer: sync ended with %s after %.1f s: %s", result.status, took, result.message)
+    return result
+
+
+def _sync_all(cache: MangaPixerCache, client, force_full, progress, should_stop, manual, list_series, include,
+              limit) -> SyncResult:
     from .mapping import refresh_auto_mappings
 
     conn = cache.connection()

@@ -138,6 +138,7 @@ class NyaaClient:
             self._pace()
             try:
                 resp = self._get(url, params, self.timeout)
+                _log.debug("nyaa: GET %s -> HTTP %s", urlsplit(url).path or "/", resp.status_code)
             except requests.exceptions.Timeout:
                 resp, failure = None, Unreachable(f"nyaa did not answer in {self.timeout:.0f} s")
             except requests.exceptions.SSLError:
@@ -191,11 +192,19 @@ class NyaaClient:
         """``?page=rss&q=<query>&c=<category>&f=<filter>``: the first page (up to 75 items). ``filter_`` is nyaa's
         ``f`` (0 = no filter)."""
         params = {"page": "rss", "q": query, "c": category, "f": str(filter_)}
-        body = self._fetch(params)
+        started = self._clock()
         try:
-            return parse_feed(body)
-        except FeedError as exc:
-            raise UnexpectedResponse(f"nyaa did not answer with its RSS feed ({exc})") from None
+            body = self._fetch(params)
+            try:
+                items = parse_feed(body)
+            except FeedError as exc:
+                raise UnexpectedResponse(f"nyaa did not answer with its RSS feed ({exc})") from None
+        except NyaaError as exc:
+            _log.warning("nyaa: search for %r failed: %s", query, exc)
+            raise
+        _log.info("nyaa: searched %r (category %s): %d releases in %.1f s", query, category, len(items),
+                  self._clock() - started)
+        return items
 
     # --- a release's .torrent -------------------------------------------------------------------------
 

@@ -17,12 +17,15 @@ so the store class itself is unchanged. No Qt here.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db import utcnow
+
+_log = logging.getLogger(__name__)
 
 # Library kinds MangaList maps by default (``None``: the library declares no kind). Every other kind
 # (comic, graphic-novel, novel, anything new) is skipped unless a mapping overrides it.
@@ -203,6 +206,10 @@ class MangaPixerCache:
                 (cur["base_url"], cur["token"], cur["verify_tls"], cur["ca_file"], rejected, now))
         if token is not self._KEEP or (base_url is not None and rejected is None):
             self.mark_scan_forbidden(False)     # a new token (or server) may have the library:scan scope
+        # What changed, never the token itself.
+        _log.info("MangaPixer connection saved: address %s, token %s, certificate checks %s", cur["base_url"] or "(none)",
+                  "unchanged" if token is self._KEEP else ("set" if cur["token"] else "forgotten"),
+                  "on" if cur["verify_tls"] else "OFF")
         return self.connection()
 
     # --- library scans on request (MangaPixer 1.36.0) ----------------------------------------------------
@@ -236,6 +243,8 @@ class MangaPixerCache:
 
     def mark_token_rejected(self, rejected: bool = True) -> None:
         """HTTP 401: remember it, so no scheduled sync tries the same token again."""
+        _log.info("MangaPixer: token %s", "refused; no automatic retries until a new one is entered" if rejected
+                  else "refusal cleared")
         with self.connect() as con:
             con.execute("UPDATE mangapixer_connection SET token_rejected_at = ?, updated_at = ? WHERE id = 1",
                         (utcnow() if rejected else None, utcnow()))

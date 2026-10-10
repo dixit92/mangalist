@@ -163,7 +163,8 @@ def _torrent_info(raw: Dict[str, Any]) -> TorrentInfo:
         content_path=str(raw.get("content_path") or ""), ratio=_float(raw.get("ratio")),
         seeding_time=_int(raw.get("seeding_time")),
         max_ratio=_float(raw["max_ratio"]) if raw.get("max_ratio") is not None else None,
-        max_seeding_time=_int(raw["max_seeding_time"]) if raw.get("max_seeding_time") is not None else None)
+        max_seeding_time=_int(raw["max_seeding_time"]) if raw.get("max_seeding_time") is not None else None,
+        size=max(0, _int(raw.get("size"))))           # the selected files' bytes (the download budget); -1 / 0: unknown
 
 
 # --- the client ---------------------------------------------------------------------------------------
