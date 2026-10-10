@@ -158,7 +158,8 @@ def test_a_title_match_is_confirmed_before_any_chapter_is_listed(qapp):
     ((sid, match),) = backend.confirmed
     assert sid == 4 and match.manga == WEEB_MANGA and match.how == chm.HOW_TITLE
     assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS and "confirmed by you" in panel.match_label.text()
-    # "Not this series?" forgets it and looks again.
+    # "Forget this source" forgets it and looks again.
+    assert not panel.btn_forget.isHidden() and panel.btn_forget.text() == "Forget this source"
     assert panel.forget_match()
     settle(qapp, panel)
     assert backend.forgotten == [4] and panel.stack.currentIndex() == cp.PAGE_CANDIDATES
@@ -219,6 +220,7 @@ def test_chapters_the_source_lacks_can_come_from_another_source(qapp):
     panel, backend, _ = make(qapp)
     open_series(qapp, panel)
     assert not panel.btn_other.isHidden()                            # ch 44 is not on MangaDex (EN)
+    assert panel.btn_forget.isHidden()                               # a MangaDex-id match: forgetting finds it again
     assert panel.other_sources()
     settle(qapp, panel)
     assert backend.other_searches == [(4, ("Example Webcomic",), MANGADEX.id)]
@@ -236,6 +238,7 @@ def test_chapters_the_source_lacks_can_come_from_another_source(qapp):
     ((sid, match),) = backend.confirmed
     assert sid == 4 and match.manga == WEEB_MANGA
     assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS and "confirmed by you" in panel.match_label.text()
+    assert not panel.btn_forget.isHidden()                             # a picked source can be forgotten
 
 
 def test_no_other_source_has_it_says_so_and_keeps_the_chapters(qapp):

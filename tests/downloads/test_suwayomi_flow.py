@@ -264,7 +264,7 @@ def test_a_title_match_on_another_source_waits_for_the_owners_confirmation(world
     assert confirmed.match is not None and confirmed.match.how == chm.HOW_CONFIRMED
     assert confirmed.match.source.id == OTHER and [r.number for r in confirmed.rows] == ["1", "2"]
     assert "MangaListSearch" not in session.names()
-    # "Not this series?": forgotten, looked up from scratch again.
+    # "Forget this source": forgotten, looked up from scratch again.
     backend.forget_match(sid)
     assert backend.chapter_lookup(sid, ("1", "2"), (SERIES,)).match is None
 

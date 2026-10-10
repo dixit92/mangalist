@@ -6,7 +6,8 @@ table, footer and status line; the same chips and In progress rows once sent.
 - **The lookup** (:meth:`ChaptersPanel.open_series`) runs off the UI thread (``backend.chapter_lookup``): the series is
   found in Suwayomi by the MangaDex id MangaPixer links, else by title on the owner's other sources - those matches are
   listed for the owner to CONFIRM ("Use this series") before any chapter is listed; the confirmed one is remembered for
-  the series. "Not this series?" forgets a match and looks again.
+  the series. "Forget this source" (only on a source the owner picked) forgets it and looks again - MangaDex by
+  its id, else the candidates.
 - **The table**: one row per missing chapter - ticked by default when the source has it; the group it comes from (a
   choice when more than one group has it); the chapter's title as the source names it. A chapter already sent shows
   how it stands and cannot be sent again; a chapter the source does not have says so.
@@ -35,7 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..downloads.chapters import ChapterLookup, ChapterRow, MangaMatch, group_key
+from ..downloads.chapters import HOW_MANGADEX, ChapterLookup, ChapterRow, MangaMatch, group_key
 from ..downloads.contracts import DownloadRecord, SuwayomiChapter
 from .background import BackgroundCall, start_call
 from .download_rules import download_chip
@@ -125,8 +126,10 @@ class ChaptersPanel(QWidget):
         self.progress.setFixedWidth(90)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
-        self.btn_forget = button("Not this series?", link=True,
-                                 tip="Forget this match and look the series up again (by title on your sources)")
+        # owner, 2026-10-10: "Not this series?" did not say what it does - and on a MangaDex-id match it did nothing
+        self.btn_forget = button("Forget this source", link=True,
+                                 tip="Forget the source you picked for this series. The next lookup uses MangaDex (by "
+                                     "the id MangaPixer links), else asks you again")
         self.btn_forget.clicked.connect(self.forget_match)
         self.btn_again = button("Look up again")
         self.btn_again.clicked.connect(self.look_up_again)
@@ -302,7 +305,7 @@ class ChaptersPanel(QWidget):
         match = lookup.match
         self.match_label.setText(f"{match.source.display_name}: {lookup.manga_title or match.manga.title} - "
                                  f"{how_text(match)}")
-        self.btn_forget.setVisible(True)
+        self.btn_forget.setVisible(match.how != HOW_MANGADEX)          # forgetting a MangaDex-id match finds it again
         queued = lookup.queued_in_suwayomi
         self.queued_label.setText(f"Already in Suwayomi's download queue: ch {numbers_text(queued)}" if queued else "")
         self.queued_label.setVisible(bool(queued))
