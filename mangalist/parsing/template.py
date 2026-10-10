@@ -14,7 +14,9 @@ digits or more digits without a leading zero, text tokens never start or end wit
 (``%G``) is balanced brackets one level deep (``[Team [X]]``). One ambiguity remains by construction: a
 chapter title that itself ends in ``[...]`` with no group after it reads back as the group.
 
-The token table is extensible (:func:`register_token`); phase 2 builds the full naming engine on it.
+The token table is extensible (:func:`register_token`); phase 2 builds the full naming engine on it. MangaList's
+own scheme (owner, 2026-10-10; :mod:`mangalist.naming`) adds ``%CN`` (the chapter number with at least two decimals:
+``%CN4`` -> ``0102.00``), ``%CE`` (the end of a chapter range, same form) and ``%VE`` (the end of a volume range).
 """
 
 from __future__ import annotations
