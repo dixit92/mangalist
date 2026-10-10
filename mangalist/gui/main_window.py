@@ -346,6 +346,7 @@ class MainWindow(QMainWindow):
         self._top = TopBar()
         self._top.tab_changed.connect(self._on_tab_changed)
         self._top.rescan_clicked.connect(self._on_rescan)
+        self._top.rescan_all_clicked.connect(self._on_rescan_all)
         self._top.rescan_root_clicked.connect(self._on_rescan_root)
         self._top.settings_clicked.connect(self._on_settings)
         self._top.missing_clicked.connect(self._on_missing)
@@ -539,6 +540,8 @@ class MainWindow(QMainWindow):
     def _apply_library(self, root_id: Optional[int]) -> None:
         """Make *root_id* (None: all) the library the table, the counts, the duplicates and the Download list show."""
         self._library = root_id
+        root = next((r for r in self._roots() if r.id == root_id), None) if root_id is not None else None
+        self._top.set_rescan_scope(root.name if root is not None else None)
         self._model.set_scope(root_id)
         self._proxy.refresh_scope()
         if hasattr(self._duplicates_view, "set_library_scope"):
@@ -1048,6 +1051,13 @@ class MainWindow(QMainWindow):
             self._status_label.setText("Library folders changed - Rescan to apply")
 
     def _on_rescan(self) -> None:
+        """The Rescan button: the library the picker shows (owner, 2026-10-10), else every library folder."""
+        if self._library is not None and any(r.id == self._library for r in self._roots()):
+            self._on_rescan_root(self._library)
+            return
+        self._on_rescan_all()
+
+    def _on_rescan_all(self) -> None:
         if not self._roots():
             QMessageBox.information(self, "No library folder", "Add a library folder first (Settings).")
             return

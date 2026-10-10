@@ -54,7 +54,8 @@ def gear_icon() -> QIcon:
 
 class TopBar(QWidget):
     tab_changed = Signal(int)           # TAB_LIST / TAB_DOWNLOAD
-    rescan_clicked = Signal()           # every library folder
+    rescan_clicked = Signal()           # the Rescan button: the picked library, or every one (All libraries)
+    rescan_all_clicked = Signal()       # the arrow's "All libraries": every library folder
     rescan_root_clicked = Signal(int)   # one library folder (its root id)
     settings_clicked = Signal()
     library_changed = Signal(object)    # the Library picker: a root id, or None (All libraries)
@@ -219,7 +220,7 @@ class TopBar(QWidget):
         """The Rescan arrow's menu from ``(root id, name, path)`` of every library folder."""
         self.rescan_menu.clear()
         everything = self.rescan_menu.addAction("All libraries")
-        everything.triggered.connect(lambda _c=False: self.rescan_clicked.emit())
+        everything.triggered.connect(lambda _c=False: self.rescan_all_clicked.emit())
         self.rescan_menu.addSeparator()
         for root_id, name, path in roots:
             act = self.rescan_menu.addAction(name)
@@ -227,6 +228,11 @@ class TopBar(QWidget):
             act.setData(root_id)
             act.triggered.connect(lambda _c=False, rid=root_id: self.rescan_root_clicked.emit(rid))
         self.btn_rescan_menu.setVisible(len(roots) > 1)
+
+    def set_rescan_scope(self, name: Optional[str]) -> None:
+        """What the Rescan button reads: the library picked (*name*), or every library folder (None)."""
+        self.btn_rescan.setToolTip(f"Scan {name} again (the arrow: another library, or all of them)" if name else
+                                   "Scan every library folder again")
 
     def _open_rescan_menu(self) -> None:
         self.rescan_menu.setToolTipsVisible(True)

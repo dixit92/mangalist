@@ -77,6 +77,12 @@ def test_partial_dates_decide_released_or_awaiting():
 def test_empty_folder_scanlation_only():
     k = own(licensed_en=False, latest_chapter="50")
     s = state(inv(), k, folder_empty=True)
+    # every chapter is missing - Suwayomi can get them (owner, 2026-10-10)
+    assert s.state == State.WANTED_SCANLATION and s.missing_chapters == (("1", "50"),)
+    assert not s.missing_volumes and "latest chapter 50" in s.reasons[0]
+    s = state(inv(), own(licensed_en=False, latest_chapter="12.5"), folder_empty=True)
+    assert s.missing_chapters == (("1", "12"), ("12.5", None))
+    s = state(inv(), own(licensed_en=False), folder_empty=True)       # no chapter number known: nothing to list
     assert s.state == State.WANTED_SCANLATION and not s.gaps
 
 
