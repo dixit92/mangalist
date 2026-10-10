@@ -9,6 +9,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 - **"Sent" now reads "Downloading"** in the In progress list and the List's detail panel, as the "To get" chips say.
 - **Fixed: the Published column cut the date** ("2021-11-...") with a larger table font: its width now comes from the font.
+- **A download budget: MangaList keeps at most 50 GB downloading or seeding** (Settings > Download sources > Download budget; 0 = no limit). Everything MangaList has sent and not yet seen removed counts: downloading, waiting to be filed, and seeding - a partial download only its selected files, and a failed one while its torrent is still in qBittorrent. Sizes start from the release's size on nyaa (or the selected files) and follow qBittorrent's own figure once it reports one. Settings shows the usage next to the cap ("Using 12.3 GB of 50 GB").
+- **A send that would go over the budget is queued.** The confirmation says so ("This would go over the download budget: MangaList is using 48 GB of 50 GB, and this adds 5 GB") and offers Queue it (the default) or Send now (past the cap). A release bigger than the whole budget on its own gets an alert naming its size and the cap: send it anyway, or cancel. Queued downloads wait in the In progress list ("Queued - 2nd in line", grey) and as "Queued v36" chips in the "To get" list; a queued release is not sent twice.
+- **Queued downloads go to qBittorrent by themselves, oldest first,** in the hourly check and Check qBittorrent now, as soon as Remove Completed has made room. Right-click a queued download for Send now (past the cap), Move to the front of the queue, or Remove from the queue. A queued release that can no longer be sent fails with the reason and does not hold up the rest; lowering the budget removes nothing (new sends then wait). Every hand-over and every wait is logged with the sizes, the cap and the place in the queue.
 
 ## [2026.10.12] - 2026-10-09
 
