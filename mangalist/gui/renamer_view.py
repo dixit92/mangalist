@@ -49,6 +49,15 @@ _log = logging.getLogger(__name__)
 
 SCOPE_SERIES, SCOPE_ROOT, SCOPE_ALL = "series", "root", "all"
 
+
+class _SeriesRowDelegate(TwoLineDelegate):
+    """A series row as wide as the list (a long title elides instead of widening the row past the chips)."""
+
+    def sizeHint(self, option, index):
+        hint = super().sizeHint(option, index)
+        hint.setWidth(1)
+        return hint
+
 STATUS_COLORS = {RENAME: "#1f4fb8", UNCHANGED: "#6b6b67", LEFT_ALONE: "#9a5b00", COLLISION: "#8b1d1d"}
 STATUS_TEXT = {RENAME: "renamed", UNCHANGED: "already named by the scheme", LEFT_ALONE: "left alone",
                COLLISION: "not renamed: name collision"}
@@ -175,7 +184,8 @@ class RenamerWindow(QDialog):
         self.series_list = QListWidget()
         # owner, 2026-10-10: "not a clear distinction between the title and the '224 to rename'" - the title on its own
         # line in medium weight, the counts smaller and grey under it, collisions as a red chip at the right
-        self.series_list.setItemDelegate(TwoLineDelegate(self.series_list, row_height=48, left_pad=6))
+        self.series_list.setItemDelegate(_SeriesRowDelegate(self.series_list, row_height=48, left_pad=6))
+        self.series_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)   # long titles elide
         self.series_list.setSpacing(2)
         self.series_list.currentRowChanged.connect(self._show_series)
         self.preview = QTreeWidget()
@@ -356,7 +366,8 @@ class RenamerWindow(QDialog):
                                                                           s.title.casefold()))
         for s in self._series:
             c = s.counts()
-            bits = [f"{c[RENAME]} to rename" if c[RENAME] else "in the scheme" if not s.error else s.error]
+            bits = [f"{c[RENAME]} to rename" if c[RENAME] else s.error if s.error
+                    else "nothing to rename" if (c[COLLISION] or c[LEFT_ALONE]) else "in the scheme"]
             if c[COLLISION]:
                 bits.append(_plural(c[COLLISION], "collision"))
             if c[LEFT_ALONE]:
