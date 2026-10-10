@@ -40,9 +40,6 @@ SEARCH_FAILED = "failed"
 SEARCH_TEXT: Mapping[str, str] = {SEARCH_QUEUED: "Queued", SEARCH_RUNNING: "Searching...", SEARCH_READY: "Releases ready",
                                   SEARCH_NONE: "No releases", SEARCH_FAILED: "Search failed"}
 
-#: Download statuses that are still going on: they outrank "releases ready" in a row.
-_LIVE = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FAILED)
-
 
 def matches_filter(series: WantedSeries, text: str) -> bool:
     needle = text.strip().casefold()
@@ -160,18 +157,64 @@ def batch_status_text(batch) -> str:
             "nothing": "Nothing to replace"}.get(batch.status, batch.status)
 
 
-def row_status(record: Optional[DownloadRecord], search: Optional[str]) -> str:
-    """The text at the right of a "To get" row. A live download (sent, downloaded, failed) beats a search result;
-    a search in flight beats an old download."""
-    if search in (SEARCH_QUEUED, SEARCH_RUNNING):
-        return SEARCH_TEXT[search]
-    if record is not None and record.status in _LIVE:
-        return status_text(record)
-    if search in SEARCH_TEXT:
-        return SEARCH_TEXT[search]
-    if record is not None and record.status in (DownloadStatus.FILED, DownloadStatus.REMOVED):
-        return status_text(record)
-    return ""
+#: A chip at the right of a "To get" row: (text, kind) - kind is a badge colour (run, ok, bad, done, muted) or
+#: ``ready`` (releases found: an outlined pill, not a download).
+Chip = Tuple[str, str]
+#: The search states as chips.
+SEARCH_CHIPS: Mapping[str, Chip] = {SEARCH_QUEUED: ("Queued", "muted"), SEARCH_RUNNING: ("Searching...", "muted"),
+                                    SEARCH_READY: ("Releases ready", "ready"), SEARCH_NONE: ("No releases", "muted"),
+                                    SEARCH_FAILED: ("Search failed", "bad")}
+#: The downloads a row always shows: the torrent is in qBittorrent (on its way, or filed and still there), or failed.
+_IN_QBITTORRENT = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED, DownloadStatus.FAILED)
+MAX_DOWNLOAD_CHIPS = 2
+
+
+def download_chip(record: DownloadRecord) -> Chip:
+    """One download as a chip: "Downloading v36", "Downloaded v36", "Seeding v09-v18", "Filed v09-v18 - stopped",
+    "Failed: ...", "Filed v03 - done" - in the In progress list's badge colour. The numbers are the record's wanted
+    units, so a chapter download (later) gets the same chips."""
+    from .volumes_target import numbers_text
+    units = numbers_text(record.wanted_volumes, pad=True)
+    status = record.status
+    if status == DownloadStatus.SENT:
+        text = f"Downloading {units}" if units else "Downloading"
+    elif status == DownloadStatus.DOWNLOADED:
+        text = f"Downloaded {units}" if units else "Downloaded"
+    elif status == DownloadStatus.FILED and not record.error:
+        text = f"Seeding {units}" if units else "Seeding"
+    else:
+        text = status_text(record)
+    return text, badge_kind(record)
+
+
+def row_chips(records: Iterable[DownloadRecord], search: Optional[str]) -> List[Chip]:
+    """The chips at the right of a "To get" row (owner, 2026-10-09: "user should be aware if there's a torrent
+    already under download for a series"): every torrent of the series still in qBittorrent or failed, newest first
+    (at most two, then "+N"), then the search state - so a series with a torrent is never shown as plain "Releases
+    ready". A finished download (removed from qBittorrent) shows only when there is nothing else to say."""
+    records = sorted(records, key=lambda r: r.id, reverse=True)
+    live = [r for r in records if r.status in _IN_QBITTORRENT]
+    chips = [download_chip(r) for r in live[:MAX_DOWNLOAD_CHIPS]]
+    if len(live) > MAX_DOWNLOAD_CHIPS:
+        chips.append((f"+{len(live) - MAX_DOWNLOAD_CHIPS}", "muted"))
+    if search in SEARCH_CHIPS:
+        chips.append(SEARCH_CHIPS[search])
+    if not chips:
+        done = next((r for r in records if r.status == DownloadStatus.REMOVED), None)
+        if done is not None:
+            chips.append(download_chip(done))
+    return chips
+
+
+def chips_text(chips: Sequence[Chip]) -> str:
+    """The chips as one line (the row's plain status: tooltips, tests, accessibility)."""
+    return " · ".join(text for text, _kind in chips)
+
+
+def in_qbittorrent(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
+    """The series' downloads whose torrent is still in qBittorrent (on its way, or filed and seeding), newest first."""
+    keep = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
+    return sorted((r for r in records if r.status in keep), key=lambda r: r.id, reverse=True)
 
 
 # --- the In progress list --------------------------------------------------------------------------------

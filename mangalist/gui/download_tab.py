@@ -53,19 +53,20 @@ from .download_rules import (
     count_text,
     grouped,
     merge_entries,
+    chips_text,
     not_findable_reason,
-    row_status,
+    row_chips,
     upgrade_note,
     upgrade_volumes_of,
 )
 from .download_style import FONT_MONO, apply_style, set_tone
-from .download_widgets import ROLE_ASIDE, ROLE_SUB, TwoLineDelegate, button, hbox, label
+from .download_widgets import ROLE_ASIDE, ROLE_CHIPS, ROLE_SUB, TwoLineDelegate, button, hbox, label
 from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList
 from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
 from .replaced_chapters import ConfirmDeleteFn, ReplacedBar, ReplacedDialog
 from .shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
-from .volumes_target import VolumeTarget, latest_by_series
+from .volumes_target import VolumeTarget
 
 ROLE_FOLDER = Qt.ItemDataRole.UserRole + 10
 ROLE_HEADER = Qt.ItemDataRole.UserRole + 11       # a group header's text
@@ -173,7 +174,7 @@ class DownloadTab(QWidget):
         self._bulk_total = 0
         self._bulk_done = 0
         self._bulk_notes = ""
-        self._latest: Dict[int, DownloadRecord] = {}
+        self._records: Dict[int, List[DownloadRecord]] = {}     # every download of a series (the row chips)
         self._items: Dict[str, QTreeWidgetItem] = {}
         self._rows: Dict[str, List[QTreeWidgetItem]] = {}
         self._header_items: Dict[str, QTreeWidgetItem] = {}
@@ -285,7 +286,8 @@ class DownloadTab(QWidget):
         self.upgrade_label.setVisible(False)
         tv.addWidget(self.upgrade_label)
         self.releases = ReleasesPanel(self._backend, top, confirm=confirm, open_url=open_url, managed=True,
-                                      source_label=self._source_label())
+                                      source_label=self._source_label(),
+                                      downloads_for=lambda sid: self._records.get(sid, ()))
         self.releases.search_again.connect(self._search_again)
         self.releases.sent.connect(self._on_sent)
         self.releases.settings_requested.connect(self.settings_requested)
@@ -428,9 +430,10 @@ class DownloadTab(QWidget):
     def _refresh_statuses(self) -> None:
         for folder, rows in self._rows.items():
             sid = self._series_ids.get(folder)
-            record = self._latest.get(sid) if sid is not None else None
+            chips = row_chips(self._records.get(sid, ()) if sid is not None else (), self._states.get(folder))
             for row in rows:
-                row.setData(0, ROLE_ASIDE, row_status(record, self._states.get(folder)))
+                row.setData(0, ROLE_CHIPS, chips)
+                row.setData(0, ROLE_ASIDE, chips_text(chips))
 
     def visible_folders(self) -> List[str]:
         """The folders in the list, top to bottom (after the filter)."""
@@ -748,8 +751,12 @@ class DownloadTab(QWidget):
     # --- records -------------------------------------------------------------------------------------------
 
     def _on_records(self, records: Sequence[DownloadRecord]) -> None:
-        self._latest = latest_by_series(records)
+        by_series: Dict[int, List[DownloadRecord]] = {}
+        for record in records:
+            by_series.setdefault(record.series_id, []).append(record)
+        self._records = by_series
         self._refresh_statuses()
+        self.releases.refresh_downloads()
         self.refresh_replaced()
 
     # --- replaced chapters ------------------------------------------------------------------------------

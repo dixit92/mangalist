@@ -71,10 +71,12 @@ def test_results_table_columns_rank_order_and_reasons(qapp):
                        covers_held=("2",), digital=False, group=None, trusted=False, seeders=2, reasons=("Print",))
     dlg = _open(qapp, FakeBackend(results=[first, second]))
     assert dlg.table.rowCount() == 2
-    assert [dlg.table.horizontalHeaderItem(c).text() for c in range(7)] == [
-        "", "RELEASE", "FILLS", "YOU HAVE", "SOURCE", "SIZE", "SEEDERS"]
-    assert _cells(dlg, 0) == ["", "Example Series v03-05 (Digital) (Group)", "v03-v05", "-", "nyaa", "700.0 MB", "12"]
-    assert _cells(dlg, 1)[2:4] == ["v03", "v02"] and _cells(dlg, 1)[6] == "2"            # backend order kept
+    assert [dlg.table.horizontalHeaderItem(c).text() for c in range(8)] == [
+        "", "RELEASE", "FILLS", "YOU HAVE", "PUBLISHED", "SOURCE", "SIZE", "SEEDERS"]
+    published = first.published[:10]
+    assert _cells(dlg, 0) == ["", "Example Series v03-05 (Digital) (Group)", "v03-v05", "-", published, "nyaa",
+                              "700.0 MB", "12"]
+    assert _cells(dlg, 1)[2:4] == ["v03", "v02"] and _cells(dlg, 1)[7] == "2"            # backend order kept
     assert dlg.table.item(0, 1).data(releases_panel.ROLE_SUB) == "Digital release, Covers 3 missing volumes, trusted uploader"
     assert dlg.table.item(1, 1).data(releases_panel.ROLE_SUB) == "Print"
     assert "Digital release" in dlg.table.item(0, 1).toolTip() and "Group: Group" in dlg.table.item(0, 1).toolTip()

@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from mangalist.downloads.contracts import DownloadStatus as S  # noqa: E402
 from mangalist.gui import download_tab as dt  # noqa: E402
 from mangalist.gui.download_tab import DownloadTab  # noqa: E402
+from mangalist.gui.download_widgets import ROLE_CHIPS  # noqa: E402
 from mangalist.gui.shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, WantedSeries  # noqa: E402
 
 from .conftest import FakeBackend, candidate, qapp, record, wait_until  # noqa: E402,F401
@@ -279,8 +280,10 @@ def test_rows_show_what_the_downloads_say(qapp):
     backend = FakeBackend(records=[record(1, series_id=3, status=S.SENT, wanted=("15",)),
                                    record(2, series_id=2, status=S.FILED, wanted=("12", "13"))])
     tab, _ = make(qapp, backend)
-    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Sent")
-    assert tab.status_of("/lib/Frieren") == "Filed v12-v13 - seeding"
+    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Downloading v15")
+    assert tab.status_of("/lib/Frieren") == "Seeding v12-v13"
+    row = tab._items["/lib/Frieren"]
+    assert row.data(0, ROLE_CHIPS) == [("Seeding v12-v13", "ok")]
     assert tab.downloads.table.rowCount() == 2
     assert tab.downloads.name_of(backend.record_list[0]) == "Oshi no Ko"       # the wanted series name the rows
 
@@ -293,17 +296,19 @@ def test_sending_from_the_tab_confirms_then_the_row_and_the_list_update(qapp):
     wait_until(qapp, lambda: tab.releases.btn_send.isEnabled())
     assert tab.releases.send_selected()
     assert "Series: Oshi no Ko" in texts[0] and "Target folder: /lib/Example Series" in texts[0]
-    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Sent" and tab.downloads.table.rowCount() == 1)
+    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko").startswith("Downloading")
+               and tab.downloads.table.rowCount() == 1)
+    assert tab.status_of("/lib/Oshi no Ko").endswith("Releases ready")        # the torrent AND the search, both said
     assert backend.sent[0][0] == 3 and backend.sent[0][3] == "/lib/Example Series"
 
 
 def test_check_now_reloads_the_list_and_the_rows(qapp):
     backend = FakeBackend(records=[record(1, series_id=3, status=S.SENT, wanted=("15",))])
     tab, _ = make(qapp, backend)
-    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Sent")
+    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Downloading v15")
     backend.record_list = [record(1, series_id=3, status=S.FILED, wanted=("15",))]
     tab.downloads.check_now()
-    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Filed v15 - seeding")
+    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Seeding v15")
     assert backend.checks == 1
 
 
@@ -354,3 +359,16 @@ def test_the_in_progress_panel_height_is_resizable_and_remembered(qapp):
     tab.vsplitter.splitterMoved.emit(400, 1)
     again, _ = make(qapp)
     assert again.vsplitter.sizes()[1] == tab.vsplitter.sizes()[1]
+
+
+def test_the_releases_panel_names_the_series_torrent_already_in_qbittorrent(qapp):
+    backend = FakeBackend(records=[record(1, series_id=3, status=S.SENT, wanted=("15",), title="Oshi no Ko v15")])
+    tab, _ = make(qapp, backend)
+    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Downloading v15")
+    tab.focus("/lib/Oshi no Ko")
+    settle(qapp, tab)
+    wait_until(qapp, lambda: tab.releases.downloads_label.text() != "")
+    assert tab.releases.downloads_label.text() == "Already in qBittorrent - Downloading v15: Oshi no Ko v15"
+    tab.focus("/lib/Frieren")                                           # no torrent: the line goes
+    settle(qapp, tab)
+    wait_until(qapp, lambda: tab.releases.downloads_label.text() == "")
