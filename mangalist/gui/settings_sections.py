@@ -115,17 +115,79 @@ class SourcesPage(SectionPage):
             sv.addWidget(holder)
         self.suwayomi_rows = suwayomi
         self.body.addWidget(suwayomi)
+        self.body.addWidget(self._budget_card())
 
         self.refresh()
         for box in (self.on_check, self.english_check, self.raw_check, self.novels_check, self.trusted_check):
             box.toggled.connect(self._changed)
         self.partial_check.toggled.connect(self._partial_changed)
+        self.budget_spin.valueChanged.connect(self._budget_changed)
+
+    # The download budget (owner, 2026-10-09: "I set MangaList to use a maximum of 50 GB"): one cap over every download
+    # client, so it has its own card under the sources. Its imports are local, to keep this lane's change inside the class.
+    def _budget_card(self) -> QWidget:
+        from PySide6.QtWidgets import QSpinBox
+
+        from ..downloads.options import MAX_BUDGET_GB
+
+        budget = card("true")
+        bv = QVBoxLayout(budget)
+        bv.setContentsMargins(16, 14, 16, 14)
+        bv.setSpacing(10)
+        self.budget_usage = label("", "muted")
+        bv.addLayout(hbox(label("Download budget", "name"), label("Every download client", "muted"), None,
+                          self.budget_usage, spacing=10))
+        self.budget_spin = QSpinBox()
+        self.budget_spin.setRange(0, MAX_BUDGET_GB)
+        self.budget_spin.setSuffix(" GB")
+        self.budget_spin.setSpecialValueText("no limit")            # 0 = no limit
+        self.budget_spin.setMinimumWidth(120)
+        self.budget_spin.setToolTip("0 = no limit. Default 50 GB.")
+        bv.addLayout(hbox(label("Keep at most"), self.budget_spin, label("downloading or seeding"), None, spacing=8))
+        bv.addWidget(label("Counts every download MangaList has sent and not yet removed: downloading, waiting to be "
+                           "filed, and seeding (a partial download counts only its selected files). A send that would go "
+                           "over it waits in a queue and goes to qBittorrent by itself once Remove Completed has made "
+                           "room. Lowering it removes nothing; new sends then wait.", "muted", wrap=True))
+        return budget
+
+    def _budget_cap(self) -> float:
+        from ..downloads.options import get_budget_gb
+
+        return get_budget_gb(self._db)
+
+    def _show_budget_usage(self) -> None:
+        """"using 12.3 GB of 50 GB" next to the setting (when the backend keeps a budget; one database read)."""
+        getter = getattr(self._backend, "budget_status", None) if self._backend is not None else None
+        text = ""
+        if callable(getter):
+            try:
+                state = getter()
+            except Exception:  # noqa: BLE001 - the usage is a courtesy; the setting works without it
+                state = None
+            if state is not None:
+                text = state.usage_text()
+                text = text[:1].upper() + text[1:]
+                if state.queued:
+                    text += f"; {len(state.queued)} queued"
+        self.budget_usage.setText(text)
+        self.budget_usage.setVisible(bool(text))
+
+    def _budget_changed(self, value: int) -> None:
+        if self._loading:
+            return
+        from ..downloads.options import set_budget_gb
+
+        set_budget_gb(self._db, value)          # read at every send and every hand-over: nothing to reload
+        self._show_budget_usage()
 
     def refresh(self) -> None:
         self._loading = True
         opts = load_nyaa_options(self._db)
         self.partial_check.setChecked(get_flag(self._db, KEY_PARTIAL_DOWNLOADS))
         self.partial_check.setEnabled(self._backend is not None)
+        self.budget_spin.setValue(int(round(self._budget_cap())))
+        self.budget_spin.setEnabled(self._backend is not None)
+        self._show_budget_usage()
         self.on_check.setChecked(opts.enabled)
         self.english_check.setChecked(opts.english)
         self.raw_check.setChecked(opts.raw)
@@ -176,6 +238,7 @@ class SourcesPage(SectionPage):
 
     def on_show(self) -> None:
         self._update_badge(load_nyaa_options(self._db))
+        self._show_budget_usage()
 
 
 class MatchingPage(SectionPage):

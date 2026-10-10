@@ -20,7 +20,17 @@ selected release is read first; the other numberless ones (at most :data:`MAX_BA
 another in the background, so the table fills in without selecting each.
 
 **Already in qBittorrent.** A line above the table names the series' torrents still in qBittorrent (downloading, or
-filed and seeding), and a release that IS one of them cannot be sent again (owner, 2026-10-09).
+filed and seeding) or queued under the download budget, and a release that IS one of them cannot be sent again (owner,
+2026-10-09).
+
+**The download budget** (owner, 2026-10-09; :mod:`mangalist.downloads.budget`). With a backend that keeps one
+(``budget_status``), Send first works out what the release adds - the selected files' total of a partial send, else the
+release's size - against the cap. Fits: the usual confirmation, with a line on the budget. Would go over the cap (or
+others wait in the queue): one question that names the usage, the cap and the size and offers **Queue it** (the default),
+**Send now (past the cap)** or Cancel. Bigger than the whole cap on its own: an alert that names its size and the cap and
+offers **Send anyway (past the cap)** or Cancel (the default) - never silently refused, never silently sent. The send
+itself tells the backend the choice (``over_cap``) and the size; the backend checks the budget again and returns a SENT
+or a QUEUED record, and the status line says which.
 """
 
 from __future__ import annotations
@@ -45,11 +55,22 @@ from PySide6.QtWidgets import (
 )
 
 from ..classifier import _human
-from ..downloads.contracts import DownloadRecord, NyaaCandidate, Placement
+from ..downloads.budget import (
+    FITS,
+    OVER_CAP_QUEUE,
+    OVER_CAP_SEND,
+    TOO_BIG,
+    BudgetState,
+    gb_text,
+    over_cap_text,
+    place_text,
+    too_big_text,
+)
+from ..downloads.contracts import DownloadRecord, DownloadStatus, NyaaCandidate, Placement
 from ..knowledge import fmt_num, to_decimal
 from ..downloads.partial import PackSelection, describe, describe_whole, file_lines
 from .background import BackgroundCall, start_call
-from .download_rules import download_chip, in_qbittorrent, release_why
+from .download_rules import download_chip, in_hand, release_why
 from .download_style import FONT_MONO, set_prop, set_tone
 from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, flat_table, hbox, label, text_width
 from .downloads_backend import DownloadsBackend
@@ -58,6 +79,11 @@ from .volumes_target import VolumeTarget, numbers_text, volume_label
 from .links import open_link
 
 ConfirmFn = Callable[[QWidget, str], bool]
+#: The over-the-cap question: (parent, kind, text) -> "queue" | "send" | "cancel"; kind is "over" (queue it, send it now
+#: past the cap, or cancel) or "too big" (send it anyway, or cancel).
+BudgetChoiceFn = Callable[[QWidget, str, str], str]
+BUDGET_OVER, BUDGET_TOO_BIG = "over", "too big"
+CHOICE_QUEUE, CHOICE_SEND, CHOICE_CANCEL = OVER_CAP_QUEUE, OVER_CAP_SEND, "cancel"
 
 COLUMNS = ("", "Release", "Fills", "You have", "Published", "Source", "Size", "Seeders")
 COL_PICK, COL_RELEASE, COL_FILLS, COL_HELD, COL_DATE, COL_SOURCE, COL_SIZE, COL_SEEDERS = range(len(COLUMNS))
@@ -91,6 +117,26 @@ PARTIAL_TIP = ("Only the files that hold a missing volume are downloaded; qBitto
 def _default_confirm(parent: QWidget, text: str) -> bool:
     return QMessageBox.question(parent, "Send to qBittorrent", text,
                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+
+
+def _default_budget_choice(parent: QWidget, kind: str, text: str) -> str:
+    """The over-the-cap question (see :data:`BudgetChoiceFn`). Queueing is the default when it is offered; for a release
+    bigger than the whole cap, Cancel is."""
+    if kind == BUDGET_TOO_BIG:
+        box = QMessageBox(QMessageBox.Icon.Warning, "Bigger than the download budget", text, parent=parent)
+        send = box.addButton("Send anyway (past the cap)", QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.exec()
+        return CHOICE_SEND if box.clickedButton() is send else CHOICE_CANCEL
+    box = QMessageBox(QMessageBox.Icon.Question, "Over the download budget", text, parent=parent)
+    queue = box.addButton("Queue it", QMessageBox.ButtonRole.AcceptRole)
+    send = box.addButton("Send now (past the cap)", QMessageBox.ButtonRole.DestructiveRole)
+    box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(queue)
+    box.exec()
+    clicked = box.clickedButton()
+    return CHOICE_QUEUE if clicked is queue else CHOICE_SEND if clicked is send else CHOICE_CANCEL
 
 
 def volumes_text(candidate: NyaaCandidate) -> str:
@@ -174,11 +220,13 @@ class ReleasesPanel(QWidget):
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
                  managed: bool = False, source_label: str = "nyaa",
-                 downloads_for: Optional[Callable[[int], Sequence[DownloadRecord]]] = None):
+                 downloads_for: Optional[Callable[[int], Sequence[DownloadRecord]]] = None,
+                 budget_choice: Optional[BudgetChoiceFn] = None):
         super().__init__(parent)
         self.setObjectName("releasesPanel")
         self._backend = backend
         self._confirm = confirm or _default_confirm
+        self.ask_budget: BudgetChoiceFn = budget_choice or _default_budget_choice     # replaceable (tests answer it)
         self._open_url = open_url or open_link
         self.managed = managed
         self.source_label = source_label
@@ -585,8 +633,9 @@ class ReleasesPanel(QWidget):
         return records
 
     def refresh_downloads(self) -> None:
-        """Say which of the series' torrents are in qBittorrent (the host calls this when its records reload)."""
-        live = in_qbittorrent(self._series_downloads())
+        """Say which of the series' torrents are in qBittorrent or queued (the host calls this when its records
+        reload)."""
+        live = in_hand(self._series_downloads())
         if not live:
             self.downloads_label.setVisible(False)
             self.downloads_label.setText("")
@@ -594,13 +643,16 @@ class ReleasesPanel(QWidget):
             lines = [f"{download_chip(r)[0]}: {r.title}" for r in live[:3]]
             if len(live) > 3:
                 lines.append(f"... and {len(live) - 3} more")
-            self.downloads_label.setText("Already in qBittorrent - " + "\n".join(lines))
+            queued = any(r.status == DownloadStatus.QUEUED for r in live)
+            head = "Already queued or in qBittorrent - " if queued else "Already in qBittorrent - "
+            self.downloads_label.setText(head + "\n".join(lines))
             self.downloads_label.setVisible(True)
         self._update_send()
 
     def _in_qbittorrent(self, candidate: NyaaCandidate) -> Optional[DownloadRecord]:
+        """The series' record that has this release in hand: in qBittorrent, or queued."""
         key = (candidate.info_hash or "").lower()
-        return next((r for r in in_qbittorrent(self._series_downloads()) if key and r.info_hash.lower() == key), None)
+        return next((r for r in in_hand(self._series_downloads()) if key and r.info_hash.lower() == key), None)
 
     def _on_search_error(self, message: str) -> None:
         self._search_state = "error"
@@ -662,7 +714,8 @@ class ReleasesPanel(QWidget):
             return "This release was already sent."
         existing = self._in_qbittorrent(candidate)
         if existing is not None:
-            return f"This release is already in qBittorrent ({download_chip(existing)[0]}); it is not added twice."
+            where = "queued" if existing.status == DownloadStatus.QUEUED else "in qBittorrent"
+            return f"This release is already {where} ({download_chip(existing)[0]}); it is not added twice."
         if self._partial_on and self.pack_state() in ("waiting", "reading"):
             return "Reading the release's file list... (or untick the box to send the whole pack)"
         if not wanted_volumes_for(candidate, self.target.missing):
@@ -872,7 +925,8 @@ class ReleasesPanel(QWidget):
         self._open_url(candidate.view_url)
         return True
 
-    def confirmation_text(self, candidate: NyaaCandidate, wanted: Sequence[str], target_dir: str) -> str:
+    def confirmation_text(self, candidate: NyaaCandidate, wanted: Sequence[str], target_dir: str,
+                          budget_line: str = "") -> str:
         title = self.target.title if self.target else ""
         if candidate.vol_from is None:
             vols = (f"{numbers_text(wanted, pad=True)} (the release's title does not say which volumes it holds; "
@@ -880,8 +934,58 @@ class ReleasesPanel(QWidget):
         else:
             vols = numbers_text(wanted, pad=True)
         return (f"Send this release to qBittorrent?\n\n{candidate.title}\n\n"
-                f"Series: {title}\nVolumes: {vols}\n{self._pack_line(candidate)}Target folder: {target_dir}\n\n"
+                f"Series: {title}\nVolumes: {vols}\n{self._pack_line(candidate)}Target folder: {target_dir}\n"
+                f"{budget_line}\n"
                 "qBittorrent downloads it; MangaList files these volumes into the target folder when it has finished.")
+
+    # --- the download budget -----------------------------------------------------------------------------------
+
+    def send_size(self, candidate: NyaaCandidate) -> int:
+        """What this send adds to the download budget: the selected files of a partial send, else the release's size
+        (qBittorrent's own figure replaces it once the torrent runs)."""
+        sel = self._packs.get(candidate.info_hash)
+        if self.partial_requested() and sel is not None:
+            return sel.kept_bytes
+        return max(0, candidate.size_bytes)
+
+    def budget_status(self) -> Optional[BudgetState]:
+        """The backend's budget right now (None: the backend keeps none, or it could not be read - the backend then
+        still checks it when sending)."""
+        getter = getattr(self._backend, "budget_status", None)
+        if not callable(getter):
+            return None
+        try:
+            return getter()
+        except Exception:  # noqa: BLE001 - the send decides: the backend queues what does not fit
+            return None
+
+    def _budget_choice(self, candidate: NyaaCandidate, wanted: Sequence[str], target_dir: str) -> Optional[dict]:
+        """Ask the owner as the budget needs; returns the send's extra arguments ({} without a budget), or None when
+        the owner cancelled."""
+        state = self.budget_status()
+        if state is None:
+            return {} if self._confirm(self, self.confirmation_text(candidate, wanted, target_dir)) else None
+        size = self.send_size(candidate)
+        verdict = state.verdict(0 if candidate.info_hash.lower() in state.hashes else size)
+        extra = {"size_bytes": size, "over_cap": OVER_CAP_QUEUE}
+        if verdict == FITS:
+            line = (f"Download budget: {state.usage_text()}; this adds {gb_text(size)}.\n" if state.limited else "")
+            return extra if self._confirm(self, self.confirmation_text(candidate, wanted, target_dir, line)) else None
+        if verdict == TOO_BIG:
+            text = (f"{too_big_text(size, state)}\n\nSend it anyway, past the cap? It then counts against the budget "
+                    "like any download, and later sends wait in the queue until there is room again.\n\n"
+                    + self.confirmation_text(candidate, wanted, target_dir))
+            choice = self.ask_budget(self, BUDGET_TOO_BIG, text)
+        else:
+            text = (f"{over_cap_text(state, size)}\n\nQueue it: MangaList sends it to qBittorrent by itself once "
+                    "Remove Completed has made room (oldest first). Or send it now, past the cap.\n\n"
+                    + self.confirmation_text(candidate, wanted, target_dir))
+            choice = self.ask_budget(self, BUDGET_OVER, text)
+        if choice == CHOICE_SEND:
+            return {**extra, "over_cap": OVER_CAP_SEND}
+        if choice == CHOICE_QUEUE and verdict != TOO_BIG:
+            return extra
+        return None
 
     def send_selected(self) -> bool:
         if self.send_blocker() is not None:
@@ -891,26 +995,40 @@ class ReleasesPanel(QWidget):
         if candidate is None or target_dir is None or self.target is None:
             return False
         wanted = tuple(wanted_volumes_for(candidate, self.target.missing))
-        if not self._confirm(self, self.confirmation_text(candidate, wanted, target_dir)):
+        extra = self._budget_choice(candidate, wanted, target_dir)
+        if extra is None:
             return False
         self._sending = True
         self._update_send()
         set_tone(self.status_label, "")
-        self.status_label.setText("Sending to qBittorrent...")
+        self.status_label.setText("Sending to qBittorrent..." if extra.get("over_cap") != OVER_CAP_QUEUE
+                                  or self._fits_now(candidate) else "Queueing...")
         series_id = self.target.series_id
-        extra = {"only_missing": True} if self.partial_requested() else {}
+        if self.partial_requested():
+            extra["only_missing"] = True
         self._spawn(lambda: self._backend.send(series_id, candidate, wanted, target_dir, **extra),
                     lambda record, c=candidate: self._on_sent(c, record), self._on_send_error)
         return True
+
+    def _fits_now(self, candidate: NyaaCandidate) -> bool:
+        state = self.budget_status()
+        return state is None or state.verdict(self.send_size(candidate)) == FITS
 
     def _on_sent(self, candidate: NyaaCandidate, record: DownloadRecord) -> None:
         self._sending = False
         self._sent_hashes.add(candidate.info_hash)
         self.sent_records.append(record)
         if self.target is not None and self.target.series_id == record.series_id:     # not after a switch of series
-            set_tone(self.status_label, "ok")
-            self.status_label.setText(f"Sent to qBittorrent: {candidate.title}. {self._sent_what(candidate)}MangaList "
-                                      "files the volumes when the download has finished.")
+            if record.status == DownloadStatus.QUEUED:
+                set_tone(self.status_label, "")
+                self.status_label.setText(
+                    f"Queued: {candidate.title} ({place_text(record.queue_position)}). MangaList sends it to qBittorrent "
+                    "when there is room under the download budget (Settings > Download sources); right-click it in "
+                    "the In progress list to send it now.")
+            else:
+                set_tone(self.status_label, "ok")
+                self.status_label.setText(f"Sent to qBittorrent: {candidate.title}. {self._sent_what(candidate)}"
+                                          "MangaList files the volumes when the download has finished.")
         self._update_send()
         self.sent.emit(record)
 
