@@ -255,3 +255,20 @@ def test_no_other_source_has_it_says_so_and_keeps_the_chapters(qapp):
     settle(qapp, panel)
     assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS
     assert "None of your other Suwayomi sources has this series" in panel.status_label.text()
+
+
+def test_extras_are_offered_unticked(qapp):
+    from decimal import Decimal
+    from .chapter_fakes import CHAPTERS
+    from ..downloads.suwayomi_fakes import chapter
+
+    panel, _, _ = make(qapp)
+    open_series(qapp, panel)
+    look = panel.lookup
+    chs = CHAPTERS + (chapter(425, "42.5", "Alpha Scans"),)
+    look.rows = chm.chapter_rows(chs, MISSING, "Alpha Scans", {}, [Decimal("42.5")])
+    panel.show_lookup(look)
+    assert table(panel)[2] == (False, "42.5", "Alpha Scans", "extra - not counted as missing")
+    assert "42.5" not in [c.number for c in panel.picks()]
+    panel.table.item(2, cp.COL_PICK).setCheckState(Qt.CheckState.Checked)
+    assert "42.5" in [c.number for c in panel.picks()]

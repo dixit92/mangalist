@@ -17,7 +17,9 @@ MangaDex sources alone (English first).
 
 **The chapters** (:func:`chapter_rows`): per missing chapter number, the copies the source has - one per scanlation group
 (the latest upload of a group wins) - and the default pick: the series' group when it has the chapter, else the group with
-the most of the missing chapters. **The series' group** (:func:`default_group`; owner: "the folder's usual group"): the
+the most of the missing chapters. **Extras** (:func:`extra_numbers`; owner, 2026-10-10: MangaFire had 71.5 and other
+extras the panel never offered): the source's decimal chapters within the folder's chapter range that the folder does not
+hold and that are not counted as missing - listed after their neighbours, unticked. **The series' group** (:func:`default_group`; owner: "the folder's usual group"): the
 owner's stored choice for the series when the source offers it; else the group the folder's own chapter files use around
 the first missing chapter (:func:`mangalist.duplicates.usual_group`'s rule: the nearest neighbours, else the folder's
 clear favourite); else the group with the most of the missing chapters.
@@ -207,6 +209,7 @@ class ChapterRow:
     options: Tuple[SuwayomiChapter, ...] = ()       # one per group, the default first
     default: Optional[SuwayomiChapter] = None       # None: the source does not have this chapter
     in_hand: Optional[DownloadRecord] = None        # a chapter download already has it (not sent again)
+    extra: bool = False                             # an extra (``71.5``) the source has: offered, not counted missing
 
     @property
     def available(self) -> bool:
@@ -249,10 +252,28 @@ def group_counts(chapters: Iterable[SuwayomiChapter], missing: Sequence[Decimal]
     return {names[k]: n for k, n in counts.items()}
 
 
+def extra_numbers(chapters: Iterable[SuwayomiChapter], missing: Sequence[str],
+                  held: Iterable[Decimal]) -> List[Decimal]:
+    """The source's extras worth offering: decimal chapters (``71.5``) between the folder's first and last chapter (held
+    or missing) that the folder does not hold and that are not missing already. Chapters inside held volumes are below
+    the first loose chapter, so they are never offered."""
+    wanted = {d for d in (to_decimal(n) for n in missing) if d is not None}
+    have = set(held)
+    known = wanted | have
+    if not known:
+        return []
+    lo, hi = min(known), max(known)
+    return sorted({n for n in _per_group(chapters) if n != n.to_integral_value() and lo <= n <= hi
+                   and n not in wanted and n not in have})
+
+
 def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], group: Optional[str],
-                 in_hand: Optional[Mapping[str, DownloadRecord]] = None) -> List[ChapterRow]:
-    """One row per missing chapter number, ascending (see the module docstring)."""
-    numbers = sorted({d for d in (to_decimal(n) for n in missing) if d is not None})
+                 in_hand: Optional[Mapping[str, DownloadRecord]] = None,
+                 extras: Sequence[Decimal] = ()) -> List[ChapterRow]:
+    """One row per missing chapter number and per *extra* (:func:`extra_numbers`), ascending (see the module
+    docstring)."""
+    numbers = sorted({d for d in (to_decimal(n) for n in missing) if d is not None} | set(extras))
+    extra = set(extras)
     per = _per_group(chapters)
     counts = Counter(key for n in numbers for key in per.get(n, {}))
     want = group_key(group)
@@ -263,7 +284,7 @@ def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], gr
         copies = per.get(number, {})
         ordered = sorted(copies.items(), key=lambda kv: (kv[0] != want, -counts[kv[0]], kv[0]))
         options = tuple(ch for _k, ch in ordered)
-        rows.append(ChapterRow(text, options, options[0] if options else None, in_hand.get(text)))
+        rows.append(ChapterRow(text, options, options[0] if options else None, in_hand.get(text), number in extra))
     return rows
 
 
@@ -405,11 +426,12 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
     numbers = [d for d in (to_decimal(n) for n in missing) if d is not None]
     counts = group_counts(fetched.chapters, numbers)
     choice = default_group(counts, held, numbers, stored_group)
-    rows = chapter_rows(fetched.chapters, missing, choice.group, in_hand)
+    extras = extra_numbers(fetched.chapters, missing, held)
+    rows = chapter_rows(fetched.chapters, missing, choice.group, in_hand, extras)
     queued: Tuple[str, ...] = ()
     try:
         ids = {c.id: c for c in fetched.chapters}
-        wanted = set(numbers)
+        wanted = set(numbers) | set(extras)
         queued = tuple(sorted({ids[q.chapter_id].number for q in client.queue()
                                if q.chapter_id in ids and to_decimal(ids[q.chapter_id].number) in wanted},
                               key=lambda n: to_decimal(n) or Decimal(0)))
