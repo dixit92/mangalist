@@ -126,7 +126,8 @@ class FakeChapterBackend(FakeBackend):
         self.other_searches.append((series_id, tuple(titles), exclude_source))
         if self.no_others:
             return []
-        return [chm.MangaMatch(WEEB, WEEB_MANGA, chm.HOW_TITLE)]
+        linked = [chm.MangaMatch(MANGADEX, MANGA, chm.HOW_MANGADEX)] if exclude_source != MANGADEX.id else []
+        return linked + [chm.MangaMatch(WEEB, WEEB_MANGA, chm.HOW_TITLE)]
 
     def confirm_match(self, series_id, match):
         self.confirmed.append((series_id, match))

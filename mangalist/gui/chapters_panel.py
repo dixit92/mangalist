@@ -6,16 +6,16 @@ table, footer and status line; the same chips and In progress rows once sent.
 - **The lookup** (:meth:`ChaptersPanel.open_series`) runs off the UI thread (``backend.chapter_lookup``): the series is
   found in Suwayomi by the MangaDex id MangaPixer links, else by title on the owner's other sources - those matches are
   listed for the owner to CONFIRM ("Use this series") before any chapter is listed; the confirmed one is remembered for
-  the series. "Forget this source" (only on a source the owner picked) forgets it and looks again - MangaDex by
-  its id, else the candidates.
+  the series. "Refresh from source" asks Suwayomi again.
 - **The table**: one row per missing chapter - ticked by default when the source has it; the group it comes from (a
   choice when more than one group has it); the chapter's title as the source names it. A chapter already sent shows
   how it stands and cannot be sent again; a chapter the source does not have says so.
 - **The group** above the table: the series' group (the owner's choice for the series, else the folder's usual group,
   else the group with the most chapters) and why; changing it re-picks every row and is remembered for the series.
 - A line says when chapters of the series are already in Suwayomi's download queue.
-- **Try another source…** (when the matched source lacks some missing chapters - owner, 2026-10-10: MangaDex had 3 of
-  90): the owner's other sources by title, to confirm one for the series; "Back to the chapters" keeps the match.
+- **Change source…** (owner, 2026-10-10: MangaDex had 3 of 90 missing chapters; "Not this series?" did not say what
+  it did): MangaDex by the id MangaPixer links and the owner's other sources by title, to pick one for the series -
+  remembered, so it does not fall back to MangaDex; "Back to the chapters" keeps the current one.
 - **Send to Suwayomi** asks first (the chapters, the source, the group, the folder) and then records and enqueues them.
 """
 
@@ -126,22 +126,18 @@ class ChaptersPanel(QWidget):
         self.progress.setFixedWidth(90)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
-        # owner, 2026-10-10: "Not this series?" did not say what it does - and on a MangaDex-id match it did nothing
-        self.btn_forget = button("Forget this source", link=True,
-                                 tip="Forget the source you picked for this series. The next lookup uses MangaDex (by "
-                                     "the id MangaPixer links), else asks you again")
-        self.btn_forget.clicked.connect(self.forget_match)
-        self.btn_again = button("Look up again")
+        self.btn_again = button("Refresh from source",
+                                tip="Ask Suwayomi again: the source's chapter list as it is now (or search again when "
+                                    "the series has no source yet)")
         self.btn_again.clicked.connect(self.look_up_again)
-        self.btn_other = button("Try another source…", link=True,
-                                tip="Some missing chapters are not on this source: look the series up by title on your "
-                                    "other Suwayomi sources and get its chapters from there")
+        self.btn_other = button("Change source…", link=True,
+                                tip="Pick where this series' chapters come from: MangaDex (by the id MangaPixer links) "
+                                    "or your other Suwayomi sources (by title). Remembered for the series")
         self.btn_other.clicked.connect(self.other_sources)
         self.btn_other.setVisible(False)
         self._before_other: Optional[ChapterLookup] = None
         head.addWidget(self.progress)
         head.addWidget(self.btn_other)
-        head.addWidget(self.btn_forget)
         head.addWidget(self.btn_again)
         outer.addLayout(head)
 
@@ -228,7 +224,6 @@ class ChaptersPanel(QWidget):
         self.message_action.setText(action or "")
         self.message_action.setVisible(bool(action))
         self.folder_row.setVisible(False)
-        self.btn_forget.setVisible(False)
         self.btn_other.setVisible(False)
         self.btn_again.setVisible(self._series_id is not None and bool(title))
         self.stack.setCurrentIndex(PAGE_MESSAGE)
@@ -305,7 +300,6 @@ class ChaptersPanel(QWidget):
         match = lookup.match
         self.match_label.setText(f"{match.source.display_name}: {lookup.manga_title or match.manga.title} - "
                                  f"{how_text(match)}")
-        self.btn_forget.setVisible(match.how != HOW_MANGADEX)          # forgetting a MangaDex-id match finds it again
         queued = lookup.queued_in_suwayomi
         self.queued_label.setText(f"Already in Suwayomi's download queue: ch {numbers_text(queued)}" if queued else "")
         self.queued_label.setVisible(bool(queued))
@@ -315,8 +309,7 @@ class ChaptersPanel(QWidget):
         self._before_other = None
         self._fill_groups(lookup)
         self._fill_rows(lookup.rows)
-        self.btn_other.setVisible(bool(lookup.not_available) and callable(getattr(self._backend, "other_candidates",
-                                                                                  None)))
+        self.btn_other.setVisible(callable(getattr(self._backend, "other_candidates", None)))
         self.stack.setCurrentIndex(PAGE_CHAPTERS)
         self._update_subtitle()
         self._update_send()
@@ -328,7 +321,6 @@ class ChaptersPanel(QWidget):
         self.btn_cand_back.setVisible(lead is not None)
         if not keep_match:
             self.match_label.setText("; ".join(lookup.notes))
-            self.btn_forget.setVisible(False)
         if not lookup.candidates:
             note = "; ".join(lookup.notes)
             self.show_message(self._title, "None of your Suwayomi sources has this series" +
@@ -338,14 +330,17 @@ class ChaptersPanel(QWidget):
             self.subtitle_label.setText(missing)
             self.btn_again.setVisible(True)
             return
-        if lead is None:
-            lead = "MangaDex has none of the missing chapters. " if keep_match else ""
-        self.cand_note.setText(lead + "MangaList found these by title on your other sources. Pick the one that is "
-                               "this series - it is remembered for the series - or look again later.")
+        if lead is not None:
+            self.cand_note.setText(lead + "Pick where this series' chapters come from - it is remembered for the "
+                                   "series. Chapters already sent stay as they are.")
+        else:
+            self.cand_note.setText(("MangaDex has none of the missing chapters. " if keep_match else "") +
+                                   "MangaList found these by title on your other sources. Pick the one that is this "
+                                   "series - it is remembered for the series - or look again later.")
         self.cand_table.setRowCount(len(lookup.candidates))
         for row, cand in enumerate(lookup.candidates):
             self.cand_table.setItem(row, 0, cell(cand.source.display_name))
-            item = cell(cand.manga.title)
+            item = cell(cand.manga.title + ("  (MangaPixer's MangaDex link)" if cand.how == HOW_MANGADEX else ""))
             item.setToolTip(cand.manga.url)
             self.cand_table.setItem(row, 1, item)
         self.cand_table.clearSelection()
@@ -531,14 +526,15 @@ class ChaptersPanel(QWidget):
         return True
 
     def other_sources(self) -> bool:
-        """The matched source lacks some missing chapters: the owner's other sources, by title (off the UI thread)."""
+        """Change source: MangaDex by its id and the owner's other sources by title, all but the current one (off the
+        UI thread)."""
         lookup, sid = self.lookup, self._series_id
         find = getattr(self._backend, "other_candidates", None)
         if lookup is None or lookup.match is None or sid is None or self._busy or not callable(find):
             return False
         exclude, titles = lookup.match.source.id, self._titles
         set_tone(self.status_label, "")
-        self.status_label.setText("Searching your other sources by title...")
+        self.status_label.setText("Looking for this series on your other sources...")
         self._set_busy(True)
         self._spawn(lambda: find(sid, titles, exclude), lambda found, s=sid, lk=lookup: self._on_others(s, lk, found),
                     self._show_error)
@@ -548,30 +544,21 @@ class ChaptersPanel(QWidget):
         if series_id != self._series_id or self.lookup is not before:
             return
         if not found:
-            self.status_label.setText("None of your other Suwayomi sources has this series by title. Allow more under "
+            self.status_label.setText("None of your other Suwayomi sources has this series. Allow more under "
                                       "Settings > Download sources > Suwayomi sources.")
             return
         self.status_label.setText("")
         self._before_other = before
         self.lookup = replace(before, candidates=list(found))
         source = before.source_name or before.match.source.display_name
-        lead = (f"{source} does not have ch {numbers_text(before.not_available)}. Chapters "
-                "already sent stay as they are. ")
+        lead = f"Now: {source}" + (f", which does not have ch {numbers_text(before.not_available)}. "
+                                   if before.not_available else ". ")
         self._show_candidates(self.lookup, f"Missing {html.escape('ch ' + numbers_text(before.missing))}",
                               keep_match=True, lead=lead)
 
     def back_to_chapters(self) -> None:
         if self._before_other is not None:
             self.show_lookup(self._before_other)
-
-    def forget_match(self) -> bool:
-        sid = self._series_id
-        forget = getattr(self._backend, "forget_match", None)
-        if sid is None or self._busy or not callable(forget):
-            return False
-        self._set_busy(True)
-        self._spawn(lambda: forget(sid), lambda _r: self._look_up(), self._show_error)
-        return True
 
     # --- sending ---------------------------------------------------------------------------------------
 

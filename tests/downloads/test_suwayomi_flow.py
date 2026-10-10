@@ -287,6 +287,11 @@ def test_other_sources_by_title_leave_out_the_matched_one(world):
     again = backend.chapter_lookup(sid, ("1", "2"), (SERIES,))
     assert again.match.source.id == OTHER and again.match.how == chm.HOW_CONFIRMED
     assert "MangaListSearch" not in session.names()                               # no MangaDex id search either
+    # Change source from there: MangaDex by MangaPixer's link (never by title), the current source left out
+    backend.other_candidates(sid, (SERIES,), OTHER)
+    searches = [r["variables"] for r in session.requests if r["name"] == "MangaListSearch"]
+    assert searches and all(str(v).count(MANGADEX_EN) == 0 or f"id:{MD_ID}" in str(v) for v in searches)
+    assert not any(OTHER in str(v) for v in searches)
 
 
 def test_the_series_group_is_remembered_and_wins_over_the_default(world):

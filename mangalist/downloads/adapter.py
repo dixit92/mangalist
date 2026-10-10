@@ -518,12 +518,16 @@ class Backend:
 
     def other_candidates(self, series_id: int, titles: Sequence[str],
                          exclude_source: Optional[str] = None) -> List[MangaMatch]:
-        """The series by title on the owner's allowed sources other than *exclude_source* (the one it is matched on,
-        which lacks some missing chapters) - candidates for the owner to confirm."""
+        """Change source: the series on the owner's allowed sources other than *exclude_source* (the current one) -
+        MangaDex by the id MangaPixer links (first), the others by title - for the owner to pick."""
         client = self._chapter_client()
         try:
             sources = allowed_sources(list(client.sources()), self.suwayomi.sources(), self._source_languages())
-            return title_candidates(client, [s for s in sources if s.id != str(exclude_source or "")], titles)
+            others = [s for s in sources if s.id != str(exclude_source or "")]
+            mangadex_id = mangadex_id_for(self.db, series_id)
+            linked = find_manga(client, others, mangadex_id=mangadex_id, titles=titles, title_search=False).match
+            by_title = title_candidates(client, [s for s in others if not (mangadex_id and s.is_mangadex)], titles)
+            return ([linked] if linked is not None else []) + by_title
         except SuwayomiError as exc:
             raise BackendError(str(exc)) from None
         finally:
