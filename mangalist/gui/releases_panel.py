@@ -710,9 +710,9 @@ class ReleasesPanel(QWidget):
         candidate = self.selected_candidate()
         if candidate is None:
             return "Select a release."
-        if candidate.info_hash in self._sent_hashes:
-            return "This release was already sent."
         existing = self._in_qbittorrent(candidate)
+        if candidate.info_hash in self._sent_hashes and (existing is None or existing.status != DownloadStatus.QUEUED):
+            return "This release was already sent."
         if existing is not None:
             where = "queued" if existing.status == DownloadStatus.QUEUED else "in qBittorrent"
             return f"This release is already {where} ({download_chip(existing)[0]}); it is not added twice."
@@ -1029,7 +1029,7 @@ class ReleasesPanel(QWidget):
                 set_tone(self.status_label, "ok")
                 self.status_label.setText(f"Sent to qBittorrent: {candidate.title}. {self._sent_what(candidate)}"
                                           "MangaList files the volumes when the download has finished.")
-        self._update_send()
+        self.refresh_downloads()                # the "Already ..." line names it now, before the host reloads
         self.sent.emit(record)
 
     def _sent_what(self, candidate: NyaaCandidate) -> str:
