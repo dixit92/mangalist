@@ -416,3 +416,15 @@ def test_empty_now_refuses_when_a_volume_left_or_changed_and_deletes_nothing(db,
     assert names(holding) == held_before and ReplacementStore(db).get(batch.id).status == "held"
     emptied, refused = upgrades.empty_all_now(db)
     assert emptied == [] and refused == [(batch.id, "not emptied: " + os.path.basename(volume) + " is no longer in the library")]
+
+
+def test_a_series_held_as_volumes_only_has_nothing_to_replace_and_says_so(db, ledger, library, holding, known,
+                                                                          tmp_path):
+    # Missing volumes filed into a volumes-only series: no chapter can be replaced - the reason says that, not
+    # anything about MangaPixer's chapter lists (owner, 2026-10-09).
+    sid, sdir = make_series(db, library, {f"{SERIES} v01.cbz": b"volume 1", f"{SERIES} v02.cbz": b"volume 2"})
+    file_volumes(ledger, tmp_path, sid, sdir, ("3",))
+    report = upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    assert batch.status == "nothing" and batch.error == "the series holds no chapter files" and batch.files == ()
+    assert report.files_moved == 0 and names(holding) == []
