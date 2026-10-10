@@ -120,7 +120,8 @@ def units_text(record: DownloadRecord) -> str:
 
 
 def chapter_status_text(record: DownloadRecord) -> str:
-    """A chapter download (Suwayomi): "Downloading", "Downloading - <Suwayomi's error>", "Downloaded", "Filed ch 4",
+    """A chapter download (Suwayomi): "Downloading", "Downloading - <Suwayomi's error>", "Downloaded" (or "Downloaded -
+    <why it is not filed yet>"), "Filed ch 4",
     "Filed ch 4 - <why Suwayomi still has its copy>", "Filed ch 4 - done", "Failed: <reason>", "Cancelled"."""
     status, units = record.status, units_text(record)
     filed = f"Filed {units}" if units else "Filed"
@@ -132,6 +133,8 @@ def chapter_status_text(record: DownloadRecord) -> str:
         return f"{filed} - done"
     if status == DownloadStatus.FAILED:
         return f"Failed: {record.error}" if record.error else "Failed"
+    if status == DownloadStatus.DOWNLOADED and record.error:        # waits to be filed, and why (e.g. no folder set)
+        return f"Downloaded - {record.error}"
     return {DownloadStatus.DOWNLOADED: "Downloaded", DownloadStatus.CANCELLED: "Cancelled"}.get(status,
                                                                                                status.capitalize())
 

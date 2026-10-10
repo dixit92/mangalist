@@ -274,8 +274,10 @@ class _ChapterPass:
         if problem:
             return self._fail(rec, problem + "; nothing filed, Suwayomi's copy is left alone")
         if not self.download_dir or not os.path.isdir(self.download_dir):
-            self._wait(rec, "Suwayomi's download folder is not set or not there (Settings > Connected services > "
-                            "Suwayomi); nothing filed")
+            note = ("Suwayomi's download folder is not set or not there (Settings > Connected services > Suwayomi); "
+                    "nothing filed")
+            self._wait(rec, note)
+            self._note(rec, note)
             return None
         request = self.ledger.request(rec.id)
         src, why = find_cbz(self.download_dir, request)
@@ -289,7 +291,9 @@ class _ChapterPass:
         try:
             name = self._name(rec, request, info, number)
         except ImportError as exc:
-            self._wait(rec, f"the naming scheme is not available in this build ({exc}); nothing filed")
+            note = f"the naming scheme is not available in this build ({exc}); nothing filed"
+            self._wait(rec, note)
+            self._note(rec, note)
             return None
         if not name or "/" in name or "\\" in name or name in (".", ".."):
             return self._fail(rec, f"the naming scheme gave no usable name ({name!r}); nothing filed")
