@@ -384,7 +384,8 @@ def compile_template(template: Union[str, Template]) -> Template:
 MANGALIST_CHAPTER_SCHEME = "Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}"
 MANGALIST_VOLUME_SCHEME = "%T - Vol. %V3{-%VE3}{ [%G]}"
 
-# The owner's FMD2 scheme (PD 6; MangaList's default until 2026-10-10, now only what FMD2 writes). %I = FMD2's numbering index (C1 open for phase 2).
+# The owner's FMD2 scheme (PD 6; MangaList's default until 2026-10-10, now only what FMD2 writes). %I = FMD2's
+# numbering index (C1 open for phase 2).
 FMD2_CHAPTER_SCHEME = "%I4 [{Vol. %V4 }Ch. %C4%CF{ - %CT}{ [%G]}]"
 # Volumes keep their release name.
 FMD2_VOLUME_SCHEME = "%O"

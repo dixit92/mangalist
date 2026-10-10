@@ -70,14 +70,15 @@ _HEAD = re.compile(
 # "Ch. Extra", "Chapter Special": a chapter word followed by an extra word, no number.
 _HEAD_EXTRA = re.compile(r"^\s*(?:vol(?:ume)?\.?\s*\d+\s*)?ch(?:apter)?\.?\s*(?=[A-Za-z])", re.IGNORECASE)
 
-# A labelled chapter after the head's volume (or alone): "Contact. 0001", "episode 0035", "report011.", "#12".
+# A labelled chapter after the head's volume (or alone): "Contact. 0001", "episode 0035", "report011.", "Ep #12".
 _LABEL_END = r"(?=$|\.(?=\s|$)|[\s\-\u2013\u2014:\uff1a_\[\]])"
 _HEAD_LABEL = re.compile(
     rf"\s*(?<![A-Za-z]){CHAPTER_LABELS}\.?\s*[#-]?\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?{_LABEL_END}", re.IGNORECASE)
 # A bracket that starts with a number: the chapter (owner's library, 2026-10-10: arc parts "NNNN [NNNN  <arc title>
 # (N)]", "0011 [0011 report011. <title>]"). Accepted when the number is zero-padded ("0076") or clearly ends the head
 # (end of the bracket, two spaces, " - ", ". ", ": ", " ["), so "3 Days Later" stays a title.
-_HEAD_NUMBER = re.compile(rf"^\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?(?P<after>$|\s{{2,}}|\s+[-\u2013\u2014]\s|[.:]\s|\s*\[|\s)")
+_HEAD_NUMBER = re.compile(
+    rf"^\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?(?P<after>$|\s{{2,}}|\s+[-\u2013\u2014]\s|[.:]\s|\s*\[|\s)")
 _PADDED = re.compile(r"^0\d")
 
 # A body without any unit is accepted as FMD2 only for "NNNN [ ... ]" with an index of 3+ digits.
@@ -194,7 +195,9 @@ _SERIES_ENDS_IN_UNIT = re.compile(r"(?<![A-Za-z])(?:v|vol(?:ume)?\.?|ch(?:apter)
 def parse_release(name: str) -> Optional[ParsedName]:
     """Layer 3: ``Title vNN(-MM) (+ chapters) (Year) (Digital|Digital-Compilation) (Group) (fN)`` and the
     older ``Title vol NN`` / ``Title Vol. NN`` / ``Title cNNN (...)`` / ``Title NNN (Year) (Digital)``
-    forms. A bare number is accepted only with a year or edition tag; its kind stays unknown."""
+    forms. A bare number is accepted only with a year or edition tag; its kind stays unknown. The volume is the
+    LAST volume token before the tags, so "Part 5" in ``<Series> - Part 5 - <Subtitle> v05 (2022)`` stays in the
+    series title."""
     stem, _ = split_extension(name)
     m = _RELEASE.match(stem)
     if m is None:

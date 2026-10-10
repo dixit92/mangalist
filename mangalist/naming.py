@@ -19,8 +19,8 @@ MangaPixer's title, owner 2026-10-10).
 
 **Why parentheses for the title** (section 12): MangaPixer reads nothing inside ``( )`` / ``[ ]`` when the rest of the
 name states a unit, so a title such as "The Vol 2 Begins" is never read as volume 2 there; MangaList reads its own
-scheme back exactly (:data:`CHAPTER_SCHEME` / :data:`VOLUME_SCHEME`, the parser's layer 1 in every root), title and group
-as free text.
+scheme back exactly (:data:`CHAPTER_SCHEME` / :data:`VOLUME_SCHEME`, the parser's layer 1 in every root), title and
+group as free text.
 
 **Sanitising**: in a chapter title ``( )`` become ``[ ]`` and in a group ``[ ]`` become ``( )`` (so each part's
 brackets stay unambiguous); the characters Windows / SMB forbid are replaced (``:`` -> `` - `` before a space, else
@@ -410,8 +410,10 @@ def _no_volume(chapter: Decimal) -> Optional[Decimal]:
 
 def volume_lookup(db, series_id: int) -> Callable[[Decimal], Optional[Decimal]]:
     """The chapter -> volume lookup of library series ``series_id`` from MangaPixer's volume list (its own item or the
-    nearest ancestor's, exactly as the chapter-to-volume upgrades read it: :func:`mangalist.upgrades._knowledge_volumes`).
-    Without a list (series unknown, not matched, MangaPixer unreadable) every chapter has no volume."""
+    nearest ancestor's, exactly as the chapter-to-volume upgrades read it:
+    :func:`mangalist.upgrades._knowledge_volumes`), by :func:`volumes_from_list`'s rule. Without a list (series
+    unknown, not matched, MangaPixer unreadable) every chapter has no volume. Read once: call it again after a
+    MangaPixer sync."""
     from .downloads.placement import locate_series
     from .upgrades import _knowledge_volumes
 
