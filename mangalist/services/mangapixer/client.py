@@ -303,10 +303,15 @@ class MangaPixerClient:
     def _send(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
         """One request with the token (never in the URL); network and TLS failures become ConnectionFailed."""
         token = _check_token(self._token.reveal())
+        started = time.monotonic()
         try:
-            return self._session.request(method, self._url(endpoint), params=params, timeout=self.timeout,
+            resp = self._session.request(method, self._url(endpoint), params=params, timeout=self.timeout,
                                          verify=self.verify, headers={"Authorization": f"Bearer {token}"},
                                          allow_redirects=method == "GET")
+            # The endpoint only: never the headers (the token) and never a URL with credentials.
+            _log.debug("MangaPixer: %s %s -> HTTP %d in %.2f s", method, endpoint, resp.status_code,
+                       time.monotonic() - started)
+            return resp
         except requests.exceptions.SSLError:
             raise ConnectionFailed(
                 f"the certificate of {self.base_url} was not accepted (a self-signed MangaPixer certificate "

@@ -37,8 +37,6 @@ def make_mangapixer_sync(open_cache: Optional[Callable[[], object]] = None, clie
         result = sync_all(cache, client=client, should_stop=lambda: ctx.stop_requested, manual=False)
         if ctx.stop_requested:
             raise Cancelled()
-        if result.status == "skipped":
-            _log.info("MangaPixer sync skipped: %s", result.message)
         extra = result.summary()
         extra["mappings"] = {str(rid): {"library": m.library_id, "prefix": m.prefix, "manual": m.manual,
                                         "matched": m.matched, "unmatched": m.unmatched}

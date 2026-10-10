@@ -54,6 +54,13 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 `USER_ID` / `GROUP_ID` default to Unraid's `99` / `100`. The scheduled rescan is `MANGALIST_RESCAN_SCHEDULE`
 (default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1` (below).
 
+The schedules (`MANGALIST_RESCAN_SCHEDULE`, `MANGALIST_MANGAPIXER_SYNC_SCHEDULE`, `MANGALIST_DOWNLOADS_SCHEDULE`) and
+the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run defaults**: you
+change them in **Settings > Automation** and **Settings > Logging**, the container's background runner picks the change
+up within a minute (no restart), and a value set in Settings is used instead of the variable until you press "Use the
+container's value". The log files are in the data folder's `logs` folder (`mangalist.log` for the window,
+`headless.log` for the runner); Settings > Logging opens that folder or copies its path.
+
 #### Volumes from nyaa (Unraid, opt-in)
 
 With `MANGALIST_DOWNLOADS=1`, a series that MangaPixer has matched and that is licensed in English gets

@@ -1,5 +1,5 @@
 """The Settings dialog (offscreen Qt, a real database in a temporary folder, fake backend and fake MangaPixer client):
-its five sections, the live status of the connected services, the roots editor with Save / Cancel, the stored
+its six sections, the live status of the connected services, the roots editor with Save / Cancel, the stored
 switches, write-only secrets, and what ``open_settings`` reports as changed."""
 
 from __future__ import annotations
@@ -115,14 +115,15 @@ def all_text(widget):
 # --- the frame ----------------------------------------------------------------------------------------------
 
 
-def test_five_sections_in_the_mockups_order_with_their_hints(qapp, db, cache):
+def test_six_sections_in_the_mockups_order_with_their_hints(qapp, db, cache):
     dlg, _ = make(qapp, db, cache)
-    assert [k for k, _t, _h in sd.NAV] == list(SECTIONS) == [SECTION_LIBRARY, SECTION_SERVICES, SECTION_SOURCES,
-                                                              SECTION_MATCHING, SECTION_AUTOMATION]
+    assert [k for k, _t, _h in sd.NAV] == list(sd.DIALOG_SECTIONS) == [
+        SECTION_LIBRARY, SECTION_SERVICES, SECTION_SOURCES, SECTION_MATCHING, SECTION_AUTOMATION, sd.SECTION_LOGGING]
+    assert tuple(SECTIONS) == sd.DIALOG_SECTIONS[:5], "the shell's five are unchanged; Logging is the dialog's sixth"
     assert [(t, h) for _k, t, h in sd.NAV] == [
         ("Library", "Roots, file naming"), ("Connected services", "MangaPixer, qBittorrent, Suwayomi"),
         ("Download sources", "nyaa, Suwayomi sources"), ("Matching", "MangaUpdates"),
-        ("Automation", "Schedules, Remove Completed")]
+        ("Automation", "Schedules, Remove Completed"), ("Logging", "Level, log files and folder")]
     assert dlg.current == SECTION_LIBRARY and dlg.windowTitle() == "Settings"
     assert dlg._nav[SECTION_LIBRARY].property("current") is True
     dlg.show_section(SECTION_MATCHING)
@@ -461,17 +462,57 @@ def test_matching_has_only_the_switch_that_works_and_it_is_the_old_auto_start_mu
     assert config.load()["mu_autostart"] is True                                  # what the window reads after a scan
 
 
-def test_automation_shows_the_container_schedules_read_only(qapp, db, cache):
+def test_automation_schedules_are_editable_and_say_who_uses_them(qapp, db, cache):
     dlg, _ = make(qapp, db, cache, env={"MANGALIST_RESCAN_SCHEDULE": "daily@02:15"})
     page = dlg.pages[SECTION_AUTOMATION]
-    assert dict((what, label.text()) for what, label in page.schedule_labels) == {
-        "Rescan the library": "daily 02:15", "Sync with MangaPixer": "daily 03:15",
-        "File finished downloads": "every hour (and Check qBittorrent now)"}
-    editors = [w for w in page.findChildren(QLineEdit)                  # read-only: no editor for the schedules
-               if w is not page.holding_edit]                                    # (replaced chapters' own)
-    assert editors == []
-    assert "changed there" in all_text(page)
-    assert "Automatic downloads" in all_text(page) and "next phase" in all_text(page)
+    assert {job: e.text() for job, e in page.schedule_edits.items()} == {
+        "rescan": "daily@02:15", "mangapixer-sync": "daily@03:15", "downloads": "every 1h"}
+    assert {job: l.text() for job, l in page.schedule_reading.items()} == {
+        "rescan": "daily 02:15", "mangapixer-sync": "daily 03:15",
+        "downloads": "every hour (and Check qBittorrent now)"}
+    assert all(btn.isHidden() for btn in page.schedule_reset.values()), "nothing stored yet: nothing to reset"
+    text = all_text(page)
+    assert "background runner in the Docker / Unraid container" in text and "no restart" in text
+    assert "daily@03:30" in text and "every 12h" in text and "off" in text
+    assert "Automatic downloads" in text and "next phase" in text
+
+
+def test_a_schedule_typed_in_settings_is_stored_and_beats_the_container(qapp, db, cache):
+    dlg, _ = make(qapp, db, cache, env={"MANGALIST_RESCAN_SCHEDULE": "daily@02:15"})
+    page = dlg.pages[SECTION_AUTOMATION]
+    edit = page.schedule_edits["rescan"]
+    edit.setText("4:05")                                        # any form the parser knows ...
+    edit.editingFinished.emit()
+    assert db.get_setting("schedule_rescan") == "daily@04:05"   # ... is stored in the one canonical form
+    assert edit.text() == "daily@04:05" and page.schedule_reading["rescan"].text() == "daily 04:05"
+    assert not page.schedule_reset["rescan"].isHidden() and "saved" in page.schedule_status.text()
+    page.schedule_reset["rescan"].click()                       # "Use the container's value"
+    assert db.get_setting("schedule_rescan") is None
+    assert edit.text() == "daily@02:15" and page.schedule_reset["rescan"].isHidden()
+
+
+def test_a_bad_schedule_is_refused_with_a_message_and_nothing_is_stored(qapp, db, cache):
+    dlg, _ = make(qapp, db, cache)
+    page = dlg.pages[SECTION_AUTOMATION]
+    for typed, said in (("sometimes", "Not understood"), ("25:00", "Not understood"), ("", "Enter a time"),
+                        ("every 1m", "Not understood"), ("every 0.1h", "too often")):
+        edit = page.schedule_edits["mangapixer-sync"]
+        edit.setText(typed)
+        edit.editingFinished.emit()
+        assert said in page.schedule_status.text(), typed
+        assert page.schedule_status.property("tone") == "bad" and "Nothing was changed" in page.schedule_status.text()
+        assert db.get_setting("schedule_mangapixer_sync") is None
+    edit.setText("off")
+    edit.editingFinished.emit()
+    assert db.get_setting("schedule_mangapixer_sync") == "off"
+    assert page.schedule_reading["mangapixer-sync"].text() == "off"
+
+
+def test_a_bad_container_value_is_shown_flagged_not_hidden(qapp, db, cache):
+    dlg, _ = make(qapp, db, cache, env={"MANGALIST_RESCAN_SCHEDULE": "whenever"})
+    page = dlg.pages[SECTION_AUTOMATION]
+    assert page.schedule_edits["rescan"].text() == "whenever"
+    assert page.schedule_reading["rescan"].text() == "whenever (not understood)"
 
 
 def test_remove_completed_goes_to_the_backend_and_back(qapp, db, cache):
@@ -515,7 +556,7 @@ def test_no_secret_is_in_any_text_of_the_dialog(qapp, db, cache):
     connect_mangapixer(cache)
     backend = FakeBackend()
     dlg, _ = make(qapp, db, cache, backend)
-    for key in SECTIONS:
+    for key in sd.DIALOG_SECTIONS:
         dlg.show_section(key)
     settle(qapp, dlg)
     text = all_text(dlg) + " ".join(b.text() for b in dlg.findChildren(QCheckBox))

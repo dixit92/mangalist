@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, Mapping
+
+_log = logging.getLogger(__name__)
 
 _MISSING = object()
 
@@ -27,6 +30,13 @@ class SettingsMixin:
         with self.connect() as con:
             con.executemany("INSERT INTO settings (key, value) VALUES (?, ?) "
                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", rows)
+        # The keys only: a value may be a path, a name or (for a service) something private.
+        _log.debug("Settings stored: %s", ", ".join(sorted(str(k) for k in values)))
+
+    def delete_setting(self, key: str) -> None:
+        """Forget *key* (the next read gives the default again)."""
+        with self.connect() as con:
+            con.execute("DELETE FROM settings WHERE key = ?", (key,))
 
     def all_settings(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {}

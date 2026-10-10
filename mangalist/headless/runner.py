@@ -7,14 +7,15 @@
 
 Logs go to ``headless.log`` in the normal log folder (a separate file from the GUI's
 ``mangalist.log``, so the two processes in the container never rotate the same file) and, from
-INFO up, to standard output (the container log).
+INFO up, to standard output (the container log). The file's level, the schedules and the log rotation are
+the owner's settings (Settings > Logging / Automation, stored in the database): the runner re-reads them about
+once a minute, so a change needs no restart; ``MANGALIST_*_SCHEDULE`` / ``MANGALIST_LOG_LEVEL`` only seed them.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import logging.handlers
 import os
 import signal
 import sys
@@ -29,27 +30,12 @@ LOCK_NAME = "headless.lock"
 
 
 def setup_logging() -> None:
-    """The app's logging (``log_config.setup``), retargeted for a long-running service."""
-    from .. import log_config, paths
+    """The app's logging (``log_config.setup``) for a long-running service: its own file (``headless.log``) and
+    INFO and up on standard output. The file's level is the one in Settings > Logging; it is re-read by every
+    scheduler tick (``log_config.apply_stored``), so a change needs no restart."""
+    from .. import log_config
 
-    log_config.setup()
-    root = logging.getLogger()
-    for h in list(root.handlers):
-        if isinstance(h, logging.handlers.RotatingFileHandler) \
-                and Path(h.baseFilename).name == "mangalist.log":
-            root.removeHandler(h)
-            h.close()
-            fh = logging.handlers.RotatingFileHandler(
-                paths.log_dir() / LOG_NAME, maxBytes=h.maxBytes, backupCount=h.backupCount,
-                encoding="utf-8", delay=True)
-            fh.setLevel(h.level)
-            fh.setFormatter(h.formatter)
-            root.addHandler(fh)
-        elif type(h) is logging.StreamHandler:
-            h.setStream(sys.stdout)
-            h.setLevel(logging.INFO)
-    # Libraries that log every HTTP request stay at WARNING on the console.
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    log_config.setup(filename=LOG_NAME, console_level=logging.INFO, console_stream=sys.stdout)
 
 
 class InstanceLock:
@@ -112,25 +98,44 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+def _open_database():
+    """The library database (settings: schedules, log level), or None when it cannot be opened: the runner then
+    runs on the environment's values rather than not at all."""
+    try:
+        from .. import store
+
+        db = store.get_store()
+        db.get_setting("schedule_rescan")           # opens it now, so a broken file shows up here
+        return db
+    except Exception:  # noqa: BLE001
+        _log.warning("Could not open the settings database; using the environment's values", exc_info=True)
+        return None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
 
-    from .. import __version__, paths
+    from .. import __version__, log_config, paths
     from .jobs import build_registry
     from .scheduler import Scheduler
-    from .settings import HeadlessSettings
+    from .settings import HeadlessSettings, resolve_schedules
     from .state import STATE_NAME, StateStore
 
     setup_logging()
+    db = _open_database()
+    if db is not None:
+        log_config.apply_stored(db)
     try:
-        settings = HeadlessSettings.from_env()
+        settings = HeadlessSettings.from_env(db=db)
     except ValueError as exc:
         _log.error("Invalid headless setting: %s", exc)
         return 2
 
     registry = build_registry(settings)
     store = StateStore(paths.data_dir() / STATE_NAME).load()
-    scheduler = Scheduler(registry, store, settings.tz)
+    scheduler = Scheduler(registry, store, settings.tz,
+                          reload_schedules=lambda: resolve_schedules(db),
+                          on_tick=(lambda: log_config.apply_stored(db)) if db is not None else None)
 
     if args.status:
         for row in scheduler.status():
@@ -143,9 +148,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         _log.error("Another headless runner is using %s; exiting", paths.data_dir())
         return 3
     try:
-        _log.info("MangaList %s headless runner; data folder %s; time zone %s; downloads %s",
+        current = log_config.current()
+        _log.info("MangaList %s headless runner; data folder %s; time zone %s; downloads %s; log level %s",
                   __version__, paths.data_dir(), getattr(settings.tz, "key", settings.tz),
-                  "on" if settings.downloads_enabled else "off (opt-in)")
+                  "on" if settings.downloads_enabled else "off (opt-in)", current.level if current else "?")
 
         def _on_signal(signum, _frame):
             _log.info("Received %s; stopping after the current step",

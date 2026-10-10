@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
@@ -394,7 +395,9 @@ def scan_one_root(
                                loose=loose, root_id=rs.root_id, kind_hints=hints, schemes=_root_schemes(root))
     except (OSError, NotADirectoryError) as exc:
         rs.error = str(exc)
+        _log.warning("Scan: cannot read the root %s (%s); its series are left as they were", name, exc)
     rs.loose = [LooseArchive(rs.root_id, name, p) for p in loose]
+    _log.debug("Scan: root %s - %d series folders, %d loose archives", name, len(rs.entries), len(rs.loose))
     return rs
 
 
@@ -437,6 +440,7 @@ def scan_and_record_library(
     result = LibraryScan()
     many = len(roots) > 1
     recorded = False
+    started = time.monotonic()
     for number, root in enumerate(roots, start=1):
         if on_start is not None:
             on_start(number, len(roots), getattr(root, "name", "") or str(root.path))
@@ -458,6 +462,10 @@ def scan_and_record_library(
             refresh_mangapixer_pairing(db)
         except Exception:  # noqa: BLE001 - the scan is recorded; the daily sync pairs again
             _log.warning("Pairing the roots with MangaPixer's libraries failed", exc_info=True)
+    _log.info("Scan: %d root%s, %d series, %d archives, %d loose, %d renamed or moved, %d unreadable root%s in %.1f s",
+              len(roots), "" if len(roots) == 1 else "s", len(result.entries),
+              sum(len(e.files) for e in result.entries), len(result.loose), len(result.renamed),
+              len(result.errors), "" if len(result.errors) == 1 else "s", time.monotonic() - started)
     return result
 
 
@@ -489,6 +497,7 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
     scanned = [rs for rs in result.roots if not rs.error and rs.root_id is not None]
     for rs in scanned:
         db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries))
+        _log.debug("Scan: recorded %s (%d series)", rs.root_name, len(rs.entries))
     try:
         report = record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in scanned])
         result.identity = report
@@ -571,4 +580,5 @@ def answer_series_kind(db, entry: MangaEntry, kind: Optional[str]) -> bool:
         return False
     row = db.get_series(*located)
     db.sync_units({row.id: units_of_entry(entry)})
+    _log.info("Series kind answered: %s is %s", Path(entry.folder).name, k or "not set (answer forgotten)")
     return True

@@ -1,10 +1,11 @@
-"""Settings > Download sources, Matching and Automation.
+"""Settings > Download sources, Matching, Automation and Logging.
 
 **Download sources** - where releases come from. nyaa (volumes; needs qBittorrent) with the options the search already
 supports (English / raw, hide light novels, only trusted uploaders) and two shown fixed because that is how the search
 always works (Digital first, no 0-seeder releases); Suwayomi sources (chapters; needs Suwayomi) greyed out until
-Suwayomi is connected. **Matching** - where series information comes from. **Automation** - the schedules (read-only:
-they come from the container's environment), Remove Completed, "ask MangaPixer to rescan after filing".
+Suwayomi is connected. **Matching** - where series information comes from. **Automation** - the schedules (editable,
+stored in the database; the container's variables only seed them), Remove Completed, "ask MangaPixer to rescan after
+filing". **Logging** - the level of the log files (and optionally of one area), their size, and the log folder.
 
 Every switch is stored as soon as it is changed (there is no Save here), in the library database's settings.
 """
@@ -12,21 +13,27 @@ Every switch is stored as soon as it is changed (there is no Save here), in the 
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Mapping, Optional
+from typing import Callable, Dict, Mapping, Optional
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QComboBox,
     QGraphicsOpacityEffect,
     QGridLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QRadioButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from .. import upgrades
+from .. import log_config, paths, upgrades
 
 from ..downloads.options import (
     KEY_MU_AUTOSTART,
@@ -39,17 +46,25 @@ from ..downloads.options import (
     set_flag,
 )
 from .background import start_call
-from .download_rules import schedule_rows
+from .download_rules import SCHEDULE_HINT, reset_schedule_text, save_schedule_text, schedule_entries
 from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
 from .downloads_backend import BackendError, DownloadsBackend
 from .settings_common import SectionPage, placeholder
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
+from ..headless.settings import SOURCE_STORED
 from .shell import SECTION_SERVICES
+
+SECTION_LOGGING = "logging"
 
 SOURCES_LEAD = "Where releases come from. A source works only when the service it needs is connected."
 MATCHING_LEAD = "Where series information comes from. Not download sources."
 AUTOMATION_LEAD = "What runs on its own in the container."
+LOGGING_LEAD = "What MangaList writes to its log files, and where they are."
+SCHEDULE_NOTE = ("These times are used by MangaList's background runner in the Docker / Unraid container, in the "
+                 "container's time zone; the desktop app on its own runs nothing on a timer. A change reaches the "
+                 "runner within a minute - no restart. Write daily@03:30 (every day at 03:30, 24-hour clock), "
+                 "every 12h (every 12 hours) or off.")
 SUWAYOMI_EXPLAIN = ("Once connected: the sources Suwayomi offers (MangaDex, official English sites, ...) in the order "
                     "MangaList tries them, which to never use, and the preferred scanlation groups - for all series, "
                     "or per series.")
@@ -198,21 +213,8 @@ class AutomationPage(SectionPage):
         self._empty_call = None
         self.confirm_empty_all = self._ask_empty_all        # replaceable in tests (answers for the owner)
 
-        grid = QGridLayout()
-        grid.setColumnMinimumWidth(0, 260)
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(10)
-        self.schedule_labels = []
-        for row, (what, when, from_env) in enumerate(schedule_rows(env)):
-            grid.addWidget(label(what), row, 0)
-            text = label(when, "mono")
-            text.setToolTip("Set by the container's environment" if from_env else "The default; set by the container's "
-                            "environment variable")
-            self.schedule_labels.append((what, text))
-            grid.addWidget(text, row, 1)
-        grid.setColumnStretch(1, 1)
-        self.body.addLayout(grid)
-        self.body.addWidget(label("These times come from the container's settings and are changed there.", "muted"))
+        self._env = env
+        self._build_schedules()
 
         self.remove_check = checkbox("Remove Completed - delete the torrent and its downloaded copy once qBittorrent "
                                      "stops it at its seed goal")
@@ -241,6 +243,75 @@ class AutomationPage(SectionPage):
     HOLDING_DAY_CHOICES = (7, 14, 30, 60, 90, 180, 365)
     HOLDING_HINT = ("Outside every library folder and MangaPixer library, on the same disk share as the library "
                     "(the container's /data). Files keep their folders there, so they can be restored.")
+
+    # Schedules (owner, 2026-10-09: "This should be configurable by the user"): stored in the database, so the runner in
+    # the container re-reads them; the container's variables only seed them.
+    def _build_schedules(self) -> None:
+        grid = QGridLayout()
+        grid.setColumnMinimumWidth(0, 260)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(10)
+        self.schedule_edits: Dict[str, QLineEdit] = {}
+        self.schedule_reading: Dict[str, QLabel] = {}
+        self.schedule_reset: Dict[str, QPushButton] = {}
+        self.schedule_source: Dict[str, QLabel] = {}
+        for row, entry in enumerate(schedule_entries(self._db, self._env)):
+            edit = QLineEdit()
+            edit.setAccessibleName(entry.label)
+            edit.setPlaceholderText(SCHEDULE_HINT)
+            edit.setMaximumWidth(180)
+            reset = button("Use the container's value", link=True,
+                           tip="Forget the time set here; the container's own setting (or the default) applies again")
+            source = label("", "muted")
+            reading = label("", "mono")
+            grid.addWidget(label(entry.label), row, 0)
+            grid.addWidget(edit, row, 1)
+            grid.addLayout(hbox(reading, source, reset, None, spacing=12), row, 2)
+            self.schedule_edits[entry.job] = edit
+            self.schedule_reading[entry.job] = reading
+            self.schedule_source[entry.job] = source
+            self.schedule_reset[entry.job] = reset
+            edit.editingFinished.connect(lambda job=entry.job: self._schedule_edited(job))
+            reset.clicked.connect(lambda _=False, job=entry.job: self._schedule_reset(job))
+        grid.setColumnStretch(2, 1)
+        self.body.addLayout(grid)
+        self.schedule_status = label("", wrap=True)
+        self.body.addWidget(self.schedule_status)
+        self.body.addWidget(label(SCHEDULE_NOTE, "muted", wrap=True))
+        self._show_schedules()
+
+    def _show_schedules(self) -> None:
+        for entry in schedule_entries(self._db, self._env):
+            self.schedule_edits[entry.job].setText(entry.edit_text)
+            self.schedule_reading[entry.job].setText(entry.when)
+            stored = entry.source == SOURCE_STORED
+            self.schedule_source[entry.job].setText("set here" if stored else "from the container")
+            self.schedule_reset[entry.job].setVisible(stored)
+            set_prop(self.schedule_reading[entry.job], "tone", "" if entry.valid else "bad")
+
+    def _say_schedule(self, text: str, tone: str = "") -> None:
+        self.schedule_status.setText(text)
+        set_prop(self.schedule_status, "tone", tone if text else "")
+
+    def _schedule_edited(self, job: str) -> None:
+        if self._loading:
+            return
+        edit = self.schedule_edits[job]
+        current = next(e for e in schedule_entries(self._db, self._env) if e.job == job)
+        if edit.text().strip() == current.edit_text:
+            return
+        try:
+            save_schedule_text(self._db, job, edit.text())
+        except ValueError as exc:
+            self._say_schedule(f"{current.label}: {exc} Nothing was changed.", "bad")
+            return
+        self._show_schedules()
+        self._say_schedule(f"{current.label}: saved. The runner uses it within a minute.", "ok")
+
+    def _schedule_reset(self, job: str) -> None:
+        reset_schedule_text(self._db, job)
+        self._show_schedules()
+        self._say_schedule("Back to the container's value.", "ok")
 
     def _build_replaced(self) -> None:
         box = card("true")
@@ -406,6 +477,7 @@ class AutomationPage(SectionPage):
                 self.remove_check.setChecked(False)
         self.scan_note.setVisible(bool(self._cache is not None and scan_forbidden(self._cache)))
         self._refresh_replaced()
+        self._show_schedules()
         self._loading = False
 
     def on_show(self) -> None:
@@ -429,3 +501,164 @@ class AutomationPage(SectionPage):
             return
         self.status_label.setText("")
         self.downloads_changed.emit()
+
+
+LOG_LEVEL_HELP = {
+    "error": "Only failures.",
+    "warning": "Failures and problems MangaList got past.",
+    "info": "What MangaList does, one line per action. The usual choice.",
+    "debug": "Everything, for tracking down a fault. The files grow quickly.",
+}
+
+
+class LoggingPage(SectionPage):
+    """The log level (one for the app and the container's runner: both read the same settings), optional levels per
+    area, the size of the files, and the log folder. Every change is stored and applied at once (no Save)."""
+
+    def __init__(self, db, parent: Optional[QWidget] = None, env: Optional[Mapping[str, str]] = None,
+                 open_folder: Optional[Callable[[str], object]] = None,
+                 copy_text: Optional[Callable[[str], object]] = None):
+        super().__init__("Logging", LOGGING_LEAD, parent)
+        self._db = db
+        self._env = env
+        self._loading = True
+        self._open_folder = open_folder or (lambda folder: QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
+        self._copy_text = copy_text or (lambda text: QApplication.clipboard().setText(text))
+
+        box = card("true")
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(16, 14, 16, 14)
+        bv.setSpacing(10)
+        self.level_combo = QComboBox()
+        self.level_combo.setAccessibleName("Log level")
+        for key, text in log_config.LEVEL_LABELS.items():
+            self.level_combo.addItem(text, key)
+        self.level_help = label("", "muted", wrap=True)
+        bv.addLayout(hbox(label("Log level", "name"), self.level_combo, None, spacing=12))
+        bv.addWidget(self.level_help)
+        bv.addWidget(label("The same level is used by the desktop app and by the container's background runner "
+                           "(they write separate files). The runner picks a change up within a minute.", "muted",
+                           wrap=True))
+        self.body.addWidget(box)
+
+        areas = card("true")
+        av = QVBoxLayout(areas)
+        av.setContentsMargins(16, 14, 16, 14)
+        av.setSpacing(8)
+        av.addWidget(label("Levels for one part of the app", "name"))
+        av.addWidget(label("Optional. Turn one part up to Debug while you look into a problem, or down to Error "
+                           "to quiet it, without changing the rest.", "muted", wrap=True))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(6)
+        self.area_combos: Dict[str, QComboBox] = {}
+        for row, (key, text, _prefixes) in enumerate(log_config.AREAS):
+            combo = QComboBox()
+            combo.setAccessibleName(f"Log level for {text}")
+            combo.addItem("Same as above", "")
+            for level, name in log_config.LEVEL_LABELS.items():
+                combo.addItem(name, level)
+            self.area_combos[key] = combo
+            grid.addWidget(label(text), row, 0)
+            grid.addWidget(combo, row, 1)
+        grid.setColumnStretch(2, 1)
+        av.addLayout(grid)
+        self.body.addWidget(areas)
+
+        files = card("true")
+        fv = QVBoxLayout(files)
+        fv.setContentsMargins(16, 14, 16, 14)
+        fv.setSpacing(8)
+        fv.addWidget(label("Log files", "name"))
+        self.size_spin = QSpinBox()
+        self.size_spin.setAccessibleName("Size of a log file")
+        self.size_spin.setRange(*log_config.MAX_MB_RANGE)
+        self.size_spin.setSuffix(" MB")
+        self.keep_spin = QSpinBox()
+        self.keep_spin.setAccessibleName("Old log files kept")
+        self.keep_spin.setRange(*log_config.BACKUPS_RANGE)
+        fgrid = QGridLayout()
+        fgrid.setHorizontalSpacing(16)
+        fgrid.setVerticalSpacing(6)
+        fgrid.addWidget(label("A file is closed at"), 0, 0)
+        fgrid.addLayout(hbox(self.size_spin, None), 0, 1)
+        fgrid.addWidget(label("Old files kept"), 1, 0)
+        fgrid.addLayout(hbox(self.keep_spin, None), 1, 1)
+        fgrid.setColumnStretch(1, 1)
+        fv.addLayout(fgrid)
+        self.space_label = label("", "muted", wrap=True)
+        fv.addWidget(self.space_label)
+        self.folder_label = label(str(paths.log_dir()), "mono", wrap=True, selectable=True)
+        fv.addWidget(self.folder_label)
+        self.btn_open = button("Open the log folder")
+        self.btn_copy = button("Copy the log folder path")
+        fv.addLayout(hbox(self.btn_open, self.btn_copy, None))
+        self.folder_status = label("", wrap=True)
+        fv.addWidget(self.folder_status)
+        self.body.addWidget(files)
+
+        self.refresh()
+        self.level_combo.currentIndexChanged.connect(self._changed)
+        for combo in self.area_combos.values():
+            combo.currentIndexChanged.connect(self._changed)
+        self.size_spin.valueChanged.connect(self._changed)
+        self.keep_spin.valueChanged.connect(self._changed)
+        self.btn_open.clicked.connect(self.open_log_folder)
+        self.btn_copy.clicked.connect(self.copy_log_folder)
+        self._loading = False
+
+    def refresh(self) -> None:
+        was, self._loading = self._loading, True
+        s = log_config.load(self._db, self._env)
+        self.level_combo.setCurrentIndex(self.level_combo.findData(s.level))
+        for key, combo in self.area_combos.items():
+            combo.setCurrentIndex(combo.findData(s.areas.get(key, "")))
+        self.size_spin.setValue(s.max_mb)
+        self.keep_spin.setValue(s.backups)
+        self._show_help(s)
+        self._loading = was
+
+    def settings(self) -> "log_config.LogSettings":
+        return log_config.LogSettings(
+            level=self.level_combo.currentData(),
+            areas={key: combo.currentData() for key, combo in self.area_combos.items() if combo.currentData()},
+            max_mb=self.size_spin.value(), backups=self.keep_spin.value())
+
+    def _show_help(self, s: "log_config.LogSettings") -> None:
+        self.level_help.setText(LOG_LEVEL_HELP[s.level])
+        total = s.max_mb * (s.backups + 1)
+        self.space_label.setText(f"Up to {total} MB on disk for each log (the file being written, {s.max_mb} MB, plus "
+                                 f"{s.backups} old file{'s' if s.backups != 1 else ''}); the oldest is deleted first.")
+
+    def _changed(self, *_args) -> None:
+        if self._loading:
+            return
+        s = log_config.save(self._db, self.settings())          # stored, then in force at once in this window
+        log_config.apply(s)
+        self._show_help(s)
+
+    def open_log_folder(self) -> bool:
+        folder = paths.log_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)           # nothing is written before the first message
+            opened = self._open_folder(str(folder))
+        except OSError as exc:
+            opened, why = False, f" ({exc})"
+        else:
+            why = ""
+        if opened is False:
+            self._say_folder(f"Could not open the folder{why}. Its path is above; copy it instead.", "bad")
+            return False
+        self._say_folder("", "")
+        return True
+
+    def copy_log_folder(self) -> None:
+        self._copy_text(str(paths.log_dir()))
+        self._say_folder("Path copied.", "ok")
+
+    def _say_folder(self, text: str, tone: str) -> None:
+        self.folder_status.setText(text)
+        set_prop(self.folder_status, "tone", tone if text else "")
+
+    def on_show(self) -> None:
+        self.refresh()

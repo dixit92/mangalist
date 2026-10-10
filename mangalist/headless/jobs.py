@@ -72,10 +72,16 @@ class Job:
     enabled: bool = True
     description: str = ""
     catch_up: bool = True       # run once after downtime if a due time was missed
+    gate: bool = True           # switched on apart from the schedule (downloads opt-in); schedule edits keep it
 
     @property
     def active(self) -> bool:
         return self.enabled and self.schedule is not None
+
+    def set_schedule(self, schedule: Optional[Schedule]) -> None:
+        """A schedule edited while the runner is up: on again when it names a time and the job is switched on."""
+        self.schedule = schedule
+        self.enabled = self.gate and schedule is not None
 
 
 class JobRegistry:
@@ -375,8 +381,8 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
         Job("dispatch-batch", make_dispatch(settings.downloads_enabled),
             settings.dispatch_schedule, enabled=settings.downloads_enabled,
             description="Dispatch the batched downloads (opt-in, off by default)",
-            catch_up=settings.catch_up),
+            catch_up=settings.catch_up, gate=bool(settings.downloads_enabled)),
         Job(DL_JOB, make_downloads_job(), dl_schedule,
             enabled=bool(settings.downloads_enabled) and dl_schedule is not None,
-            description=DL_DESCRIPTION, catch_up=settings.catch_up),
+            description=DL_DESCRIPTION, catch_up=settings.catch_up, gate=bool(settings.downloads_enabled)),
     ])
