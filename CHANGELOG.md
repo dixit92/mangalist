@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.14] - 2026-10-10
+
+The thirteenth MangaList release (testing build): MangaList's own naming scheme and a library renamer that brings existing files to it safely (dry run, preview, batches with undo), chapter downloads through Suwayomi, schedules picked from a list, and the holding folder's size.
+
 - **MangaList's own naming scheme** (the names the renamer and chapter downloads will give files): chapters are `Ch. 0102.00 Vol. 012 (Chapter title) [Group].cbz` - the chapter number first with four digits and always two decimals (`Ch. 0010.50`), then the volume, the chapter title and the group, each only when known; a range is `Ch. 0010.00-0012.00`. Volumes are `Series title - Vol. 001 [Group].cbz` (a range `Vol. 001-003`). Every chapter name starts with its number, so any file browser sorts them in reading order, and a volume learned later only changes the end of the name. Characters Windows does not allow are replaced, brackets inside a title become `[ ]` and inside a group `( )`, and the group is capped at 32 characters. No name is longer than 255 bytes; when the Windows server name is set, no Windows path (`\\SERVER\share\...`) is longer than 259 characters - the chapter title is shortened first (ending with `…`), then the group, never the numbers.
 - **Every library reads these names exactly**, also a library with its own naming scheme: a chapter title such as "The Vol 2 Begins" or "Chapter 5 of the Ch. 3 Arc" is no longer read as volume 2 or chapters 3-10.
 - **More chapter names are understood**: chapters a site labels with its own word ("Contact. 0001", "Episode 35", "report011", "Pact 0015", "Lesson", "Stage", "Round", "Night" and others) are chapters, not extras; an FMD2 name whose bracket starts with a number (`0076 [0076  Arc title (3)]`) is that chapter; a volume release with "Part 5" in its title (`Series - Part 5 - Subtitle v05 (2022) (Digital)`) is volume 5, not "5".
