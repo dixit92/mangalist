@@ -97,9 +97,10 @@ class DownloadsList(QWidget):
         self.btn_refresh.setToolTip("Show the latest saved state of these downloads (asks neither qBittorrent nor "
                                     "MangaPixer)")
         self.btn_refresh.clicked.connect(self.refresh)
-        self.btn_check = button("Check qBittorrent now", tip="Ask qBittorrent now: file finished downloads and remove "
-                                                              "completed torrents - the same check that runs every hour "
-                                                              "on its own")
+        self.btn_check = button("Check qBittorrent now", tip="Ask qBittorrent now: file finished downloads, remove "
+                                                              "completed torrents and hand queued downloads over while "
+                                                              "they fit the download budget - the same check that runs "
+                                                              "every hour on its own")
         self.btn_check.clicked.connect(self.check_now)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
