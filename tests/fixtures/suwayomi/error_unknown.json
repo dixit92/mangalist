@@ -1,0 +1,10 @@
+{
+ "errors": [
+  {
+   "message": "The field at path '/chapter' was declared as a non null type, but the code involved in retrieving data has wrongly returned a null value.  The graphql specification requires that the parent field be set to null, or if that is non nullable that it bubble up null to its parent and so on. The non-nullable type is 'ChapterType' within parent type 'Query'",
+   "path": [
+    "chapter"
+   ]
+  }
+ ]
+}

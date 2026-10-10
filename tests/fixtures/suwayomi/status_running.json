@@ -1,0 +1,31 @@
+{
+ "data": {
+  "downloadStatus": {
+   "state": "STARTED",
+   "queue": [
+    {
+     "position": 0,
+     "progress": 0.0,
+     "state": "DOWNLOADING",
+     "tries": 0,
+     "chapter": {
+      "id": 1,
+      "name": "Vol.1 Ch.1 - Example Title 1",
+      "isDownloaded": false
+     }
+    },
+    {
+     "position": 1,
+     "progress": 0.0,
+     "state": "QUEUED",
+     "tries": 0,
+     "chapter": {
+      "id": 2,
+      "name": "Vol.1 Ch.2 - Example Title 2",
+      "isDownloaded": false
+     }
+    }
+   ]
+  }
+ }
+}

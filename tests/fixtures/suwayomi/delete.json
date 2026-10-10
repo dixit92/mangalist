@@ -1,0 +1,12 @@
+{
+ "data": {
+  "deleteDownloadedChapters": {
+   "chapters": [
+    {
+     "id": 1,
+     "isDownloaded": false
+    }
+   ]
+  }
+ }
+}

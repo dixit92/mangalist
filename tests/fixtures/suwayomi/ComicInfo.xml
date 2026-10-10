@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Title>Vol.1 Ch.1 - Example Title 1</Title>
+  <Series>Example Manga</Series>
+  <Number>1</Number>
+  <Summary>A made-up summary.
+
+Final chapter:
+Vol.8 Ch.953</Summary>
+  <Writer>Example Author</Writer>
+  <Penciller>Example Author</Penciller>
+  <Translator>Alpha Scans</Translator>
+  <Genre>4-Koma, Comedy</Genre>
+  <Web>https://mangadex.org/chapter/00000000-0000-4000-8000-0000000c0001</Web>
+  <ty:PublishingStatusTachiyomi xmlns:ty="http://www.w3.org/2001/XMLSchema">Completed</ty:PublishingStatusTachiyomi>
+  <Day>1</Day>
+  <Month>2</Month>
+  <Year>2018</Year>
+</ComicInfo>

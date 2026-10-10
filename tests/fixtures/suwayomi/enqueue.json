@@ -1,0 +1,47 @@
+{
+ "data": {
+  "enqueueChapterDownloads": {
+   "downloadStatus": {
+    "state": "STOPPED",
+    "queue": [
+     {
+      "position": 0,
+      "progress": 0.0,
+      "state": "QUEUED",
+      "tries": 0,
+      "chapter": {
+       "id": 1,
+       "name": "Vol.1 Ch.1 - Example Title 1",
+       "chapterNumber": 1.0,
+       "scanlator": "Alpha Scans",
+       "isDownloaded": false,
+       "mangaId": 1
+      },
+      "manga": {
+       "id": 1,
+       "title": "Example Manga"
+      }
+     },
+     {
+      "position": 1,
+      "progress": 0.0,
+      "state": "QUEUED",
+      "tries": 0,
+      "chapter": {
+       "id": 2,
+       "name": "Vol.1 Ch.2 - Example Title 2",
+       "chapterNumber": 2.0,
+       "scanlator": "Alpha Scans",
+       "isDownloaded": false,
+       "mangaId": 1
+      },
+      "manga": {
+       "id": 1,
+       "title": "Example Manga"
+      }
+     }
+    ]
+   }
+  }
+ }
+}
