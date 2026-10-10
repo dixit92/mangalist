@@ -112,7 +112,7 @@ def find_volumes_availability(*, series_id: Optional[int], folder: str, title: s
 
 
 def status_text(record: DownloadRecord) -> str:
-    """"Sent", "Downloaded", "Filed v03-v05 - seeding", "Filed v03-v05 - done", "Failed: <reason>", "Cancelled".
+    """"Downloading", "Downloaded", "Filed v03-v05 - seeding", "Filed v03-v05 - done", "Failed: <reason>", "Cancelled".
 
     The volumes come first: once filed they are in the library, whatever happens to the torrent afterwards - "done"
     means qBittorrent finished seeding and the torrent with its downloaded copy was removed (never the library's)."""
@@ -125,7 +125,7 @@ def status_text(record: DownloadRecord) -> str:
         return f"{filed} - done"
     if status == DownloadStatus.FAILED:
         return f"Failed: {record.error}" if record.error else "Failed"
-    return {DownloadStatus.SENT: "Sent", DownloadStatus.DOWNLOADED: "Downloaded",
+    return {DownloadStatus.SENT: "Downloading", DownloadStatus.DOWNLOADED: "Downloaded",
             DownloadStatus.CANCELLED: "Cancelled"}.get(status, status.capitalize())
 
 

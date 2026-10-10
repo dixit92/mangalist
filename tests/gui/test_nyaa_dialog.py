@@ -270,3 +270,17 @@ def test_default_confirm_is_a_question_box(qapp, monkeypatch):
 
     monkeypatch.setattr(releases_panel.QMessageBox, "question", staticmethod(fake_question))
     assert releases_panel._default_confirm(None, "Send it?") is False and seen["title"] == "Send to qBittorrent"
+
+
+def test_the_published_column_fits_a_whole_date_once_shown(qapp):
+    """The owner's screen showed "2021-11-...": the column is sized from the table's own (styled) font."""
+    from PySide6.QtGui import QFontMetricsF
+
+    dlg = _open(qapp, FakeBackend())
+    dlg.table.setColumnWidth(releases_panel.COL_DATE, 40)                # as narrow as a large font makes 100 px
+    dlg.resize(1400, 600)
+    dlg.show()
+    wait_until(qapp, lambda: dlg._fitted)
+    need = QFontMetricsF(dlg.table.font()).horizontalAdvance("2026-09-30")
+    assert dlg.table.columnWidth(releases_panel.COL_DATE) >= need + 2 * releases_panel.DATE_PAD
+    dlg.close()

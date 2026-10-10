@@ -7,6 +7,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **"Sent" now reads "Downloading"** in the In progress list and the List's detail panel, as the "To get" chips say.
+- **Fixed: the Published column cut the date** ("2021-11-...") with a larger table font: its width now comes from the font.
+
 ## [2026.10.12] - 2026-10-09
 
 The eleventh MangaList release (testing build): the "To get" list shows which series already have a torrent in qBittorrent, packs without volume numbers show what their file list holds, and the releases table gains a Published column.

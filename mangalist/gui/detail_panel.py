@@ -182,7 +182,7 @@ class DetailPanel(QWidget):
         self._show_row("download", enabled)
 
     def set_download(self, text: Optional[str], tooltip: str = "") -> None:
-        """The selected series' download status ("Sent", "Filed v03-v05", ...), or None for none."""
+        """The selected series' download status ("Downloading", "Filed v03-v05", ...), or None for none."""
         self._lbl_download.setText(text or "-")
         self._lbl_download.setToolTip(tooltip if text else "")
 

@@ -92,7 +92,7 @@ def _record(status, **kw) -> DownloadRecord:
 
 
 def test_status_texts():
-    assert status_text(_record(DownloadStatus.SENT)) == "Sent"
+    assert status_text(_record(DownloadStatus.SENT)) == "Downloading"
     assert status_text(_record(DownloadStatus.DOWNLOADED)) == "Downloaded"
     assert status_text(_record(DownloadStatus.FILED)) == "Filed v03-v05 - seeding"
     assert status_text(_record(DownloadStatus.FILED, wanted_volumes=("7",))) == "Filed v07 - seeding"

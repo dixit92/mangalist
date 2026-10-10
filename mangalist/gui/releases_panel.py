@@ -31,6 +31,7 @@ from pathlib import PurePath
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -50,7 +51,7 @@ from ..downloads.partial import PackSelection, describe, describe_whole, file_li
 from .background import BackgroundCall, start_call
 from .download_rules import download_chip, in_qbittorrent, release_why
 from .download_style import FONT_MONO, set_prop, set_tone
-from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, flat_table, hbox, label
+from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, flat_table, hbox, label, text_width
 from .downloads_backend import DownloadsBackend
 from .tables import resizable_columns
 from .volumes_target import VolumeTarget, numbers_text, volume_label
@@ -60,6 +61,7 @@ ConfirmFn = Callable[[QWidget, str], bool]
 
 COLUMNS = ("", "Release", "Fills", "You have", "Published", "Source", "Size", "Seeders")
 COL_PICK, COL_RELEASE, COL_FILLS, COL_HELD, COL_DATE, COL_SOURCE, COL_SIZE, COL_SEEDERS = range(len(COLUMNS))
+DATE_PAD = 16                       # each side of the Published column's date
 MAX_BACKGROUND_PACKS = 5            # numberless packs whose file lists are read without being selected
 PAGE_MESSAGE, PAGE_RESULTS = 0, 1
 ROW_HEIGHT = 48
@@ -327,6 +329,9 @@ class ReleasesPanel(QWidget):
         """Give the Release column the width the others leave (once: after that the owner's drag stands)."""
         if self._fitted or not self.table.isVisible():
             return
+        date_w = text_width(QFontMetricsF(self.table.font()), "0000-00-00") + 2 * DATE_PAD
+        if self.table.columnWidth(COL_DATE) < date_w:           # the cell font as styled: a full date, never "2021-11-..."
+            self.table.setColumnWidth(COL_DATE, date_w)
         others = sum(self.table.columnWidth(c) for c in range(self.table.columnCount()) if c != COL_RELEASE)
         room = self.table.viewport().width() - others
         if room > 200:
