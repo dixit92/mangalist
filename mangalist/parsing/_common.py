@@ -66,3 +66,17 @@ def clean_title(text: str) -> Optional[str]:
 EXTRA_WORDS = re.compile(
     r"(?<![A-Za-z])(?:extras?|omake|specials?|side[\s_-]*stor(?:y|ies)|bonus|afterword)(?![A-Za-z])",
     re.IGNORECASE)
+
+
+# Words some sites use for a chapter (owner's library, 2026-10-10: "Contact. 0001", "episode 0035", "report011",
+# "Pact 0015" ...): a label followed by a number is that chapter. "Ch." / "Chapter" are the classifier's own tokens
+# and are not listed here; neither are "Part" (arcs, series parts), "Story" ("Side Story 2" is an extra) and "#"
+# ("Title #3" stays a bare number: issue or volume?).
+CHAPTER_LABELS = (
+    r"(?:contact|episodes?|episodio|epis\u00f3dio|eps?|report|pact|act|lesson|stage|round|night|scene|phase|step"
+    r"|level|file|case|mission|quest|trip|log|karte|bout|sequence|track|song|cap(?:[i\u00ed]tulo)?)"
+)
+
+# A text that ends in a unit word without its number ("Vol.", "Chapter"): the number after it is that unit's, so a
+# bare number there is never guessed to be a chapter ("Vol. 01" as a folder name).
+ENDS_IN_UNIT_WORD = re.compile(r"(?<![A-Za-z])(?:v|vol(?:ume)?|ch(?:apter|ap|p)?|c)\.?$", re.IGNORECASE)

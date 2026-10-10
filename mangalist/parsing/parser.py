@@ -7,9 +7,10 @@ from dataclasses import dataclass, replace
 from pathlib import PurePath
 from typing import Iterable, Optional, Tuple, Union
 
-from .layers import parse_bare, parse_fmd2, parse_generic, parse_release, parse_scheme
+from ._common import ENDS_IN_UNIT_WORD
+from .layers import parse_bare, parse_fmd2, parse_generic, parse_labelled, parse_release, parse_scheme
 from .model import Kind, Layer, ParsedName
-from .template import Template, compile_template
+from .template import MANGALIST_CHAPTER_SCHEME, MANGALIST_VOLUME_SCHEME, Template, compile_template
 
 KindHint = Union[Kind, str, None]
 
@@ -57,6 +58,11 @@ class ParseContext:
 
 _NO_CONTEXT = ParseContext()
 
+# MangaList's own scheme is read back exactly in every root, after the root's own scheme (if any): every name the
+# renamer writes keeps its title and group as free text ("Ch. 0010.00 (The Vol 2 Begins) [G]" is chapter 10, no volume).
+_BUILT_IN_SCHEMES: Tuple[Template, ...] = (compile_template(MANGALIST_CHAPTER_SCHEME),
+                                           compile_template(MANGALIST_VOLUME_SCHEME))
+
 
 def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseContext] = None, *,
                file_size: int = 0) -> ParsedName:
@@ -79,22 +85,32 @@ def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseCont
 
 
 def _first(name: str, ctx: ParseContext, file_size: int) -> Optional[ParsedName]:
-    for scheme in ctx.schemes:
+    for scheme in ctx.schemes + tuple(s for s in _BUILT_IN_SCHEMES if s not in ctx.schemes):
         r = parse_scheme(name, scheme)
         if r is not None:
             return r
-    return (parse_fmd2(name) or parse_release(name) or parse_generic(name, file_size)
-            or parse_bare(name, ctx.series_title))
+    return (parse_fmd2(name) or parse_release(name) or parse_labelled(name, ctx.series_title)
+            or parse_generic(name, file_size) or parse_bare(name, ctx.series_title))
 
 
 def _apply_hint(result: ParsedName, hint: Optional[Kind]) -> ParsedName:
-    if hint is None or result.kind is not Kind.UNKNOWN or result.number is None:
+    """The series' answer decides a bare number; without one, a bare number AFTER the series title is read as a
+    chapter by guess (``guessed``: Next Cycle Design section 10, owner's library 2026-10-10 - of 830 unreadable files
+    ~471 were such chapters: ``<Title>. 035 (2023) (Digital)``, ``<Title> 014.6  <chapter title>``, ``<Title> 07``).
+    A name that is only a number (``01.cbz``) stays unknown until the owner answers (C12). The guess keeps the
+    question open: the series still asks "volumes or chapters?", and the renamer leaves guessed files alone."""
+    if result.kind is not Kind.UNKNOWN or result.number is None:
         return result
     if hint is Kind.VOLUME:
         return replace(result, kind=Kind.VOLUME, volume=result.number,
                        notes=result.notes + ("kind from the series hint: volumes",))
-    return replace(result, kind=Kind.CHAPTER, chapter=result.number,
-                   notes=result.notes + ("kind from the series hint: chapters",))
+    if hint is Kind.CHAPTER:
+        return replace(result, kind=Kind.CHAPTER, chapter=result.number,
+                       notes=result.notes + ("kind from the series hint: chapters",))
+    if result.series and result.layer in (Layer.BARE, Layer.RELEASE) and not ENDS_IN_UNIT_WORD.search(result.series):
+        return replace(result, kind=Kind.CHAPTER, chapter=result.number, guessed=True,
+                       notes=result.notes + ("a bare number after the series title: a chapter (guess)",))
+    return result
 
 
 def parse_names(names: Iterable[Union[str, "os.PathLike[str]"]],
