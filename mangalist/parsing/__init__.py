@@ -14,8 +14,9 @@ Public API
     (:class:`UnitRange` of ``Decimal`` - ``291.999``, ``12.5``, ``3.10`` exactly as written, never float),
     ``is_extra``, ``is_fraction``, ``title`` (chapter title), ``group``, ``index`` (FMD2's numbering index,
     separate from the chapter number), ``series``, ``year``, ``edition``, ``fix``, ``tags``, ``layer``
-    (:class:`Layer`, which layer produced it) and ``notes`` (diagnostics). ``legacy_kind`` gives today's
-    ``FileHit.kind`` value.
+    (:class:`Layer`, which layer produced it), ``guessed`` (a bare number after the series title read as
+    a chapter by guess), ``ambiguous`` (the generic layer found several numbers) and ``notes``
+    (diagnostics). ``legacy_kind`` gives today's ``FileHit.kind`` value.
 
 ``Template`` / ``compile_template(source)`` / ``register_token(spec)``
     The naming-template engine: ``Template.render(values)`` and the exact parse-back
