@@ -4,10 +4,11 @@ stylesheet selects on (:mod:`.download_style`), and the two-line table cell (a n
 
 from __future__ import annotations
 
-from typing import Optional
+import math
+from typing import Optional, Sequence, Tuple
 
-from PySide6.QtCore import QModelIndex, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PySide6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -24,10 +25,68 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .download_style import FONT_MONO, set_prop
+from .download_style import ACCENT, BADGES, FONT_MONO, set_prop
 
 ROLE_SUB = Qt.ItemDataRole.UserRole + 1          # the second line of a two-line cell
 ROLE_ASIDE = Qt.ItemDataRole.UserRole + 2        # text at the right edge of a cell
+ROLE_CHIPS = Qt.ItemDataRole.UserRole + 3        # [(text, kind)]: pills at the right edge, drawn instead of the aside
+
+#: Chip colours (background, text, border): the badges of the In progress list, and "ready" - an outlined accent pill
+#: for releases found, so it is not mistaken for a download on its way (blue, filled).
+CHIP_COLORS = {kind: (bg, fg, bg) for kind, (bg, fg) in BADGES.items()}
+CHIP_COLORS["ready"] = ("#ffffff", ACCENT, ACCENT)
+CHIP_PAD_X, CHIP_PAD_Y, CHIP_GAP, CHIP_MIN = 8, 3, 6, 40
+TITLE_MIN = 120                 # a row with chips keeps at least this much for its title
+
+
+def text_width(fm: QFontMetricsF, text: str) -> int:
+    """The whole pixels *text* needs. ``QFontMetrics.horizontalAdvance`` rounds the fractional width DOWN as often as
+    up, and ``elidedText`` then cuts the text at its own width ("Releases rea..." - seen on the owner's Unraid display);
+    rounding up, plus a pixel, never does."""
+    return math.ceil(fm.horizontalAdvance(text)) + 1
+
+
+def fit_text(fm: QFontMetricsF, text: str, room: int) -> Tuple[str, int]:
+    """(*text*, its width) when it fits in *room*, else the elided text and *room*."""
+    need = text_width(fm, text)
+    if need <= room:
+        return text, need
+    return fm.elidedText(text, Qt.TextElideMode.ElideRight, room), room
+
+
+def paint_chips(painter: QPainter, font: QFont, rect: QRect, chips: Sequence[Tuple[str, str]]) -> int:
+    """Draw *chips* right-aligned inside *rect* (the first chip leftmost), no wider than *rect*; a chip that does not
+    fit is elided, and the ones after it are left out. Returns the width used."""
+    fm = QFontMetricsF(font)
+    height = math.ceil(fm.height()) + 2 * CHIP_PAD_Y
+    widths, texts, room = [], [], rect.width()
+    for text, _kind in chips:
+        avail = room - 2 * CHIP_PAD_X - (CHIP_GAP if texts else 0)
+        if avail < CHIP_MIN - 2 * CHIP_PAD_X:
+            break
+        shown, width = fit_text(fm, text, avail)
+        texts.append(shown)
+        widths.append(width + 2 * CHIP_PAD_X)
+        room -= widths[-1] + (CHIP_GAP if len(texts) > 1 else 0)
+        if shown != text:
+            break
+    used = sum(widths) + CHIP_GAP * max(len(widths) - 1, 0)
+    x = rect.right() + 1 - used
+    y = rect.top() + (rect.height() - height) / 2
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setFont(font)
+    for (text, (_t, kind)), width in zip(zip(texts, chips), widths):
+        bg, fg, border = CHIP_COLORS.get(kind, CHIP_COLORS["muted"])
+        box = QRectF(x + 0.5, y + 0.5, width - 1, height - 1)
+        painter.setPen(QPen(QColor(border), 1))
+        painter.setBrush(QColor(bg))
+        painter.drawRoundedRect(box, height / 2, height / 2)
+        painter.setPen(QColor(fg))
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
+        x += width + CHIP_GAP
+    painter.restore()
+    return used
 
 
 def label(text: str = "", role: Optional[str] = None, *, wrap: bool = False, selectable: bool = False) -> QLabel:
@@ -160,17 +219,23 @@ class TwoLineDelegate(QStyledItemDelegate):
         sub_font.setPointSizeF(max(opt.font.pointSizeF() - 1.5, 7.0))
         if self._mono_sub:
             sub_font.setFamilies([f.strip("' ") for f in FONT_MONO.split(",")])
+        chips = index.data(ROLE_CHIPS) or ()
         aside = index.data(ROLE_ASIDE) or ""
-        if aside:
-            aside_font = QFont(opt.font)
-            aside_font.setPointSizeF(max(opt.font.pointSizeF() - 1.5, 7.0))
-            aside_fm = QFontMetrics(aside_font)
-            aside_w = min(aside_fm.horizontalAdvance(aside), max(rect.width() // 2, 60))
+        aside_font = QFont(opt.font)
+        aside_font.setPointSizeF(max(opt.font.pointSizeF() - 1.5, 7.0))
+        room = max(rect.width() // 2, 60)
+        if chips:                                       # the chips come first; the title keeps TITLE_MIN and elides
+            room = max(rect.width() - TITLE_MIN, room)
+            aside_font.setWeight(QFont.Weight.DemiBold)
+            used = paint_chips(painter, aside_font, QRect(rect.right() - room + 1, rect.top(), room, rect.height()),
+                               chips)
+            rect = rect.adjusted(0, 0, -(used + 8), 0)
+        elif aside:
+            shown, aside_w = fit_text(QFontMetricsF(aside_font), aside, room)
             painter.setFont(aside_font)
             painter.setPen(QColor("#5a5a57"))
-            painter.drawText(QRect(rect.right() - aside_w, rect.top(), aside_w, rect.height()),
-                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
-                             aside_fm.elidedText(aside, Qt.TextElideMode.ElideRight, aside_w))
+            painter.drawText(QRect(rect.right() - aside_w + 1, rect.top(), aside_w, rect.height()),
+                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, shown)
             rect = rect.adjusted(0, 0, -(aside_w + 8), 0)
         top_h = QFontMetrics(top).height()
         sub_h = QFontMetrics(sub_font).height()

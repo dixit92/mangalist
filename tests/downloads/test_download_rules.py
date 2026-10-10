@@ -59,19 +59,6 @@ def test_group_notes_and_reasons():
         "Not licensed in English"
 
 
-def test_row_status_precedence():
-    sent, filed = record(S.SENT), record(S.FILED, wanted_volumes=("3", "4"))
-    assert rules.row_status(None, None) == ""
-    assert rules.row_status(None, rules.SEARCH_READY) == "Releases ready"
-    assert rules.row_status(None, rules.SEARCH_NONE) == "No releases" and rules.row_status(None, rules.SEARCH_FAILED) == "Search failed"
-    assert rules.row_status(sent, rules.SEARCH_READY) == "Sent"                  # a live download outranks a search result
-    assert rules.row_status(sent, rules.SEARCH_RUNNING) == "Searching..."        # a search in flight outranks a download
-    assert rules.row_status(filed, rules.SEARCH_READY) == "Releases ready"       # filed is history: a new search is news
-    assert rules.row_status(filed, None) == "Filed v03-v04 - seeding"
-    assert rules.row_status(record(S.FAILED, error="no space"), None) == "Failed: no space"
-    assert rules.row_status(None, rules.SEARCH_QUEUED) == "Queued"
-
-
 def test_badge_kinds():
     kinds = {s: rules.badge_kind(record(s)) for s in S.ALL}
     assert kinds == {S.SENT: "run", S.DOWNLOADED: "run", S.FILED: "ok", S.REMOVED: "done", S.FAILED: "bad",
@@ -142,3 +129,36 @@ def test_switches_default_and_round_trip():
     assert load_nyaa_options(store) == NyaaOptions(raw=True)                           # a wrong type falls back
     store.data["mu_autostart"] = "maybe"
     assert get_flag(store, KEY_MU_AUTOSTART) is False                                 # a wrong type: the default
+
+
+# --- the "To get" row chips (owner, 2026-10-09: "user should be aware if there's a torrent already under download") ---
+
+def test_row_chips_show_every_torrent_in_qbittorrent_and_then_the_search():
+    sent = record(S.SENT, id=5, wanted_volumes=("36",))
+    filed = record(S.FILED, id=2, wanted_volumes=("9", "10"))
+    assert rules.row_chips([], None) == []
+    assert rules.row_chips([], rules.SEARCH_READY) == [("Releases ready", "ready")]
+    assert rules.row_chips([filed], rules.SEARCH_READY) == [("Seeding v09-v10", "ok"), ("Releases ready", "ready")]
+    assert rules.row_chips([filed, sent], None) == [("Downloading v36", "run"), ("Seeding v09-v10", "ok")]  # newest first
+    assert rules.row_chips([record(S.DOWNLOADED)], rules.SEARCH_RUNNING) == [("Downloaded v02", "run"),
+                                                                            ("Searching...", "muted")]
+    assert rules.row_chips([record(S.FAILED, error="no space")], None) == [("Failed: no space", "bad")]
+    stopped = record(S.FILED, error="stopped in qBittorrent")
+    assert rules.row_chips([stopped], None) == [("Filed v02 - stopped in qBittorrent", "ok")]
+
+
+def test_row_chips_cap_the_downloads_and_show_a_finished_one_only_alone():
+    many = [record(S.SENT, id=i, wanted_volumes=(str(i),)) for i in range(1, 5)]
+    chips = rules.row_chips(many, rules.SEARCH_NONE)
+    assert chips == [("Downloading v04", "run"), ("Downloading v03", "run"), ("+2", "muted"), ("No releases", "muted")]
+    removed = record(S.REMOVED)
+    assert rules.row_chips([removed], None) == [("Filed v02 - done", "done")]
+    assert rules.row_chips([removed], rules.SEARCH_READY) == [("Releases ready", "ready")]          # history yields
+    assert rules.row_chips([record(S.CANCELLED)], None) == []
+    assert rules.chips_text(chips) == "Downloading v04 · Downloading v03 · +2 · No releases"
+
+
+def test_in_qbittorrent_keeps_the_torrents_still_there_newest_first():
+    rows = [record(S.FILED, id=1), record(S.REMOVED, id=2), record(S.SENT, id=3), record(S.FAILED, id=4),
+            record(S.DOWNLOADED, id=5), record(S.CANCELLED, id=6)]
+    assert [r.id for r in rules.in_qbittorrent(rows)] == [5, 3, 1]

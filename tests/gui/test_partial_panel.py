@@ -3,6 +3,7 @@ sizes, untick = whole pack, the Settings default, the fallbacks, and the file li
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 
 import pytest
@@ -351,3 +352,69 @@ def test_search_again_forgets_the_file_lists(qapp):
 
     panel.show_outcome(SearchOutcome(target=target(), placement=backend.placement_answer, candidates=[candidate()]))
     wait_until(qapp, lambda: panel.pack_state() == "partial" and len(backend.inspected) == 2)
+
+
+# --- what a numberless pack holds (owner, 2026-10-09: "read the contents of the torrent files") --------------------
+
+def numberless(info_hash, title="Example Series (2019-2021) (Digital)"):
+    return candidate(title, info_hash=info_hash, vol_from=None, vol_to=None, covers_missing=(), is_pack=True,
+                     reasons=("pack without volume numbers: contents unknown", "Digital"))
+
+
+def test_a_numberless_pack_shows_what_its_file_list_holds(qapp):
+    backend = PartialBackend(results=[numberless("c" * 40)])
+    panel = open_panel(qapp, backend)                                  # missing 3, 4, 5, 9; held 1, 2
+    cells = [panel.table.item(0, c).text() for c in (releases_panel.COL_FILLS, releases_panel.COL_HELD)]
+    assert cells == ["v03-v05", "v01-v02"]                             # the pack holds v01-v08: no v09
+    sub = panel.table.item(0, releases_panel.COL_RELEASE).data(releases_panel.ROLE_SUB)
+    assert sub == "file list: v01-v08, 8 files, Digital, trusted uploader"
+    assert panel.table.item(0, releases_panel.COL_DATE).text() == "2026-09-30"
+
+
+def test_the_other_numberless_packs_are_read_one_after_another_in_the_background(qapp):
+    titled = candidate()                                               # selected first: its own read
+    packs = [numberless(h * 40) for h in "cdefghi"]                    # 7 numberless, only MAX_BACKGROUND_PACKS read
+    backend = PartialBackend(results=[titled] + packs)
+    panel = open_panel(qapp, backend)
+    limit = releases_panel.MAX_BACKGROUND_PACKS
+    wait_until(qapp, lambda: len(backend.inspected) == 1 + limit)
+    assert backend.inspected[0][0] == "a" * 40                         # the selected release first
+    assert [h for h, _w in backend.inspected[1:]] == [p.info_hash for p in packs[:limit]]
+    assert all(w == ("3", "4", "5", "9") for _h, w in backend.inspected[1:])
+    fills = [panel.table.item(r, releases_panel.COL_FILLS).text() for r in range(1, len(packs) + 1)]
+    assert fills == ["v03-v05"] * limit + ["?"] * (len(packs) - limit)
+    assert threading.get_ident() not in backend.threads
+
+
+def test_a_file_list_without_volume_numbers_leaves_the_question_marks(qapp):
+    odd = choose_files([(f"{ROOT}/{n}.cbz", MB) for n in ("Extras", "Bonus art", "Afterword")], ("3", "4", "5", "9"),
+                       "volumes")
+    backend = PartialBackend(results=[numberless("c" * 40)], packs={"c" * 40: odd})
+    panel = open_panel(qapp, backend)
+    assert panel.table.item(0, releases_panel.COL_FILLS).text() == "-"
+    sub = panel.table.item(0, releases_panel.COL_RELEASE).data(releases_panel.ROLE_SUB)
+    assert sub.startswith("file list: no volume numbers in the 3 files")
+
+
+# --- already in qBittorrent (owner, 2026-10-09) ----------------------------------------------------------------
+
+def test_a_release_already_in_qbittorrent_is_named_and_cannot_be_sent_again(qapp):
+    seeding = record(4, series_id=7, status=DownloadStatus.FILED, wanted=("1", "2"), title="Example Series v01-02")
+    seeding = dataclasses.replace(seeding, info_hash="A" * 40)                   # the same torrent, any case
+    panel = ReleasesPanel(PartialBackend(), confirm=lambda p, t: True, downloads_for=lambda sid: [seeding])
+    panel.open_target(target())
+    wait_until(qapp, lambda: panel._search_state == "done" and panel._placement is not None)
+    assert panel.downloads_label.isVisibleTo(panel)
+    assert panel.downloads_label.text() == "Already in qBittorrent - Seeding v01-v02: Example Series v01-02"
+    assert panel.send_blocker() == ("This release is already in qBittorrent (Seeding v01-v02); "
+                                    "it is not added twice.")
+    assert not panel.btn_send.isEnabled()
+
+
+def test_a_torrent_no_longer_in_qbittorrent_is_not_mentioned(qapp):
+    gone = record(4, series_id=7, status=DownloadStatus.REMOVED, wanted=("1",))
+    other = record(5, series_id=8, status=DownloadStatus.SENT)                  # another series
+    panel = ReleasesPanel(PartialBackend(), confirm=lambda p, t: True, downloads_for=lambda sid: [gone, other])
+    panel.open_target(target())
+    wait_until(qapp, lambda: panel._search_state == "done" and panel._placement is not None)
+    assert not panel.downloads_label.isVisibleTo(panel) and panel.downloads_label.text() == ""

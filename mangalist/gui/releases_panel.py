@@ -13,6 +13,14 @@ list is read from the release's ``.torrent`` off the UI thread (a short pause af
 through the table does not hit nyaa for every row); Send waits for it only while the box is ticked. When it cannot be
 read, or no file names a missing volume, the box says so and the whole pack is what is sent. Unticking sends the whole
 pack. The box is hidden for a release that has nothing to leave out, and for a backend that cannot read file lists.
+
+**What a numberless pack holds.** A release whose title names no volumes ("Series (2019-2021) (Digital)") shows its
+Fills / You have from its file list once that is read, and the line under its name says "file list: v01-v10". The
+selected release is read first; the other numberless ones (at most :data:`MAX_BACKGROUND_PACKS`) are read one after
+another in the background, so the table fills in without selecting each.
+
+**Already in qBittorrent.** A line above the table names the series' torrents still in qBittorrent (downloading, or
+filed and seeding), and a release that IS one of them cannot be sent again (owner, 2026-10-09).
 """
 
 from __future__ import annotations
@@ -20,7 +28,7 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 from pathlib import PurePath
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -37,9 +45,10 @@ from PySide6.QtWidgets import (
 
 from ..classifier import _human
 from ..downloads.contracts import DownloadRecord, NyaaCandidate, Placement
+from ..knowledge import fmt_num, to_decimal
 from ..downloads.partial import PackSelection, describe, describe_whole, file_lines
 from .background import BackgroundCall, start_call
-from .download_rules import release_why
+from .download_rules import download_chip, in_qbittorrent, release_why
 from .download_style import FONT_MONO, set_prop, set_tone
 from .download_widgets import ROLE_SUB, RadioDelegate, TwoLineDelegate, button, flat_table, hbox, label
 from .downloads_backend import DownloadsBackend
@@ -49,8 +58,9 @@ from .links import open_link
 
 ConfirmFn = Callable[[QWidget, str], bool]
 
-COLUMNS = ("", "Release", "Fills", "You have", "Source", "Size", "Seeders")
-COL_PICK, COL_RELEASE, COL_FILLS, COL_HELD, COL_SOURCE, COL_SIZE, COL_SEEDERS = range(len(COLUMNS))
+COLUMNS = ("", "Release", "Fills", "You have", "Published", "Source", "Size", "Seeders")
+COL_PICK, COL_RELEASE, COL_FILLS, COL_HELD, COL_DATE, COL_SOURCE, COL_SIZE, COL_SEEDERS = range(len(COLUMNS))
+MAX_BACKGROUND_PACKS = 5            # numberless packs whose file lists are read without being selected
 PAGE_MESSAGE, PAGE_RESULTS = 0, 1
 ROW_HEIGHT = 48
 PACK_DELAY_MS = 400                 # the selection must settle this long before a release's file list is fetched
@@ -98,6 +108,34 @@ def wanted_volumes_for(candidate: NyaaCandidate, missing: Sequence[str]) -> Sequ
     return tuple(candidate.covers_missing)
 
 
+def pack_volumes(selection: Optional[PackSelection]) -> Tuple[str, ...]:
+    """Every volume a read file list names, ascending (empty when it was not read)."""
+    if selection is None or not selection.readable:
+        return ()
+    numbers = {d for f in selection.files for d in (to_decimal(v) for v in f.volumes) if d is not None}
+    return tuple(fmt_num(d) for d in sorted(numbers))
+
+
+def _among(volumes: Sequence[str], pool: Sequence[str]) -> Tuple[str, ...]:
+    wanted = {to_decimal(v) for v in pool} - {None}
+    return tuple(v for v in volumes if to_decimal(v) in wanted)
+
+
+def contents_text(selection: Optional[PackSelection]) -> str:
+    """"file list: v01-v10, 10 files" - what a numberless pack turned out to hold ("" before it is read)."""
+    if selection is None or not selection.readable or not selection.files:
+        return ""
+    vols = numbers_text(pack_volumes(selection), pad=True)
+    n = selection.total_files
+    files = f"{n} file{'s' if n != 1 else ''}"
+    return f"file list: {vols}, {files}" if vols else f"file list: no volume numbers in the {files}"
+
+
+def date_text(published: str) -> str:
+    """The day a release was published (``2021-11-09``), from nyaa's ISO time."""
+    return (published or "")[:10]
+
+
 def folder_text(target_dir: Optional[str], series_dir: str) -> str:
     """``Series/Volumes/`` - the target folder written from the series folder's parent; the full path when it is not
     below it."""
@@ -133,7 +171,8 @@ class ReleasesPanel(QWidget):
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
-                 managed: bool = False, source_label: str = "nyaa"):
+                 managed: bool = False, source_label: str = "nyaa",
+                 downloads_for: Optional[Callable[[int], Sequence[DownloadRecord]]] = None):
         super().__init__(parent)
         self.setObjectName("releasesPanel")
         self._backend = backend
@@ -149,6 +188,8 @@ class ReleasesPanel(QWidget):
         self._calls: List[BackgroundCall] = []
         self._sending = False
         self._sent_hashes = set()
+        self._downloads_for = downloads_for                 # series id -> its download records (the host's)
+        self._background: List[str] = []                   # numberless packs still to read, by info hash
         self.sent_records: List[DownloadRecord] = []
         self._settings_section: Optional[str] = None
         self._fitted = False
@@ -178,6 +219,10 @@ class ReleasesPanel(QWidget):
         self.subtitle_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         titles.addWidget(self.title_label)
         titles.addWidget(self.subtitle_label)
+        self.downloads_label = label("", "muted", wrap=True)
+        self.downloads_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.downloads_label.setVisible(False)
+        titles.addWidget(self.downloads_label)
         head.addLayout(titles, 1)
         self.search_label = label("", "muted")
         self.progress = QProgressBar()
@@ -235,8 +280,8 @@ class ReleasesPanel(QWidget):
         self.table.setItemDelegateForColumn(COL_PICK, RadioDelegate(self.table))
         self.table.setItemDelegateForColumn(COL_RELEASE, TwoLineDelegate(self.table, row_height=ROW_HEIGHT))
         self.table.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
-        resizable_columns(self.table, {COL_PICK: 36, COL_RELEASE: 420, COL_FILLS: 110, COL_HELD: 110, COL_SOURCE: 84,
-                                       COL_SIZE: 90, COL_SEEDERS: 80})        # every column can be dragged
+        resizable_columns(self.table, {COL_PICK: 36, COL_RELEASE: 420, COL_FILLS: 110, COL_HELD: 110, COL_DATE: 100,
+                                       COL_SOURCE: 84, COL_SIZE: 90, COL_SEEDERS: 80})        # every column can be dragged
         for col in (COL_SIZE, COL_SEEDERS):
             self.table.horizontalHeaderItem(col).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -342,6 +387,7 @@ class ReleasesPanel(QWidget):
         self.target = target
         self._pack_timer.stop()
         self._packs, self._pack_failed, self._pack_reading = {}, {}, set()
+        self._background = []
         self._candidates = []
         self._placement = None
         self._placement_error = None
@@ -368,6 +414,7 @@ class ReleasesPanel(QWidget):
         self._set_chrome(True)
         self.btn_retry.setEnabled(True)
         self._update_subtitle()
+        self.refresh_downloads()
 
     def _update_subtitle(self) -> None:
         target = self.target
@@ -480,25 +527,75 @@ class ReleasesPanel(QWidget):
             self.stack.setCurrentIndex(PAGE_MESSAGE)
         else:
             self.stack.setCurrentIndex(PAGE_RESULTS)
+            self._background = [c.info_hash for c in self._candidates if c.vol_from is None][:MAX_BACKGROUND_PACKS]
             self.table.selectRow(0)
             QTimer.singleShot(0, self._fit_release_column)
         self._update_send()
 
     def _fill_row(self, row: int, candidate: NyaaCandidate) -> None:
-        unknown = candidate.vol_from is None
-        values = ("", candidate.title,
-                  "?" if unknown else numbers_text(candidate.covers_missing, pad=True) or "-",
-                  "?" if unknown else numbers_text(candidate.covers_held, pad=True) or "-",
-                  "nyaa", _human(candidate.size_bytes), str(candidate.seeders))
+        fills, held, why = self._covers(candidate)
+        values = ("", candidate.title, fills, held, date_text(candidate.published), "nyaa",
+                  _human(candidate.size_bytes), str(candidate.seeders))
         tip = self._tooltip(candidate)
         for col, text in enumerate(values):
             item = QTableWidgetItem(text)
             item.setToolTip(tip)
             if col == COL_RELEASE:
-                item.setData(ROLE_SUB, release_why(candidate))
+                item.setData(ROLE_SUB, why)
             if col in (COL_SEEDERS, COL_SIZE):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, col, item)
+
+    def _covers(self, candidate: NyaaCandidate) -> Tuple[str, str, str]:
+        """(Fills, You have, the line under the name): from the title's numbers, else from the file list once read
+        ("?" before)."""
+        why = release_why(candidate)
+        if candidate.vol_from is not None:
+            return (numbers_text(candidate.covers_missing, pad=True) or "-",
+                    numbers_text(candidate.covers_held, pad=True) or "-", why)
+        selection = self._packs.get(candidate.info_hash)
+        contents = contents_text(selection)
+        if not contents or self.target is None:
+            return "?", "?", why
+        vols = pack_volumes(selection)
+        why = why.replace("pack without volume numbers: contents unknown", contents) if "contents unknown" in why \
+            else f"{contents}, {why}"
+        return (numbers_text(_among(vols, self.target.missing), pad=True) or "-",
+                numbers_text(_among(vols, self.target.held), pad=True) or "-", why)
+
+    def _refill(self, key: str) -> None:
+        for row, candidate in enumerate(self._candidates):
+            if candidate.info_hash == key and self.table.item(row, COL_RELEASE) is not None:
+                self._fill_row(row, candidate)
+
+    # --- the series' torrents already in qBittorrent ------------------------------------------------------
+
+    def _series_downloads(self) -> List[DownloadRecord]:
+        if self.target is None:
+            return []
+        sid = self.target.series_id
+        records = [r for r in (self._downloads_for(sid) if self._downloads_for else ()) if r.series_id == sid]
+        known = {r.id for r in records}
+        records += [r for r in self.sent_records if r.series_id == sid and r.id not in known]
+        return records
+
+    def refresh_downloads(self) -> None:
+        """Say which of the series' torrents are in qBittorrent (the host calls this when its records reload)."""
+        live = in_qbittorrent(self._series_downloads())
+        if not live:
+            self.downloads_label.setVisible(False)
+            self.downloads_label.setText("")
+        else:
+            lines = [f"{download_chip(r)[0]}: {r.title}" for r in live[:3]]
+            if len(live) > 3:
+                lines.append(f"... and {len(live) - 3} more")
+            self.downloads_label.setText("Already in qBittorrent - " + "\n".join(lines))
+            self.downloads_label.setVisible(True)
+        self._update_send()
+
+    def _in_qbittorrent(self, candidate: NyaaCandidate) -> Optional[DownloadRecord]:
+        key = (candidate.info_hash or "").lower()
+        return next((r for r in in_qbittorrent(self._series_downloads()) if key and r.info_hash.lower() == key), None)
 
     def _on_search_error(self, message: str) -> None:
         self._search_state = "error"
@@ -558,6 +655,9 @@ class ReleasesPanel(QWidget):
             return "Select a release."
         if candidate.info_hash in self._sent_hashes:
             return "This release was already sent."
+        existing = self._in_qbittorrent(candidate)
+        if existing is not None:
+            return f"This release is already in qBittorrent ({download_chip(existing)[0]}); it is not added twice."
         if self._partial_on and self.pack_state() in ("waiting", "reading"):
             return "Reading the release's file list... (or untick the box to send the whole pack)"
         if not wanted_volumes_for(candidate, self.target.missing):
@@ -628,10 +728,27 @@ class ReleasesPanel(QWidget):
         self._update_send()
 
     def _read_pack(self) -> None:
-        candidate, target = self.selected_candidate(), self.target
+        self._read_pack_of(self.selected_candidate())
+
+    def _read_next_background(self) -> None:
+        """Read the next numberless pack's file list - one at a time, and never while another read is on its way."""
+        if self._pack_reading or not self._can_inspect():
+            return
+        while self._background:
+            key = self._background.pop(0)
+            if key in self._packs:
+                continue
+            candidate = next((c for c in self._candidates if c.info_hash == key), None)
+            if candidate is not None:
+                self._read_pack_of(candidate)
+                return
+
+    def _read_pack_of(self, candidate: Optional[NyaaCandidate]) -> None:
+        target = self.target
         if candidate is None or target is None or not self._can_inspect():
             return
-        key, wanted, series_id = candidate.info_hash, tuple(self._pack_wanted()), target.series_id
+        key, wanted, series_id = candidate.info_hash, tuple(wanted_volumes_for(candidate, target.missing)), \
+            target.series_id
         if key in self._packs or key in self._pack_reading:
             return
         self._pack_reading.add(key)
@@ -651,8 +768,10 @@ class ReleasesPanel(QWidget):
         self._packs[key] = selection
         if not selection.readable:                          # selecting the release again tries again
             self._pack_failed[key] = selection.problem or "the file list is not available"
+        self._refill(key)
         self._show_pack()
         self._update_send()
+        self._after_read()
 
     def _on_pack_error(self, key: str, series_id: int, message: str) -> None:
         if not self._same_target(series_id):
@@ -662,6 +781,12 @@ class ReleasesPanel(QWidget):
         self._pack_failed[key] = message
         self._show_pack()
         self._update_send()
+        self._after_read()
+
+    def _after_read(self) -> None:
+        """The selected release first (its timer may be waiting), then the next numberless pack."""
+        if not self._pack_timer.isActive():
+            QTimer.singleShot(0, self._read_next_background)
 
     def _on_partial_toggled(self, on: bool) -> None:
         self._partial_on = bool(on)
@@ -805,6 +930,7 @@ class ReleasesPanel(QWidget):
     def stop(self) -> None:
         """Abandon the calls in flight (their results are dropped)."""
         self._pack_timer.stop()
+        self._background = []
         for call in list(self._calls):
             call.abandon()
         self._calls.clear()
