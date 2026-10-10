@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
@@ -64,6 +65,17 @@ from .links import open_link
 
 
 _log = logging.getLogger(__name__)
+
+
+def root_of(path: str, roots: Sequence[Root]) -> Optional[Root]:
+    """The library folder *path* is in (the deepest one, when folders nest), else None."""
+    norm = os.path.normcase(os.path.abspath(path))
+    best = None
+    for r in roots:
+        base = os.path.normcase(os.path.abspath(r.path)).rstrip("/\\")
+        if (norm == base or norm.startswith(base + os.sep)) and (best is None or len(r.path) > len(best.path)):
+            best = r
+    return best
 
 
 class _ScanStopped(Exception):
@@ -750,14 +762,28 @@ class MainWindow(QMainWindow):
     def _on_replaced_chapters_moved(self, folders) -> None:
         """The Download tab filed downloads, or restored, moved or deleted replaced chapter files: rescan so the table,
         the To get list and the database follow."""
-        n = len(list(folders))
+        folders = list(folders)
+        n = len(folders)
         self._status_label.setText(f"Files changed in {n} series - rescanning" if n else "Files changed - rescanning")
-        self._start_scan()
+        self._start_scan(self._roots_holding(folders))
 
     def _on_files_deleted(self, paths) -> None:
         """Lane C's view deleted duplicate files: rescan so the table and the database follow."""
         self._status_label.setText(f"{len(paths)} duplicate file(s) deleted - rescanning")
-        self._start_scan()
+        self._start_scan(self._roots_holding(paths))
+
+    def _roots_holding(self, paths) -> Optional[List[Root]]:
+        """The library folders that hold *paths* - only they are rescanned (owner, 2026-10-10: discarding duplicates in
+        one library rescanned every library). None (every library) when a path is in none of them, or none is given."""
+        roots = self._roots()
+        found: List[Root] = []
+        for p in paths:
+            root = root_of(str(p), roots)
+            if root is None:
+                return None
+            if root not in found:
+                found.append(root)
+        return found or None
 
     def _count_duplicate_files(self) -> None:
         """Lane C's duplicate-numbers finder, off the UI thread, for the Duplicates chip's count."""
