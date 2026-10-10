@@ -612,5 +612,8 @@ def test_a_rescan_asked_for_during_a_scan_follows_it_and_the_renamer_hears_of_it
     win._start_scan = lambda roots=None: scans.append(None if roots is None else [r.name for r in roots])
     win._on_thread_finished()
     assert heard == [[lib.root(win, MANGA).id]]
-    wait_until(qapp, lambda: scans, timeout=5)
-    assert scans == [[MANHWA]] and win._scan_queued is None
+    try:
+        wait_until(qapp, lambda: scans, timeout=5)
+        assert scans == [[MANHWA]] and win._scan_queued is None
+    finally:
+        win._renamer_window = None
