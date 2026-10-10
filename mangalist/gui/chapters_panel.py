@@ -27,6 +27,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QMessageBox,
     QProgressBar,
@@ -195,7 +196,11 @@ class ChaptersPanel(QWidget):
         self.group_combo.setMinimumWidth(220)
         self.group_combo.currentIndexChanged.connect(self._on_group_changed)
         self.group_reason = label("", "muted")
-        pv.addLayout(hbox(label("Group"), self.group_combo, self.group_reason, None, spacing=8))
+        # owner, 2026-10-10: "there's no 'check all' box" - ticks every chapter that can be sent, or none
+        self.check_all = QCheckBox("Select all")
+        self.check_all.setToolTip("Tick every chapter that can be sent (extras included), or untick them all")
+        self.check_all.clicked.connect(self._check_all_clicked)
+        pv.addLayout(hbox(label("Group"), self.group_combo, self.group_reason, None, self.check_all, spacing=8))
         self.table = flat_table("chaptersTable", COLUMNS, select_rows=False)
         self.table.setSortingEnabled(False)
         resizable_columns(self.table, {COL_PICK: 36, COL_CHAPTER: 90, COL_GROUP: 220, COL_TITLE: 360, COL_STATUS: 180})
@@ -502,8 +507,32 @@ class ChaptersPanel(QWidget):
         self.btn_send.setToolTip(blocker or "")
         n = len(self.picks()) if self.lookup is not None else 0
         self.btn_send.setText(f"Send {n} to Suwayomi" if n else "Send to Suwayomi")
+        self._sync_check_all()
         if self.lookup is not None and self.lookup.match is not None:
             self._update_subtitle()
+
+    def _sendable_items(self) -> List[QTableWidgetItem]:
+        items = [self.table.item(r, COL_PICK) for r in range(self.table.rowCount())]
+        return [i for i in items if i is not None and i.flags() & Qt.ItemFlag.ItemIsUserCheckable]
+
+    def _sync_check_all(self) -> None:
+        """Select all follows the ticks: checked when every sendable chapter is ticked, partly when some are."""
+        items = self._sendable_items()
+        ticked = sum(1 for i in items if i.checkState() == Qt.CheckState.Checked)
+        self.check_all.blockSignals(True)
+        self.check_all.setEnabled(bool(items) and not self._busy)
+        self.check_all.setCheckState(Qt.CheckState.Checked if items and ticked == len(items) else
+                                     Qt.CheckState.PartiallyChecked if ticked else Qt.CheckState.Unchecked)
+        self.check_all.blockSignals(False)
+
+    def _check_all_clicked(self, *_args) -> None:
+        items = self._sendable_items()
+        tick = not (items and all(i.checkState() == Qt.CheckState.Checked for i in items))
+        self.table.blockSignals(True)
+        for i in items:
+            i.setCheckState(Qt.CheckState.Checked if tick else Qt.CheckState.Unchecked)
+        self.table.blockSignals(False)
+        self._update_send()
 
     def _update_confirm(self) -> None:
         self.btn_confirm.setEnabled(bool(self.cand_table.selectionModel().selectedRows()) and not self._busy)

@@ -272,3 +272,20 @@ def test_extras_are_offered_unticked(qapp):
     assert "42.5" not in [c.number for c in panel.picks()]
     panel.table.item(2, cp.COL_PICK).setCheckState(Qt.CheckState.Checked)
     assert "42.5" in [c.number for c in panel.picks()]
+
+
+def test_select_all_ticks_every_sendable_chapter_or_none(qapp):
+    # owner, 2026-10-10: "there's no 'check all' box"
+    panel, _, _ = make(qapp)
+    open_series(qapp, panel)
+    assert panel.check_all.isEnabled() and panel.check_all.checkState() == Qt.CheckState.Checked   # 41-43 ticked
+    panel.check_all.click()
+    assert panel.picks() == [] and panel.check_all.checkState() == Qt.CheckState.Unchecked
+    assert not panel.btn_send.isEnabled()
+    panel.check_all.click()
+    assert [c.id for c in panel.picks()] == [41, 42, 43] and panel.btn_send.text() == "Send 3 to Suwayomi"
+    assert not (panel.table.item(3, cp.COL_PICK).flags() & Qt.ItemFlag.ItemIsUserCheckable)   # 44: not on the source
+    panel.table.item(0, cp.COL_PICK).setCheckState(Qt.CheckState.Unchecked)
+    assert panel.check_all.checkState() == Qt.CheckState.PartiallyChecked
+    panel.check_all.click()                                            # partly ticked: tick them all
+    assert len(panel.picks()) == 3 and panel.check_all.checkState() == Qt.CheckState.Checked
