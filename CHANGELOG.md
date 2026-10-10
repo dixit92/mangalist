@@ -7,6 +7,7 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **The download budget says when its usage moves**: one log line when a check takes sizes from qBittorrent or releases a failed download ("now 12.3 GB of 50 GB") - the first live check changed the usage from 36.1 to 12.3 GB without a word at Info.
 - **Schedules are picked, not typed.** Settings > Automation offers Weekly (a day and a time), Daily (a time), Every 12 hours, Every 6 hours or Off for each schedule; filing finished downloads also keeps Every hour, its default. A container value outside these (e.g. every 3 hours) is shown as its own choice, never changed silently. The runner understands the new weekly form (`weekly@sun 03:30`).
 - **The holding folder says how much space it takes**: "1.2 GB held (4 batches, 32 files)" in Settings, "1.2 GB of replaced chapters in the holding folder (32 chapter files, 4 series)" in the Download tab.
 - **Finished downloads leave the In progress list.** A download whose torrent left qBittorrent at its seed goal ("Filed v36 - done") or that was cancelled is hidden; "Show finished (2)" shows it again. Failed downloads stay in view.

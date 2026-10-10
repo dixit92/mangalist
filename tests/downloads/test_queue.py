@@ -195,17 +195,23 @@ def test_no_limit_hands_everything_over(setup, ledger, qbt):
     assert setup(H4, 900).status == S.SENT
 
 
-def test_sizes_come_from_qbittorrent_once_it_reports_them(setup, ledger, qbt):
+def test_sizes_come_from_qbittorrent_once_it_reports_them(setup, ledger, qbt, caplog):
     a = setup(H1, 30)
     assert a.size_source == SIZE_RELEASE
     qbt.put(H1, "Pack", {"Series A v02.cbz": data("v02")}, state="downloading", progress=0.1, size=0)
     Q.run_queue(qbt, ledger)
     assert ledger.get(a.id).size_bytes == 30 * GB                      # not reported yet: the release's size stays
     qbt.set(H1, size=12 * GB)
-    report = Q.run_queue(qbt, ledger)
+    with caplog.at_level(logging.INFO, logger="mangalist.downloads.queueing"):
+        report = Q.run_queue(qbt, ledger)
     got = ledger.get(a.id)
     assert report.sized == [a.id] and (got.size_bytes, got.size_source) == (12 * GB, SIZE_CLIENT)
-    assert Q.run_queue(qbt, ledger).sized == []                        # written once
+    # the first live pass (2026-10-10) changed the usage from 36.1 to 12.3 GB without a word at INFO
+    assert "Budget: 1 size(s) taken from qBittorrent, 0 failed download(s) released; now" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="mangalist.downloads.queueing"):
+        assert Q.run_queue(qbt, ledger).sized == []                    # written once ...
+    assert "size(s) taken" not in caplog.text                          # ... and an uneventful pass stays quiet
 
 
 def test_a_failed_download_counts_while_its_torrent_is_in_qbittorrent(setup, ledger, qbt):
