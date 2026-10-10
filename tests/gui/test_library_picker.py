@@ -587,3 +587,30 @@ def test_root_of_takes_the_deepest_library_folder(tmp_path):
     assert root_of(str(tmp_path / "Reading" / "Manga-Concluded" / "S"), roots) is sibling        # not a prefix match
     assert root_of(str(tmp_path / "Reading" / "x.cbz"), roots) is outer
     assert root_of(str(tmp_path / "Elsewhere"), roots) is None
+
+
+def test_a_rescan_asked_for_during_a_scan_follows_it_and_the_renamer_hears_of_it(lib, qapp):
+    # a rename's rescan used to be dropped while another scan ran; the Renamer window waits for it (owner, 2026-10-10)
+    win = lib.make_window()
+    for name in (MANGA, MANHWA):
+        win._db.add_root(str(lib.dirs[name]), name)
+    win._show_roots()
+    manhwa = lib.root(win, MANHWA)
+    win._thread, win._scanning_ids = object(), [lib.root(win, MANGA).id]     # a scan of Manga is running
+    win._start_scan([manhwa])
+    win._start_scan([manhwa])
+    assert [r.name for r in win._scan_queued] == [MANHWA] and not win._scan_queue_all
+
+    heard = []
+
+    class Window:
+        def library_rescanned(self, ids):
+            heard.append(list(ids))
+
+    win._renamer_window = Window()
+    scans = []
+    win._start_scan = lambda roots=None: scans.append(None if roots is None else [r.name for r in roots])
+    win._on_thread_finished()
+    assert heard == [[lib.root(win, MANGA).id]]
+    wait_until(qapp, lambda: scans, timeout=5)
+    assert scans == [[MANHWA]] and win._scan_queued is None

@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Set, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
@@ -140,6 +140,8 @@ class RenamerWindow(QDialog):
         self._call = None
         self._dry: Optional[DryRun] = None
         self._last: Optional[BatchRecord] = None
+        self.rescan_follows = False         # the host rescans the libraries after library_changed (main window: True)
+        self._awaiting: Set[int] = set()    # libraries renamed, their rescan not reported yet (library_rescanned)
         self._busy = False
         self._changing = False
         self._build()
@@ -296,7 +298,8 @@ class RenamerWindow(QDialog):
         n = self._dry.count(RENAME) if self._dry is not None else 0
         self.btn_apply.setText(f"Rename {_plural(n, 'file')}…" if n else "Rename")
         self.btn_apply.setEnabled(not self._busy and n > 0)
-        self.btn_undo.setEnabled(not self._busy and self._last is not None)
+        # while the rescan runs, the last batch is not known yet: no undo of an older one
+        self.btn_undo.setEnabled(not self._busy and not self._awaiting and self._last is not None)
         if self._last is not None:
             self.btn_undo.setToolTip(f"Put the {_plural(self._last.done, 'file')} of the last batch back under their "
                                      f"old names ({self._last.note})")
@@ -539,9 +542,7 @@ class RenamerWindow(QDialog):
         self.result_label.setProperty("tone", "bad" if bad else "ok")
         self.result_label.setText(" ".join(lines))
         roots = sorted({rid for r in results if r.renamed for rid in r.root_ids})
-        if roots:
-            self.library_changed.emit(roots)
-        self.refresh()
+        self._after_change(roots)
 
     def undo_last(self) -> None:
         last = self._last
@@ -556,9 +557,31 @@ class RenamerWindow(QDialog):
     def _undone(self, result: BatchResult) -> None:
         self.result_label.setProperty("tone", "ok" if result.status == "undone" else "bad")
         self.result_label.setText(result.message + (f" {result.after}" if result.after else ""))
-        if result.root_ids and result.renamed:
-            self.library_changed.emit(list(result.root_ids))
+        self._after_change(sorted(result.root_ids) if result.root_ids and result.renamed else [])
+
+    def _after_change(self, root_ids: Sequence[int]) -> None:
+        """Files were renamed or put back. The preview reads the files as the last scan recorded them, so with a host
+        that rescans (``rescan_follows``) it waits for that rescan - looking at once listed every renamed file under its
+        old name as "gone since the last scan" (owner, 2026-10-10)."""
+        if root_ids:
+            self.library_changed.emit(list(root_ids))
+        if root_ids and self.rescan_follows:
+            self._awaiting = set(root_ids)
+            self._dry = None
+            self.series_list.clear()
+            self.preview.clear()
+            self.summary_label.setText("Rescanning the library to show the new names…")
+            self._update_buttons()
+            return
         self.refresh()
+
+    def library_rescanned(self, root_ids: Sequence[int]) -> None:
+        """The host finished a scan of *root_ids*: look again once every library this window changed is rescanned."""
+        if not self._awaiting:
+            return
+        self._awaiting -= set(root_ids)
+        if not self._awaiting and not self._busy:
+            self.refresh()
 
     def widen_to_library(self) -> None:
         """After the pilot: the same window on the series' whole library."""
