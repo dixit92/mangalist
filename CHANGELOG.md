@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.11] - 2026-10-09
+
+The tenth MangaList release (testing build): the Library picker moves to the top bar (it applies to both tabs), and filing into a series held as volumes only is noted plainly.
+
 - **The Library picker moved to the top bar** ("Library: All libraries ▾"), next to the scan time: it applies to the
   List and the Download tab alike, which the List's filter bar did not make clear. The top bar no longer repeats the
   library names beside it.
