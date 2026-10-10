@@ -655,7 +655,7 @@ def test_automation_schedules_are_choices_and_say_who_uses_them(qapp, db, cache)
     assert page.schedule_times["downloads"].isHidden() and page.schedule_days["downloads"].isHidden()
     assert {job: l.text() for job, l in page.schedule_reading.items()} == {
         "rescan": "daily 02:15", "mangapixer-sync": "daily 03:15",
-        "downloads": "every hour (and Check qBittorrent now)"}
+        "downloads": "every hour (and Check downloads now)"}
     assert all(btn.isHidden() for btn in page.schedule_reset.values()), "nothing stored yet: nothing to reset"
     text = all_text(page)
     assert "background runner in the Docker / Unraid container" in text and "no restart" in text

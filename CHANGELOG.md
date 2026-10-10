@@ -7,6 +7,7 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **"Check qBittorrent now" is now "Check downloads now"**: it asks Suwayomi as well (files finished chapters), so the old name was misleading.
 - **Suwayomi sources: only your languages, and only MangaDex (English) ticked to start.** Every MangaDex language used to arrive ticked. The list now shows the sources in your nyaa languages (English unless Raw is ticked) plus any you use; "Show all languages" shows the rest. "Reset to default" undoes a list ticked by hand.
 - **Number boxes show their up / down arrows again** (Settings > Download sources > Download budget, Logging): the stylesheet had hidden them. Settings cards have a little more room inside their border.
 - **No personal examples in the app**: the Windows server field and its explanation use a neutral example (`MYSERVER`); test data no longer borrows real library or share names.

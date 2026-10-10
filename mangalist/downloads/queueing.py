@@ -9,7 +9,7 @@ Owner, 2026-10-09: "the rest of the items are queued if that cap is reached" (th
   QUEUED, with everything a later send needs (the ledger's ``request`` JSON: the release, the wanted volumes, the
   partial-or-whole choice; the target folder) - unless the owner chose to send it now, past the cap. A release bigger
   than the cap on its own is never queued (it would never fit): it is refused unless the owner sends it past the cap.
-- **Handing over** (:func:`run_queue`; the hourly ``downloads`` job and "Check qBittorrent now", after the arrivals
+- **Handing over** (:func:`run_queue`; the hourly ``downloads`` job and "Check downloads now", after the arrivals
   pass and Remove Completed): first every record's size is brought up to date from qBittorrent (its own figure for the
   files it downloads) and FAILED records whose torrent is gone stop counting; then the queue is walked in order. The
   first item that does not fit stops the walk - nothing behind it jumps ahead. An item bigger than the cap on its own
@@ -53,7 +53,7 @@ from .service import PackWait, SendRefused, check_pick, dispatch
 
 _log = logging.getLogger(__name__)
 
-# One hand-over at a time in this process (the scheduler's pass and "Check qBittorrent now" may meet): the budget is
+# One hand-over at a time in this process (the scheduler's pass and "Check downloads now" may meet): the budget is
 # read and spent as one step. Records are claimed compare-and-set as well, so another process can never send one twice.
 _HAND_OVER = threading.Lock()
 
