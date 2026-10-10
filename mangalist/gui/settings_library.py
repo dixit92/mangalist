@@ -26,7 +26,7 @@ NAMING_TEXT = ("Every library uses MangaList's naming scheme: chapters as \"Ch. 
                "happens to files named differently: Off, Ask before renaming, or Rename automatically. To rename, "
                "right-click a series in the List and choose \"Rename to the scheme…\", or use \"Rename library…\".")
 SERVER_TEXT = ("Windows server name (optional). If you open these files from a Windows PC over the network "
-               "(\\\\SERVER\\share\\...), enter the server's name as Windows shows it, e.g. SMIT-SERVER. Windows cannot open "
+               "(\\\\SERVER\\share\\...), enter the server's name as Windows shows it, e.g. MYSERVER. Windows cannot open "
                "a path longer than 259 characters, so MangaList then shortens long chapter titles (and after them long "
                "group names) wherever the whole Windows path would be too long. Leave it empty if you never open the "
                "library from Windows; file names are still kept to 255 bytes.")
@@ -83,9 +83,10 @@ class LibraryPage(SectionPage):
         self.server_note = label(SERVER_TEXT, "muted", wrap=True)
         lay.addWidget(self.server_note)
         self.server_edit = QLineEdit()
-        self.server_edit.setPlaceholderText("e.g. SMIT-SERVER (empty: not opened from Windows)")
+        self.server_edit.setPlaceholderText("e.g. MYSERVER (empty: not opened from Windows)")
         self.server_edit.setAccessibleName("Windows server name")
-        self.server_edit.setMaximumWidth(320)
+        self.server_edit.setMinimumWidth(280)                  # the placeholder fits
+        self.server_edit.setMaximumWidth(360)
         self.server_edit.setText(renamer.windows_server(self._db) or "")
         self.server_edit.editingFinished.connect(self.save_server)
         self.server_error = label("", wrap=True)

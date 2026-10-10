@@ -231,7 +231,8 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         extra.update(queue.summary())
         extra["queue_failed_records"] = [{"id": i, "why": why} for i, why in queue.failed]
         status = "error" if report.errors or queue.error else "ok"
-        message = (f"{report.checked} checked: {len(report.filed)} filed, {len(report.removed)} removed, "
+        # "torrents:" next to "chapters:" - one check covers both (owner, 2026-10-10)
+        message = (f"torrents: {report.checked} checked: {len(report.filed)} filed, {len(report.removed)} removed, "
                    f"{len(report.failed)} failed, {len(report.waiting)} waiting")
         if queue.text():
             message += f"; {queue.text()}"

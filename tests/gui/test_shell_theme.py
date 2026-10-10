@@ -53,7 +53,8 @@ def test_apply_theme_loads_plex_and_parses_the_stylesheet(themed):
     app, loaded, warnings = themed
     assert loaded
     assert {"IBM Plex Sans", "IBM Plex Mono"} <= set(QFontDatabase.families())
-    assert app.styleSheet() == theme.stylesheet(theme.SANS, theme.MONO)
+    assert app.styleSheet().startswith(theme.stylesheet(theme.SANS, theme.MONO))
+    assert "QSpinBox::up-arrow" in app.styleSheet()                    # the drawn arrows (owner, 2026-10-10)
     assert QFontInfo(app.font()).family() == "IBM Plex Sans" and app.font().pixelSize() == theme.BASE_PX
     assert app.palette().window().color().name() == theme.GROUND
     widgets = []

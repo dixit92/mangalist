@@ -115,7 +115,9 @@ QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
 
 def apply_style(widget: QWidget) -> None:
     """Attach the stylesheet to a top-level host (the Download tab, the Settings dialog, a wrapper dialog)."""
-    widget.setStyleSheet(STYLESHEET)
+    from .spin_arrows import spin_rules
+
+    widget.setStyleSheet(STYLESHEET + spin_rules(line=FIELD_LINE, color=MUTED))
 
 
 def repolish(widget: QWidget) -> None:

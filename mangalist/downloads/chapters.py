@@ -287,13 +287,16 @@ class FindResult:
     notes: List[str] = field(default_factory=list)  # what was looked at, for the panel ("MangaDex: no id linked")
 
 
-def allowed_sources(installed: Sequence[SuwayomiSource], chosen: Optional[Sequence[str]]) -> List[SuwayomiSource]:
-    """The sources MangaList may use, in order: the owner's choice (ids still installed), else the MangaDex sources alone
-    (English first)."""
+def allowed_sources(installed: Sequence[SuwayomiSource], chosen: Optional[Sequence[str]],
+                    languages: Optional[Sequence[str]] = ("all", "en")) -> List[SuwayomiSource]:
+    """The sources MangaList may use, in order: the owner's choice (ids still installed), else MangaDex alone in the
+    owner's *languages* (nyaa's: English by default) - not MangaDex in every language (owner, 2026-10-10: every
+    MangaDex language came ticked, "I have to manually untick all the others")."""
     by_id = {s.id: s for s in installed}
     if chosen is not None:
         return [by_id[i] for i in chosen if i in by_id]
-    mangadex = [s for s in installed if s.is_mangadex]
+    langs = set(languages or ())
+    mangadex = [s for s in installed if s.is_mangadex and (not langs or s.lang in langs)]
     return sorted(mangadex, key=lambda s: (s.lang != "en", s.display_name.casefold()))
 
 

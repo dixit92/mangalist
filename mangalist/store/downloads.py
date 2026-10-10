@@ -522,6 +522,10 @@ class SuwayomiSettings:
                 out.append(text)
         self.store.set_setting(SETTING_SUWAYOMI_SOURCES, out)
 
+    def reset_sources(self) -> None:
+        """Forget the choice: :meth:`sources` is None again (MangaDex in the owner's languages)."""
+        self.store.delete_setting(SETTING_SUWAYOMI_SOURCES)
+
     # --- per series ------------------------------------------------------------------------------------------
 
     def series_choice(self, series_id: int) -> Dict[str, Any]:

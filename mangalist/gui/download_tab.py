@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..downloads.contracts import DownloadRecord
+from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .. import config
 from .background import describe_error, start_call
 from .chips import ChipButton
@@ -188,6 +188,7 @@ class DownloadTab(QWidget):
         self._bulk_done = 0
         self._bulk_notes = ""
         self._records: Dict[int, List[DownloadRecord]] = {}     # every download of a series (the row chips)
+        self._seen_status: Optional[Dict[int, str]] = None     # record id -> status at the last reload (None: none yet)
         self._chapter_lookups: Dict[str, object] = {}           # folder -> the chapters panel's last lookup
         self._chapter_states: Dict[str, str] = {}               # folder -> SEARCH_* of its chapter lookup
         self._items: Dict[str, QTreeWidgetItem] = {}
@@ -838,6 +839,7 @@ class DownloadTab(QWidget):
     # --- records -------------------------------------------------------------------------------------------
 
     def _on_records(self, records: Sequence[DownloadRecord]) -> None:
+        self._rescan_newly_filed(records)
         by_series: Dict[int, List[DownloadRecord]] = {}
         for record in records:
             by_series.setdefault(record.series_id, []).append(record)
@@ -845,6 +847,26 @@ class DownloadTab(QWidget):
         self._refresh_statuses()
         self.releases.refresh_downloads()
         self.refresh_replaced()
+
+    def _rescan_newly_filed(self, records: Sequence[DownloadRecord]) -> None:
+        """Files landed in the library since the last reload (a check filed volumes or chapters, here or in the
+        container's hourly job): ask for a rescan of those series, so the To get list and the panel follow (owner,
+        2026-10-10: "It finished but the to get and the main panel didn't refresh"). The first reload only remembers."""
+        done = (DownloadStatus.FILED, DownloadStatus.REMOVED)
+        seen = self._seen_status
+        self._seen_status = {r.id: r.status for r in records}
+        if seen is None:
+            return
+        landed = {r.series_id for r in records
+                  if r.status in done and r.filed_files and seen.get(r.id) not in done}
+        if not landed:
+            return
+        folders = [f for f, sid in self._series_ids.items() if sid in landed]
+        for folder in folders:                              # the panel looks the series up again after the rescan
+            self._chapter_lookups.pop(folder, None)
+            self._results.pop(folder, None)
+        _log.info("Download tab: files filed for %d series - asking for a rescan", len(landed))
+        self.library_changed.emit(folders)
 
     # --- replaced chapters ------------------------------------------------------------------------------
 

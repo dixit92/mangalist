@@ -365,7 +365,7 @@ def test_restore_move_or_delete_of_replaced_chapters_rescans(make_window):
     scans = []
     win._start_scan = lambda roots=None: scans.append(roots)
     win._download_tab.library_changed.emit(["/lib/Series A"])
-    assert scans == [None] and "Chapter files changed in 1 series - rescanning" in win._status_label.text()
+    assert scans == [None] and "Files changed in 1 series - rescanning" in win._status_label.text()
 
 
 def test_exclude_from_its_library_adds_an_anchored_pattern_and_rescans_that_root(make_window, tmp_path):

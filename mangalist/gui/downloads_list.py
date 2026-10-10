@@ -1,5 +1,5 @@
 """The "In progress" list: every download MangaList has sent to qBittorrent or queued, and where it stands (Queued -
-2nd in line, Downloading, Downloaded, Filed v03-v05 - seeding, Failed: <reason>, ...), with Check qBittorrent now, the
+2nd in line, Downloading, Downloaded, Filed v03-v05 - seeding, Failed: <reason>, ...), with Check downloads now, the
 time of the next automatic check and the download budget ("Using 31.2 GB of 50 GB; 2 downloads queued"). Chapter
 downloads (Suwayomi) show here too, one row per Send ("Ch. 101-104 · <group> · MangaDex (EN)": Downloading, Filed ch
 101-104 - done, ...); they have no row menu (no torrent, no queue) and the check files them as well.
@@ -62,7 +62,7 @@ QUEUE_ACTIONS = {ACT_SEND_NOW: "send_queued_now", ACT_TO_FRONT: "move_to_front",
 
 class DownloadsList(QWidget):
     records_loaded = Signal(object)         # the records (a list of DownloadRecord), newest first
-    check_finished = Signal(bool)           # a "Check qBittorrent now" ended (True: it worked)
+    check_finished = Signal(bool)           # a "Check downloads now" ended (True: it worked)
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None, autostart: bool = True,
                  heading: str = "In progress", series_name: Optional[Callable[[int], str]] = None,
@@ -75,7 +75,7 @@ class DownloadsList(QWidget):
         self._backend = backend
         self._series_name = series_name
         self._call: Optional[BackgroundCall] = None
-        self._note: Optional[str] = None            # the last "Check qBittorrent now" summary, kept across the reload
+        self._note: Optional[str] = None            # the last "Check downloads now" summary, kept across the reload
         self._check_failed = False
         self._again = False                         # a refresh was asked for while one ran
         self._known_titles: Mapping[int, str] = {}  # names the host knows (the wanted series)
@@ -97,13 +97,14 @@ class DownloadsList(QWidget):
         # Owner, 2026-10-09: "These labels need to be more clear" - one re-reads MangaList's own list, the other asks
         # qBittorrent; neither talks to MangaPixer.
         self.btn_refresh = button("Reload list", link=True)
-        self.btn_refresh.setToolTip("Show the latest saved state of these downloads (asks neither qBittorrent nor "
-                                    "MangaPixer)")
+        self.btn_refresh.setToolTip("Show the latest saved state of these downloads (asks neither qBittorrent, Suwayomi "
+                                    "nor MangaPixer)")
         self.btn_refresh.clicked.connect(self.refresh)
-        self.btn_check = button("Check qBittorrent now", tip="Ask qBittorrent now: file finished downloads, remove "
-                                                              "completed torrents and hand queued downloads over while "
-                                                              "they fit the download budget - the same check that runs "
-                                                              "every hour on its own")
+        # owner, 2026-10-10: "Check downloads now is misleading since we have another provider" - it asks Suwayomi too
+        self.btn_check = button("Check downloads now", tip="Ask qBittorrent and Suwayomi now: file finished downloads, "
+                                                            "remove completed torrents and hand queued torrents over "
+                                                            "while they fit the download budget - the same check that "
+                                                            "runs every hour on its own")
         self.btn_check.clicked.connect(self.check_now)
         self.btn_finished = button("", link=True, tip="Downloads whose torrent left qBittorrent at its seed goal, "
                                                        "or that were cancelled - their volumes stay in the library")
@@ -226,7 +227,7 @@ class DownloadsList(QWidget):
         self.btn_check.setEnabled(not busy)
         self.progress.setVisible(busy)
 
-    # --- Check qBittorrent now -------------------------------------------------------------------------------------
+    # --- Check downloads now -------------------------------------------------------------------------------------
 
     def check_now(self) -> bool:
         """Run the downloads check once (off the UI thread), then reload the list."""
@@ -234,7 +235,7 @@ class DownloadsList(QWidget):
             return False
         self._busy(True)
         set_tone(self.status_label, "")
-        self.status_label.setText("Checking qBittorrent...")
+        self.status_label.setText("Checking the downloads...")
         self._check_failed = False
         backend = self._backend
         self._call = start_call(backend.check_now, self._on_checked, self._on_check_error, self._after_check)

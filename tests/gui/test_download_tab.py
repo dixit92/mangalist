@@ -312,6 +312,29 @@ def test_check_now_reloads_the_list_and_the_rows(qapp):
     assert backend.checks == 1
 
 
+def test_a_check_that_files_something_asks_for_a_rescan(qapp):
+    """Owner, 2026-10-10: "It finished but the to get and the main panel didn't refresh" - files landed, so the window
+    rescans (the To get list and the panel follow); the first load and an unchanged reload ask nothing."""
+    import dataclasses
+
+    backend = FakeBackend(records=[record(1, series_id=3, status=S.SENT, wanted=("15",)),
+                                   dataclasses.replace(record(2, series_id=2, status=S.FILED, wanted=("12",)),
+                                                       filed_files=("Frieren v12.cbz",))])
+    tab, _ = make(qapp, backend)
+    asked = []
+    tab.library_changed.connect(asked.append)
+    wait_until(qapp, lambda: tab.status_of("/lib/Oshi no Ko") == "Downloading v15")
+    assert asked == []                                                  # already filed before: nothing new
+    backend.record_list[0] = dataclasses.replace(backend.record_list[0], status=S.FILED,
+                                                 filed_files=("Oshi no Ko v15.cbz",))
+    tab.downloads.check_now()
+    wait_until(qapp, lambda: asked)
+    assert asked == [["/lib/Oshi no Ko"]]
+    tab.downloads.refresh()                                             # the same state again: no second rescan
+    wait_until(qapp, lambda: tab.downloads._call is None)
+    assert len(asked) == 1
+
+
 def test_show_in_list_and_stop(qapp):
     tab, backend = make(qapp)
     seen = []

@@ -277,5 +277,7 @@ def apply_theme(app) -> bool:
         app.setStyle(style)
     app.setPalette(palette())
     app.setFont(font(BASE_PX))
-    app.setStyleSheet(stylesheet(sans_family(), mono_family()))
+    from .spin_arrows import spin_rules
+
+    app.setStyleSheet(stylesheet(sans_family(), mono_family()) + spin_rules(line=CONTROL, color=MUTED))
     return loaded

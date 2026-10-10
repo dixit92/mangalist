@@ -117,7 +117,7 @@ def test_check_now_runs_the_check_off_the_ui_thread_then_reloads(qapp):
                and dlg.table.cellWidget(0, 2).findChild(QLabel).text() == "Filed v03-v05 - seeding")
     assert finished == [True]
     assert backend.checks == 1 and threading.get_ident() not in backend.threads
-    assert dlg.status_label.text() == "Checked now: 1 checked: 1 filed, 0 removed, 0 failed, 0 waiting."
+    assert dlg.status_label.text() == "Checked now: torrents: 1 checked: 1 filed, 0 removed, 0 failed, 0 waiting."
 
 
 def test_check_now_failure_is_shown_and_the_list_kept(qapp):

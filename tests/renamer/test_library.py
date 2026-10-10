@@ -77,10 +77,10 @@ def test_chapter_volumes_from_the_volume_list(db, hooks, two_series):
 
 
 def test_the_windows_server_reaches_the_namer(db, renamer, namer, two_series):
-    rn.set_windows_server(db, "\\\\SMIT-SERVER")
-    assert rn.windows_server(db) == "SMIT-SERVER"
+    rn.set_windows_server(db, "\\\\MYSERVER")
+    assert rn.windows_server(db) == "MYSERVER"
     renamer.preview_series(_sid(db, two_series, "Series A"))
-    assert namer.limit_servers[-1] == "SMIT-SERVER"
+    assert namer.limit_servers[-1] == "MYSERVER"
     rn.set_windows_server(db, "")
     assert rn.windows_server(db) is None
 

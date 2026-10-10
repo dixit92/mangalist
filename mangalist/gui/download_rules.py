@@ -509,7 +509,7 @@ def schedule_entries(db, env: Optional[Mapping[str, str]] = None) -> List[Schedu
         canonical = parsed.describe() if parsed is not None else "off"
         when = schedule_text(canonical) if parsed is not None else "off"
         if job == "downloads" and parsed is not None:
-            when += " (and Check qBittorrent now)"
+            when += " (and Check downloads now)"
         rows.append(ScheduleEntry(job, spec.label, canonical, when, choice.source, True))
     return rows
 

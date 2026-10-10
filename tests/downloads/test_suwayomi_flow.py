@@ -156,8 +156,9 @@ def test_sources_mangadex_first_by_default_then_the_owners_choice(world):
     connect(world)
     session.answers["MangaListSources"] = with_other_source()
     listed = backend.suwayomi_sources()
-    assert [(s.display_name, on) for s, on in listed] == [("MangaDex (EN)", True), ("MangaDex (JA)", True),
-                                                          ("Weeb Example", False)]
+    # MangaDex in the owner's languages only (nyaa: English) - not every language (owner, 2026-10-10)
+    assert [(s.display_name, on) for s, on in listed] == [("MangaDex (EN)", True), ("Weeb Example", False),
+                                                          ("MangaDex (JA)", False)]
     assert "Local source" not in [s.display_name for s, _ in listed]
     backend.set_suwayomi_sources([OTHER, MANGADEX_EN])
     assert [(s.display_name, on) for s, on in backend.suwayomi_sources()] == [
