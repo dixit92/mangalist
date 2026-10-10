@@ -7,6 +7,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Settings > Logging.** Pick what the log files hold: Error, Warning, Info (the default) or Debug, optionally a level of its own for scanning, matching, MangaPixer, nyaa, qBittorrent, filing, duplicates or upgrades, how big a file may grow and how many old ones are kept. A change applies at once in the app, and within a minute in the container's background runner (no restart). **Open the log folder** and **Copy the log folder path** are on the page. `MANGALIST_LOG_LEVEL` only sets the first-run level.
+- **The schedules are editable.** Settings > Automation now lets you type the rescan, MangaPixer sync and "file finished downloads" times (`daily@03:30`, `every 12h` or `off`; a bad entry says what to write). They are stored in the database and the container's runner re-reads them without a restart, logging each new next-run time; the `MANGALIST_*_SCHEDULE` variables only seed them, and "Use the container's value" goes back to the variable. The page says that the container's runner uses them, not the desktop app.
+- **Better logs.** One convention (Info for every action and external call, Warning for a problem MangaList got past, Error for a failure, Debug for detail; never a token, password or cookie - and a mask on every log line as a second guard): a scan, a MangaPixer sync and its token or connection changes, nyaa searches, duplicate and replaced-chapter clean-ups, root changes, the filing plans and a failed job now leave a line. The debug level adds MangaPixer and nyaa request lines (the endpoint only) and `urllib3` stays quiet.
 - **"Sent" now reads "Downloading"** in the In progress list and the List's detail panel, as the "To get" chips say.
 - **Fixed: the Published column cut the date** ("2021-11-...") with a larger table font: its width now comes from the font.
 

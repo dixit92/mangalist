@@ -338,6 +338,12 @@ def schedule_entries(db, env: Optional[Mapping[str, str]] = None) -> List[Schedu
     return rows
 
 
+def schedule_rows(env: Optional[Mapping[str, str]] = None) -> List[Tuple[str, str, bool]]:
+    """(what, when, from the container's environment?) as the container's variables alone give them (no database):
+    the schedules before anything is set in Settings."""
+    return [(e.label, e.when, e.source == "env") for e in schedule_entries(None, env)]
+
+
 def save_schedule_text(db, job: str, text: str) -> str:
     """Check and store the schedule typed for *job*; the stored text. ValueError with a plain message for the owner."""
     from ..headless.settings import SCHEDULE_BY_JOB, save_schedule

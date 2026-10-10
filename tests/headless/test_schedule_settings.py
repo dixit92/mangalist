@@ -212,3 +212,28 @@ def test_build_registry_marks_the_downloads_jobs_as_gated():
     settings = HeadlessSettings.from_env({"MANGALIST_DOWNLOADS": "0"})
     registry = build_registry(settings, provider=type("P", (), {"roots": lambda self: []})())
     assert [j.gate for j in registry.all()] == [True, True, False, False]
+
+
+# --- the Automation section's helpers (no Qt) -------------------------------------------------------------------
+
+def test_schedule_entries_say_where_each_value_comes_from(db):
+    from mangalist.gui import download_rules as rules
+
+    env = {"MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00", "MANGALIST_DOWNLOADS_SCHEDULE": "banana"}
+    rules.save_schedule_text(db, "rescan", "12h")
+    entries = {e.job: e for e in rules.schedule_entries(db, env)}
+    assert list(entries) == ["rescan", "mangapixer-sync", "downloads"], "the dispatch stub has no row"
+    assert (entries["rescan"].edit_text, entries["rescan"].when, entries["rescan"].source) == \
+        ("every 12h", "every 12 hours", "stored")
+    assert (entries["mangapixer-sync"].edit_text, entries["mangapixer-sync"].source) == ("daily@02:00", "env")
+    assert (entries["downloads"].edit_text, entries["downloads"].when, entries["downloads"].valid) == \
+        ("banana", "banana (not understood)", False)
+    rules.reset_schedule_text(db, "rescan")
+    assert {e.job: e.source for e in rules.schedule_entries(db, {})}["rescan"] == "default"
+
+
+def test_schedule_rows_without_a_database_are_the_containers_values():
+    from mangalist.gui import download_rules as rules
+
+    assert [(w, e) for w, _when, e in rules.schedule_rows({"MANGALIST_RESCAN_SCHEDULE": "off"})] == [
+        ("Rescan the library", True), ("Sync with MangaPixer", False), ("File finished downloads", False)]
