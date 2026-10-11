@@ -25,6 +25,11 @@ the id MangaPixer links, else title candidates the owner confirms - :meth:`Backe
 chapters with their groups and the default group, and :meth:`Backend.send_chapters` records and enqueues the picks
 (:mod:`mangalist.downloads.chapters`). Suwayomi's connection, sources and per-series choices live in
 :class:`~mangalist.store.downloads.SuwayomiSettings`. :meth:`Backend.records` returns every tool's records.
+
+**Automatic downloads** (:mod:`mangalist.downloads.finding`): :meth:`Backend.find_now` runs the find pass
+(:mod:`mangalist.downloads.finder`) with this backend's nyaa client, qBittorrent and Suwayomi; :meth:`Backend.send_finding`
+sends one finding later; the modes, the findings and the last run are quick reads of
+:class:`~mangalist.store.findings.FindingStore`.
 """
 
 from __future__ import annotations
@@ -97,8 +102,9 @@ class Backend:
     def __init__(self, db, *, search: Optional[NyaaSearch] = None, nyaa_client: Optional[NyaaClient] = None,
                  client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection,
                  chapter_client_factory: Optional[Callable[[SuwayomiConnection], ChapterClient]] = None,
-                 namer=None):
+                 namer=None, wanted=None):
         self.db = db
+        self._wanted = wanted                   # the find pass's wanted list (tests); None: mangalist.wanted
         self.ledger = DownloadLedger(db)
         self.chapter_ledger = DownloadLedger(db, tool=TOOL_SUWAYOMI)
         self.suwayomi = SuwayomiSettings(db)
@@ -585,6 +591,81 @@ class Backend:
             raise BackendError(str(exc)) from None
         finally:
             _close(client)
+
+    # --- automatic downloads (mangalist.downloads.finding) ------------------------------------------------------
+
+    def find_now(self, series_ids: Optional[Sequence[int]] = None):
+        """A find pass now (Find now), or a bulk find of *series_ids* (never sends by itself) -> ``FindReport``.
+        Blocks for as long as the searches take; a pass already running is a :class:`BackendError`."""
+        from .finder import FindBusy, run_find
+        from .finding import TRIGGER_BULK, TRIGGER_NOW
+
+        try:
+            return run_find(self.db, trigger=TRIGGER_NOW if series_ids is None else TRIGGER_BULK,
+                            series_ids=None if series_ids is None else list(series_ids), wanted=self._wanted,
+                            backend=self)
+        except FindBusy as exc:
+            raise BackendError(str(exc)) from None
+
+    def findings(self, status: Optional[str] = "waiting") -> list:
+        """What find passes found, newest first (*status* None: every status). Quick."""
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).list(status)
+
+    def send_finding(self, finding_id: int) -> str:
+        """Send one waiting finding; returns what happened in a sentence (sent, queued, or why not)."""
+        from .finder import send_finding
+
+        return send_finding(self.db, finding_id, backend=self, wanted=self._wanted)
+
+    def skip_finding(self, finding_id: int) -> None:
+        """The owner skipped it: never offered again. Quick."""
+        from ..store.findings import SKIPPED, WAITING, FindingConflict, FindingStore
+
+        try:
+            FindingStore(self.db).set_status(finding_id, SKIPPED, expect=(WAITING,))
+        except FindingConflict as exc:
+            raise BackendError(f"not skipped: {exc}") from None
+        _log.info("Finding %s skipped by the owner", finding_id)
+
+    def series_modes(self, series_ids: Sequence[int]) -> Dict[int, str]:
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).modes(series_ids)
+
+    def own_series_mode(self, series_id: int) -> Optional[str]:
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).own_mode(series_id)
+
+    def set_series_mode(self, series_ids: Sequence[int], mode: Optional[str]) -> None:
+        from ..store.findings import FindingStore
+
+        try:
+            n = FindingStore(self.db).set_mode(series_ids, mode)
+        except ValueError as exc:
+            raise BackendError(str(exc)) from None
+        _log.info("Automatic downloads: %d series set to %s", n, mode or "the default")
+
+    def default_mode(self) -> str:
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).default_mode()
+
+    def set_default_mode(self, mode: str) -> None:
+        from ..store.findings import FindingStore
+
+        try:
+            FindingStore(self.db).set_default_mode(mode)
+        except ValueError as exc:
+            raise BackendError(str(exc)) from None
+        _log.info("Automatic downloads: the default mode is %s", mode)
+
+    def last_find_run(self):
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).last_run()
 
 
 def _close(client) -> None:
