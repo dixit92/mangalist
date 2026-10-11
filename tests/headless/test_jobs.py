@@ -117,11 +117,7 @@ def test_dispatch_off_dispatches_nothing(caplog):
     assert "nothing dispatched" in caplog.text
 
 
-def test_dispatch_on_is_still_a_placeholder(caplog):
-    caplog.set_level(logging.INFO)
-    result = make_dispatch(True)(JobContext())
-    assert result.status == "skipped" and "not implemented" in result.message
-    assert "nothing dispatched" in caplog.text
+# The pass itself (downloads on): tests/headless/test_dispatch_find.py.
 
 
 # --- roots --------------------------------------------------------------------------------------

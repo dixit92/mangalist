@@ -7,10 +7,12 @@
   (:meth:`mangalist.renamer.Renamer.automatic_pass`): roots set to "Rename automatically" whose conversion the
   owner started in the GUI get their pending renames through the journal (every batch logged; the touched roots are
   scanned again and MangaPixer is asked to scan). The downloads job's rescan after filing runs it too.
-- ``dispatch-batch``: the batched download dispatch. Downloads are phase 3+ and opt-in: the job is
-  registered but DISABLED unless downloads are turned on, and even then it only logs for now.
-  Nothing is ever dispatched on discovery - only in these scheduled batches. (The volumes MVP sends on the
-  owner's pick instead; this stub stays.)
+- ``dispatch-batch``: the scheduled find pass of automatic downloads (:func:`mangalist.downloads.finder.run_find`,
+  trigger ``schedule``): the wanted series are searched, picks of series on Auto that may go out by themselves are
+  sent (the budget queues what does not fit), the rest waits as findings for the owner. Opt-in: the job is
+  registered but DISABLED unless downloads are turned on. Nothing is ever dispatched on discovery - only in these
+  scheduled passes (or the owner's Find now). Settings > Automation calls it "Find and send missing volumes and
+  chapters".
 - ``downloads``: the volumes MVP's arrivals pass (:mod:`mangalist.headless.downloads_job`) - file finished
   ``mangalist`` torrents into their series folders and remove completed ones. Enabled only with downloads on.
 
@@ -371,16 +373,45 @@ def _record(db: Any, result: Any, ctx: JobContext, backfill: bool, delay: Option
     return out
 
 
-def make_dispatch(downloads_enabled: bool) -> JobFunc:
-    def dispatch_batch(ctx: JobContext) -> JobResult:  # noqa: ARG001
+DISPATCH_DESCRIPTION = "Find and send missing volumes and chapters (opt-in)"
+
+
+def make_dispatch(downloads_enabled: bool, *, open_db: Optional[Callable[[], Any]] = None,
+                  backend_factory: Optional[Callable[[Any], Any]] = None, wanted: Any = None) -> JobFunc:
+    """The scheduled find pass. *open_db* / *backend_factory* / *wanted* are for tests (default: the data folder's
+    database, :class:`mangalist.downloads.adapter.Backend` over it, :func:`mangalist.wanted.wanted_list`). The pass
+    logs its own summary line; a pass already running (Find now in the GUI) skips this one."""
+
+    def dispatch_batch(ctx: JobContext) -> JobResult:
         if not downloads_enabled:
             _log.info("Dispatch batch: downloads are off (opt-in); nothing dispatched")
             return JobResult("skipped", "downloads are off")
-        # Phase 3+: collect the missing items queued since the last batch and hand them to the
-        # download clients. Until then the batch only records that it ran.
-        _log.info("Dispatch batch: downloads are on, but dispatch is not implemented yet "
-                  "(phase 3); nothing dispatched")
-        return JobResult("skipped", "dispatch not implemented yet")
+        from ..downloads.finder import FindBusy, run_find
+        from ..downloads.finding import TRIGGER_SCHEDULE
+
+        if open_db is not None:
+            db = open_db()
+        else:
+            from ..store import get_store
+
+            db = get_store()
+        if backend_factory is not None:
+            backend = backend_factory(db)
+        else:
+            from ..downloads.adapter import Backend
+
+            backend = Backend(db)
+        try:
+            report = run_find(db, trigger=TRIGGER_SCHEDULE, wanted=wanted, backend=backend,
+                              should_stop=lambda: ctx.stop_requested)
+        except FindBusy as exc:
+            _log.info("Find pass: skipped: %s", exc)
+            return JobResult("skipped", str(exc))
+        if ctx.stop_requested:
+            raise Cancelled()
+        extra = {"run_id": report.run_id, "series_searched": report.series_searched, "found": report.found,
+                 "sent": report.sent, "errors": report.errors, "lines": report.lines[:100]}
+        return JobResult("error" if report.errors else "ok", report.summary, extra)
 
     return dispatch_batch
 
@@ -403,7 +434,7 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
             description="Rescan the library roots", catch_up=settings.catch_up),
         Job("dispatch-batch", make_dispatch(settings.downloads_enabled),
             settings.dispatch_schedule, enabled=settings.downloads_enabled,
-            description="Dispatch the batched downloads (opt-in, off by default)",
+            description=DISPATCH_DESCRIPTION,
             catch_up=settings.catch_up, gate=bool(settings.downloads_enabled)),
         Job(DL_JOB, make_downloads_job(), dl_schedule,
             enabled=bool(settings.downloads_enabled) and dl_schedule is not None,
