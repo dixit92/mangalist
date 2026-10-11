@@ -170,6 +170,9 @@ class _ToGetDelegate(TwoLineDelegate):
         painter.restore()
 
 
+_FIND_STARTING = object()   # the find call between start_call and its return (see _start_find)
+
+
 class DownloadTab(QWidget):
     count_changed = Signal(int)             # how many series are to get (the tab's badge)
     show_in_list = Signal(str)              # a series folder: show it in the List tab
@@ -1054,12 +1057,15 @@ class DownloadTab(QWidget):
         _log.info("Download tab: %s", f"bulk find for {len(ids)} series" if bulk else "Find now")
         backend = self._backend
         made: list = []
-        self._find_call = start_call(lambda: backend.find_now(ids) if bulk else backend.find_now(),
-                                     lambda report: self._on_found_report(report, bulk),
-                                     lambda message: self._on_find_error(message),
-                                     lambda: self._find_finished(made[0] if made else None))
-        made.append(self._find_call)
-        self._calls.append(self._find_call)
+        self._find_call = _FIND_STARTING
+        call = start_call(lambda: backend.find_now(ids) if bulk else backend.find_now(),
+                          lambda report: self._on_found_report(report, bulk),
+                          lambda message: self._on_find_error(message),
+                          lambda: self._find_finished(made[0] if made else None))
+        made.append(call)
+        if self._find_call is _FIND_STARTING:       # still running (a runner that finished at once has cleared it)
+            self._find_call = call
+            self._calls.append(call)
         self._update_selected()
         return True
 
