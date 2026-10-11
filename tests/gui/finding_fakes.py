@@ -75,8 +75,9 @@ class FakeFindingBackend(FakeChapterBackend):
         if finding_id in self.send_finding_error:
             raise BackendError(self.send_finding_error[finding_id])
         self.sent_findings.append(finding_id)
+        title = next((f.title for f in self.found if f.id == finding_id), "")
         self._move(finding_id, "sent")
-        return "sent to qBittorrent"
+        return f"Sent to qBittorrent: {title}."                 # the adapter's wording
 
     def skip_finding(self, finding_id):
         self.skipped_findings.append(finding_id)
