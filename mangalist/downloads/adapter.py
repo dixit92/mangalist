@@ -495,6 +495,8 @@ class Backend:
                     built.notes.append("MangaDex has none of the missing chapters")
             return built
         except SuwayomiError as exc:
+            # the panel shows it; the log keeps why (owner, 2026-10-11: three "Lookup failed" rows, nothing logged)
+            _log.warning("Chapters: looking up series %s in Suwayomi failed: %s", series_id, exc)
             raise BackendError(str(exc)) from None
         finally:
             _close(client)
@@ -506,12 +508,29 @@ class Backend:
             return {}
 
     def _chapters_in_hand(self, series_id: int) -> Dict[str, DownloadRecord]:
+        """Chapters a download already has: on their way (sent, downloaded), or filed while a file it filed is still in
+        the library. A filed chapter whose file was moved away or deleted is not in hand (owner, 2026-10-11: chapters
+        moved to the holding folder to be replaced from another source stayed "Filed ch 56" and could not be ticked)."""
         from .contracts import DownloadStatus
 
-        keep = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED, DownloadStatus.REMOVED)
+        from .placement import locate_series
+
+        try:
+            _series, _root, series_dir = locate_series(self.db, series_id)
+        except LookupError:
+            series_dir = None                       # cannot look: every filed chapter counts as in hand, as before
+
+        def still_there(rec: DownloadRecord) -> bool:
+            if series_dir is None:
+                return True
+            return any(os.path.isfile(os.path.join(series_dir, *str(rel).replace("\\", "/").split("/")))
+                       for rel in rec.filed_files or ())
+
+        on_the_way = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED)
+        filed = (DownloadStatus.FILED, DownloadStatus.REMOVED)
         out: Dict[str, DownloadRecord] = {}
         for rec in self.chapter_ledger.for_series(series_id):
-            if rec.status in keep:
+            if rec.status in on_the_way or (rec.status in filed and still_there(rec)):
                 for number in rec.wanted_chapters:
                     out[number] = rec
         return out
