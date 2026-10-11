@@ -21,7 +21,7 @@ a finding without a pick (:data:`REASON_NO_SOURCE`). The missing chapters the so
 (the chapters panel's default rule); extras never; chapters already in hand or in Suwayomi's queue are left out.
 **Source dropped** (owner: "If a series appears removed from the saved source, notify."): the saved manga cannot be
 fetched while Suwayomi answers, or it lists chapters but none of the missing ones although some of them lie within its
-numbers -> :data:`REASON_SOURCE_DROPPED`. Missing chapters past the source's last chapter only mean the source is
+numbers, or it lists no chapters at all -> :data:`REASON_SOURCE_DROPPED`. Missing chapters past the source's last chapter only mean the source is
 behind: nothing is said (steady state stays quiet).
 
 **Not searched**: a series on Off, one with a download in flight (queued, sent, downloaded), and - except in a bulk
@@ -650,6 +650,11 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
         ctx.store.retire(sid, KIND_CHAPTERS, keep)
         return True
     source_name = fetched.source_name or source_name
+    if not fetched.chapters:
+        # the saved manga lists no chapters at all now (Suwayomi's "No chapters found"): taken down there
+        _dropped(ctx, sid, name, match, missing, existing, keep, source_name)
+        ctx.store.retire(sid, KIND_CHAPTERS, keep)
+        return True
     numbers = [d for d in (to_decimal(n) for n in missing) if d is not None]
     try:
         held = held_chapter_groups(ctx.db, sid)

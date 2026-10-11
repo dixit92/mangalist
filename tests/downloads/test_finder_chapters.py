@@ -113,6 +113,16 @@ def test_a_source_listing_none_of_the_missing_chapters_within_its_numbers_is_dro
     assert f.reason == "not on MangaDex (EN) any more - Change source?"
 
 
+def test_a_saved_source_listing_no_chapters_at_all_is_dropped(db, w):
+    # Suwayomi's "No chapters found" reads as an empty list (2026-10-11): still "Change source?", never silence
+    saved(w)
+    w.suwayomi.chapter_list = []
+    w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
+    run(db, w)
+    (f,) = findings(db)
+    assert f.reason == "not on MangaDex (EN) any more - Change source?" and enqueued(w) == []
+
+
 def test_a_source_that_is_only_behind_says_nothing(db, w):
     saved(w)
     w.suwayomi.chapter_list = [chapter(101, "4")]                                   # 5 and 6 are not out there yet
