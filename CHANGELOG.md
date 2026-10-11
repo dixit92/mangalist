@@ -7,6 +7,14 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.21] - 2026-10-11
+
+The twentieth MangaList release (testing build): a volume starting at part 1 of a chapter covers that chapter, more bare-number names are read, and the Renamer shows when it is waiting for a rescan.
+
+- **A volume whose chapters start at part 1 covers that chapter.** A complete series held as all its volumes showed one missing chapter when the volume list mapped its last volume from `11.1` (chapter 11 released in parts). A start at `N.5` (usually an extra) still does not count.
+- **A zero-padded number and a chapter title right after the series' own title** (`<Series> 002 <chapter title>`, one space) is read as a bare number with that title, so the "volumes or chapters?" answer (in the List or the Renamer) applies; such names were unreadable. A short plain number (`<Series> 2 <words>`) is still not read.
+- **The Renamer shows its wait.** After an answer or a rename the window read the library again with only a summary line changing ("the page was blank"); it now shows its busy bar with "Rescanning the library to show the new names…" and keeps the buttons off until the rescan is done.
+
 ## [2026.10.20] - 2026-10-11
 
 The nineteenth MangaList release (testing build): chapters moved away can be sent again, four file-name readings fixed, "volumes or chapters?" answered in the Renamer, and a finished series held as all its volumes is Complete.
