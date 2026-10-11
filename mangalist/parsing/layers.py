@@ -455,9 +455,14 @@ def parse_bare(name: str, series_title: Optional[str] = None) -> Optional[Parsed
                 rm = _BARE.match(rest.lstrip(" _-#"))
                 if rm is not None and rm.group("series") is None:
                     return _bare_result(name, rm, st)
+    # A number with a chapter title after it first: a title ending in a number ("..., Part 2") must not give its "2"
+    # (owner, 2026-10-11: "<Series> 014.5  <title>, Part 2" read as chapter 2, so three chapters collided).
+    titled = _bare_titled(name, text)
+    if titled is not None:
+        return titled
     m = _BARE.match(text)
     if m is None:
-        return _bare_titled(name, text)
+        return None
     return _bare_result(name, m, m.group("series"))
 
 
