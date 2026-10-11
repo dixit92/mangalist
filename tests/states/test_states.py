@@ -495,4 +495,4 @@ def test_a_volume_starting_at_part_one_covers_that_chapter():
     vols5 = (VolumeInfo("1", "1", "10"), VolumeInfo("3", "11.5", "16"))
     k5 = own(licensed_en=False, latest_chapter="16", volumes=vols5)
     s5 = state(inv(held_volumes=["3"]), k5)
-    assert ("11", None) in s5.missing_chapters or any(lo <= "11" for lo, _ in s5.missing_chapters if lo)
+    assert any(Decimal(lo) <= 11 <= Decimal(hi or lo) for lo, hi in s5.missing_chapters), s5.missing_chapters
