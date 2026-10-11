@@ -463,7 +463,7 @@ class DownloadTab(QWidget):
         found = self._found_by_series()
         counts[GROUP_FOUND] = len(self._findings)
         if not counts.get(self._group) and not self._group_chosen:     # nothing in the remembered group: the first with any
-            self._group = next((g for g in self.chip_groups() if counts.get(g)), self._group)
+            self._group = next((g for g in TAB_GROUPS if counts.get(g)), self._group)   # (Found only when asked for)
         for g, chip in self.group_chips.items():
             chip.set_count(counts.get(g, 0))
             chip.setChecked(g == self._group)
