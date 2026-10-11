@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from pathlib import PurePath
 from typing import Iterable, Optional, Tuple, Union
 
@@ -78,10 +80,42 @@ def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseCont
     elif not isinstance(name, str):
         name = os.path.basename(os.fspath(name))
     ctx = context or _NO_CONTEXT
-    result = _first(name, ctx, file_size)
+    read = _without_watermark(name)
+    result = _first(read, ctx, file_size)
     if result is None:
         return ParsedName(name=name, notes=("no layer recognised the name",))
+    if read != name:
+        result = replace(result, name=name, notes=result.notes + ("a site's watermark left out of the name",))
     return _finish(_apply_hint(result, ctx.kind_hint))
+
+
+# A sub-number padded to three digits after the point, like the chapter number before it ("Ch.014.005" - owner,
+# 2026-10-11: "It is .5"): the three digits are the sub-number, so 014.005 is 14.5 and 021.010 is 21.10 (= 21.1).
+def _sub(d):
+    sign, digits, exp = d.as_tuple()
+    if exp != -3 or len(digits) < 3 or digits[-3] != 0 or not any(digits[-2:]):
+        return d
+    whole = d.to_integral_value(rounding="ROUND_DOWN")
+    return Decimal(f"{whole}.{int(''.join(map(str, digits[-3:])))}").normalize()
+
+
+def _unpadded(unit):
+    if unit is None:
+        return None
+    start, end = _sub(unit.start), _sub(unit.end)
+    return unit if (start, end) == (unit.start, unit.end) else replace(unit, start=start, end=end)
+
+
+# A site's watermark at the end of a downloaded file's name ("<Series> 001 Read Online.cbz" - owner, 2026-10-11: such
+# a bare number was not read at all, so the "volumes or chapters?" answer could not help). Left out before reading.
+_WATERMARK = re.compile(r"[\s_-]+(?:read[\s_]+(?:manga[\s_]+)?(?:online|free)(?:[\s_]+free)?|online[\s_]+free)\s*$",
+                        re.IGNORECASE)
+
+
+def _without_watermark(name: str) -> str:
+    stem, ext = split_extension(name)
+    cut = _WATERMARK.sub("", stem)
+    return cut + ext if cut and cut != stem else name
 
 
 def _finish(result: ParsedName) -> ParsedName:
@@ -92,6 +126,9 @@ def _finish(result: ParsedName) -> ParsedName:
     - a name cut off after a chapter word (``0001 [Vol. 0001 Ch.cbz``: the chapter number is lost) is a chapter
       without a number, flagged ``ambiguous`` - never a volume."""
     changes = {}
+    chapter = _unpadded(result.chapter)
+    if chapter != result.chapter:
+        changes["chapter"] = chapter
     group = real_group(result.group)
     if group != result.group:
         changes["group"] = group
