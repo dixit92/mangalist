@@ -552,8 +552,9 @@ class LogViewer(QWidget):
             lines = log_tail.line_count(self.records)
             shown = self.model.rowCount()
             match = f", {shown:,} shown" if shown != lines else ""
+            more = " (older lines not loaded)" if self._more else ""
             self.info_label.setText(f"{name}{files} - {log_tail.size_text(self._total)} - "
-                                    f"{lines:,} lines loaded{match}")
+                                    f"{lines:,} lines loaded{match}{more}")
         else:
             self.info_label.setText(name)
         self._update_buttons()
