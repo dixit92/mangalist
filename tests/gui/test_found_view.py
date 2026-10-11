@@ -110,7 +110,7 @@ def test_send_runs_off_the_ui_thread_and_the_row_leaves(qapp):
     settle(qapp, tab)
     assert backend.sent_findings == [1] and backend.threads[-1] != threading.get_ident()
     assert 1 not in tab.found.rows and tab.group_chips[GROUP_FOUND].count == 2
-    assert tab.found.status_label.text() == "Alpha Saga, v02: sent to qBittorrent"
+    assert tab.found.status_label.text() == "Alpha Saga v02 - Sent to qBittorrent: Alpha Saga v02 (Digital)."
 
 
 def test_a_refused_send_says_why_and_keeps_the_row(qapp):

@@ -246,7 +246,7 @@ class FoundView(QWidget):
         self.say(f"Sending {gets_text(finding)} of {name}...")
         backend = self._backend
         self._call = start_call(lambda: backend.send_finding(finding_id),
-                                lambda outcome: self.say(f"{name}, {gets_text(finding)}: {outcome}", "ok"),
+                                lambda outcome: self.say(f"{name} {gets_text(finding)} - {outcome}", "ok"),
                                 lambda message: self.say(f"Could not send {gets_text(finding)} of {name}: {message}",
                                                          "bad"),
                                 self._call_finished)
