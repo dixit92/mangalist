@@ -57,3 +57,38 @@ def test_extras_and_unreadable_names_are_left_alone(tmp_path):
     names = ["readme.cbz", "cover art.cbz"]
     plans = _plans(tmp_path, names, series_title="Series X")
     assert all(plans[n].status == LEFT_ALONE and plans[n].target is None for n in names)
+
+
+def test_a_file_whose_numbers_the_owner_sets_is_named_by_them_and_reads_back(db, library, hooks):
+    # owner, 2026-10-11: "I still can't set volume or chapter in the rename window" - names cut off after "Ch", a
+    # "vch106-110" bundle and a notice the parser cannot place were left alone with no way to name them
+    import pytest
+
+    from mangalist.renamer import UNIT_CHAPTER, UNIT_VOLUME, Renamer, file_units
+
+    from .conftest import make_library, rescan
+
+    cut, bundle, notice = "0001 [Vol. 0001 Ch.cbz", "Series X vch106-110.cbz", "0050 [Ch. 0017.1.5 - Short notice [Grp]].cbz"
+    root = make_library(db, library, {"Series X": {cut: b"a" * 50, bundle: b"b" * 50, notice: b"c" * 50}})
+    sid = db.get_series(root.id, "Series X").id
+    r = Renamer(db, title_for=lambda root, series: "Series X", rescan=hooks.rescan, request_scans=hooks.request_scans)
+    before = {f.name: f for f in r.preview_series(sid).files}
+    assert all(before[n].status == LEFT_ALONE for n in (cut, bundle, notice))
+    r.set_file_units(str(library / "Series X" / cut), file_units(UNIT_CHAPTER, "1", "1"))
+    r.set_file_units(str(library / "Series X" / bundle), file_units(UNIT_CHAPTER, "106-110"))
+    r.set_file_units(str(library / "Series X" / notice), file_units(UNIT_CHAPTER, "17.5"))
+    after = {f.name: f for f in r.preview_series(sid).files}
+    assert after[cut].status == RENAME and after[cut].target == "Ch. 0001.00 Vol. 001.cbz"
+    assert after[bundle].target == "Ch. 0106.00-0110.00.cbz"
+    assert after[notice].target == "Ch. 0017.50 (Short notice) [Grp].cbz"          # its title and group stay
+    assert {after[n].reason for n in (cut, bundle, notice)} == {"number set by you"}
+    for batch in r.batches([r.preview_series(sid)]):
+        assert r.apply(batch).status == "applied"
+    rescan(db)
+    fresh = Renamer(db, title_for=lambda root, series: "Series X", rescan=None)       # a new window: nothing set
+    assert {f.status for f in fresh.preview_series(sid).files} == {UNCHANGED}      # the new names read back
+    with pytest.raises(ValueError):
+        file_units(UNIT_VOLUME, "3-1")
+    with pytest.raises(ValueError):
+        file_units(UNIT_CHAPTER, "twelve")
+    assert file_units(UNIT_VOLUME, " 4 ", "9").volume is None                     # a volume has no volume
