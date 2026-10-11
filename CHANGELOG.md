@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.23] - 2026-10-11
+
+The twenty-second MangaList release (testing build): set a file's chapter or volume in the Renamer, and the List's last column can no longer be squeezed out of sight.
+
+- **Set chapter / volume in the Renamer.** A file whose name cannot be read (cut off after "Ch", a "vch106-110" bundle, an odd number like 17.1.5) was left alone with no way to name it. Right-click it in the Renamer > **Set chapter / volume…**: chapter or volume, a number or range, and for a chapter its volume (blank: the one the name states, else the volume list's). It is then renamed with the rest ("number set by you"), undoable like any batch; its title and group stay. **Forget the number I set** takes the answer back.
+- **The List's last column keeps at least its header's width.** It used to get only what was left of the view - a sliver with its header cut and its edge out of reach. The table now scrolls sideways instead, by pixel rather than a column at a time; Last Modified starts at 150 px.
+
 ## [2026.10.22] - 2026-10-11
 
 The twenty-first MangaList release (testing build): automatic downloads, a Found list, bulk find, a log viewer, and Check for new chapters.
