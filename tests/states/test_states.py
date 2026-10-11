@@ -454,3 +454,31 @@ def test_a_volume_list_without_english_dates_falls_back_to_the_publishers_count(
     assert s.state == State.MISSING_VOLUMES and s.missing_volumes == ("2", "3")
     it["record"]["englishPublishers"] = []                         # no count either: nothing to tell
     assert state(inv(held_volumes=["1"]), from_mangapixer_item(it)).missing_volumes == ()
+
+
+# --- owner, 2026-10-11: every volume of a finished, unlicensed 4-koma held; the volume list maps only volumes 1-3 -----
+
+def _four_koma(**kw):
+    vols = (VolumeInfo("1", "1", "141.15"), VolumeInfo("2", "101.11", "209"), VolumeInfo("3", "210", "260"))
+    base = dict(licensed_en=False, latest_chapter="717", origin_volumes=Decimal(7), origin_status="Complete",
+                translation_complete=True, volumes=vols)
+    base.update(kw)
+    return own(**base)
+
+
+def test_unmapped_held_volumes_are_not_compared_by_chapter_and_all_volumes_held_is_complete():
+    held = inv(held_volumes=[str(n) for n in range(1, 8)], chapters_covered_by_volumes=[("1", "260")])
+    s = state(held, _four_koma())
+    assert s.state == State.COMPLETE and not s.missing_chapters, (s.state, s.gaps, s.reasons)
+    assert any("volume(s) 4-7" in r for r in s.reasons)
+    # one volume short: that volume is missing (the original count, the translation being complete)
+    s = state(inv(held_volumes=[str(n) for n in range(1, 7)], chapters_covered_by_volumes=[("1", "260")]), _four_koma())
+    assert s.state == State.MISSING_VOLUMES and s.missing_volumes == ("7",) and not s.missing_chapters
+
+
+def test_the_original_volume_count_needs_a_complete_translation():
+    held = inv(held_volumes=["1", "2", "3"], chapters_covered_by_volumes=[("1", "260")])
+    s = state(held, _four_koma(translation_complete=False))
+    assert not s.missing_volumes                             # scanlation may not reach volume 7: no volume claimed
+    # every held volume mapped: chapters past them are compared as before
+    assert s.missing_chapters and s.missing_chapters[0][0] == "261"
