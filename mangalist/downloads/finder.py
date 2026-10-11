@@ -24,6 +24,10 @@ fetched while Suwayomi answers, or it lists chapters but none of the missing one
 numbers -> :data:`REASON_SOURCE_DROPPED`. Missing chapters past the source's last chapter only mean the source is
 behind: nothing is said (steady state stays quiet).
 
+**Not searched**: a series on Off, one with a download in flight (queued, sent, downloaded), and - except in a bulk
+find of explicitly selected series - one the owner marked up to date (the List's Behind override "done", which the
+wanted list keeps for parity with the List).
+
 **Findings.** Every pick is recorded (:meth:`FindingStore.offer`); one the owner skipped - or one sent before - is
 never offered or sent again. What a searched series no longer offers is retired (``gone``), and so are the waiting
 findings of a series that left the wanted list (its gap was filled). A sent pick is a finding with status ``sent`` and
@@ -37,6 +41,7 @@ refused with :class:`FindBusy`. Every series line and the summary (:attr:`FindRe
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -286,11 +291,16 @@ def _run(ctx: _Context, series_ids: Optional[Sequence[int]], wanted: Wanted, sho
         _log.warning("Find pass %d: the wanted list (mangalist.wanted) is not available; nothing searched", ctx.run_id)
         return
     only = set(int(i) for i in series_ids) if series_ids is not None else None
+    done = up_to_date_folders(ctx.db) if ctx.trigger != TRIGGER_BULK else set()
     by_series: Dict[int, list] = {}
     for e in entries:
         if e.series_id is None or (only is not None and e.series_id not in only):
             continue
+        if _folder_key(e.folder) in done:
+            continue                    # the owner marked it up to date: no gap to search (a bulk find still may)
         by_series.setdefault(int(e.series_id), []).append(e)
+    if done:
+        _log.info("Find pass %d: %d series marked up to date are not searched", ctx.run_id, len(done))
     if only is None:
         _retire_left(ctx, by_series)
     records = DownloadLedger(ctx.db, tool=None).all_records()
@@ -320,6 +330,22 @@ def _run(ctx: _Context, series_ids: Optional[Sequence[int]], wanted: Wanted, sho
             searched = _chapters(ctx, sid, name, mode, chapters) or searched
         if searched:
             ctx.report.series_searched += 1
+
+
+def _folder_key(folder: Any) -> str:
+    return os.path.normcase(os.path.normpath(str(folder or "")))
+
+
+def up_to_date_folders(db) -> Set[str]:
+    """The series folders the owner marked up to date (the List's Behind override "done"): the wanted list keeps them
+    for parity with the List, but a scheduled pass or Find now never searches them (integrator, 2026-10-11)."""
+    try:
+        with db.connect() as con:
+            rows = con.execute("SELECT folder FROM links_cache WHERE behind_override = 'done'").fetchall()
+    except Exception:  # noqa: BLE001 - no MangaUpdates links table yet: nothing is marked
+        _log.debug("Find pass: the Behind overrides could not be read", exc_info=True)
+        return set()
+    return {_folder_key(r[0]) for r in rows}
 
 
 def _retire_left(ctx: _Context, by_series: Dict[int, list]) -> None:

@@ -177,6 +177,20 @@ def test_off_series_and_unfindable_entries_are_not_searched(db, w):
     assert run(db, w).series_searched == 0 and w.search.calls == []
 
 
+def test_a_series_marked_up_to_date_is_searched_only_by_a_bulk_find(db, w):
+    w.search.results = [single_release(1, w.qbt, "2")]
+    w.entries = wanted(w.series_id, w.folder, volumes=["2"])
+    run(db, w)                                                      # a finding from before the owner's mark
+    with db.connect() as con:
+        con.execute("INSERT INTO links_cache (folder, behind_override) VALUES (?, 'done')", (str(w.folder),))
+    w.search.calls.clear()
+    for trigger in (TRIGGER_SCHEDULE, TRIGGER_NOW):
+        assert run(db, w, trigger=trigger).series_searched == 0 and w.search.calls == []
+    assert findings(db) == []                                       # no longer wanted: retired
+    report = run(db, w, trigger=TRIGGER_BULK, series_ids=[w.series_id])
+    assert report.series_searched == 1 and findings(db)[0].reason == REASON_BULK
+
+
 def test_a_series_with_a_download_in_flight_is_skipped(db, w, caplog):
     caplog.set_level(logging.INFO)
     auto(db, w)
@@ -420,3 +434,9 @@ def test_backend_find_now_and_bulk(db, w):
     assert report.trigger == "bulk" and w.backend.findings()[0].reason == REASON_BULK         # refreshed, not new
     with pytest.raises(BackendError, match="not skipped"):
         w.backend.skip_finding(12345)
+
+
+def test_the_default_wanted_list_is_lane_as_wanted_list(db, w):
+    """No injected list: mangalist.wanted.wanted_list over the database (a series without known gaps: nothing to do)."""
+    report = run_find(db, trigger=TRIGGER_NOW, backend=w.backend)
+    assert report.errors == 0 and report.series_searched == 0 and w.search.calls == []
