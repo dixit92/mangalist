@@ -431,6 +431,8 @@ class DownloadTab(QWidget):
                 self._chapter_states.pop(folder, None)
         self._checked &= set(self._by_folder)
         self._queue = deque(f for f in self._queue if f in self._by_folder)
+        if self._automation:                            # the findings' series names come from this list
+            self.found.set_findings(self._findings, self.found_names(), self._last_run)
         self._rebuild()
         self.downloads.set_known_titles({sid: self._by_folder[f].title for f, sid in self._series_ids.items()
                                          if sid is not None})
