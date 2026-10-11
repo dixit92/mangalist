@@ -476,6 +476,7 @@ def compute_state(
     rename_count: int = 0,
     behind_override: Optional[str] = None,
     today: Optional[_dt.date] = None,
+    restarts: Collection[str] = (),
 ) -> SeriesState:
     """The state of one series folder.
 
@@ -486,6 +487,9 @@ def compute_state(
     a count alone also sets the flag).
     *behind_override* ``"done"``: the owner marked the series up to date - number gaps are kept for the
     tooltip but the state is Up to date (or Complete).
+    *restarts*: ``"chapter"`` / ``"volume"`` when those numbers start again in another folder of the series (``Season 1``
+    and ``Season 2`` both from 1 - :attr:`mangalist.models.MangaEntry.restarting_units`): they are not compared with one
+    total, so no gap of that kind is invented (MangaPixer gives no verdict either).
     """
     today = today or _dt.date.today()
     rename_count = max(0, int(rename_count or 0))
@@ -577,7 +581,9 @@ def compute_state(
     mixed = held.has_volumes and held.has_chapters
     top_volume = max(held.volumes) if held.volumes else None
     unmapped_for_chapters: List[VolumeInfo] = []   # rule (b): upgrades once every chapter is held
-    if k.licensed and out_vols:
+    if "volume" in restarts:
+        reasons.append("Volume numbers start again in each folder of the series - not compared")
+    elif k.licensed and out_vols:
         compared = True
         for v in out_vols:
             vd = to_decimal(v.volume)
@@ -612,6 +618,9 @@ def compute_state(
     # 3. Chapters.
     chapters_checked = False
     target = _chapter_target(k)
+    if "chapter" in restarts:
+        reasons.append("Chapter numbers start again in each folder of the series (e.g. each season) - not compared")
+        target = None
     if target is not None and (held.has_chapters or not k.licensed or not held.has_volumes):
         if held.has_chapters or not held.has_volumes or held.covered:
             compared = True
@@ -635,7 +644,8 @@ def compute_state(
         gaps += [Gap(GAP_UPGRADE, v.volume, note="every chapter held; the volume is out") for v in unmapped_for_chapters]
 
     if not compared:
-        return finish(State.CANT_TELL, reasons=["No volume or chapter numbers to compare with"])
+        why = [r for r in reasons if "start again" in r]
+        return finish(State.CANT_TELL, reasons=why or ["No volume or chapter numbers to compare with"])
 
     gaps = _sorted_gaps(gaps)
     missing_vol = any(g.kind == GAP_VOLUME for g in gaps)
@@ -757,4 +767,5 @@ def state_for_entry(entry: Any, *, inventory: Any = None, knowledge: Optional[Se
         knowledge = from_own_matcher(entry)
     files = getattr(entry, "files", None) or ()
     return compute_state(inventory, knowledge, folder_empty=len(files) == 0, needs_kind=needs_kind,
+                         restarts=getattr(entry, "restarting_units", ()),
                          behind_override=getattr(entry, "behind_override", None), today=today)
