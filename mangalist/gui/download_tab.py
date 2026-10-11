@@ -6,7 +6,7 @@ series' gaps and what is going on with it (a search, a download). A series in tw
 upgrades) is one search for every volume it wants. **Releases** is the find-volumes panel for the selected series
 (:class:`~mangalist.gui.releases_panel.ReleasesPanel`): selecting a series searches nyaa for it (a short pause first, so
 arrowing through the list asks nothing) and keeps the result for the session; a series that cannot be searched says why.
-**Find releases for selected** searches every checked series one after another - the backend keeps nyaa's politeness
+**Search selected on nyaa** searches every checked series one after another - the backend keeps nyaa's politeness
 delay - and marks each "Releases ready"; there is no "send all". **In progress** is the downloads list with Check now.
 For an upgrade, a line above the releases says what happens to the chapters the volumes replace (Settings >
 Automation); **Replaced chapters** (:mod:`.replaced_chapters`) - a line above In progress - asks about the chapter files
@@ -20,7 +20,16 @@ chapters with the groups that have them, the default group's copies ticked, Send
 the series' chapter downloads as chips ("Downloading ch 101-104", "Filed ch 101-104") and the lookup's state; a row of
 the volume groups shows its torrents. The In progress list shows both.
 
-Every backend call runs off the UI thread (:mod:`.background`); the search queue runs one series at a time.
+**Automatic downloads** (owner decisions 2026-10-10; :mod:`mangalist.downloads.finding`), when the backend has them
+(:func:`~.automation_rules.has_automation`): a fourth chip, **Found (N)**, lists the series whose findings wait for the
+owner and shows the :class:`~.found_view.FoundView` in the panels' place (Send / Skip per finding, Send all); **Find now**
+next to "Check downloads now" runs the find pass; **Find releases for N series** under the list runs the same pass for
+the checked series (or, none checked, the whole group shown) - a bulk find, which sends nothing by itself - and opens
+Found. The tab's badge counts the series to get plus the findings waiting. **Search selected on nyaa** (the search queue
+above) stays: it searches nyaa for each checked series and leaves the pick to the owner.
+
+Every backend call runs off the UI thread (:mod:`.background`) - the findings, the modes and the last pass are quick
+reads (the contract) and run on it; the search queue runs one series at a time.
 """
 
 from __future__ import annotations
@@ -49,8 +58,9 @@ from PySide6.QtWidgets import (
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .. import config
 from .background import describe_error, start_call
-from .chips import ChipButton
+from .chips import ChipButton, FlowLayout
 from .chapters_panel import ChaptersPanel
+from .automation_rules import bulk_find_label, by_series, has_automation, report_text, series_line
 from .download_rules import (
     CHAPTER_CHIPS,
     GROUP_TITLES,
@@ -75,6 +85,7 @@ from .download_style import FONT_MONO, apply_style, set_tone
 from .download_widgets import ROLE_ASIDE, ROLE_CHIPS, ROLE_SUB, TwoLineDelegate, button, hbox, label
 from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList
+from .found_view import FoundView
 from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
 from .replaced_chapters import ConfirmDeleteFn, ReplacedBar, ReplacedDialog
 from .shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
@@ -84,13 +95,19 @@ ROLE_FOLDER = Qt.ItemDataRole.UserRole + 10
 ROLE_HEADER = Qt.ItemDataRole.UserRole + 11       # a group header's text
 ROLE_NOTE_TONE = Qt.ItemDataRole.UserRole + 12
 ROLE_GROUP = Qt.ItemDataRole.UserRole + 13         # a series row's group (its chips: torrents or chapter downloads)
-PANEL_RELEASES, PANEL_CHAPTERS = 0, 1
+ROLE_FOUND = Qt.ItemDataRole.UserRole + 14         # a Found row's series id
+PANEL_RELEASES, PANEL_CHAPTERS, PANEL_FOUND = 0, 1, 2
+GROUP_FOUND = "found"           # the Found chip (automatic downloads): not a "To get" group
 
 _log = logging.getLogger(__name__)
 
 REFRESH_MS = 60_000
 SEARCH_DELAY_MS = 350          # a pause after selecting a series, before it is searched
 UPGRADE_NOTE_STYLE = "\nQLabel#upgradeNote { background: #e8eefb; border-radius: 6px; padding: 8px 12px; }\n"
+# The group chips as the List tab's (theme.py): the tab's own sheet would make them 36 px, taller than the flow layout's
+# lines (they wrap since the Found chip).
+CHIP_STYLE = 'QPushButton[chip="true"] { min-height: 30px; max-height: 30px; padding: 0; border-radius: 16px; }\n'
+
 _NOTE_COLORS = {"muted": "#5a5a57", "warn": "#8a3f00"}
 
 
@@ -153,6 +170,9 @@ class _ToGetDelegate(TwoLineDelegate):
         painter.restore()
 
 
+_FIND_STARTING = object()   # the find call between start_call and its return (see _start_find)
+
+
 class DownloadTab(QWidget):
     count_changed = Signal(int)             # how many series are to get (the tab's badge)
     show_in_list = Signal(str)              # a series folder: show it in the List tab
@@ -162,10 +182,15 @@ class DownloadTab(QWidget):
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
                  autostart: bool = True, refresh_ms: int = REFRESH_MS, search_delay_ms: int = SEARCH_DELAY_MS,
-                 replaced=None, confirm_delete: Optional[ConfirmDeleteFn] = None):
+                 replaced=None, confirm_delete: Optional[ConfirmDeleteFn] = None,
+                 confirm_send_all: Optional[Callable[[str, str], bool]] = None):
         super().__init__(parent)
         self.setObjectName("downloadTab")
         self._backend = backend
+        self._automation = has_automation(backend)
+        self._findings: list = []                   # the waiting findings (automatic downloads)
+        self._last_run = None
+        self._find_call = None                      # the find pass running for this tab (Find now / a bulk find)
         self._replaced = replaced if replaced is not None else replaced_service(backend)
         self._confirm_delete = confirm_delete
         self._replaced_call = None
@@ -177,7 +202,7 @@ class DownloadTab(QWidget):
         # One group at a time, picked with the chips above the list (owner, 2026-10-09: "I shouldn't need to scroll down
         # to get to 'upgrades'"); remembered, like the panel's width.
         cfg = config.load()
-        self._group = cfg.get(CFG_GROUP) if cfg.get(CFG_GROUP) in TAB_GROUPS else GROUP_VOLUMES
+        self._group = cfg.get(CFG_GROUP) if cfg.get(CFG_GROUP) in self.chip_groups() else GROUP_VOLUMES
         self._group_chosen = False          # the owner picked a group this session: keep it even when it is empty
         self._results: Dict[str, SearchOutcome] = {}
         self._signatures: Dict[str, tuple] = {}
@@ -199,7 +224,7 @@ class DownloadTab(QWidget):
         self._pending_focus: Optional[str] = None
         self._rebuilding = False
         self._stopped = False
-        self._build_ui(confirm, open_url)
+        self._build_ui(confirm, open_url, confirm_send_all)
         self._delay = QTimer(self)
         self._delay.setSingleShot(True)
         self._delay.setInterval(search_delay_ms)
@@ -211,14 +236,18 @@ class DownloadTab(QWidget):
             self._refresh_timer.timeout.connect(self.downloads.refresh)
             self._refresh_timer.start()
         apply_style(self)
-        self.setStyleSheet(self.styleSheet() + UPGRADE_NOTE_STYLE)
+        self.setStyleSheet(self.styleSheet() + UPGRADE_NOTE_STYLE + CHIP_STYLE)
+        if self._group == GROUP_FOUND:                  # remembered from the last session
+            self.panels.setCurrentIndex(PANEL_FOUND)
+            self.footer.setVisible(False)
         if autostart:
             self.downloads.refresh()
             self.refresh_replaced()
+            self.reload_found()
 
     # --- UI ------------------------------------------------------------------------------------------
 
-    def _build_ui(self, confirm, open_url) -> None:
+    def _build_ui(self, confirm, open_url, confirm_send_all=None) -> None:
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -248,16 +277,15 @@ class DownloadTab(QWidget):
         self.filter_edit.textChanged.connect(self._rebuild)
         hv.addWidget(self.filter_edit)
         self.group_chips: Dict[str, ChipButton] = {}
-        chips = QHBoxLayout()
-        chips.setSpacing(6)
-        for group in TAB_GROUPS:
-            chip = ChipButton(GROUP_TITLES[group], group)
+        chip_box = QWidget()
+        chips = FlowLayout(chip_box, spacing=6)         # wraps when the panel is narrow (four chips with Found)
+        for group in self.chip_groups():
+            chip = ChipButton(GROUP_TITLES.get(group, FOUND_TITLE), group)
             chip.setCheckable(True)
             chip.clicked.connect(lambda _=False, g=group: self.show_group(g))
             self.group_chips[group] = chip
             chips.addWidget(chip)
-        chips.addStretch(1)
-        hv.addLayout(chips)
+        hv.addWidget(chip_box)
         lv.addWidget(head)
 
         self.tree = QTreeWidget()
@@ -277,14 +305,26 @@ class DownloadTab(QWidget):
 
         foot = QFrame()
         foot.setObjectName("toGetFooter")
+        self.footer = foot
         fv = QVBoxLayout(foot)
         fv.setContentsMargins(16, 12, 16, 12)
         fv.setSpacing(6)
         self.selected_label = label("0 selected", "lead")
-        self.btn_find = button("Find releases for selected", primary=True)
+        self.btn_find = button("Search selected on nyaa", primary=not self._automation,
+                               tip="Search nyaa for each checked series, one after another; you pick a release in the "
+                                   "panel. Nothing is sent.")
         self.btn_find.setMinimumHeight(36)
         self.btn_find.clicked.connect(self.find_selected)
         fv.addLayout(hbox(self.selected_label, None, self.btn_find))
+        # The bulk find (automatic downloads): the find pass for these series; what it finds waits under Found.
+        self.btn_bulk = button(bulk_find_label(0), primary=True,
+                               tip="Run the find pass for the checked series (none checked: every series of the group "
+                                   "shown). What it finds is listed under Found for you to send or skip; nothing is "
+                                   "sent by itself.")
+        self.btn_bulk.setMinimumHeight(36)
+        self.btn_bulk.clicked.connect(self.bulk_find)
+        self.btn_bulk.setVisible(self._automation)
+        fv.addLayout(hbox(None, self.btn_bulk))
         self.bulk_label = label("", "muted", wrap=True)
         self.bulk_label.setVisible(False)
         fv.addWidget(self.bulk_label)
@@ -314,9 +354,12 @@ class DownloadTab(QWidget):
         self.chapters.sent.connect(self._on_sent)
         self.chapters.looked_up.connect(self._on_chapter_lookup)
         self.chapters.settings_requested.connect(self.settings_requested)
+        self.found = FoundView(self._backend, top, confirm=confirm_send_all)
+        self.found.changed.connect(self._on_found_changed)
         self.panels = QStackedWidget()
         self.panels.addWidget(self.releases)
         self.panels.addWidget(self.chapters)
+        self.panels.addWidget(self.found)                   # PANEL_FOUND
         tv.addWidget(self.panels)
         upper = QWidget()                       # the releases and the replaced-chapters line, above the divider
         uv = QVBoxLayout(upper)
@@ -342,6 +385,8 @@ class DownloadTab(QWidget):
         bv.setContentsMargins(20, 14, 20, 14)
         self.downloads = DownloadsList(self._backend, bottom, autostart=False)
         self.downloads.records_loaded.connect(self._on_records)
+        self.downloads.set_find_available(self._automation)
+        self.downloads.find_now_requested.connect(self.find_now)
         bv.addWidget(self.downloads)
         self.vsplitter.addWidget(bottom)
         self.vsplitter.setStretchFactor(0, 1)
@@ -392,12 +437,18 @@ class DownloadTab(QWidget):
                 self._chapter_states.pop(folder, None)
         self._checked &= set(self._by_folder)
         self._queue = deque(f for f in self._queue if f in self._by_folder)
+        if self._automation:                            # the findings' series names come from this list
+            self.found.set_findings(self._findings, self.found_names(), self._last_run)
         self._rebuild()
         self.downloads.set_known_titles({sid: self._by_folder[f].title for f, sid in self._series_ids.items()
                                          if sid is not None})
-        if self._current in self._by_folder and self._current not in self._results:
+        if self._current in self._by_folder and self._current not in self._results and self._group != GROUP_FOUND:
             self._show_series(self._current, now=False)      # its wanted volumes changed: look again
-        self.count_changed.emit(len(self._by_folder))
+        self.count_changed.emit(self.badge_count())
+
+    def badge_count(self) -> int:
+        """The tab's badge: the series to get plus the findings waiting for the owner."""
+        return len(self._by_folder) + len(self._findings)
 
     @staticmethod
     def _signature(item: WantedSeries) -> tuple:
@@ -415,11 +466,16 @@ class DownloadTab(QWidget):
         self._header_items.clear()
         groups = grouped(self._wanted, self.filter_edit.text())
         counts = {g: len(items) for g, items in groups}
+        found = self._found_by_series()
+        counts[GROUP_FOUND] = len(self._findings)
         if not counts.get(self._group) and not self._group_chosen:     # nothing in the remembered group: the first with any
-            self._group = next((g for g in TAB_GROUPS if counts.get(g)), self._group)
+            self._group = next((g for g in TAB_GROUPS if counts.get(g)), self._group)   # (Found only when asked for)
         for g, chip in self.group_chips.items():
             chip.set_count(counts.get(g, 0))
             chip.setChecked(g == self._group)
+        self.footer.setVisible(self._group != GROUP_FOUND)
+        if self._group == GROUP_FOUND:
+            self._add_found_rows(found)
         for group, items in groups:
             if group != self._group:
                 continue
@@ -448,7 +504,9 @@ class DownloadTab(QWidget):
         matching = {item.folder for _g, items in groups for item in items}       # every group, the filter applied
         self.count_label.setText(count_text(len(matching), len(self._by_folder)))
         self._update_selected()
-        if current in self._items:
+        if self._group == GROUP_FOUND:
+            self._select_found_row()
+        elif current in self._items:
             self.tree.blockSignals(True)
             self.tree.setCurrentItem(self._items[current])
             self.tree.blockSignals(False)
@@ -458,6 +516,44 @@ class DownloadTab(QWidget):
                 self._current = None
                 self._show_upgrade_note(None)
                 self.releases.show_message("", "Select a series to see its releases.")
+
+    def _found_by_series(self) -> Dict[int, list]:
+        """The waiting findings by series, the filter applied to the series' names."""
+        needle = self.filter_edit.text().strip().casefold()
+        names = self.found_names()
+        return {sid: items for sid, items in by_series(self._findings).items()
+                if not needle or needle in names.get(sid, "").casefold()}
+
+    def _add_found_rows(self, found: Dict[int, list]) -> None:
+        """The Found chip's list: one row per series with findings waiting (what they would get, their size)."""
+        names = self.found_names()
+        header = QTreeWidgetItem(self.tree)
+        header.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        n = sum(len(items) for items in found.values())
+        header.setData(0, ROLE_HEADER, f"{FOUND_TITLE.upper()} · {len(found)} SERIES")
+        header.setData(0, ROLE_ASIDE, f"{n} waiting")
+        header.setData(0, ROLE_NOTE_TONE, "muted")
+        header.setSizeHint(0, QSize(100, 36))
+        for sid in sorted(found, key=lambda i: (names.get(i, f"Series #{i}").casefold(), i)):
+            items = found[sid]
+            row = QTreeWidgetItem(self.tree)
+            row.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            row.setText(0, names.get(sid, f"Series #{sid}"))
+            row.setData(0, ROLE_SUB, series_line(items))
+            row.setData(0, ROLE_FOUND, sid)
+            row.setData(0, ROLE_CHIPS, [(f"{len(items)} waiting", "ready")])
+            row.setToolTip(0, row.text(0))
+
+    def _select_found_row(self) -> None:
+        """Keep the series the Found view shows selected in the list (none: every series)."""
+        sid = self.found.series_filter()
+        self.tree.blockSignals(True)
+        self.tree.setCurrentItem(None)
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if sid is not None and item.data(0, ROLE_FOUND) == sid:
+                self.tree.setCurrentItem(item)
+        self.tree.blockSignals(False)
 
     def _refresh_statuses(self) -> None:
         for folder, rows in self._rows.items():
@@ -520,19 +616,37 @@ class DownloadTab(QWidget):
         n = len(self._checked)
         self.selected_label.setText(f"{n} selected")
         self.btn_find.setEnabled(n > 0 and not self._stopped)
+        ids = self.bulk_series_ids()
+        self.btn_bulk.setText(bulk_find_label(len(ids)))
+        self.btn_bulk.setEnabled(bool(ids) and self._find_call is None and not self._stopped)
 
     # --- selecting a series -------------------------------------------------------------------------------
 
+    def chip_groups(self) -> tuple:
+        """The chips above the list: the "To get" groups, and Found when the backend can find."""
+        return TAB_GROUPS + ((GROUP_FOUND,) if self._automation else ())
+
     def show_group(self, group: str) -> None:
-        """Show one group of the "To get" list (Volumes / Upgrades / Chapters); remembered."""
-        if group not in TAB_GROUPS:
+        """Show one group of the "To get" list (Volumes / Upgrades / Chapters), or Found; remembered."""
+        if group not in self.chip_groups():
             return
+        leaving_found = self._group == GROUP_FOUND and group != GROUP_FOUND
         self._group = group
         self._group_chosen = True
         cfg = config.load()
         cfg[CFG_GROUP] = group
         config.save(cfg)
         self._rebuild()
+        if group == GROUP_FOUND:
+            self._delay.stop()
+            self._show_upgrade_note(None)
+            self.panels.setCurrentIndex(PANEL_FOUND)
+        elif leaving_found:
+            if self._current in self._by_folder:
+                self._show_series(self._current, now=False)
+            else:
+                self.panels.setCurrentIndex(PANEL_RELEASES)
+                self.releases.show_message("", "Select a series to see its releases.")
 
     def current_group(self) -> str:
         return self._group
@@ -570,6 +684,10 @@ class DownloadTab(QWidget):
         return self._current
 
     def _on_current_changed(self, item: Optional[QTreeWidgetItem], _prev) -> None:
+        if item is not None and item.data(0, ROLE_FOUND) is not None:
+            self.found.set_series_filter(item.data(0, ROLE_FOUND))
+            self.panels.setCurrentIndex(PANEL_FOUND)
+            return
         folder = item.data(0, ROLE_FOLDER) if item is not None else None
         if not folder:
             return
@@ -856,6 +974,124 @@ class DownloadTab(QWidget):
         self.bulk_label.setText(text)
         self.bulk_label.setVisible(bool(text))
 
+    # --- automatic downloads: Found, Find now, the bulk find ----------------------------------------------------
+
+    def found_names(self) -> Dict[int, str]:
+        """series id -> its name, for the findings: the "To get" titles, else what the backend calls it."""
+        names = {sid: self._by_folder[f].title for f, sid in self._series_ids.items()
+                 if sid is not None and f in self._by_folder}
+        missing = {f.series_id for f in self._findings} - set(names)
+        titles_fn = getattr(self._backend, "series_titles", None)
+        if missing and callable(titles_fn):
+            try:
+                names.update({int(k): v for k, v in dict(titles_fn(missing)).items() if v})
+            except Exception:  # noqa: BLE001 - names only: "Series #id" stands in
+                _log.warning("Reading series names for the findings failed", exc_info=True)
+        return names
+
+    def reload_found(self) -> None:
+        """Re-read the waiting findings and the last find pass (quick reads) - after a pass, a send or skip, and with
+        every downloads reload (the container's scheduled pass adds findings too)."""
+        if not self._automation or self._stopped:
+            return
+        try:
+            findings = list(self._backend.findings("waiting"))
+            last_run = self._backend.last_find_run()
+        except Exception as exc:  # noqa: BLE001 - shown in the view; the old list stays
+            self.found.say(f"Could not read what was found: {describe_error(exc)}", "bad")
+            return
+        changed = [f.id for f in findings] != [f.id for f in self._findings]
+        self._findings, self._last_run = findings, last_run
+        self.found.set_findings(findings, self.found_names(), last_run)
+        if changed or self._group == GROUP_FOUND:
+            self._rebuild()
+        self.count_changed.emit(self.badge_count())
+
+    def findings(self) -> list:
+        return list(self._findings)
+
+    def _on_found_changed(self) -> None:
+        self.reload_found()
+        self.downloads.refresh()
+
+    def bulk_series_ids(self) -> List[int]:
+        """The series a bulk find covers: the checked ones, else every series of the group shown (the filter applied)."""
+        if self._group == GROUP_FOUND:
+            return []
+        folders = self.checked_folders() or self.visible_folders()
+        return sorted({sid for sid in (self._series_ids.get(f) for f in folders) if sid is not None})
+
+    def bulk_find(self) -> bool:
+        """"Find releases for N series": the find pass for :meth:`bulk_series_ids`, then the Found view."""
+        return self.find_for(self.bulk_series_ids())
+
+    def find_for(self, series_ids: Sequence[int]) -> bool:
+        """A bulk find of *series_ids* (the List's row menu, the button under the list): shows Found while it runs.
+        Nothing is sent by itself; what it finds waits under Found."""
+        ids = sorted({int(i) for i in series_ids if i is not None})
+        if not ids or not self._automation:
+            return False
+        self.show_group(GROUP_FOUND)
+        return self._start_find(ids)
+
+    def find_now(self) -> bool:
+        """Find now: the find pass for every series with gaps (off the UI thread)."""
+        return self._start_find(None)
+
+    def find_running(self) -> bool:
+        return self._find_call is not None
+
+    def _start_find(self, ids: Optional[List[int]]) -> bool:
+        if not self._automation or self._stopped:
+            return False
+        if self._find_call is not None:
+            text = "A find pass is already running: its results show under Found when it ends."
+            self.downloads.set_note(text, "warn")
+            self.found.say(text, "warn")
+            return False
+        bulk = ids is not None
+        self.found.say("")
+        self.found.set_busy(f"Finding releases for {len(ids)} series..." if bulk
+                            else "Finding releases for every series with gaps...")
+        self.downloads.set_find_busy(True)
+        _log.info("Download tab: %s", f"bulk find for {len(ids)} series" if bulk else "Find now")
+        backend = self._backend
+        made: list = []
+        self._find_call = _FIND_STARTING
+        call = start_call(lambda: backend.find_now(ids) if bulk else backend.find_now(),
+                          lambda report: self._on_found_report(report, bulk),
+                          lambda message: self._on_find_error(message),
+                          lambda: self._find_finished(made[0] if made else None))
+        made.append(call)
+        if self._find_call is _FIND_STARTING:       # still running (a runner that finished at once has cleared it)
+            self._find_call = call
+            self._calls.append(call)
+        self._update_selected()
+        return True
+
+    def _on_found_report(self, report, bulk: bool) -> None:
+        text = report_text(report, bulk)
+        tone = "bad" if getattr(report, "errors", 0) else ""
+        self.downloads.set_note(text, tone)
+        self.found.say(text, tone)
+
+    def _on_find_error(self, message: str) -> None:
+        text = f"Could not run the find pass: {message}"
+        self.downloads.set_note(text, "bad")
+        self.found.say(text, "bad")
+
+    def _find_finished(self, call) -> None:
+        if call in self._calls:
+            self._calls.remove(call)
+        self._find_call = None
+        if self._stopped:
+            return
+        self.found.set_busy("")
+        self.downloads.set_find_busy(False)
+        self._update_selected()
+        self.reload_found()
+        self.downloads.refresh()                # a series on Auto may have had something sent
+
     # --- records -------------------------------------------------------------------------------------------
 
     def _on_records(self, records: Sequence[DownloadRecord]) -> None:
@@ -867,6 +1103,7 @@ class DownloadTab(QWidget):
         self._refresh_statuses()
         self.releases.refresh_downloads()
         self.refresh_replaced()
+        self.reload_found()
 
     def _rescan_newly_filed(self, records: Sequence[DownloadRecord]) -> None:
         """Files landed in the library since the last reload (a check filed volumes or chapters, here or in the
@@ -947,12 +1184,14 @@ class DownloadTab(QWidget):
         self._calls.clear()
         self.releases.stop()
         self.chapters.stop()
+        self.found.stop()
         self.downloads.stop()
         self._update_selected()
 
 
 # The group chips, in the order the owner works through them: what nyaa can get first, chapters (Suwayomi, later) last.
 TAB_GROUPS = (GROUP_VOLUMES, GROUP_UPGRADES, GROUP_CHAPTERS)
+FOUND_TITLE = "Found"
 CFG_GROUP = "download_tab_group"
 CFG_SPLIT = "download_tab_split"
 CFG_VSPLIT = "download_tab_progress_split"

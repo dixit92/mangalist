@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, mu_cache, store
+from .. import config, mu_cache, store, wanted
 from .._version import __version__
 from ..models import MangaEntry
 from ..scanner import LibraryScan, RootScan, apply_kind_hint, scan_and_record_library
@@ -47,7 +47,7 @@ from . import lanes
 from .app_icon import build_app_icon
 from .downloads_backend import create_backend as create_downloads_backend
 from .list_tab import DUPLICATES, PAGE_DUPLICATES, PAGE_EMPTY, PAGE_TABLE, ListTab, all_filter_keys, chip_label
-from .list_text import wanted_label, wanted_series
+from .list_text import wanted_label
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
@@ -308,6 +308,7 @@ class MainWindow(QMainWindow):
         self._volumes = None
         self._volumes_backend = self._make_volumes_backend()
         self._download_tab = None
+        self._auto_modes = None                     # automatic downloads: the per-series modes (auto_modes.py)
         self._duplicates_view = None
         self._dupe_file_groups: Optional[int] = None
         self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
@@ -427,6 +428,7 @@ class MainWindow(QMainWindow):
             self._download_tab = tab
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
+        self._make_auto_modes()
 
         # --- the duplicates view (lane C's)
         view = lanes.duplicates_view_class()(self._db, self)
@@ -504,6 +506,9 @@ class MainWindow(QMainWindow):
         if getattr(result, "downloads_changed", False) and self._volumes is not None:
             self._volumes.refresh_records()
             self._rebuild_wanted(force=True)
+            self._refresh_auto_modes(force=True)            # the default mode may have changed
+            if callable(getattr(self._download_tab, "reload_found", None)):
+                self._download_tab.reload_found()
 
     def _on_details_toggled(self, visible: bool) -> None:
         self._cfg[self._CFG_DETAILS] = visible
@@ -609,6 +614,7 @@ class MainWindow(QMainWindow):
         self._update_counts()
         self._rebuild_wanted()
         self._update_detail_wanted()
+        self._refresh_auto_modes()
         if self._list.current_filter() == DUPLICATES and self._duplicates_view is not None:
             self._duplicates_view.set_series_duplicates(self._model.duplicate_series())
 
@@ -650,17 +656,15 @@ class MainWindow(QMainWindow):
             return
         out: List[WantedSeries] = []
         model = self._model
+        downloads = self._volumes is not None
         for row in model.scope_rows():          # the library picked
             entry = model.entry_at(row)
             st = model.state_at(row)
             if entry is None or st is None or not st.gaps:
                 continue
-            volumes = (self._volumes.availability(row)
-                       if self._volumes is not None and (st.missing_volumes or st.upgrade_volumes) else None)
-            series_id = self._volumes.series_id_for(entry) if self._volumes is not None else None
-            out += wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title,
-                                 state=st, knowledge=model.knowledge_at(row), held=model.held_volumes_at(row),
-                                 series_id=series_id, volumes=volumes)
+            series_id = self._volumes.series_id_for(entry) if downloads else None
+            out += wanted.series_wanted(entry, st, model.knowledge_at(row), model.held_volumes_at(row), series_id,
+                                        downloads=downloads)
         if out == self._wanted_series and not force:
             return
         self._wanted_series = out
@@ -1050,7 +1054,7 @@ class MainWindow(QMainWindow):
 
     def _mp_item_for(self, entry: MangaEntry):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
-        None; resolved once per scan / sync."""
+        None; resolved once per scan / sync (:func:`mangalist.wanted.mangapixer_item`)."""
         key = str(entry.folder)
         if key in self._mp_items:
             return self._mp_items[key]
@@ -1058,15 +1062,10 @@ class MainWindow(QMainWindow):
         if entry.root_id is not None:
             try:
                 if self._mp_resolver is None:
-                    from ..services.mangapixer import open_cache
-                    from ..services.mangapixer.resolve import Resolver
-
-                    self._mp_resolver = Resolver(open_cache(self._db))
+                    self._mp_resolver = wanted.open_resolver(self._db)
                 root = self._db.get_root(entry.root_id)
                 if root is not None:
-                    rel = Path(entry.folder).resolve().relative_to(Path(root.path).resolve()).as_posix()
-                    res = self._mp_resolver.resolve(entry.root_id, rel)
-                    item = res.item if res is not None else None
+                    item = wanted.mangapixer_item(self._mp_resolver, entry.root_id, root.path, entry.folder)
             except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
                 _log.warning("MangaPixer data for %s unavailable", entry.folder, exc_info=True)
         self._mp_items[key] = item
@@ -1075,22 +1074,12 @@ class MainWindow(QMainWindow):
     def _knowledge_for(self, entry: MangaEntry):
         """MangaPixer's knowledge for *entry* when its folder (or an ancestor) has an exported link,
         else None (the table then uses the own matcher's)."""
-        item = self._mp_item_for(entry)
-        if item is None:
-            return None
-        from ..knowledge import from_mangapixer_item
-
-        return from_mangapixer_item(item)
+        return wanted.knowledge_of_item(self._mp_item_for(entry))
 
     def _inventory_for(self, entry: MangaEntry):
         """The series' held units for the state columns, merged with MangaPixer's volume list (which
         chapters each volume collects) when MangaPixer knows the series."""
-        from ..inventory import as_state_inventory
-
-        item = self._mp_item_for(entry) or {}
-        volumes = item.get("volumes") if isinstance(item.get("volumes"), dict) else None
-        volume_list = volumes.get("items") if volumes else None
-        return as_state_inventory(entry.inventory(volume_list or None))
+        return wanted.inventory_of(entry, self._mp_item_for(entry))
 
     def _after_roots_changed(self, rescan: bool = False) -> None:
         self._show_roots()
@@ -1714,6 +1703,7 @@ class MainWindow(QMainWindow):
         self._detail.show_entry(entry, m.state_at(row), m.links_at(row), knowledge=m.knowledge_at(row),
                                 held_volumes=m.held_volumes_at(row), held_chapters=m.held_chapters_at(row))
         self._update_detail_wanted()
+        self._update_detail_auto()
         if self._volumes is not None:
             self._volumes.show_in_detail(row)
 
@@ -1829,6 +1819,8 @@ class MainWindow(QMainWindow):
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
             menu.addSeparator()
 
+        auto_actions, act_bulk_find = self._add_automation_menu(menu, entries)
+
         act_confirm_mu = menu.addAction(
             "Confirm MU match" if n == 1 else f"Confirm MU match ({n_unconfirmed})"
         )
@@ -1868,7 +1860,11 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if act_kind is not None and chosen is act_kind:
+        if chosen in auto_actions:
+            self._status_label.setText(self._auto_modes.apply([str(e.folder) for e in entries], auto_actions[chosen]))
+        elif act_bulk_find is not None and chosen is act_bulk_find:
+            self.bulk_find(entries)
+        elif act_kind is not None and chosen is act_kind:
             from .kind_dialog import ask_series_kind
 
             if ask_series_kind(self, entries[0], db=self._db):
@@ -1949,6 +1945,66 @@ class MainWindow(QMainWindow):
                 if e is not None:
                     self._model.set_examined(r, not e.examined)
             self._persist_examined()
+
+    # --- Automatic downloads: the per-series mode, the mode chip, the bulk find ---------------------------
+
+    def _make_auto_modes(self) -> None:
+        """The per-series modes, when the downloads backend offers automatic downloads (auto_modes.py)."""
+        from .auto_modes import AutoModes
+
+        if self._volumes_backend is None or not AutoModes.available(self._volumes_backend):
+            return
+        self._auto_modes = AutoModes(self._volumes_backend, self, background=lambda *a: self._background(*a))
+        self._auto_modes.changed.connect(self._on_auto_modes_changed)
+        self._detail.set_auto_enabled(True)
+
+    def _refresh_auto_modes(self, force: bool = False) -> None:
+        if self._auto_modes is None:
+            return
+        folders = [str(e.folder) for e in (self._model.entry_at(r) for r in range(self._model.rowCount())) if e]
+        self._auto_modes.refresh(folders, force=force)
+
+    def _on_auto_modes_changed(self) -> None:
+        self._model.set_mode_chips(self._auto_modes.chips())
+        self._update_detail_auto()
+
+    def _update_detail_auto(self) -> None:
+        if self._auto_modes is None:
+            return
+        entry = self._current_entry()
+        if entry is None:
+            self._detail.set_auto_mode(None)
+            return
+        self._detail.set_auto_mode(*self._auto_modes.detail(str(entry.folder)))
+
+    def _add_automation_menu(self, menu: QMenu, entries) -> tuple:
+        """The row menu's "Automatic downloads" submenu and "Find releases for N series" ({} and None without)."""
+        if self._auto_modes is None:
+            return {}, None
+        from .automation_rules import bulk_find_label
+
+        folders = [str(e.folder) for e in entries]
+        actions = self._auto_modes.add_menu(menu, folders)
+        act_bulk = None
+        if callable(getattr(self._download_tab, "find_for", None)):
+            ids = self._auto_modes.series_ids(folders)
+            act_bulk = menu.addAction(bulk_find_label(len(ids)))
+            act_bulk.setEnabled(bool(ids))
+            act_bulk.setToolTip("Run the find pass for these series; what it finds waits under Found in the Download "
+                                "tab - nothing is sent by itself" if ids else "Not scanned yet: rescan first")
+            menu.setToolTipsVisible(True)
+        menu.addSeparator()
+        return actions, act_bulk
+
+    def bulk_find(self, entries) -> bool:
+        """"Find releases for N series": the Download tab's bulk find for these series, shown under Found."""
+        if self._auto_modes is None or not callable(getattr(self._download_tab, "find_for", None)):
+            return False
+        ids = self._auto_modes.series_ids(str(e.folder) for e in entries)
+        if not ids:
+            return False
+        self.show_tab(TAB_DOWNLOAD)
+        return bool(self._download_tab.find_for(ids))
 
     def _on_fix_mu_match(self, src_row: int, entry: MangaEntry) -> None:
         """Open the MU picker so the user can manually select the correct series."""
@@ -2085,6 +2141,8 @@ class MainWindow(QMainWindow):
             self._volumes.stop()
         if self._download_tab is not None:
             self._download_tab.stop()
+        if self._auto_modes is not None:
+            self._auto_modes.stop()
         if self._dupe_call is not None:
             self._dupe_call.abandon()
         if self._rename_call is not None and hasattr(self._rename_call, "abandon"):

@@ -222,7 +222,8 @@ def test_schedule_entries_say_where_each_value_comes_from(db):
     env = {"MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00", "MANGALIST_DOWNLOADS_SCHEDULE": "banana"}
     rules.save_schedule_text(db, "rescan", "12h")
     entries = {e.job: e for e in rules.schedule_entries(db, env)}
-    assert list(entries) == ["rescan", "mangapixer-sync", "downloads"], "the dispatch stub has no row"
+    assert list(entries) == ["rescan", "mangapixer-sync", "downloads", "dispatch-batch"], "the find pass has a row"
+    assert entries["dispatch-batch"].when == "daily 04:30 (and Find now)"
     assert (entries["rescan"].edit_text, entries["rescan"].when, entries["rescan"].source) == \
         ("every 12h", "every 12 hours", "stored")
     assert (entries["mangapixer-sync"].edit_text, entries["mangapixer-sync"].source) == ("daily@02:00", "env")
@@ -235,5 +236,8 @@ def test_schedule_entries_say_where_each_value_comes_from(db):
 def test_schedule_rows_without_a_database_are_the_containers_values():
     from mangalist.gui import download_rules as rules
 
+    from mangalist.headless.settings import SCHEDULE_BY_JOB
+
     assert [(w, e) for w, _when, e in rules.schedule_rows({"MANGALIST_RESCAN_SCHEDULE": "off"})] == [
-        ("Rescan the library", True), ("Sync with MangaPixer", False), ("File finished downloads", False)]
+        ("Rescan the library", True), ("Sync with MangaPixer", False), ("File finished downloads", False),
+        (SCHEDULE_BY_JOB["dispatch-batch"].label, False)]

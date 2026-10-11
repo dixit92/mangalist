@@ -71,6 +71,18 @@ available:
 ``confirm_match(series_id, match)``       the owner confirmed a title match (stored for the series).
 ``forget_match(series_id)``               look the series up again from scratch.
 ``set_series_group(series_id, group)``    the series' scanlation group (None: back to the default rule).
+``find_now(series_ids=None)``              automatic downloads (2026-10-10, :mod:`mangalist.downloads.finding`): a find pass
+                                          now (None) or a bulk find of these series (never sends) -> ``FindReport``;
+                                          blocks for minutes; a pass already running is a ``BackendError``.
+``findings(status="waiting")``            quick: what find passes found -> ``[Finding]``.
+``send_finding(id)`` / ``skip_finding``   send one finding -> what happened, in a sentence ("Sent ...", "Queued ...",
+                                          "Not sent: <why>"; a filled gap or a vanished release drops the finding) /
+                                          skip it (quick; never offered again; ``BackendError`` when not waiting).
+``series_modes(ids)``                     quick: series id -> the Off / Notify / Auto mode in force.
+``own_series_mode(id)``                   quick: the series' own mode (None: follows the default).
+``set_series_mode(ids, mode)``            quick: set the series' own mode (None: back to the default).
+``default_mode()`` / ``set_default_mode`` quick: the default mode (Notify unless changed).
+``last_find_run()``                       quick: the last find pass (``FindRun``) or None.
 ``send_chapters(series_id, match, picks,  record and enqueue the picked chapters ->
  target_dir, manga_title, source_name)``  :class:`~mangalist.downloads.chapters.ChapterSendOutcome`.
 ========================================  =======================================================================

@@ -36,6 +36,12 @@ STEP_OPS = ("move", "link", "hold")                          # hold: a move OUT 
 REPLACEMENT_STATUS = ("nothing", "pending", "held", "restored", "purged", "deleted", "declined", "failed")
 REPLACEMENT_MODES = ("holding", "delete")
 LINK_HOW = ("link", "copy")                                  # how a link step created its name
+# Automatic downloads (schema 7): a series' mode, what a find pass found, how a pass was started.
+AUTO_MODES = ("off", "notify", "auto")                       # series.auto_mode; NULL = the default setting
+AUTO_MODE_DEFAULT = "notify"                                 # owner, 2026-10-10
+FINDING_KINDS = ("volumes", "upgrades", "chapters")
+FINDING_STATUS = ("waiting", "sent", "skipped", "gone")
+FIND_TRIGGERS = ("schedule", "now", "bulk")
 
 # --- Migrations ----------------------------------------------------------------------------------------
 
@@ -391,6 +397,42 @@ CREATE INDEX IF NOT EXISTS replacements_by_status ON replacements (status);
 INSERT OR IGNORE INTO meta (key, value) SELECT 'upgrades.first_download', CAST(COALESCE(MAX(id), 0) AS TEXT) FROM ledger;
 """
 
+# Automatic downloads cycle (mangalist.store.findings): a series' Off / Notify / Auto mode (NULL = the default setting),
+# what a find pass found and is waiting for the owner (or was sent / skipped), and one row per pass.
+# A pick is identified by (series, kind, pick_key): a skipped pick is never offered again for the same release.
+_V7_FINDINGS = """
+ALTER TABLE series ADD COLUMN auto_mode TEXT;            -- off | notify | auto; NULL = the default setting
+CREATE TABLE IF NOT EXISTS find_runs (
+    id              INTEGER PRIMARY KEY,
+    trigger         TEXT    NOT NULL,                    -- schedule | now | bulk
+    started_at      TEXT    NOT NULL,
+    finished_at     TEXT,
+    series_searched INTEGER NOT NULL DEFAULT 0,
+    found           INTEGER NOT NULL DEFAULT 0,          -- findings now waiting for the owner
+    sent            INTEGER NOT NULL DEFAULT 0,          -- picks sent automatically
+    errors          INTEGER NOT NULL DEFAULT 0,
+    summary         TEXT    NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS findings (
+    id          INTEGER PRIMARY KEY,
+    series_id   INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    kind        TEXT    NOT NULL,                        -- volumes | upgrades | chapters
+    pick_key    TEXT    NOT NULL,                        -- what the pick is: 'nyaa:<info hash>' | 'chapters:<source>:<ids>'
+    title       TEXT    NOT NULL,                        -- what the owner sees (the release name; 'Ch. 41-44 - group')
+    fills       TEXT    NOT NULL DEFAULT '[]',           -- JSON: the exact numbers it fills
+    size_bytes  INTEGER,                                 -- what it adds (the selected files of a pack), when known
+    reason      TEXT    NOT NULL DEFAULT '',             -- why it waits (the series is on Notify; a pack that cannot be narrowed ...)
+    payload     TEXT    NOT NULL DEFAULT '{}',           -- JSON: what sending it later needs (the finder writes, the finder reads)
+    status      TEXT    NOT NULL,                        -- waiting | sent | skipped | gone
+    run_id      INTEGER REFERENCES find_runs(id) ON DELETE SET NULL,
+    record_id   INTEGER,                                 -- the ledger row once sent
+    found_at    TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS findings_pick ON findings (series_id, kind, pick_key);
+CREATE INDEX IF NOT EXISTS findings_by_status ON findings (status);
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
@@ -399,6 +441,7 @@ MIGRATIONS: List[Tuple[int, str]] = [
     (4, _V4_IDENTITY),
     (5, _V5_DOWNLOADS),
     (6, _V6_REPLACEMENTS),
+    (7, _V7_FINDINGS),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
