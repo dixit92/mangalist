@@ -119,3 +119,23 @@ def test_flow_layout_wraps_onto_more_lines_when_narrow(qapp):
     flow.setGeometry(box.rect())
     assert buttons[2].geometry().topLeft().y() == 36 and buttons[1].geometry().left() == 106
     box.deleteLater()
+
+
+def test_a_text_boxs_clear_button_is_centred(qapp):
+    # owner, 2026-10-11: "the (x) is off-center" - the 34 px button rule made the clear button 36 px tall, 9 px low
+    from PySide6.QtWidgets import QLineEdit, QToolButton, QVBoxLayout, QWidget
+
+    from mangalist.gui import theme
+
+    host = QWidget()
+    host.setStyleSheet(theme.stylesheet())
+    edit = QLineEdit()
+    edit.setClearButtonEnabled(True)
+    QVBoxLayout(host).addWidget(edit)
+    host.resize(400, 80)
+    host.show()
+    edit.setText("abc")
+    qapp.processEvents()
+    (button,) = [b for b in edit.findChildren(QToolButton) if b.isVisible()]
+    assert abs((button.y() + button.height() / 2) - edit.height() / 2) <= 1 and button.height() < edit.height()
+    host.close()
