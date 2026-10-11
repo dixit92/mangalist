@@ -38,6 +38,11 @@ def _u(r):
     ("Some Series 012.5 Vol 02.cbz", "2", "12.5", None, None),
     ("Some Series 001 v01 (2020) (Digital) (G).cbz", "1", "1", None, "G"),
     ("Some Series 2 001 Volume 3 Title.cbz", "3", "1", "Title", None),
+    # owner, 2026-10-11: chapter 100 onwards is not zero-padded ("<Series> 100 Vol 11 <title>" read as volume 11)
+    ("Some Series 100 Vol 11 Memories of the Sea.cbz", "11", "100", "Memories of the Sea", None),
+    ("Some Series 112 Vol 11 The Rising Festival.cbz", "11", "112", "The Rising Festival", None),
+    ("Some Series 102 Vol 11.cbz", "11", "102", None, None),
+    ("Some Series 1045 Vol 103 A Title.cbz", "103", "1045", "A Title", None),
 ])
 def test_a_chapter_number_before_its_volume(name, vol, ch, title, group):
     r = parse_name(name)
@@ -48,6 +53,9 @@ def test_a_chapter_number_before_its_volume(name, vol, ch, title, group):
 @pytest.mark.parametrize("name, vol", [
     ("Some Series 2 Vol 3 Subtitle.cbz", "3"),                       # a plain number belongs to the title
     ("Some Series 2049 v01 (2020) (Digital) (G).cbz", "1"),
+    ("Some Series 2049 Vol 1 Subtitle.cbz", "1"),                    # year-like four digits stay in the title
+    ("Some Series 1999 v02 (2021) (Digital) (G).cbz", "2"),
+    ("Some Series 42 Vol 3 Subtitle.cbz", "3"),                      # two digits, not zero-padded: the title
     ("Some Series v01 (2020) (Digital) (G).cbz", "1"),
 ])
 def test_plain_numbers_before_a_volume_stay_in_the_title(name, vol):
@@ -56,7 +64,7 @@ def test_plain_numbers_before_a_volume_stay_in_the_title(name, vol):
 
 
 def test_a_series_of_numbered_chapters_no_longer_collides():
-    names = [f"Some Series {n:03d} Vol 01 Title {n}.cbz" for n in range(1, 6)]
+    names = [f"Some Series {n:03d} Vol 01 Title {n}.cbz" for n in (*range(1, 6), *range(97, 115))]
     targets = [_t(n) for n in names]
     assert targets[0] == "Ch. 0001.00 Vol. 001 (Title 1).cbz"
     assert len(set(targets)) == len(names)
