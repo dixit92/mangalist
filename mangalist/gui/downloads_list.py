@@ -63,6 +63,7 @@ QUEUE_ACTIONS = {ACT_SEND_NOW: "send_queued_now", ACT_TO_FRONT: "move_to_front",
 class DownloadsList(QWidget):
     records_loaded = Signal(object)         # the records (a list of DownloadRecord), newest first
     check_finished = Signal(bool)           # a "Check downloads now" ended (True: it worked)
+    find_now_requested = Signal()           # "Find now" (automatic downloads): the host runs the find pass
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None, autostart: bool = True,
                  heading: str = "In progress", series_name: Optional[Callable[[int], str]] = None,
@@ -77,6 +78,7 @@ class DownloadsList(QWidget):
         self._call: Optional[BackgroundCall] = None
         self._note: Optional[str] = None            # the last "Check downloads now" summary, kept across the reload
         self._check_failed = False
+        self._host_note, self._host_tone = "", ""  # the host's line (Find now's summary), kept across the reload
         self._again = False                         # a refresh was asked for while one ran
         self._known_titles: Mapping[int, str] = {}  # names the host knows (the wanted series)
         self._titles: Dict[int, str] = {}
@@ -106,6 +108,13 @@ class DownloadsList(QWidget):
                                                             "while they fit the download budget - the same check that "
                                                             "runs every hour on its own")
         self.btn_check.clicked.connect(self.check_now)
+        # Automatic downloads (2026-10-10): the find pass on request, next to the check - the host runs it and says
+        # what it did (set_find_available / set_find_busy / set_note); hidden without a backend that can find.
+        self.btn_find_now = button("Find now", tip="Look for every series with gaps now - the same find pass as the "
+                                                   "schedule in Settings > Automation: series on Auto get what is "
+                                                   "found sent, the rest waits under Found")
+        self.btn_find_now.clicked.connect(self.find_now_requested)
+        self.btn_find_now.setVisible(False)
         self.btn_finished = button("", link=True, tip="Downloads whose torrent left qBittorrent at its seed goal, "
                                                        "or that were cancelled - their volumes stay in the library")
         self.btn_finished.clicked.connect(self.toggle_finished)
@@ -116,7 +125,7 @@ class DownloadsList(QWidget):
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
         outer.addLayout(hbox(self.heading_label, self.next_label, self.budget_label, self.progress, None,
-                             self.btn_finished, self.btn_refresh, self.btn_check, spacing=12))
+                             self.btn_finished, self.btn_refresh, self.btn_find_now, self.btn_check, spacing=12))
 
         self.table = flat_table("progressTable", COLUMNS, select_rows=False)
         resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 240, COL_UPDATED: 110})
@@ -167,8 +176,8 @@ class DownloadsList(QWidget):
             empty = "" if self.records else "Nothing has been sent to qBittorrent yet."
             if self.records and not self.shown_records():
                 empty = "Nothing is in progress."
-            set_tone(self.status_label, "")
-            self.status_label.setText(" ".join(t for t in (self._note or "", empty) if t))
+            set_tone(self.status_label, self._host_tone if self._host_note and not self._note else "")
+            self.status_label.setText(" ".join(t for t in (self._note or "", self._host_note, empty) if t))
         self.records_loaded.emit(list(self.records))
 
     def name_of(self, record: DownloadRecord) -> str:
@@ -227,6 +236,24 @@ class DownloadsList(QWidget):
         self.btn_check.setEnabled(not busy)
         self.progress.setVisible(busy)
 
+    # --- Find now (the host's find pass) ------------------------------------------------------------------------
+
+    def set_find_available(self, available: bool) -> None:
+        self.btn_find_now.setVisible(available)
+
+    def set_find_busy(self, busy: bool) -> None:
+        """A find pass runs: the button waits (its text says so) until it ends."""
+        self.btn_find_now.setEnabled(not busy)
+        self.btn_find_now.setText("Finding…" if busy else "Find now")
+
+    def set_note(self, text: str, tone: str = "") -> None:
+        """A line under the list from the host (the find pass's summary); a reload keeps it."""
+        self._host_note, self._host_tone = text, tone
+        self._note = None
+        self._check_failed = False
+        set_tone(self.status_label, tone if text else "")
+        self.status_label.setText(text)
+
     # --- Check downloads now -------------------------------------------------------------------------------------
 
     def check_now(self) -> bool:
@@ -237,6 +264,7 @@ class DownloadsList(QWidget):
         set_tone(self.status_label, "")
         self.status_label.setText("Checking the downloads...")
         self._check_failed = False
+        self._host_note = ""
         backend = self._backend
         self._call = start_call(backend.check_now, self._on_checked, self._on_check_error, self._after_check)
         return True
