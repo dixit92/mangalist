@@ -34,11 +34,13 @@ import logging
 import os
 import threading
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from .. import paths
 from ..gui.downloads_backend import BackendError, QbtSettings, SuwayomiCheck, SuwayomiSettingsView
+from ..knowledge import fmt_num
 from ..services.suwayomi import SuwayomiError
 from ..services.nyaa import NyaaError, NyaaSearch
 from ..services.nyaa.client import NyaaClient
@@ -71,7 +73,9 @@ from .chapters import (
     chapter_placement_for,
     find_manga,
     held_chapter_groups,
+    held_chapter_span,
     mangadex_id_for,
+    newer_numbers,
     send_chapters,
     title_candidates,
 )
@@ -457,9 +461,12 @@ class Backend:
         except Exception:  # noqa: BLE001 - English, the default, when the options cannot be read
             return ("all", "en")
 
-    def chapter_lookup(self, series_id: int, missing: Sequence[str], titles: Sequence[str]) -> ChapterLookup:
-        """Find the series in Suwayomi and list its missing chapters (see :mod:`mangalist.downloads.chapters`)."""
-        lookup = ChapterLookup(series_id=series_id, missing=tuple(missing))
+    def chapter_lookup(self, series_id: int, missing: Sequence[str], titles: Sequence[str],
+                       newer: bool = False) -> ChapterLookup:
+        """Find the series in Suwayomi and list its missing chapters (see :mod:`mangalist.downloads.chapters`).
+        *newer* ("Check for new chapters", owner 2026-10-11): ignore *missing* and list what the source has after the
+        newest chapter held - ahead of MangaUpdates, which is what the gaps count up to."""
+        lookup = ChapterLookup(series_id=series_id, missing=() if newer else tuple(missing), newer=newer)
         try:
             lookup.placement = chapter_placement_for(self.db, series_id)
         except LookupError as exc:
@@ -479,15 +486,33 @@ class Backend:
             if found.match is None:
                 return lookup
             in_hand = self._chapters_in_hand(series_id)
+            fetched = None
+            newest: Optional[Decimal] = None
+            if newer:
+                fetched = client.chapters(found.match.manga.id)
+                try:
+                    newest, volumes_only = held_chapter_span(self.db, series_id)
+                except LookupError:
+                    newest, volumes_only = None, False
+                if newest is None and volumes_only:
+                    missing = ()
+                    lookup.notes.append("this series holds volumes only, so there is no newest chapter to compare "
+                                        "with")
+                else:
+                    missing = tuple(newer_numbers(fetched.chapters, newest))
             built = build_lookup(client, series_id=series_id, missing=missing, match=found.match,
-                                 held=self._held_groups(series_id), stored_group=stored.get("group"), in_hand=in_hand)
+                                 held=self._held_groups(series_id), stored_group=stored.get("group"), in_hand=in_hand,
+                                 fetched=fetched)
             built.placement, built.placement_error = lookup.placement, lookup.placement_error
             built.notes = lookup.notes
+            if newer:
+                built.newer, built.newer_than = True, (fmt_num(newest) if newest is not None else None)
             if found.match.how == HOW_MANGADEX and stored.get("manga_id") != found.match.manga.id:
                 self.suwayomi.set_series_choice(series_id, source_id=found.match.source.id,
                                                 manga_id=found.match.manga.id, manga_title=built.manga_title,
                                                 how=HOW_MANGADEX)
-            if not built.available and not built.queued_in_suwayomi and found.match.how == HOW_MANGADEX:
+            if (not built.available and not built.queued_in_suwayomi and found.match.how == HOW_MANGADEX
+                    and (built.missing or built.source_empty)):
                 # MangaDex has none of them: the owner's other sources, by title (owner: "when MangaDex has nothing")
                 others = [s for s in sources if not s.is_mangadex]
                 if others:

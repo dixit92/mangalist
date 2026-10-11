@@ -190,6 +190,40 @@ def held_chapter_groups(db, series_id: int) -> Dict[Decimal, List[str]]:
     return out
 
 
+def held_chapter_span(db, series_id: int) -> Tuple[Optional[Decimal], bool]:
+    """``(the newest chapter the series' files hold, whether it holds volume files)`` - None when no chapter file
+    states a number. Ranges count by their end."""
+    from .placement import locate_series, series_units
+
+    series, _root, _dir = locate_series(db, series_id)
+    newest: Optional[Decimal] = None
+    volumes = False
+    for u in series_units(db, series):
+        kind = getattr(u, "kind", None)
+        if kind == "volume":
+            volumes = True
+            continue
+        if kind not in ("chapter", "both"):
+            continue
+        for value in (u.ch_from, u.ch_to):
+            number = to_decimal(value)
+            if number is not None and (newest is None or number > newest):
+                newest = number
+    return newest, volumes
+
+
+def newer_numbers(chapters: Sequence[SuwayomiChapter], newest: Optional[Decimal]) -> List[str]:
+    """The chapter numbers the source lists after *newest* (all of them when None), oldest first, each once in the
+    source's own spelling; a chapter without a number is left out."""
+    seen: Dict[Decimal, str] = {}
+    for c in chapters:
+        number = to_decimal(c.number)
+        if number is None or number < 0 or (newest is not None and number <= newest):
+            continue
+        seen.setdefault(number, c.number)
+    return [seen[n] for n in sorted(seen)]
+
+
 # --- the series' group ------------------------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -431,6 +465,8 @@ class ChapterLookup:
     placement_error: Optional[str] = None
     error: Optional[str] = None                     # the lookup failed (Suwayomi unreachable, ...)
     source_empty: bool = False                      # the matched manga lists no chapters at all on its source
+    newer: bool = False                             # "Check for new chapters": *missing* is what the source lists
+    newer_than: Optional[str] = None                # ... after this chapter, the newest held (None: none held)
 
     @property
     def available(self) -> List[ChapterRow]:
@@ -443,9 +479,12 @@ class ChapterLookup:
 
 def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str], match: MangaMatch,
                  held: Mapping[Decimal, Sequence[str]], stored_group: Optional[str],
-                 in_hand: Optional[Mapping[str, DownloadRecord]] = None) -> ChapterLookup:
-    """The chapters of a confirmed *match* against the series' *missing* chapters."""
-    fetched: MangaChapters = client.chapters(match.manga.id)
+                 in_hand: Optional[Mapping[str, DownloadRecord]] = None,
+                 fetched: Optional[MangaChapters] = None) -> ChapterLookup:
+    """The chapters of a confirmed *match* against the series' *missing* chapters (*fetched*: the source's list when
+    the caller has it already)."""
+    if fetched is None:
+        fetched = client.chapters(match.manga.id)
     numbers = [d for d in (to_decimal(n) for n in missing) if d is not None]
     counts = group_counts(fetched.chapters, numbers)
     choice = default_group(counts, held, numbers, stored_group)
