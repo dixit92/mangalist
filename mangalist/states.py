@@ -600,12 +600,13 @@ def compute_state(
             elif not v.has_chapters:
                 unmapped_for_chapters.append(v)
         reasons.append(f"{len(out_vols)} English volume(s) out")
-    elif not k.licensed and held.has_volumes and k.scan_latest_volume:
+    elif not k.licensed and held.has_volumes and _scan_volume_total(k):
         compared = True
-        for n in range(1, int(k.scan_latest_volume) + 1):
+        total = _scan_volume_total(k)
+        for n in range(1, int(total) + 1):
             if Decimal(n) not in held.volumes:
                 gaps.append(Gap(GAP_VOLUME, str(n), note="scanlation"))
-        reasons.append(f"Scanlation volumes up to {fmt_num(k.scan_latest_volume)}")
+        reasons.append(f"Scanlation volumes up to {fmt_num(total)}")
     # MangaPixer's upgrade volumes feed Upgrade available (volumes it found held only as chapters).
     if completion and completion.upgrade_volumes:
         have = {g.start for g in gaps if g.kind == GAP_UPGRADE}
@@ -621,6 +622,16 @@ def compute_state(
     if "chapter" in restarts:
         reasons.append("Chapter numbers start again in each folder of the series (e.g. each season) - not compared")
         target = None
+    # A volumes-only folder holding volumes the volume list does not map: which chapters those hold is unknown, so the
+    # chapter numbers are not compared (owner, 2026-10-11: every volume of a finished 4-koma held, the list mapped only
+    # volumes 1-3, and MangaUpdates' strip count 717 made "missing ch 261-717").
+    if target is not None and held.has_volumes and not held.has_chapters:
+        mapped = {to_decimal(v.volume) for v in (k.volumes or ()) if v.has_chapters}
+        unmapped = sorted(v for v in held.volumes if v not in mapped)
+        if unmapped and (not mapped or max(unmapped) > max(mapped)):
+            reasons.append(f"The volume list does not say which chapters volume(s) {_span(unmapped)} hold - chapters "
+                           "not compared")
+            target = None
     if target is not None and (held.has_chapters or not k.licensed or not held.has_volumes):
         if held.has_chapters or not held.has_volumes or held.covered:
             compared = True
@@ -677,6 +688,20 @@ def _range_held(held: _Held, lo: Optional[Decimal], hi: Optional[Decimal]) -> bo
         return False
     numbers = _whole_numbers(lo, hi) | {lo, hi}
     return all(held.holds_chapter(c) for c in numbers)
+
+
+def _scan_volume_total(k: SeriesKnowledge) -> Optional[Decimal]:
+    """How many volumes a series with no English edition has in scanlation: MangaUpdates' latest scanlated volume, or -
+    when its translation is complete and the series finished - its volume count in the original language."""
+    cands = [k.scan_latest_volume]
+    if k.translation_complete is True and k.finished_in_origin:
+        cands.append(k.origin_volumes)
+    cands = [d for d in cands if d is not None and d > 0]
+    return max(cands) if cands else None
+
+
+def _span(numbers: Sequence[Decimal]) -> str:
+    return fmt_num(numbers[0]) if len(numbers) == 1 else f"{fmt_num(numbers[0])}-{fmt_num(numbers[-1])}"
 
 
 def _chapter_target(k: SeriesKnowledge) -> Optional[Decimal]:
