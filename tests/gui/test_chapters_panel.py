@@ -199,6 +199,26 @@ def test_a_lookup_failure_is_shown_and_can_be_retried(qapp):
     assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS
 
 
+def test_a_failed_lookup_offers_change_source_on_every_allowed_source(qapp):
+    # owner, 2026-10-11: "There's no option to do this" - a failed lookup showed only Refresh from source
+    backend = FakeChapterBackend()
+    backend.lookup_error = "Suwayomi: something the source refused"
+    panel, _, _ = make(qapp, backend)
+    open_series(qapp, panel)
+    assert panel.stack.currentIndex() == cp.PAGE_MESSAGE and not panel.btn_other.isHidden()
+    assert panel.other_sources()
+    settle(qapp, panel)
+    assert backend.other_searches == [(4, ("Example Webcomic",), None)]          # no source left out
+    assert panel.stack.currentIndex() == cp.PAGE_CANDIDATES and panel.cand_table.rowCount() == 2
+    assert panel.cand_note.text().startswith("The lookup failed.") and panel.btn_cand_back.isHidden()
+    backend.lookup_error = None
+    panel.cand_table.selectRow(1)
+    assert panel.confirm_selected()
+    settle(qapp, panel)
+    assert backend.confirmed[-1][1].manga == WEEB_MANGA
+    assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS and "confirmed by you" in panel.match_label.text()
+
+
 def test_an_ambiguous_folder_must_be_chosen_and_a_cached_lookup_is_shown_at_once(qapp):
     panel, backend, _ = make(qapp)
     placement = Placement(FOLDER, None, "chapters are in two folders", options=(FOLDER, FOLDER + "/Side"))
