@@ -211,6 +211,11 @@ def _held(inv: Any, knowledge: Optional[SeriesKnowledge]) -> _Held:
                 cov_ranges.append((to_decimal(v.chapters_from), to_decimal(v.chapters_to)))
     for lo, hi in cov_ranges:
         covered |= _whole_numbers(lo, hi) | {lo, hi}
+        # A volume whose chapters start at N.1 - part 1 of a chapter released in parts - is where chapter N begins: it
+        # counts as covered (owner, 2026-10-11: every volume of a complete series held, the list's volume 3 "11.1-16",
+        # and chapter 11 showed as missing). A start like N.5 (an extra) says nothing about chapter N.
+        if lo is not None and lo != lo.to_integral_value() and lo - lo.to_integral_value(rounding="ROUND_FLOOR") == Decimal("0.1"):
+            covered.add(lo.to_integral_value(rounding="ROUND_FLOOR"))
     hv = to_decimal(getattr(inv, "highest_volume", None))
     hc = to_decimal(getattr(inv, "highest_chapter", None))
     if hv is None and vols:
