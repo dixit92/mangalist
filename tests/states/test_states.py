@@ -482,3 +482,17 @@ def test_the_original_volume_count_needs_a_complete_translation():
     assert not s.missing_volumes                             # scanlation may not reach volume 7: no volume claimed
     # every held volume mapped: chapters past them are compared as before
     assert s.missing_chapters and s.missing_chapters[0][0] == "261"
+
+
+def test_a_volume_starting_at_part_one_covers_that_chapter():
+    # owner, 2026-10-11: all 3 volumes of a complete series held; the list maps volume 3 to chapters 11.1-16
+    vols = (VolumeInfo("1", "1", "5.1"), VolumeInfo("2", "6", "10"), VolumeInfo("3", "11.1", "16"))
+    k = own(licensed_en=False, latest_chapter="13", origin_volumes="3", origin_status="Complete",
+            translation_complete=True, volumes=vols)
+    s = state(inv(held_volumes=["1", "2", "3"]), k)
+    assert s.state == State.COMPLETE and not s.missing_chapters, (s.state, s.gaps)
+    # an extra starting a volume (N.5) does not cover chapter N
+    vols5 = (VolumeInfo("1", "1", "10"), VolumeInfo("3", "11.5", "16"))
+    k5 = own(licensed_en=False, latest_chapter="16", volumes=vols5)
+    s5 = state(inv(held_volumes=["3"]), k5)
+    assert ("11", None) in s5.missing_chapters or any(lo <= "11" for lo, _ in s5.missing_chapters if lo)
