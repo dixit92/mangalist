@@ -7,6 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.24] - 2026-10-11
+
+The twenty-third MangaList release (testing build): series licensed only as app chapters are compared with the original volume list, the To get list sorts by how much is missing, and Check for new chapters works for volume series and from the Download tab.
+
+- **No English volume list? The original one.** A series licensed in English only as chapters in an app (no English volumes, dates or count) whose folder holds volumes was "Can't tell". It is now compared with the original edition's volume list: a volume counts as out once its last chapter is out in English (the English chapter count or the latest scanlated chapter) - not held, it is a Missing volume (nyaa often has the English chapters compiled into those volumes); its chapters all held, an Upgrade. Volumes beyond the list are fine; volume 0 and series with an English omnibus edition are not compared this way.
+- **Sort the To get list**: a Sort box next to Filter - Title, Most missing first, Fewest missing first (volumes, or chapters under Missing chapters); remembered.
+- **Check for new chapters for volume series, and from the Download tab.** A series held as volumes counts the last chapter of its newest volume (from the volume list) as held and lists the chapters after it. To get rows have a right-click menu with Check for new chapters….
+- **Two rescans at once no longer fail.** After a filing the GUI and the scheduled job rescan the same library; the slower one's recording failed ("UNIQUE constraint failed") and skipped its move detection for that scan. Nothing was lost, and it now completes.
+
 ## [2026.10.23] - 2026-10-11
 
 The twenty-second MangaList release (testing build): set a file's chapter or volume in the Renamer, and the List's last column can no longer be squeezed out of sight.
