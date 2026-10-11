@@ -3,6 +3,7 @@ temporary folder, the FAKE namer). Nothing depends on thread timing: every backg
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -344,5 +345,27 @@ def test_after_a_rename_the_preview_waits_for_the_rescan(qapp, db, made):
         assert win.dry_run.count(RENAME) == 0 and win.dry_run.count(UNCHANGED) == 2      # the new names, in the scheme
         assert not any("gone" in (f.reason or "") for s in win.dry_run.series for f in s.files)
         assert win.btn_undo.isEnabled()
+    finally:
+        win.deleteLater()
+
+
+def test_bare_numbers_can_be_answered_chapters_in_the_renamer(qapp, db, tmp_path):
+    # owner, 2026-10-11: "You should be able to set unknown as chapters or volumes from within the renamer"
+    folder = tmp_path / "library3" / "Manga"
+    folder.mkdir(parents=True)
+    root = make_library(db, folder, {"Bare Series": {"Bare Series 001 Read Online.cbz": payload("b1"),
+                                                     "Bare Series 002 Read Online.cbz": payload("b2"),
+                                                     "Bare Series Ch.003.cbz": payload("b3")}})
+    win = _window(qapp, _renamer(db, namer=None), Scope.root(root.id, "Manga"))
+    try:
+        s = win._current_series()
+        assert [f.name for f in s.needs_kind] == ["Bare Series 001 Read Online.cbz", "Bare Series 002 Read Online.cbz"]
+        assert not win.kind_bar.isHidden() and "2 files" in win.kind_label.text()
+        assert all("chapters or volumes?" in f.reason for f in s.needs_kind)
+        win.btn_kind_chapters.click()
+        assert db.get_series(root.id, "Bare Series").kind_hint == "chapters"
+        after = {os.path.basename(f.path): f.target for f in win.dry_run.series[0].files}
+        assert after["Bare Series 001 Read Online.cbz"] == "Ch. 0001.00.cbz" and win.kind_bar.isHidden()
+        assert "bare numbers are chapters" in win.result_label.text()
     finally:
         win.deleteLater()
