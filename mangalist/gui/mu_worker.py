@@ -259,30 +259,10 @@ def _clear_match(entry: MangaEntry) -> None:
 
 
 def _apply_cache(entry: MangaEntry, cached: dict) -> None:
-    entry.mu_id = cached.get("mu_id")
-    entry.mu_title = cached.get("mu_title")
-    entry.mu_url = cached.get("mu_url")
-    entry.licensed = cached.get("licensed")
-    entry.mu_confirmed = cached.get("mu_confirmed", False)
-    entry.mu_associated = cached.get("mu_associated") or []
-    entry.mu_score = float(cached.get("mu_score") or 0.0)
-    entry.mu_score_version = int(cached.get("mu_score_version") or 1)
-    entry.mu_band = cached.get("mu_band")
-    entry.mu_reasons = list(cached.get("mu_reasons") or [])
-    # Tolerate older caches missing the new keys.
-    entry.scan_latest_chapter = _opt_float(cached.get("scan_latest_chapter"))
-    entry.publisher_name = cached.get("publisher_name")
-    entry.publisher_chapters = _opt_float(cached.get("publisher_chapters"))
-    entry.publisher_volumes = _opt_float(cached.get("publisher_volumes"))
-    entry.publisher_status = cached.get("publisher_status")
-    entry.scan_latest_volume = _opt_float(cached.get("scan_latest_volume"))
-    entry.anilist_id = cached.get("anilist_id")
-    entry.anilist_chapters = _opt_float(cached.get("anilist_chapters"))
-    entry.anilist_volumes = _opt_float(cached.get("anilist_volumes"))
-    # Tolerate older caches missing completed_in_origin.
-    co = cached.get("completed_in_origin")
-    entry.completed_in_origin = None if co is None else bool(co)
-    entry.behind_override = cached.get("behind_override") or None
+    """One ``links_cache`` row onto *entry* - the one implementation the headless wanted list uses too."""
+    from ..wanted import apply_links_cache
+
+    apply_links_cache(entry, cached)
 
 
 def _opt_float(v) -> Optional[float]:

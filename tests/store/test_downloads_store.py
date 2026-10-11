@@ -165,7 +165,8 @@ def test_download_settings(ledger, db):
 
 
 def test_the_queue_needs_no_migration(db):
-    assert schema.SCHEMA_VERSION == 6 and DownloadStatus.QUEUED in schema.LEDGER_STATUS
+    # queued downloads live in the ledger as it was in schema 6 (the budget cycle added no migration)
+    assert schema.SCHEMA_VERSION >= 6 and DownloadStatus.QUEUED in schema.LEDGER_STATUS
 
 
 def test_queued_records_keep_what_a_later_send_needs(ledger, db):

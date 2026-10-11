@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
-from ..knowledge import (LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, fmt_num, from_own_matcher,
-                         to_decimal)
+from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, from_own_matcher
 from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 from ..official_sources import KIND_SEARCH, official_links, primary_label
 from .list_text import english_text
 from .shell import DuplicateSeries
-from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, State, compute_state, \
-    fallback_inventory_from_entry
+from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, State, fallback_inventory_from_entry
+from ..wanted import evaluate, held_volumes
 
 COLUMNS = [
     "✓",
@@ -75,6 +74,8 @@ STATE_COLUMNS = (COL_STATE, COL_GAPS, COL_OFFICIAL)
 SUBTITLE_ROLE = Qt.UserRole + 1     # Title: the matched series' title, shown under the folder's
 REVIEW_ROLE = Qt.UserRole + 2       # Title: the match needs review (the subtitle turns orange)
 STATE_ROLE = Qt.UserRole + 3        # State: the SeriesState (the badge's colour)
+MODE_CHIP_ROLE = Qt.UserRole + 20   # Title: the series' own automatic-downloads mode where it differs from the default
+                                    # (a small chip after the title; "" for none)
 
 # State filters (key -> label), in the order the toolbar lists them; None = every row.
 STATE_FILTERS: List[Tuple[Optional[str], str]] = (
@@ -126,6 +127,8 @@ class MangaTableModel(QAbstractTableModel):
         self._dupe_files: Dict[str, Tuple[int, int]] = {}
         # series folder -> how many files the renamer would rename (Rename pending; counted off the UI thread)
         self._rename_counts: Dict[str, int] = {}
+        # folder -> the Title's automatic-downloads chip: the series' own mode where it differs from the default
+        self._mode_chips: Dict[str, str] = {}
         # Rescan state + official sources per row, computed on first use and dropped when the row changes.
         self._state_cache: Dict[int, Tuple[SeriesState, List[OfficialLink]]] = {}
         self._today: Optional[datetime.date] = None
@@ -195,13 +198,9 @@ class MangaTableModel(QAbstractTableModel):
         e = self.entry_at(row)
         if e is None:
             return None
-        knowledge = self._knowledge_for(e) or from_own_matcher(e)
-        inventory = self._inventory_for(e)
-        if inventory is None:
-            inventory = fallback_inventory_from_entry(e)
-        st = compute_state(inventory, knowledge, folder_empty=e.n_files == 0, needs_kind=self._needs_kind_for(e),
-                           rename_count=self._rename_counts.get(str(e.folder), 0),
-                           behind_override=e.behind_override, today=self._today, restarts=e.restarting_units)
+        st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
+                                 needs_kind=self._needs_kind_for(e),
+                                 rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today)
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
         self._state_cache[row] = (st, links, knowledge)
         return st, links, knowledge
@@ -224,9 +223,7 @@ class MangaTableModel(QAbstractTableModel):
         e = self.entry_at(row)
         if e is None:
             return ()
-        inventory = self._inventory_for(e) or fallback_inventory_from_entry(e)
-        nums = [d for d in (to_decimal(v) for v in inventory.held_volumes) if d is not None]
-        return tuple(fmt_num(d) for d in sorted(set(nums)))
+        return held_volumes(self._inventory_for(e) or fallback_inventory_from_entry(e))
 
     def held_chapters_at(self, row: int) -> Tuple[Any, ...]:
         """The chapters *row*'s folder holds as chapter archives (numbers, or ``(from, to)`` for a range archive)."""
@@ -331,6 +328,19 @@ class MangaTableModel(QAbstractTableModel):
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
             self.dataChanged.emit(self.index(0, COL_RENAME), self.index(len(self._entries) - 1, COL_RENAME),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def set_mode_chips(self, chips: Mapping[str, str]) -> None:
+        """folder -> the automatic-downloads chip its Title cell shows (the series' own mode, where it differs from
+        the default)."""
+        new = {str(f): str(t) for f, t in chips.items() if t}
+        if new == self._mode_chips:
+            return
+        flipped = {f for f in set(new) | set(self._mode_chips) if new.get(f) != self._mode_chips.get(f)}
+        self._mode_chips = new
+        for row, entry in enumerate(self._entries):
+            if str(entry.folder) in flipped:
+                idx = self.index(row, COL_TITLE)
+                self.dataChanged.emit(idx, idx, [MODE_CHIP_ROLE])
 
     def rename_count_at(self, row: int) -> int:
         """How many files of row *row*'s folder the renamer would rename (0: none, or not counted yet)."""
@@ -528,6 +538,8 @@ class MangaTableModel(QAbstractTableModel):
             return (v.mu_title or "") if v is not None else ""
         if role == REVIEW_ROLE and col == COL_TITLE:
             return needs_review(e)
+        if role == MODE_CHIP_ROLE and col == COL_TITLE:
+            return self._mode_chips.get(str(e.folder), "")
         if role == STATE_ROLE and col == COL_STATE:
             return self.state_at(index.row())
 

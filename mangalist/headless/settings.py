@@ -6,7 +6,7 @@ Variable                       Default             Meaning
 =============================  ==================  ====================================================
 ``MANGALIST_RESCAN_SCHEDULE``  ``daily@03:30``     When to rescan the library roots (``off`` to stop).
 ``MANGALIST_DOWNLOADS``        ``0``               Opt-in: downloads (the volumes MVP; the Unraid container).
-``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the download batch runs (only with downloads on).
+``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the find pass runs (only with downloads on).
 ``MANGALIST_DOWNLOADS_SCHEDULE`` ``every 1h``      When to file finished downloads and remove completed
                                                    torrents (the ``downloads`` job; only with downloads on).
 ``MANGALIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
@@ -74,7 +74,7 @@ SCHEDULES = (
     ScheduleSpec("rescan", "Rescan the library", "schedule_rescan", ENV_RESCAN, DEFAULT_RESCAN),
     ScheduleSpec("mangapixer-sync", "Sync with MangaPixer", "schedule_mangapixer_sync", ENV_MANGAPIXER,
                  DEFAULT_MANGAPIXER),
-    ScheduleSpec("dispatch-batch", "Dispatch the batched downloads", "schedule_dispatch", ENV_DISPATCH,
+    ScheduleSpec("dispatch-batch", "Find and send missing volumes and chapters", "schedule_dispatch", ENV_DISPATCH,
                  DEFAULT_DISPATCH),
     ScheduleSpec("downloads", "File finished downloads", "schedule_downloads", ENV_DOWNLOADS_SCHEDULE,
                  DEFAULT_DOWNLOADS_SCHEDULE),

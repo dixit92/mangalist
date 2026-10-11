@@ -79,9 +79,12 @@ def test_times_and_schedules_are_worded_like_the_mockup():
 
 
 def test_schedule_rows_read_the_container_environment():
+    from mangalist.headless.settings import SCHEDULE_BY_JOB
+
     rows = {w: (when, env) for w, when, env in rules.schedule_rows({})}
     assert rows == {"Rescan the library": ("daily 03:30", False), "Sync with MangaPixer": ("daily 03:15", False),
-                    "File finished downloads": ("every hour (and Check downloads now)", False)}
+                    "File finished downloads": ("every hour (and Check downloads now)", False),
+                    SCHEDULE_BY_JOB["dispatch-batch"].label: ("daily 04:30 (and Find now)", False)}   # the find pass
     rows = {w: (when, env) for w, when, env in rules.schedule_rows(
         {"MANGALIST_RESCAN_SCHEDULE": "off", "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00",
          "MANGALIST_DOWNLOADS_SCHEDULE": "banana"})}

@@ -395,10 +395,10 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 
 # --- Settings: schedules ---------------------------------------------------------------------------------
 
-# The schedules the Automation section edits (owner, 2026-10-09). The dispatch batch is left out: it is a stub that
-# dispatches nothing yet, so a time for it would only confuse. Stored in the database; the container's variables only
-# seed them (see mangalist/headless/settings.py).
-SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads")
+# The schedules the Automation section edits (owner, 2026-10-09). Stored in the database; the container's variables only
+# seed them (see mangalist/headless/settings.py). ``dispatch-batch`` is the find pass of automatic downloads (2026-10-10,
+# :mod:`mangalist.downloads.finding`; default daily 04:30) - the headless runner names its label.
+SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads", "dispatch-batch")
 
 #: The choices each schedule offers (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6
 #: hours"), plus Off. Filing finished downloads also keeps Every hour - its default; without it filing could not run
@@ -510,6 +510,8 @@ def schedule_entries(db, env: Optional[Mapping[str, str]] = None) -> List[Schedu
         when = schedule_text(canonical) if parsed is not None else "off"
         if job == "downloads" and parsed is not None:
             when += " (and Check downloads now)"
+        elif job == "dispatch-batch" and parsed is not None:
+            when += " (and Find now)"
         rows.append(ScheduleEntry(job, spec.label, canonical, when, choice.source, True))
     return rows
 

@@ -11,11 +11,12 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from . import theme
-from .table_model import REVIEW_ROLE, STATE_ROLE, SUBTITLE_ROLE, state_text
+from .table_model import MODE_CHIP_ROLE, REVIEW_ROLE, STATE_ROLE, SUBTITLE_ROLE, state_text
 
 ROW_HEIGHT = 50                 # two lines of the Title cell with the mockup's 9 px padding
 TITLE_PAD = 20                  # the first column's left padding
 CELL_PAD = 12
+CHIP_AUTO = "Auto"              # the accent chip; Notify / Off are muted (owner decisions 2026-10-10, 2026-10-11)
 
 
 def _draw_cell(option: QStyleOptionViewItem, painter: QPainter, index, delegate: QStyledItemDelegate) -> QStyleOptionViewItem:
@@ -42,6 +43,9 @@ class TitleDelegate(QStyledItemDelegate):
         main = theme.font(13, 500)
         small = theme.font(12, 400)
         painter.save()
+        chip = str(index.data(MODE_CHIP_ROLE) or "")
+        if chip:                                        # the chip at the right; the title elides before it
+            rect.setRight(rect.right() - _paint_mode_chip(painter, rect, chip) - 8)
         main_h = QFontMetrics(main).height()
         small_h = QFontMetrics(small).height() if subtitle else 0
         top = rect.top() + (rect.height() - main_h - small_h) / 2
@@ -58,7 +62,31 @@ class TitleDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index) -> QSize:
         title = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
-        return QSize(QFontMetrics(theme.font(13, 500)).horizontalAdvance(title) + TITLE_PAD + CELL_PAD, ROW_HEIGHT)
+        text = str(index.data(MODE_CHIP_ROLE) or "")
+        chip = QFontMetrics(theme.font(11, 600)).horizontalAdvance(text) + 21 if text else 0
+        return QSize(QFontMetrics(theme.font(13, 500)).horizontalAdvance(title) + TITLE_PAD + CELL_PAD + chip,
+                     ROW_HEIGHT)
+
+
+def _paint_mode_chip(painter: QPainter, rect: QRectF, text: str) -> float:
+    """The small mode chip (*text*: ``Auto`` / ``Notify`` / ``Off``) right-aligned in *rect*, vertically centred;
+    returns its width."""
+    font = theme.font(11, 600)
+    fm = QFontMetrics(font)
+    width = fm.horizontalAdvance(text) + 1 + 12
+    height = fm.height() + 2
+    box = QRectF(rect.right() - width, rect.top() + (rect.height() - height) / 2, width, height)
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    auto = text == CHIP_AUTO
+    painter.setBrush(QColor(theme.ACCENT_TINT if auto else theme.BORDER_SOFT))
+    painter.drawRoundedRect(box, height / 2, height / 2)
+    painter.setFont(font)
+    painter.setPen(QColor(theme.ACCENT if auto else theme.MUTED))
+    painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
+    painter.restore()
+    return width
 
 
 class StateBadgeDelegate(QStyledItemDelegate):
