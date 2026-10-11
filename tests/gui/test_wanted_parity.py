@@ -97,7 +97,7 @@ def test_the_picked_library_is_the_same(setup):
     win._apply_library(manga.id)
     win._rebuild_wanted(force=True)
     got = wanted.wanted_list(lib.db, root_ids=[manga.id], today=TODAY)
-    assert _sorted(got) == _sorted(win._wanted_series) and all("/Manga/" in w.folder for w in got)
+    assert _sorted(got) == _sorted(win._wanted_series) and all("Manga" in Path(w.folder).parts for w in got)
 
 
 def test_the_links_cache_is_applied_as_the_window_does():
