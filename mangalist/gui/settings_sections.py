@@ -609,6 +609,7 @@ class AutomationPage(SectionPage):
                                wrap=True)
         bv.addWidget(self.auto_note)
         self.auto_status = label("", wrap=True)
+        self.auto_status.setVisible(False)
         bv.addWidget(self.auto_status)
         self.body.addWidget(box)
 
@@ -628,6 +629,7 @@ class AutomationPage(SectionPage):
 
     def _say_auto(self, text: str, tone: str = "") -> None:
         self.auto_status.setText(text)
+        self.auto_status.setVisible(bool(text))
         set_prop(self.auto_status, "tone", tone if text else "")
 
     def _default_mode_chosen(self, mode: str) -> None:
