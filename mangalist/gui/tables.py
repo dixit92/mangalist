@@ -16,6 +16,9 @@ def resizable_columns(table: QTableView, widths: Optional[Mapping[int, int]] = N
     header = table.horizontalHeader()
     header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
     header.setStretchLastSection(True)
+    # by pixel: scrolling a column at a time cannot reach the end of a last column wider than a step (owner,
+    # 2026-10-11: "the last column gets cut off")
+    table.setHorizontalScrollMode(QTableView.ScrollMode.ScrollPerPixel)
     for col, width in (widths or {}).items():
         table.setColumnWidth(col, width)
 

@@ -52,8 +52,9 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
-    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MU_TITLE,
-    COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
+    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MTIME,
+    COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label,
+    state_matches,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
@@ -270,7 +271,7 @@ class MainWindow(QMainWindow):
     _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
     _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 170, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
                        COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180,
-                       COL_LIBRARY: 130, COL_RENAME: 90}
+                       COL_LIBRARY: 130, COL_RENAME: 90, COL_MTIME: 150}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
     # 2: the Library column exists, 3: the Rename column exists (each hidden unless the owner showed it)
@@ -459,6 +460,7 @@ class MainWindow(QMainWindow):
         # Restore or apply default column order, then apply visibility.
         self._restore_column_state()
         self._apply_hidden_columns()
+        self._keep_last_column_readable()
         header.sectionMoved.connect(self._on_column_moved)
         header.sectionResized.connect(self._on_section_resized)
 
@@ -1627,6 +1629,7 @@ class MainWindow(QMainWindow):
         config.save(self._cfg)
 
     def _on_column_moved(self, _logical: int, _old: int, _new: int) -> None:
+        self._keep_last_column_readable()
         self._save_column_state()
 
     def _on_section_resized(self, _logical: int, _old: int, _new: int) -> None:
@@ -1650,6 +1653,20 @@ class MainWindow(QMainWindow):
         if version < 3:
             hidden.add("Rename")
         return hidden
+
+    def _keep_last_column_readable(self) -> None:
+        """The last column stretches into what is left of the view, which can be a sliver with its header cut off;
+        its right edge then sits at the view's edge where it cannot be dragged (owner, 2026-10-11: "the last column
+        gets cut off"). Give it at least its header's width: the table then scrolls sideways instead."""
+        header = self._table.horizontalHeader()
+        shown = [header.logicalIndex(v) for v in range(header.count())
+                 if not header.isSectionHidden(header.logicalIndex(v))]
+        if not shown:
+            return
+        last = shown[-1]
+        need = max(header.sectionSizeHint(last), self._DEFAULT_WIDTHS.get(last, 0))
+        if header.sectionSize(last) < need:
+            header.resizeSection(last, need)
 
     def _apply_hidden_columns(self) -> None:
         """Hide/show columns according to config."""
@@ -1688,6 +1705,7 @@ class MainWindow(QMainWindow):
         self._cfg[self._CFG_COLUMNS_VERSION] = self._COLUMNS_VERSION
         config.save(self._cfg)
         self._apply_hidden_columns()
+        self._keep_last_column_readable()
 
     def _on_row_changed(self, *_args) -> None:
         idx = self._table.selectionModel().currentIndex()
