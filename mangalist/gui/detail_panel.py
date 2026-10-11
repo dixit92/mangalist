@@ -115,13 +115,15 @@ class DetailPanel(QWidget):
         self._lbl_english = _label("-")
         self._lbl_mangapixer = _label("-")
         self._lbl_download = _label("-")
+        self._lbl_auto = _label("-")          # automatic downloads: Off / Notify / Auto (owner decisions 2026-10-10)
         self._lbl_kind = _label("-")
         self._path_label = _label("", mono=True)
         for key, caption, widget in (("state", "State", state_cell), ("flags", "Flags", self._lbl_flags),
                                      ("gaps", "Gaps", self._lbl_gaps), ("holds", "Holds", self._lbl_holds),
                                      ("english", "English", self._lbl_english),
                                      ("mangapixer", "MangaPixer", self._lbl_mangapixer),
-                                     ("download", "Download", self._lbl_download), ("kind", "Kind", self._lbl_kind),
+                                     ("download", "Download", self._lbl_download),
+                                     ("auto", "Automatic", self._lbl_auto), ("kind", "Kind", self._lbl_kind),
                                      ("folder", "Folder", self._path_label)):
             self._add_row(key, caption, widget)
         root.addLayout(grid)
@@ -161,6 +163,7 @@ class DetailPanel(QWidget):
         root.addStretch(1)
 
         self._downloads = False
+        self._auto = False
         self.show_entry(None)
 
     # ------------------------------------------------------------------
@@ -181,6 +184,19 @@ class DetailPanel(QWidget):
         self._downloads = enabled
         self._show_row("download", enabled)
 
+    def set_auto_enabled(self, enabled: bool) -> None:
+        """Show the "Automatic" line (the backend offers automatic downloads)."""
+        self._auto = enabled
+        self._show_row("auto", enabled and self._title_label.property("role") == "title")
+
+    def set_auto_mode(self, text: Optional[str], tooltip: str = "") -> None:
+        """The selected series' automatic-download mode ("Auto", "Notify (the default)"), or None for "-"."""
+        self._lbl_auto.setText(text or "-")
+        self._lbl_auto.setToolTip(tooltip if text else "")
+
+    def auto_mode_text(self) -> str:
+        return self._lbl_auto.text()
+
     def set_download(self, text: Optional[str], tooltip: str = "") -> None:
         """The selected series' download status ("Downloading", "Filed v03-v05", ...), or None for none."""
         self._lbl_download.setText(text or "-")
@@ -197,7 +213,7 @@ class DetailPanel(QWidget):
                    held_volumes: Sequence[str] = (), held_chapters: Sequence = ()) -> None:
         has = entry is not None
         for key in self._rows:
-            self._show_row(key, has and (key != "download" or self._downloads))
+            self._show_row(key, has and (key != "download" or self._downloads) and (key != "auto" or self._auto))
         self._show_state(state if has else None, links if has else None)
         self._links_box.setVisible(has)
         self._files_box.setVisible(has)

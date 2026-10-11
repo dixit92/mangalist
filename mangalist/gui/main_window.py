@@ -307,6 +307,7 @@ class MainWindow(QMainWindow):
         self._volumes = None
         self._volumes_backend = self._make_volumes_backend()
         self._download_tab = None
+        self._auto_modes = None                     # automatic downloads: the per-series modes (auto_modes.py)
         self._duplicates_view = None
         self._dupe_file_groups: Optional[int] = None
         self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
@@ -426,6 +427,7 @@ class MainWindow(QMainWindow):
             self._download_tab = tab
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
+        self._make_auto_modes()
 
         # --- the duplicates view (lane C's)
         view = lanes.duplicates_view_class()(self._db, self)
@@ -503,6 +505,9 @@ class MainWindow(QMainWindow):
         if getattr(result, "downloads_changed", False) and self._volumes is not None:
             self._volumes.refresh_records()
             self._rebuild_wanted(force=True)
+            self._refresh_auto_modes(force=True)            # the default mode may have changed
+            if callable(getattr(self._download_tab, "reload_found", None)):
+                self._download_tab.reload_found()
 
     def _on_details_toggled(self, visible: bool) -> None:
         self._cfg[self._CFG_DETAILS] = visible
@@ -608,6 +613,7 @@ class MainWindow(QMainWindow):
         self._update_counts()
         self._rebuild_wanted()
         self._update_detail_wanted()
+        self._refresh_auto_modes()
         if self._list.current_filter() == DUPLICATES and self._duplicates_view is not None:
             self._duplicates_view.set_series_duplicates(self._model.duplicate_series())
 
@@ -1695,6 +1701,7 @@ class MainWindow(QMainWindow):
         self._detail.show_entry(entry, m.state_at(row), m.links_at(row), knowledge=m.knowledge_at(row),
                                 held_volumes=m.held_volumes_at(row), held_chapters=m.held_chapters_at(row))
         self._update_detail_wanted()
+        self._update_detail_auto()
         if self._volumes is not None:
             self._volumes.show_in_detail(row)
 
@@ -1807,6 +1814,8 @@ class MainWindow(QMainWindow):
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
             menu.addSeparator()
 
+        auto_actions, act_bulk_find = self._add_automation_menu(menu, entries)
+
         act_confirm_mu = menu.addAction(
             "Confirm MU match" if n == 1 else f"Confirm MU match ({n_unconfirmed})"
         )
@@ -1846,7 +1855,11 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if act_kind is not None and chosen is act_kind:
+        if chosen in auto_actions:
+            self._status_label.setText(self._auto_modes.apply([str(e.folder) for e in entries], auto_actions[chosen]))
+        elif act_bulk_find is not None and chosen is act_bulk_find:
+            self.bulk_find(entries)
+        elif act_kind is not None and chosen is act_kind:
             from .kind_dialog import ask_series_kind
 
             if ask_series_kind(self, entries[0], db=self._db):
@@ -1925,6 +1938,66 @@ class MainWindow(QMainWindow):
                 if e is not None:
                     self._model.set_examined(r, not e.examined)
             self._persist_examined()
+
+    # --- Automatic downloads: the per-series mode, the Auto chip, the bulk find ---------------------------
+
+    def _make_auto_modes(self) -> None:
+        """The per-series modes, when the downloads backend offers automatic downloads (auto_modes.py)."""
+        from .auto_modes import AutoModes
+
+        if self._volumes_backend is None or not AutoModes.available(self._volumes_backend):
+            return
+        self._auto_modes = AutoModes(self._volumes_backend, self, background=lambda *a: self._background(*a))
+        self._auto_modes.changed.connect(self._on_auto_modes_changed)
+        self._detail.set_auto_enabled(True)
+
+    def _refresh_auto_modes(self, force: bool = False) -> None:
+        if self._auto_modes is None:
+            return
+        folders = [str(e.folder) for e in (self._model.entry_at(r) for r in range(self._model.rowCount())) if e]
+        self._auto_modes.refresh(folders, force=force)
+
+    def _on_auto_modes_changed(self) -> None:
+        self._model.set_auto_folders(self._auto_modes.auto_folders())
+        self._update_detail_auto()
+
+    def _update_detail_auto(self) -> None:
+        if self._auto_modes is None:
+            return
+        entry = self._current_entry()
+        if entry is None:
+            self._detail.set_auto_mode(None)
+            return
+        self._detail.set_auto_mode(*self._auto_modes.detail(str(entry.folder)))
+
+    def _add_automation_menu(self, menu: QMenu, entries) -> tuple:
+        """The row menu's "Automatic downloads" submenu and "Find releases for N series" ({} and None without)."""
+        if self._auto_modes is None:
+            return {}, None
+        from .automation_rules import bulk_find_label
+
+        folders = [str(e.folder) for e in entries]
+        actions = self._auto_modes.add_menu(menu, folders)
+        act_bulk = None
+        if callable(getattr(self._download_tab, "find_for", None)):
+            ids = self._auto_modes.series_ids(folders)
+            act_bulk = menu.addAction(bulk_find_label(len(ids)))
+            act_bulk.setEnabled(bool(ids))
+            act_bulk.setToolTip("Run the find pass for these series; what it finds waits under Found in the Download "
+                                "tab - nothing is sent by itself" if ids else "Not scanned yet: rescan first")
+            menu.setToolTipsVisible(True)
+        menu.addSeparator()
+        return actions, act_bulk
+
+    def bulk_find(self, entries) -> bool:
+        """"Find releases for N series": the Download tab's bulk find for these series, shown under Found."""
+        if self._auto_modes is None or not callable(getattr(self._download_tab, "find_for", None)):
+            return False
+        ids = self._auto_modes.series_ids(str(e.folder) for e in entries)
+        if not ids:
+            return False
+        self.show_tab(TAB_DOWNLOAD)
+        return bool(self._download_tab.find_for(ids))
 
     def _on_fix_mu_match(self, src_row: int, entry: MangaEntry) -> None:
         """Open the MU picker so the user can manually select the correct series."""
@@ -2061,6 +2134,8 @@ class MainWindow(QMainWindow):
             self._volumes.stop()
         if self._download_tab is not None:
             self._download_tab.stop()
+        if self._auto_modes is not None:
+            self._auto_modes.stop()
         if self._dupe_call is not None:
             self._dupe_call.abandon()
         if self._rename_call is not None and hasattr(self._rename_call, "abandon"):
