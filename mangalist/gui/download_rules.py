@@ -68,15 +68,25 @@ def matches_filter(series: WantedSeries, text: str) -> bool:
     return not needle or needle in series.title.casefold() or any(needle in t.casefold() for t in series.titles)
 
 
-def grouped(series: Iterable[WantedSeries], filter_text: str = "") -> List[Tuple[str, List[WantedSeries]]]:
-    """(group, its series) for every group, in the fixed order, series sorted by title (case-insensitive); the
-    filter keeps those matching it. A group with nothing stays in the list (the tab shows its header, count 0)."""
+#: How the "To get" list is sorted (owner, 2026-10-11: "Can I sort this? For example by highest number of missing
+#: volumes"); "missing" counts the group's units - volumes, or chapters under Missing chapters.
+SORT_TITLE, SORT_MOST, SORT_FEWEST = "title", "most", "fewest"
+SORTS: Tuple[Tuple[str, str], ...] = ((SORT_TITLE, "Title (A-Z)"), (SORT_MOST, "Most missing first"),
+                                      (SORT_FEWEST, "Fewest missing first"))
+
+
+def grouped(series: Iterable[WantedSeries], filter_text: str = "",
+            sort: str = SORT_TITLE) -> List[Tuple[str, List[WantedSeries]]]:
+    """(group, its series) for every group, in the fixed order, series sorted by *sort* (title - case-insensitive -
+    breaking ties); the filter keeps those matching it. A group with nothing stays in the list (the tab shows its
+    header, count 0)."""
     buckets: Dict[str, List[WantedSeries]] = {g: [] for g in GROUPS}
     for item in series:
         if item.group in buckets and matches_filter(item, filter_text):
             buckets[item.group].append(item)
+    sign = {SORT_MOST: -1, SORT_FEWEST: 1}.get(sort, 0)
     for items in buckets.values():
-        items.sort(key=lambda s: (s.title.casefold(), s.folder))
+        items.sort(key=lambda s: (sign * len(s.missing), s.title.casefold(), s.folder))
     return [(g, buckets[g]) for g in GROUPS]
 
 
