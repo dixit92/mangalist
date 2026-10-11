@@ -289,3 +289,18 @@ def test_select_all_ticks_every_sendable_chapter_or_none(qapp):
     assert panel.check_all.checkState() == Qt.CheckState.PartiallyChecked
     panel.check_all.click()                                            # partly ticked: tick them all
     assert len(panel.picks()) == 3 and panel.check_all.checkState() == Qt.CheckState.Checked
+
+
+def test_a_default_folder_with_choices_is_shown_and_can_be_changed(qapp):
+    # owner, 2026-10-10: new chapters go to the latest season folder; the others stay a choice
+    latest, older = FOLDER + "/Season 03", FOLDER + "/Season 02"
+    panel, backend, _ = make(qapp)
+    open_series(qapp, panel)
+    look = panel.lookup
+    look.placement = Placement(FOLDER, latest, 'new ones go to "Season 03", the one with the latest chapters',
+                               (latest, older, FOLDER))
+    panel.show_lookup(look)
+    assert not panel.folder_row.isHidden() and not panel.folder_combo.isHidden()
+    assert panel.chosen_target_dir() == latest and "Season 03" in panel.folder_label.text()
+    panel.folder_combo.setCurrentIndex(panel.folder_combo.findData(older))
+    assert panel.chosen_target_dir() == older

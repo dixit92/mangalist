@@ -201,7 +201,7 @@ class MangaTableModel(QAbstractTableModel):
             inventory = fallback_inventory_from_entry(e)
         st = compute_state(inventory, knowledge, folder_empty=e.n_files == 0, needs_kind=self._needs_kind_for(e),
                            rename_count=self._rename_counts.get(str(e.folder), 0),
-                           behind_override=e.behind_override, today=self._today)
+                           behind_override=e.behind_override, today=self._today, restarts=e.restarting_units)
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
         self._state_cache[row] = (st, links, knowledge)
         return st, links, knowledge
