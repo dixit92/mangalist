@@ -46,7 +46,8 @@ from ..downloads.options import (
     save_nyaa_options,
     set_flag,
 )
-from .background import start_call
+from .automation_rules import MODE_HELP, MODE_LABELS, MODES, has_automation
+from .background import describe_error, start_call
 from .download_rules import (
     CHOICE_DAILY,
     CHOICE_WEEKLY,
@@ -63,7 +64,7 @@ from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
 from .spin_arrows import pad_spin
 from .downloads_backend import BackendError, DownloadsBackend
-from .settings_common import SectionPage, placeholder
+from .settings_common import SectionPage
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
 from ..headless.settings import SOURCE_STORED
 from .shell import SECTION_SERVICES
@@ -81,7 +82,11 @@ SUWAYOMI_EXPLAIN = ("The sources installed in Suwayomi (from their extensions). 
                     "the order it tries them: MangaDex first - it is found by the MangaDex id MangaPixer links; the "
                     "others by title, and you confirm the match once per series. The scanlation group is chosen per "
                     "series in the Download tab.")
-AUTOMATIC_DOWNLOADS = "Automatic downloads - off / notify / automatic, per series and a default (next phase)."
+AUTOMATIC_DOWNLOADS_LEAD = ("Each series is Off, Notify or Auto - set per series in the List's row menu (Automatic "
+                            "downloads). Series you have not set follow this default.")
+AUTOMATIC_DOWNLOADS_NOTE = ("The find pass runs on the schedule above (and with Find now in the Download tab) and looks "
+                            "only at series with gaps - the Download tab's To get list.")
+AUTOMATIC_DOWNLOADS_OFF = "Not available: downloads are switched off in this installation."
 FIXED_DIGITAL = "Always on: the ranking puts Digital releases first."
 FIXED_SEEDERS = "Always on: releases nobody is seeding are never shown."
 
@@ -454,8 +459,8 @@ class AutomationPage(SectionPage):
         self.status_label = label("", wrap=True)
         self.status_label.setProperty("tone", "bad")
         self.body.addWidget(self.status_label)
+        self._build_auto_downloads()
         self._build_replaced()
-        self.body.addWidget(placeholder(AUTOMATIC_DOWNLOADS))
         self._cache = cache
         self.refresh()
         self._loading = False
@@ -576,6 +581,70 @@ class AutomationPage(SectionPage):
         reset_schedule_text(self._db, job)
         self._show_schedules()
         self._say_schedule("Back to the container's value.", "ok")
+
+    # Automatic downloads (owner decisions 2026-10-10): the default mode; the per-series mode is in the List's row menu.
+    def _build_auto_downloads(self) -> None:
+        box = card("true")
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(20, 16, 20, 16)
+        bv.setSpacing(6)
+        bv.addWidget(label("Automatic downloads", "name"))
+        bv.addWidget(label(AUTOMATIC_DOWNLOADS_LEAD, "lead", wrap=True))
+        bv.addWidget(label("Default for new series", "h3"))
+        self._auto_ok = has_automation(self._backend)
+        self.default_mode_radios: Dict[str, QRadioButton] = {}
+        self._default_group = QButtonGroup(self)
+        for mode in MODES:
+            radio = QRadioButton(MODE_LABELS[mode])
+            radio.setAccessibleName(f"Default for new series: {MODE_LABELS[mode]}")
+            radio.setEnabled(self._auto_ok)
+            radio.toggled.connect(lambda on, m=mode: on and self._default_mode_chosen(m))
+            self._default_group.addButton(radio)
+            help_text = label(MODE_HELP[mode], "muted", wrap=True)
+            help_text.setContentsMargins(26, 0, 0, 4)            # under the radio's text, not its circle
+            bv.addWidget(radio)
+            bv.addWidget(help_text)
+            self.default_mode_radios[mode] = radio
+        self.auto_note = label(AUTOMATIC_DOWNLOADS_NOTE if self._auto_ok else AUTOMATIC_DOWNLOADS_OFF, "muted",
+                               wrap=True)
+        bv.addWidget(self.auto_note)
+        self.auto_status = label("", wrap=True)
+        bv.addWidget(self.auto_status)
+        self.body.addWidget(box)
+
+    def _show_default_mode(self) -> None:
+        if not self._auto_ok:
+            for radio in self.default_mode_radios.values():
+                radio.setChecked(False)
+            return
+        try:
+            mode = self._backend.default_mode()
+        except Exception as exc:  # noqa: BLE001 - shown, nothing changed
+            self._say_auto(f"Could not read the default: {describe_error(exc)}", "bad")
+            return
+        radio = self.default_mode_radios.get(mode)
+        if radio is not None:
+            radio.setChecked(True)
+
+    def _say_auto(self, text: str, tone: str = "") -> None:
+        self.auto_status.setText(text)
+        set_prop(self.auto_status, "tone", tone if text else "")
+
+    def _default_mode_chosen(self, mode: str) -> None:
+        if self._loading or not self._auto_ok:
+            return
+        try:
+            if self._backend.default_mode() == mode:
+                return
+            self._backend.set_default_mode(mode)
+        except Exception as exc:  # noqa: BLE001 - shown; the radios go back to what is stored
+            self._say_auto(f"Could not change the default: {describe_error(exc)}", "bad")
+            self._loading = True
+            self._show_default_mode()
+            self._loading = False
+            return
+        self._say_auto(f"Saved: series you have not set are now {MODE_LABELS[mode]}.", "ok")
+        self.downloads_changed.emit()
 
     def _build_replaced(self) -> None:
         box = card("true")
@@ -742,6 +811,7 @@ class AutomationPage(SectionPage):
         self.scan_note.setVisible(bool(self._cache is not None and scan_forbidden(self._cache)))
         self._refresh_replaced()
         self._show_schedules()
+        self._show_default_mode()
         self._loading = False
 
     def on_show(self) -> None:
