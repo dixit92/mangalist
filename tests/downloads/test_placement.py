@@ -119,12 +119,10 @@ def test_placement_from_the_library_database(tmp_path):
     touch(root / "Series B" / "Series B c020.cbz")
     r = db.add_root(str(root), "Manga")
     scan(db)
-    # The scanner records "Series B/Volumes" as a nested series row; the layout still counts.
-    assert {s.rel_path for s in db.list_series()} == {"Series B", "Series B/Volumes"}
+    # "Volumes" is a unit subfolder of "Series B" (MangaPixer's rule, 2026-10-10), not a series of its own
+    assert {s.rel_path for s in db.list_series()} == {"Series B"}
     sid = db.get_series(r.id, "Series B").id
     p = placement_for(db, sid)
     assert p.target_dir == str(root / "Series B" / "Volumes") and p.series_dir == str(root / "Series B")
-    nested = db.get_series(r.id, "Series B/Volumes").id
-    assert placement_for(db, nested).target_dir == str(root / "Series B" / "Volumes")
     with pytest.raises(LookupError):
         placement_for(db, 999)
