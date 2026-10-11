@@ -473,8 +473,9 @@ def test_a_volume_list_without_english_dates_falls_back_to_the_publishers_count(
         v["englishDate"], v["englishDateKind"] = None, None
     s = state(inv(held_volumes=["1"]), from_mangapixer_item(it))
     assert s.state == State.MISSING_VOLUMES and s.missing_volumes == ("2", "3")
-    it["record"]["englishPublishers"] = []                         # no count either: nothing to tell
-    assert state(inv(held_volumes=["1"]), from_mangapixer_item(it)).missing_volumes == ()
+    it["record"]["englishPublishers"] = []                         # no count either: the volumes whose chapters are
+    s = state(inv(held_volumes=["1"]), from_mangapixer_item(it))  # out (latest 41) - owner, 2026-10-11
+    assert s.missing_volumes == ("2", "3") and "original volume" in s.reasons[0]
 
 
 # --- owner, 2026-10-11: every volume of a finished, unlicensed 4-koma held; the volume list maps only volumes 1-3 -----
@@ -517,3 +518,31 @@ def test_a_volume_starting_at_part_one_covers_that_chapter():
     k5 = own(licensed_en=False, latest_chapter="16", volumes=vols5)
     s5 = state(inv(held_volumes=["3"]), k5)
     assert any(Decimal(lo) <= 11 <= Decimal(hi or lo) for lo, hi in s5.missing_chapters), s5.missing_chapters
+
+
+def test_a_licensed_volume_folder_without_english_volumes_is_compared_with_the_original_list():
+    # owner, 2026-10-11: "if English volume list is not available but JP is, compare with JP. Often nyaa has volume
+    # compilations of english chapters into the JP volume containers" - these were "Can't tell"
+    jp = (VolumeInfo("1", "1", "4"), VolumeInfo("2", "5", "8"), VolumeInfo("3", "9", "12"), VolumeInfo("4", "13", "16"),
+          VolumeInfo("5"))                                          # 5: no chapter range yet - not counted
+    app = (EnglishPublisher("Example App", chapters=Decimal(10)),)
+    k = own(licensed_en=True, latest_chapter="12", english_publishers=app, volumes=jp)
+    s = state(inv(held_volumes=["1"]), k)
+    assert s.state == State.MISSING_VOLUMES and s.missing_volumes == ("2", "3")   # 4 ends at 16 > 12: not out yet
+    assert "original volume" in s.reasons[0]
+    s = state(inv(held_volumes=["1", "2", "3", "4", "5", "6"]), k)                # more than the list: fine
+    assert s.state == State.UP_TO_DATE and not s.gaps
+    s = state(inv(held_volumes=["1"]), own(licensed_en=True, english_publishers=app, volumes=(VolumeInfo("5"),)))
+    assert s.state == State.CANT_TELL                                              # nothing mapped: still can't tell
+
+
+def test_the_original_list_fallback_skips_omnibus_editions_and_specials_and_finds_upgrades():
+    jp = (VolumeInfo("0", "0", "0"), VolumeInfo("1", "1", "4"), VolumeInfo("2", "5", "8"), VolumeInfo("3", "9", "9"))
+    app = (EnglishPublisher("Example App", chapters=Decimal(9)),)
+    k = own(licensed_en=True, english_publishers=app, volumes=jp)
+    s = state(inv(held_volumes=["1"], held_chapters=["9"]), k)
+    assert s.missing_volumes == ("2",) and s.upgrade_volumes == ("3",)            # 0 is a special; 3's chapter held
+    omnibus = (EnglishPublisher("Example Omnibus", omnibus=True),)
+    s = state(inv(held_volumes=["1"]), own(licensed_en=True, latest_chapter="9", english_publishers=omnibus,
+                                           volumes=jp))
+    assert s.state == State.CANT_TELL                       # an omnibus edition numbers its volumes its own way
