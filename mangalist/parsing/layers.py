@@ -455,6 +455,9 @@ def parse_bare(name: str, series_title: Optional[str] = None) -> Optional[Parsed
                 rm = _BARE.match(rest.lstrip(" _-#"))
                 if rm is not None and rm.group("series") is None:
                     return _bare_result(name, rm, st)
+                titled = _after_series_titled(name, rest.lstrip(" _-#"), st)
+                if titled is not None:
+                    return titled
     # A number with a chapter title after it first: a title ending in a number ("..., Part 2") must not give its "2"
     # (owner, 2026-10-11: "<Series> 014.5  <title>, Part 2" read as chapter 2, so three chapters collided).
     titled = _bare_titled(name, text)
@@ -464,6 +467,26 @@ def parse_bare(name: str, series_title: Optional[str] = None) -> Optional[Parsed
     if m is None:
         return None
     return _bare_result(name, m, m.group("series"))
+
+
+# Right after the series' own title, a zero-padded or fractional number followed by a chapter title with one space
+# ("<Series> 002 Searching for Sunrise", "<Series> 016.5 Alternative" - owner, 2026-10-11: such names were unreadable, so
+# the "volumes or chapters?" answer could not apply). The known title makes one space safe.
+_AFTER_SERIES_TITLED = re.compile(
+    rf"^(?P<n>{UNIT})(?:-(?P<n2>{UNIT}))?(?:\s+[-\u2013\u2014:]\s+|\.\s+|\s+)(?P<title>[^\s(\[].*?)"
+    r"(?P<tags>(?:\s*(?:\([^()]*\)|\[[^\[\]]*\]))*)\s*$")
+
+
+def _after_series_titled(name: str, rest: str, series: str) -> Optional[ParsedName]:
+    m = _AFTER_SERIES_TITLED.match(rest)
+    if m is None:
+        return None
+    n = m.group("n")
+    if not ((n.startswith("0") and len(n.partition(".")[0]) > 1) or "." in n):
+        return None                                     # "<Series> 2 Something": too little to go on
+    r = _bare_result(name, m, series)
+    return replace(r, title=clean_title(m.group("title")), group=_read_tags(m.group("tags"))[0],
+                   notes=("bare number with a chapter title after the series title: volumes or chapters?",))
 
 
 def _bare_titled(name: str, text: str) -> Optional[ParsedName]:

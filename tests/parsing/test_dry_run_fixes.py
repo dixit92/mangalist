@@ -319,3 +319,22 @@ def test_series_titles_ending_in_a_number_stay_titles():
     assert parse_name("Some Series 2 - The Return.cbz").title is None
     r = parse_name("Some Series 07.cbz", ParseContext(series_title="Some Series"))
     assert str(r.number or r.chapter) == "7"
+
+
+# --- owner, 2026-10-11: "<Series> 002 <title>" (one space) right after the series' own title ---------------------
+
+@pytest.mark.parametrize("name, n, title", [
+    ("Some Series 002 Searching for Sunrise.cbz", "2", "Searching for Sunrise"),
+    ("Some Series 001.1 Hero and Villain.cbz", "1.1", "Hero and Villain"),
+    ("Some Series 016.5 Alternative.cbz", "16.5", "Alternative"),
+])
+def test_a_padded_number_and_title_after_the_series_title(name, n, title):
+    r = parse_name(name, ParseContext(series_title="Some Series"))
+    assert (str(r.number), r.title) == (n, title)
+    answered = parse_name(name, ParseContext(series_title="Some Series", kind_hint="chapters"))
+    assert answered.kind == Kind.CHAPTER and str(answered.chapter) == n
+
+
+def test_a_short_number_and_title_after_the_series_title_is_not_guessed():
+    r = parse_name("Some Series 2 Something Else.cbz", ParseContext(series_title="Some Series"))
+    assert r.number is None
