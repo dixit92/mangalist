@@ -144,3 +144,17 @@ def test_every_operation_is_valid_against_the_recorded_schema_names():
     for key, query in sc.OPERATIONS.items():
         assert key in query
         assert query.split()[0] in ("query", "mutation")
+
+
+def test_a_manga_without_chapters_answers_an_empty_list(session):
+    # owner, 2026-10-11: three licensed series showed "Lookup failed" - MangaDex lists no chapters for them, and
+    # Suwayomi says so as an error next to the manga's details
+    session.answers["MangaListChapters"] = "no_chapters.json"
+    got = make(session).chapters(1)
+    assert got.chapters == () and got.manga.title == "Example Manga" and got.source_name == "MangaDex (EN)"
+    session.answers["MangaListChapters"] = {"data": None, "errors": [{"message": "No chapters found"}]}
+    bare = make(session).chapters(7)
+    assert bare.chapters == () and bare.manga.id == 7
+    session.answers["MangaListChapters"] = "error_unknown.json"          # any other error still fails
+    with pytest.raises(GraphQLError):
+        make(session).chapters(1)
