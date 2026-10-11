@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, FrozenSet, Iterable, List, Optional
 
 if TYPE_CHECKING:  # the parser imports this module; import it lazily at run time
     from .inventory import Inventory
@@ -275,6 +275,35 @@ class MangaEntry:
             return list(self.files)
         nested = [Path(p) for p in self.nested_series]
         return [f for f in self.files if not any(_is_under(f.path, n) for n in nested)]
+
+    @property
+    def restarting_units(self) -> FrozenSet[str]:
+        """``{"chapter"}`` / ``{"volume"}`` when those numbers start again in another folder of the series - ``Season 1``
+        and ``Season 2`` both from chapter 1 - so they cannot be compared with one total (MangaPixer 1.29.0's rule,
+        ported: two folders share two or more numbers, or start at the same number; 0 is ignored; one shared number
+        between folders that start apart is a duplicate at a boundary, not a restart). Empty: nothing restarts."""
+        out = set()
+        for attr in ("chapter", "volume"):
+            sets: Dict[str, set] = {}
+            for f in self.inventory_files:
+                p = f.parsed
+                unit = getattr(p, attr, None) if p is not None else None
+                if unit is None or (attr == "volume" and getattr(p, "chapter", None) is not None):
+                    continue
+                n = int(unit.start)
+                if n <= 0:
+                    continue
+                try:
+                    rel = f.path.relative_to(self.folder).parts
+                except ValueError:
+                    rel = ()
+                sets.setdefault(rel[0] if len(rel) > 1 else "", set()).add(n)
+            numbered = [v for v in sets.values() if v]
+            if any(len(numbered[i] & numbered[j]) >= 2
+                   or (numbered[i] & numbered[j] and min(numbered[i]) == min(numbered[j]))
+                   for i in range(len(numbered)) for j in range(i + 1, len(numbered))):
+                out.add(attr)
+        return frozenset(out)
 
     def inventory(self, volume_list: Optional[Iterable[Any]] = None) -> "Inventory":
         """The series' held units (:class:`mangalist.inventory.Inventory`), optionally merged with a

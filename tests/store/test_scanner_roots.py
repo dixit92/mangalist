@@ -39,10 +39,10 @@ def test_exclusions_are_never_scanned(library, monkeypatch):
 
 
 def test_without_exclusions_behaviour_is_unchanged(library):
-    make_archive(library / "Series A" / "Raw" / "raw 01.cbz")
+    make_archive(library / "Series A" / "Other Work" / "other 01.cbz")
     make_archive(library / "Series A" / "Series A v01.cbz")
     entries = scan_root(library)  # a parent with its own files and a subseries folder: both, as before
-    assert [(e.folder.name, len(e.files)) for e in entries] == [("Series A", 2), ("Raw", 1)]
+    assert [(e.folder.name, len(e.files)) for e in entries] == [("Series A", 2), ("Other Work", 1)]
     assert entries[0].root_id is None
 
 

@@ -84,13 +84,13 @@ def test_units_stay_computed_from_names(db, library):
 
 def test_nested_series_archives_belong_to_the_subseries(db, library):
     make_archive(library / "Franchise" / "Franchise v01.cbz")
-    make_archive(library / "Franchise" / "Side Story" / "Side Story v01.cbz", size=4100)
+    make_archive(library / "Franchise" / "Spin-off Work" / "Spin-off Work v01.cbz", size=4100)
     root = db.add_root(str(library))
     scan(db)
     parent = db.get_series(root.id, "Franchise").id
-    side = db.get_series(root.id, "Franchise/Side Story").id
+    side = db.get_series(root.id, "Franchise/Spin-off Work").id
     rows = {r.rel_path: r.series_id for r in db.list_archives(root.id)}
-    assert rows == {"Franchise/Franchise v01.cbz": parent, "Franchise/Side Story/Side Story v01.cbz": side}
+    assert rows == {"Franchise/Franchise v01.cbz": parent, "Franchise/Spin-off Work/Spin-off Work v01.cbz": side}
 
 
 def test_an_unreachable_root_keeps_its_archives_present(db, library, library2):

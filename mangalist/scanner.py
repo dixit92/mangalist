@@ -154,6 +154,16 @@ def _get_subdirs_with_archives(folder: Path, _ex: _Excl = _NO_EXCL) -> List[Path
 _SKIP_SUBDIR_NAMES = {"chapters", "extras", "bonus", "specials", "omake"}
 
 
+def _is_unit_subfolder(name: str) -> bool:
+    """A subfolder that holds a unit of its parent series, not a series of its own: ``Season 2``, ``Part 3``,
+    ``Volumes``, ``Chapters 1-50``, ``Extras``, a bare number (MangaPixer's unit-subfolder rule, already ported for the
+    matcher). ``Part 3 - Subtitle`` is a work of its own. Owner, 2026-10-10: a webtoon split into ``Season 01`` ...
+    ``Season 04`` showed as four series, each missing the chapters the others hold."""
+    from .matcher.auto_match_text import is_unit_folder_name
+
+    return name.lower() in _SKIP_SUBDIR_NAMES or is_unit_folder_name(name)
+
+
 def _extract_subseries(
     parent: Path, parent_title: str, parent_mtime: float, _ex: _Excl = _NO_EXCL,
     hint_for: Optional[Callable[[Path], Optional[str]]] = None, schemes: Sequence = (),
@@ -168,8 +178,8 @@ def _extract_subseries(
     subdirs = _get_subdirs_with_archives(parent, _ex)
 
     for subdir in subdirs:
-        # Skip non-series subdirectories
-        if subdir.name.lower() in _SKIP_SUBDIR_NAMES:
+        # Skip subfolders that are units of the parent (Season 2, Part 3, Chapters, ...): the parent is the series
+        if _is_unit_subfolder(subdir.name):
             continue
 
         # Parse subdir name using same logic as parent
@@ -283,6 +293,9 @@ def scan_root(
 
         has_direct = _has_direct_archives(folder, ex)
         subseries = _extract_subseries(folder, title, mtime, ex, hint_for, schemes)
+        # Unit subfolders (Season 1, Part 2, Volumes) with archives make the folder itself a series, like direct files.
+        has_units = bool(subseries) and any(_is_unit_subfolder(d.name) for d in _get_subdirs_with_archives(folder, ex))
+        has_direct = has_direct or has_units
 
         if not has_direct and subseries:
             # Parent is a franchise container - only add subseries, not parent
@@ -515,6 +528,14 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
         renamed.extend(report.renamed)
     except Exception:  # noqa: BLE001 - the series rows are recorded; identity is tried again next scan
         _log.warning("Recording the archives (series identity) failed", exc_info=True)
+    try:
+        from .identity.carry import absorb_unit_folders
+
+        absorbed = absorb_unit_folders(db, [rs.root_id for rs in scanned], {rs.root_id: rs.folder for rs in scanned})
+        if result.identity is not None:
+            result.identity.carries.extend(absorbed)
+    except Exception:  # noqa: BLE001 - the series rows are recorded; tried again next scan
+        _log.warning("Folding unit folders into their series failed", exc_info=True)
     try:
         carried = apply_pending(db)
         renamed.extend((Path(c.old_folder), Path(c.new_folder)) for c in carried if c.carried)
