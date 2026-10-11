@@ -1922,7 +1922,7 @@ class MainWindow(QMainWindow):
                     self._model.set_examined(r, not e.examined)
             self._persist_examined()
 
-    # --- Automatic downloads: the per-series mode, the Auto chip, the bulk find ---------------------------
+    # --- Automatic downloads: the per-series mode, the mode chip, the bulk find ---------------------------
 
     def _make_auto_modes(self) -> None:
         """The per-series modes, when the downloads backend offers automatic downloads (auto_modes.py)."""
@@ -1941,7 +1941,7 @@ class MainWindow(QMainWindow):
         self._auto_modes.refresh(folders, force=force)
 
     def _on_auto_modes_changed(self) -> None:
-        self._model.set_auto_folders(self._auto_modes.auto_folders())
+        self._model.set_mode_chips(self._auto_modes.chips())
         self._update_detail_auto()
 
     def _update_detail_auto(self) -> None:

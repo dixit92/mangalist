@@ -1,5 +1,5 @@
 """Automatic downloads in the main window and Settings (offscreen Qt, the fake finding backend, made-up series): the row
-menu's "Automatic downloads" submenu (ticks, a multi-selection), the details panel's line, the "Auto" chip on the rows,
+menu's "Automatic downloads" submenu (ticks, a multi-selection), the details panel's line, the mode chip on the rows that differ from the default,
 the bulk find from the List, and Settings > Automation's default for new series."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ pytest.importorskip("PySide6")
 from mangalist import store  # noqa: E402
 from mangalist.gui.settings_dialog import SettingsDialog  # noqa: E402
 from mangalist.gui.shell import SECTION_AUTOMATION  # noqa: E402
-from mangalist.gui.table_model import AUTO_ROLE, COL_TITLE  # noqa: E402
+from mangalist.gui.table_model import COL_TITLE, MODE_CHIP_ROLE  # noqa: E402
 from mangalist.models import FileHit, MangaEntry  # noqa: E402
 from mangalist.states import InventorySnapshot  # noqa: E402
 
@@ -140,22 +140,29 @@ def test_a_series_not_scanned_yet_has_the_submenu_off(make_window):
     assert bulk.text() == "Find releases for 0 series" and not bulk.isEnabled()
 
 
-def test_the_auto_chip_and_the_details_follow_the_mode(make_window):
+def _chips(win):
+    model = win._model
+    return {t: model.data(model.index(_row(win, t), COL_TITLE), MODE_CHIP_ROLE) for t in TITLES
+            if model.data(model.index(_row(win, t), COL_TITLE), MODE_CHIP_ROLE)}
+
+
+def test_the_mode_chip_shows_only_where_the_series_differs_from_the_default(make_window):
+    # owner, 2026-10-11: with an Auto default every row would carry the chip - only a series' own, different mode does
     backend = _backend(modes={1: "auto"})
     win = make_window(backend)
-    model = win._model
-    assert [t for t in TITLES if model.data(model.index(_row(win, t), COL_TITLE), AUTO_ROLE)] == ["Alpha Saga"]
+    assert _chips(win) == {"Alpha Saga": "Auto"}
     win._select_source_row(_row(win, "Alpha Saga"))
     assert win._detail.auto_mode_text() == "Auto" and win._detail._lbl_auto.isVisibleTo(win._detail)
     win._select_source_row(_row(win, "Beta Days"))
     assert win._detail.auto_mode_text() == "Notify (the default)"
     _choose(win, ["Beta Days"], "Auto")
-    assert model.data(model.index(_row(win, "Beta Days"), COL_TITLE), AUTO_ROLE)
+    assert _chips(win) == {"Alpha Saga": "Auto", "Beta Days": "Auto"}
     assert win._detail.auto_mode_text() == "Auto"
+    _choose(win, ["Gamma Tales"], "Off")
+    assert _chips(win)["Gamma Tales"] == "Off"
     backend.default = "auto"                                            # the default changed in Settings
     win._refresh_auto_modes(force=True)
-    assert {t for t in TITLES if model.data(model.index(_row(win, t), COL_TITLE), AUTO_ROLE)} == {
-        "Alpha Saga", "Beta Days", "Gamma Tales"}
+    assert _chips(win) == {"Gamma Tales": "Off"}                         # Auto is the default now: no Auto chips
 
 
 def test_bulk_find_from_the_list_opens_found(make_window, qapp):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
@@ -74,7 +74,8 @@ STATE_COLUMNS = (COL_STATE, COL_GAPS, COL_OFFICIAL)
 SUBTITLE_ROLE = Qt.UserRole + 1     # Title: the matched series' title, shown under the folder's
 REVIEW_ROLE = Qt.UserRole + 2       # Title: the match needs review (the subtitle turns orange)
 STATE_ROLE = Qt.UserRole + 3        # State: the SeriesState (the badge's colour)
-AUTO_ROLE = Qt.UserRole + 20        # Title: the series' automatic downloads are on Auto (a small chip after the title)
+MODE_CHIP_ROLE = Qt.UserRole + 20   # Title: the series' own automatic-downloads mode where it differs from the default
+                                    # (a small chip after the title; "" for none)
 
 # State filters (key -> label), in the order the toolbar lists them; None = every row.
 STATE_FILTERS: List[Tuple[Optional[str], str]] = (
@@ -126,8 +127,8 @@ class MangaTableModel(QAbstractTableModel):
         self._dupe_files: Dict[str, Tuple[int, int]] = {}
         # series folder -> how many files the renamer would rename (Rename pending; counted off the UI thread)
         self._rename_counts: Dict[str, int] = {}
-        # series folders whose automatic downloads are on Auto (the Title's "Auto" chip; read off the UI thread)
-        self._auto_folders: set = set()
+        # folder -> the Title's automatic-downloads chip: the series' own mode where it differs from the default
+        self._mode_chips: Dict[str, str] = {}
         # Rescan state + official sources per row, computed on first use and dropped when the row changes.
         self._state_cache: Dict[int, Tuple[SeriesState, List[OfficialLink]]] = {}
         self._today: Optional[datetime.date] = None
@@ -328,21 +329,18 @@ class MangaTableModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(0, COL_RENAME), self.index(len(self._entries) - 1, COL_RENAME),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
-    def set_auto_folders(self, folders) -> None:
-        """The series folders on Auto (automatic downloads): their Title cell shows a small "Auto" chip."""
-        new = {str(f) for f in folders}
-        if new == self._auto_folders:
+    def set_mode_chips(self, chips: Mapping[str, str]) -> None:
+        """folder -> the automatic-downloads chip its Title cell shows (the series' own mode, where it differs from
+        the default)."""
+        new = {str(f): str(t) for f, t in chips.items() if t}
+        if new == self._mode_chips:
             return
-        flipped = new ^ self._auto_folders
-        self._auto_folders = new
+        flipped = {f for f in set(new) | set(self._mode_chips) if new.get(f) != self._mode_chips.get(f)}
+        self._mode_chips = new
         for row, entry in enumerate(self._entries):
             if str(entry.folder) in flipped:
                 idx = self.index(row, COL_TITLE)
-                self.dataChanged.emit(idx, idx, [AUTO_ROLE])
-
-    def is_auto_at(self, row: int) -> bool:
-        entry = self.entry_at(row)
-        return entry is not None and str(entry.folder) in self._auto_folders
+                self.dataChanged.emit(idx, idx, [MODE_CHIP_ROLE])
 
     def rename_count_at(self, row: int) -> int:
         """How many files of row *row*'s folder the renamer would rename (0: none, or not counted yet)."""
@@ -540,8 +538,8 @@ class MangaTableModel(QAbstractTableModel):
             return (v.mu_title or "") if v is not None else ""
         if role == REVIEW_ROLE and col == COL_TITLE:
             return needs_review(e)
-        if role == AUTO_ROLE and col == COL_TITLE:
-            return str(e.folder) in self._auto_folders
+        if role == MODE_CHIP_ROLE and col == COL_TITLE:
+            return self._mode_chips.get(str(e.folder), "")
         if role == STATE_ROLE and col == COL_STATE:
             return self.state_at(index.row())
 

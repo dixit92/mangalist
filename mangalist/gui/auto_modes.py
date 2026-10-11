@@ -1,6 +1,6 @@
 """The List tab's side of automatic downloads (owner decisions 2026-10-10): each series' Off / Notify / Auto mode - the
-row menu's "Automatic downloads" submenu (also on a multi-selection), the details panel's line and the small "Auto" chip
-on the rows whose mode in force is Auto - and the bulk find's menu entry.
+row menu's "Automatic downloads" submenu (also on a multi-selection), the details panel's line and a small chip with the
+series' own mode on the rows whose mode differs from the default (owner, 2026-10-11) - and the bulk find's menu entry.
 
 :class:`AutoModes` keeps folder -> mode in force for the rows shown, read off the UI thread after each scan (one
 ``series_id_for`` per folder, then one ``series_modes``); the menu and the details read the series' own mode with the
@@ -45,6 +45,7 @@ class AutoModes(QObject):
         self._background = background or start_call
         self._ids: Dict[str, Optional[int]] = {}        # folder -> series id (None: not scanned into the store yet)
         self._modes: Dict[str, str] = {}                # folder -> the mode in force
+        self._default: Optional[str] = None             # the default mode, as of the last read
         self._signature: Optional[tuple] = None
         self._call = None
         self._running = False
@@ -77,7 +78,7 @@ class AutoModes(QObject):
                 except Exception:  # noqa: BLE001 - that row gets no chip
                     ids[folder] = None
             known = sorted({i for i in ids.values() if i is not None})
-            return ids, (dict(backend.series_modes(known)) if known else {})
+            return ids, (dict(backend.series_modes(known)) if known else {}), backend.default_mode()
 
         self._running = True
         call = self._background(run, self._loaded,
@@ -87,7 +88,7 @@ class AutoModes(QObject):
         return True
 
     def _loaded(self, result) -> None:
-        ids, modes = result
+        ids, modes, self._default = result
         self._ids.update(ids)
         self._modes = {folder: modes[sid] for folder, sid in ids.items() if sid is not None and sid in modes}
         self.changed.emit()
@@ -100,8 +101,15 @@ class AutoModes(QObject):
             self.refresh(folders, force=True)
 
     def auto_folders(self) -> set:
-        """The folders whose mode in force is Auto (their rows show the chip)."""
+        """The folders whose mode in force is Auto."""
         return {folder for folder, mode in self._modes.items() if mode == MODE_AUTO}
+
+    def chips(self) -> Dict[str, str]:
+        """folder -> the chip its row shows: the series' own mode (``Auto`` / ``Notify`` / ``Off``) where it differs
+        from the default; the rows on the default show none (owner, 2026-10-11: with an Auto default every row would
+        carry the chip)."""
+        return {folder: MODE_LABELS.get(mode, mode) for folder, mode in self._modes.items()
+                if self._default is not None and mode != self._default}
 
     def mode_of(self, folder: str) -> Optional[str]:
         return self._modes.get(str(folder))
