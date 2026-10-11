@@ -529,6 +529,14 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
     except Exception:  # noqa: BLE001 - the series rows are recorded; identity is tried again next scan
         _log.warning("Recording the archives (series identity) failed", exc_info=True)
     try:
+        from .identity.carry import absorb_unit_folders
+
+        absorbed = absorb_unit_folders(db, [rs.root_id for rs in scanned], {rs.root_id: rs.folder for rs in scanned})
+        if result.identity is not None:
+            result.identity.carries.extend(absorbed)
+    except Exception:  # noqa: BLE001 - the series rows are recorded; tried again next scan
+        _log.warning("Folding unit folders into their series failed", exc_info=True)
+    try:
         carried = apply_pending(db)
         renamed.extend((Path(c.old_folder), Path(c.new_folder)) for c in carried if c.carried)
         if result.identity is not None:

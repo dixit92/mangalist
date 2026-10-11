@@ -296,6 +296,36 @@ def carry_moved_series(db, from_series_ids: Iterable[Optional[int]], dirs: Optio
     return out
 
 
+def absorb_unit_folders(db, root_ids: Iterable[int], dirs: Optional[Dict[int, Path]] = None) -> List[CarryResult]:
+    """A missing series whose folder is still there, inside a live series of the same root, became a unit folder of it
+    (``Season 2``, ``Part 1``: the scanner's unit-subfolder rule, owner 2026-10-10) - its files are now the live
+    series'. Its data follows them (the carry-over rules: never over the live series' own data; what cannot move stays
+    on the old row, which stays in the Missing series list), so a season folder does not show as a missing series."""
+    out: List[CarryResult] = []
+    with db.connect() as con:
+        ctx = _Ctx(con, dirs)
+        for root_id in sorted(set(int(i) for i in root_ids)):
+            missing = con.execute("SELECT * FROM series WHERE root_id = ? AND status = 'missing' ORDER BY rel_path, id",
+                                  (root_id,)).fetchall()
+            for o in missing:
+                parts = o["rel_path"].split("/")
+                if len(parts) < 2 or not Path(ctx.key(o)).is_dir():
+                    continue
+                present = {r["rel_path"]: r["id"] for r in con.execute(   # again each time: a carry can swap ids
+                    "SELECT id, rel_path FROM series WHERE root_id = ? AND status = 'present'", (root_id,))}
+                target = next((present[p] for p in ("/".join(parts[:i]) for i in range(len(parts) - 1, 0, -1))
+                               if p in present), None)
+                if target is None:
+                    continue
+                res = carry(con, ctx, o["id"], target, "unit-folder")
+                if res is not None:
+                    _log.info("Series carry-over: %s is now a unit folder of %s (%s)", res.old_folder, res.new_folder,
+                              ", ".join(res.moved) or "nothing to move")
+                    out.append(res)
+        ctx.flush()
+    return out
+
+
 # --- the Missing series list -------------------------------------------------------------------------------------
 
 
