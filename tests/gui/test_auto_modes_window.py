@@ -59,9 +59,13 @@ def make_window(qapp, monkeypatch):
     def make(backend):
         monkeypatch.setenv("MANGALIST_DOWNLOADS", "1")
         monkeypatch.setattr(mw.MainWindow, "_make_volumes_backend", lambda self: backend)
-        win = mw.MainWindow()
+        from mangalist.gui import background as bg
+
+        with monkeypatch.context() as patch:            # the window's own runner, at once from the start
+            patch.setattr(bg, "start_call", _sync)
+            win = mw.MainWindow()
         made.append(win)
-        win._background = _sync
+        assert win._background is _sync
         win._model.set_entries([_entry(t) for t in TITLES])
         win._model.set_state_providers(knowledge_for=lambda e: None,
                                        inventory_for=lambda e: InventorySnapshot(held_volumes=["1"]),
