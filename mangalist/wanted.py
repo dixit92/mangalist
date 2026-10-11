@@ -28,6 +28,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -41,7 +42,7 @@ from .states import SeriesState, compute_state, fallback_inventory_from_entry
 _log = logging.getLogger(__name__)
 
 __all__ = [
-    "wanted_list", "entries_from_db", "apply_links_cache", "load_links_cache", "open_resolver", "mangapixer_item",
+    "wanted_list", "library_states", "SeriesView", "entries_from_db", "apply_links_cache", "load_links_cache", "open_resolver", "mangapixer_item",
     "knowledge_of_item", "inventory_of", "evaluate", "held_volumes", "series_wanted",
 ]
 
@@ -202,6 +203,9 @@ def entries_from_db(db, root) -> List[Tuple[Any, MangaEntry]]:
     for a in db.list_archives(root_id=root.id, status="present"):
         if a.series_id is not None:
             archives[a.series_id].append(a)
+    by_top: Dict[str, List[Any]] = defaultdict(list)       # a nested series lies in the same top-level folder
+    for s in rows:
+        by_top[s.rel_path.split("/", 1)[0]].append(s)
     schemes = _root_schemes(root)
     out: List[Tuple[Any, MangaEntry]] = []
     for row in rows:
@@ -211,7 +215,7 @@ def entries_from_db(db, root) -> List[Tuple[Any, MangaEntry]]:
         entry = MangaEntry(folder=folder, title=title, english_title=eng, root_id=root.id)
         entry.kind_hint = row.kind_hint
         ctx = _parse_context(title, row.kind_hint, schemes)
-        nested = [s for s in rows if s.id != row.id and _under(s.rel_path, rel)]
+        nested = [s for s in by_top[rel.split("/", 1)[0]] if s.id != row.id and _under(s.rel_path, rel)]
         own: List[Tuple[str, Any, bool]] = []
         for a in archives.get(row.id, ()):
             if _under(a.rel_path, rel):
@@ -237,18 +241,27 @@ def entries_from_db(db, root) -> List[Tuple[Any, MangaEntry]]:
 # --- the list ----------------------------------------------------------------------------------------------------
 
 
-def wanted_list(db, *, root_ids: Optional[Iterable[int]] = None, today: Optional[_dt.date] = None,
-                downloads: bool = True) -> List[WantedSeries]:
-    """The "To get" entries of every present series of *root_ids* (all roots when None), in the List's order (root by
-    root, series folders by name): the same states and gaps the List shows and the same ``findable`` / ``reason``
-    the Download tab shows with downloads on (*downloads* False: as with downloads off). ``series_id`` is always set.
-    A broken MangaPixer cache leaves every series on the own matcher's knowledge (logged), as in the window."""
-    started = time.monotonic()
+@dataclass
+class SeriesView:
+    """One present series as the List evaluates it (what :func:`wanted_list` is built from)."""
+
+    row: Any                            # the ``series`` row (``store.Series``)
+    entry: MangaEntry
+    state: SeriesState
+    knowledge: SeriesKnowledge
+    held: Tuple[str, ...]               # volumes held, exact decimal strings
+
+
+def library_states(db, *, root_ids: Optional[Iterable[int]] = None,
+                   today: Optional[_dt.date] = None) -> List[SeriesView]:
+    """Every present series of *root_ids* (all roots when None) with its state, in the List's order (root by root,
+    series folders by name). A broken MangaPixer cache leaves every series on the own matcher's knowledge, as in the
+    window; a root whose records cannot be read is left out (both logged)."""
     wanted_ids = None if root_ids is None else set(root_ids)
     roots = [r for r in db.list_roots() if wanted_ids is None or r.id in wanted_ids]
     try:
         links = load_links_cache(db)
-    except Exception:  # noqa: BLE001 - without the links every series is "not matched": no gaps, nothing invented
+    except Exception:  # noqa: BLE001 - without the links every own-matcher series is "not matched": no gaps invented
         _log.warning("Wanted list: the MangaUpdates links could not be read", exc_info=True)
         links = {}
     try:
@@ -256,8 +269,7 @@ def wanted_list(db, *, root_ids: Optional[Iterable[int]] = None, today: Optional
     except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not stop the list
         _log.warning("Wanted list: MangaPixer's data unavailable; the own matcher's knowledge is used", exc_info=True)
         resolver = None
-    out: List[WantedSeries] = []
-    n_series = 0
+    out: List[SeriesView] = []
     for root in roots:
         try:
             pairs = entries_from_db(db, root)
@@ -265,7 +277,6 @@ def wanted_list(db, *, root_ids: Optional[Iterable[int]] = None, today: Optional
             _log.warning("Wanted list: the series of %s could not be read", root.name, exc_info=True)
             continue
         pairs.sort(key=lambda p: _list_order(p[0].rel_path))
-        n_series += len(pairs)
         for row, entry in pairs:
             cached = links.get(str(entry.folder))
             if cached:
@@ -274,10 +285,22 @@ def wanted_list(db, *, root_ids: Optional[Iterable[int]] = None, today: Optional
             inventory = inventory_of(entry, item)
             state, knowledge = evaluate(entry, knowledge=knowledge_of_item(item), inventory=inventory,
                                         needs_kind=entry.needs_kind, today=today)
-            out += series_wanted(entry, state, knowledge, held_volumes(inventory), row.id, downloads=downloads)
-    _log.info("Wanted list: %d entr%s for %d series with gaps, of %d series in %d root%s (%.2f s)",
-              len(out), "y" if len(out) == 1 else "ies", len({w.series_id for w in out}), n_series, len(roots),
-              "" if len(roots) == 1 else "s", time.monotonic() - started)
+            out.append(SeriesView(row, entry, state, knowledge, held_volumes(inventory)))
+    return out
+
+
+def wanted_list(db, *, root_ids: Optional[Iterable[int]] = None, today: Optional[_dt.date] = None,
+                downloads: bool = True) -> List[WantedSeries]:
+    """The "To get" entries of every present series of *root_ids* (all roots when None), in the List's order: the
+    same states and gaps the List shows and the same ``findable`` / ``reason`` the Download tab shows with downloads on
+    (*downloads* False: as with downloads off). ``series_id`` is always set."""
+    started = time.monotonic()
+    views = library_states(db, root_ids=root_ids, today=today)
+    out: List[WantedSeries] = []
+    for v in views:
+        out += series_wanted(v.entry, v.state, v.knowledge, v.held, v.row.id, downloads=downloads)
+    _log.info("Wanted list: %d entr%s for %d series with gaps, of %d series (%.2f s)", len(out),
+              "y" if len(out) == 1 else "ies", len({w.series_id for w in out}), len(views), time.monotonic() - started)
     return out
 
 
