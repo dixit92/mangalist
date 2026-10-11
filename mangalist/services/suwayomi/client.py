@@ -112,6 +112,18 @@ class GraphQLError(SuwayomiError):
     """Suwayomi answered with ``errors`` (e.g. an unknown id, a source that failed)."""
 
 
+class NoChapters(GraphQLError):
+    """The source lists no chapters for the manga: Suwayomi answers ``No chapters found`` next to the data instead of
+    an empty list (e.g. a licensed series MangaDex took its chapters down for). *data*: the answer's data, if any."""
+
+    def __init__(self, message: str, data: Optional[Mapping[str, Any]] = None):
+        super().__init__(message)
+        self.data = data if isinstance(data, Mapping) else {}
+
+
+NO_CHAPTERS_MESSAGE = "No chapters found"
+
+
 # --- helpers --------------------------------------------------------------------------------------------------
 
 class _Secret:
@@ -279,6 +291,8 @@ class SuwayomiClient:
         if errors:
             first = errors[0] if isinstance(errors, list) and errors else errors
             message = first.get("message") if isinstance(first, Mapping) else str(first)
+            if _text(message).strip() == NO_CHAPTERS_MESSAGE:
+                raise NoChapters(f"Suwayomi: {NO_CHAPTERS_MESSAGE}", answer.get("data"))
             raise GraphQLError(f"Suwayomi: {_text(message)[:300]}")
         data = answer.get("data")
         if not isinstance(data, dict):
@@ -322,8 +336,16 @@ class SuwayomiClient:
         return [manga_of(m) for m in mangas if isinstance(m, Mapping)]
 
     def chapters(self, manga_id: int) -> MangaChapters:
-        """The manga (details fetched now) and its chapters, fetched from the source now."""
-        data = self._field(self.call(M_CHAPTERS, {"id": int(manga_id)}, timeout=FETCH_TIMEOUT), "fetchMangaAndChapters")
+        """The manga (details fetched now) and its chapters, fetched from the source now. A source that lists no
+        chapters answers with none (Suwayomi reports it as an error)."""
+        try:
+            answer = self.call(M_CHAPTERS, {"id": int(manga_id)}, timeout=FETCH_TIMEOUT)
+        except NoChapters as exc:
+            got = exc.data.get("fetchMangaAndChapters")
+            manga = got.get("manga") if isinstance(got, Mapping) else None
+            answer = {"fetchMangaAndChapters": {"manga": manga if isinstance(manga, Mapping) else {"id": int(manga_id)},
+                                                "chapters": []}}
+        data = self._field(answer, "fetchMangaAndChapters")
         manga_node = data.get("manga") if isinstance(data.get("manga"), Mapping) else {}
         source = manga_node.get("source") if isinstance(manga_node.get("source"), Mapping) else {}
         manga = manga_of({**manga_node, "sourceId": manga_node.get("sourceId") or source.get("id")})

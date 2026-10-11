@@ -309,7 +309,8 @@ class ChaptersPanel(QWidget):
             return
         match = lookup.match
         self.match_label.setText(f"{match.source.display_name}: {lookup.manga_title or match.manga.title} - "
-                                 f"{how_text(match)}")
+                                 f"{how_text(match)}" + (f" - {lookup.notes[-1]}" if lookup.source_empty and
+                                                         lookup.notes else ""))
         queued = lookup.queued_in_suwayomi
         self.queued_label.setText(f"Already in Suwayomi's download queue: ch {numbers_text(queued)}" if queued else "")
         self.queued_label.setVisible(bool(queued))
@@ -344,7 +345,7 @@ class ChaptersPanel(QWidget):
             self.cand_note.setText(lead + "Pick where this series' chapters come from - it is remembered for the "
                                    "series. Chapters already sent stay as they are.")
         else:
-            self.cand_note.setText(("MangaDex has none of the missing chapters. " if keep_match else "") +
+            self.cand_note.setText((f"{lookup.notes[-1]}. " if keep_match and lookup.notes else "") +
                                    "MangaList found these by title on your other sources. Pick the one that is this "
                                    "series - it is remembered for the series - or look again later.")
         self.cand_table.setRowCount(len(lookup.candidates))

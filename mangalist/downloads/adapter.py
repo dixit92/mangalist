@@ -507,6 +507,14 @@ class Backend:
                 if others:
                     built.candidates = title_candidates(client, others, titles)
                     built.notes.append("MangaDex has none of the missing chapters")
+            elif built.source_empty:
+                # the saved source lists nothing at all now: say so, and offer the other sources (owner, 2026-10-10:
+                # "if a series appears removed from the saved source, notify")
+                name = built.source_name or found.match.source.display_name
+                built.notes.append(f"{name} lists no chapters for this series now (taken down there?)")
+                others = [s for s in sources if s.id != found.match.source.id]
+                if others:
+                    built.candidates = title_candidates(client, others, titles)
             return built
         except SuwayomiError as exc:
             # the panel shows it; the log keeps why (owner, 2026-10-11: three "Lookup failed" rows, nothing logged)
