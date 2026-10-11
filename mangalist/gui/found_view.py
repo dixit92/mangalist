@@ -17,7 +17,7 @@ import logging
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QMessageBox, QProgressBar, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from .automation_rules import (
     EMPTY_TITLE,
@@ -56,14 +56,17 @@ class FoundRow(QFrame):
         self.btn_send = button("Send", primary=True, tip="Send it now: a torrent goes to qBittorrent (or waits in the "
                                                          "queue past the download budget), chapters to Suwayomi")
         self.btn_skip = button("Skip", tip="Do not get it: it leaves the list and is not offered again")
-        top = hbox(self.name_label, self.kind_pill, None, self.size_label, self.btn_send, self.btn_skip, spacing=10)
+        # The series' name alone on the first line with the actions; the kind and the numbers under it (owner: title
+        # and counts clearly apart).
+        top = hbox(self.name_label, self.size_label, self.btn_send, self.btn_skip, spacing=10)
         top.setStretchFactor(self.name_label, 1)
         lay.addLayout(top)
-        self.gets_label = label(f"Gets {gets_text(finding)}", "lead", wrap=True)
+        self.gets_label = label(f"Gets {gets_text(finding)}", "lead")
+        lay.addLayout(hbox(self.kind_pill, self.gets_label, None, spacing=8))
         self.release_label = label(finding.title, "mono", wrap=True, selectable=True)
         self.reason_label = label(f"Waits because {finding.reason}" if finding.reason else "Waits for you", "muted",
                                   wrap=True)
-        for widget in (self.gets_label, self.release_label, self.reason_label):
+        for widget in (self.release_label, self.reason_label):
             lay.addWidget(widget)
 
     def set_enabled_actions(self, enabled: bool) -> None:
@@ -124,6 +127,7 @@ class FoundView(QWidget):
         self.empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ev.addWidget(self.empty_title)
         ev.addWidget(self.empty_text)
+        self.empty.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)   # its own height, at the top
         outer.addWidget(self.empty)
 
         self.scroll = QScrollArea()
@@ -139,6 +143,7 @@ class FoundView(QWidget):
         self._list.addStretch(1)
         self.scroll.setWidget(body)
         outer.addWidget(self.scroll, 1)
+        outer.addStretch(0)                     # takes the room while the list is hidden (the empty state)
         self._show()
 
     # --- data ----------------------------------------------------------------------------------------
@@ -192,6 +197,7 @@ class FoundView(QWidget):
         shown = self.shown()
         for row in self.rows.values():
             self._list.removeWidget(row)
+            row.hide()                          # gone now, not when the event loop deletes it
             row.deleteLater()
         self.rows.clear()
         for finding in shown:
@@ -199,11 +205,13 @@ class FoundView(QWidget):
             row.btn_send.clicked.connect(lambda _=False, fid=finding.id: self.send(fid))
             row.btn_skip.clicked.connect(lambda _=False, fid=finding.id: self.skip(fid))
             self._list.insertWidget(self._list.count() - 1, row)
+            row.show()                          # shown with the list (a reparented widget starts hidden)
             self.rows[finding.id] = row
         filtered = self._series is not None
         self.title_label.setText(f"Found for {self.name_of(self._series)}" if filtered else "Found")
         self.title_label.setWordWrap(filtered)
         self.count_label.setText(total_text(shown))
+        self.count_label.setVisible(bool(shown))
         self.btn_show_all.setText(f"Show all ({len(self._findings)})")
         self.btn_show_all.setVisible(filtered)
         self.btn_send_all.setText(f"Send all {len(shown)}…" if len(shown) > 1 else "Send all…")
@@ -217,7 +225,9 @@ class FoundView(QWidget):
 
     def _enable(self) -> None:
         free = not self.busy()
-        self.btn_send_all.setEnabled(free and len(self.shown()) > 1)
+        several = len(self.shown()) > 1
+        self.btn_send_all.setVisible(several)
+        self.btn_send_all.setEnabled(free and several)
         for row in self.rows.values():
             row.set_enabled_actions(free)
 

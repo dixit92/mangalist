@@ -58,10 +58,9 @@ from PySide6.QtWidgets import (
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .. import config
 from .background import describe_error, start_call
-from .chips import ChipButton
+from .chips import ChipButton, FlowLayout
 from .chapters_panel import ChaptersPanel
-from .automation_rules import bulk_find_label, by_series, has_automation, report_text, series_line, size_text, \
-    total_size
+from .automation_rules import bulk_find_label, by_series, has_automation, report_text, series_line
 from .download_rules import (
     CHAPTER_CHIPS,
     GROUP_TITLES,
@@ -104,6 +103,10 @@ _log = logging.getLogger(__name__)
 REFRESH_MS = 60_000
 SEARCH_DELAY_MS = 350          # a pause after selecting a series, before it is searched
 UPGRADE_NOTE_STYLE = "\nQLabel#upgradeNote { background: #e8eefb; border-radius: 6px; padding: 8px 12px; }\n"
+# The group chips as the List tab's (theme.py): the tab's own sheet would make them 36 px, taller than the flow layout's
+# lines (they wrap since the Found chip).
+CHIP_STYLE = 'QPushButton[chip="true"] { min-height: 30px; max-height: 30px; padding: 0; border-radius: 16px; }\n'
+
 _NOTE_COLORS = {"muted": "#5a5a57", "warn": "#8a3f00"}
 
 
@@ -229,7 +232,7 @@ class DownloadTab(QWidget):
             self._refresh_timer.timeout.connect(self.downloads.refresh)
             self._refresh_timer.start()
         apply_style(self)
-        self.setStyleSheet(self.styleSheet() + UPGRADE_NOTE_STYLE)
+        self.setStyleSheet(self.styleSheet() + UPGRADE_NOTE_STYLE + CHIP_STYLE)
         if self._group == GROUP_FOUND:                  # remembered from the last session
             self.panels.setCurrentIndex(PANEL_FOUND)
             self.footer.setVisible(False)
@@ -270,16 +273,15 @@ class DownloadTab(QWidget):
         self.filter_edit.textChanged.connect(self._rebuild)
         hv.addWidget(self.filter_edit)
         self.group_chips: Dict[str, ChipButton] = {}
-        chips = QHBoxLayout()
-        chips.setSpacing(6)
+        chip_box = QWidget()
+        chips = FlowLayout(chip_box, spacing=6)         # wraps when the panel is narrow (four chips with Found)
         for group in self.chip_groups():
             chip = ChipButton(GROUP_TITLES.get(group, FOUND_TITLE), group)
             chip.setCheckable(True)
             chip.clicked.connect(lambda _=False, g=group: self.show_group(g))
             self.group_chips[group] = chip
             chips.addWidget(chip)
-        chips.addStretch(1)
-        hv.addLayout(chips)
+        hv.addWidget(chip_box)
         lv.addWidget(head)
 
         self.tree = QTreeWidget()
@@ -525,8 +527,7 @@ class DownloadTab(QWidget):
         header.setFlags(Qt.ItemFlag.ItemIsEnabled)
         n = sum(len(items) for items in found.values())
         header.setData(0, ROLE_HEADER, f"{FOUND_TITLE.upper()} · {len(found)} SERIES")
-        known, _unknown = total_size([f for items in found.values() for f in items])
-        header.setData(0, ROLE_ASIDE, f"{n} waiting" + (f" · {size_text(known)}" if known else ""))
+        header.setData(0, ROLE_ASIDE, f"{n} waiting")
         header.setData(0, ROLE_NOTE_TONE, "muted")
         header.setSizeHint(0, QSize(100, 36))
         for sid in sorted(found, key=lambda i: (names.get(i, f"Series #{i}").casefold(), i)):
