@@ -336,12 +336,14 @@ def test_after_a_rename_the_preview_waits_for_the_rescan(qapp, db, made):
     try:
         win.apply()
         assert changed == [[made.id]]
-        assert "Rescanning the library" in win.summary_label.text() and win.series_list.count() == 0
+        assert "Rescanning the library" in win.busy_label.text() and win.series_list.count() == 0
+        assert not win.busy_bar.isHidden() and win.busy                # the busy bar shows the wait (owner, 2026-10-11)
         assert not win.btn_undo.isEnabled() and not win.btn_apply.isEnabled()
         rescan(db)                                          # the host's rescan
         win.library_rescanned([999])                        # another library: still waiting
-        assert "Rescanning the library" in win.summary_label.text()
+        assert "Rescanning the library" in win.busy_label.text()
         win.library_rescanned([made.id])
+        assert win.busy_bar.isHidden() and not win.busy
         assert win.dry_run.count(RENAME) == 0 and win.dry_run.count(UNCHANGED) == 2      # the new names, in the scheme
         assert not any("gone" in (f.reason or "") for s in win.dry_run.series for f in s.files)
         assert win.btn_undo.isEnabled()
@@ -367,5 +369,26 @@ def test_bare_numbers_can_be_answered_chapters_in_the_renamer(qapp, db, tmp_path
         after = {os.path.basename(f.path): f.target for f in win.dry_run.series[0].files}
         assert after["Bare Series 001 Read Online.cbz"] == "Ch. 0001.00.cbz" and win.kind_bar.isHidden()
         assert "bare numbers are chapters" in win.result_label.text()
+    finally:
+        win.deleteLater()
+
+
+def test_answering_shows_the_wait_until_the_rescan(qapp, db, tmp_path):
+    # owner, 2026-10-11: "I clicked on 'chapters' here and the page was blank with no indication it was refreshing"
+    from ..renamer.conftest import rescan
+
+    folder = tmp_path / "library4" / "Manga"
+    folder.mkdir(parents=True)
+    root = make_library(db, folder, {"Bare Series": {"Bare Series 001 Read Online.cbz": payload("w1")}})
+    win = _window(qapp, _renamer(db, namer=None), Scope.root(root.id, "Manga"))
+    win.rescan_follows = True
+    try:
+        assert not win.kind_bar.isHidden()
+        win.btn_kind_chapters.click()
+        assert win.busy and not win.busy_bar.isHidden() and "Rescanning the library" in win.busy_label.text()
+        assert win.kind_bar.isHidden() and not win.btn_apply.isEnabled()
+        rescan(db)
+        win.library_rescanned([root.id])
+        assert not win.busy and win.dry_run.count(RENAME) == 1
     finally:
         win.deleteLater()
