@@ -616,8 +616,12 @@ class RenamerWindow(QDialog):
             self._dry = None
             self.series_list.clear()
             self.preview.clear()
-            self.summary_label.setText("Rescanning the library to show the new names…")
-            self._update_buttons()
+            self.kind_bar.setVisible(False)
+            self.summary_label.setText("")
+            self.patterns_label.setText("")
+            # the window's busy bar while the library is read again (owner, 2026-10-11: "the page was blank with no
+            # indication it was refreshing")
+            self._set_busy("Rescanning the library to show the new names…")
             return
         self.refresh()
 
@@ -626,7 +630,8 @@ class RenamerWindow(QDialog):
         if not self._awaiting:
             return
         self._awaiting -= set(root_ids)
-        if not self._awaiting and not self._busy:
+        if not self._awaiting and self._call is None:
+            self._set_busy(None)
             self.refresh()
 
     def widen_to_library(self) -> None:
