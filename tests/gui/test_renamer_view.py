@@ -392,3 +392,49 @@ def test_answering_shows_the_wait_until_the_rescan(qapp, db, tmp_path):
         assert not win.busy and win.dry_run.count(RENAME) == 1
     finally:
         win.deleteLater()
+
+
+def test_a_left_alone_file_can_be_given_its_chapter_from_the_row_menu(qapp, db, tmp_path):
+    # owner, 2026-10-11: "I still can't set volume or chapter in the rename window" - a name cut off after "Ch"
+    folder = tmp_path / "library4" / "Manga"
+    folder.mkdir(parents=True)
+    cut = "0001 [Vol. 0001 Ch.cbz"
+    root = make_library(db, folder, {"Cut Series": {cut: payload("c1"), fmd2(2, "0002", "Next", "G"): payload("c2")}})
+    win = _window(qapp, _renamer(db, namer=None), Scope.root(root.id, "Manga"))
+    try:
+        win.show_done.setChecked(True)
+        rows = {win.preview.topLevelItem(i).text(0): win.preview.topLevelItem(i) for i in
+                range(win.preview.topLevelItemCount())}
+        assert "right-click to set its chapter or volume" in rows[cut].text(2)
+        menus = []
+        win._exec_menu = lambda menu, pos: menus.append([a.text() for a in menu.actions()]) or menu.actions()[0]
+        win._ask_units = lambda name, current: ("chapter", "1", "")
+        win._on_preview_menu(win.preview.visualItemRect(rows[cut]).center())
+        assert menus == [["Set chapter / volume…"]]
+        after = {os.path.basename(f.path): f for f in win.dry_run.series[0].files}
+        assert after[cut].status == RENAME and after[cut].target == "Ch. 0001.00 Vol. 001.cbz"
+        assert "chapter 1" in win.result_label.text()
+        rows = {win.preview.topLevelItem(i).text(0): win.preview.topLevelItem(i) for i in
+                range(win.preview.topLevelItemCount())}
+        assert "number set by you" in rows[cut].text(2)
+        win._on_preview_menu(win.preview.visualItemRect(rows[cut]).center())         # set again: Forget is offered
+        assert menus[-1] == ["Set chapter / volume…", "Forget the number I set"]
+    finally:
+        win.deleteLater()
+
+
+def test_the_units_dialog_checks_what_is_typed(qapp):
+    from mangalist.gui.renamer_view import UnitsDialog
+    from mangalist.renamer import UNIT_VOLUME, FileUnits
+    from decimal import Decimal
+
+    dlg = UnitsDialog("x.cbz", FileUnits(UNIT_VOLUME, Decimal(3), Decimal(4)))
+    assert dlg.rb_volume.isChecked() and dlg.numbers.text() == "3-4" and not dlg.volume.isEnabled()
+    dlg.numbers.setText("4-3")
+    dlg._accept()
+    assert "smaller number" in dlg.error.text() and dlg.result() == 0
+    dlg.rb_chapter.setChecked(True)
+    dlg.numbers.setText("12.5")
+    dlg.volume.setText("2")
+    dlg._accept()
+    assert dlg.result() == 1 and dlg.answer() == ("chapter", "12.5", "2")
