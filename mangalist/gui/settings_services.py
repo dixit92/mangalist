@@ -293,12 +293,16 @@ class ServicesPage(SectionPage):
         self._syncing = False
         self.mp_sync.setText("Sync now")
         self._refresh_mangapixer()
-        if result is None:
-            self.mp_card.set_note(f"Sync failed: {error}")
+        # the badge said "Syncing..." until the next check (owner, 2026-10-11: "why does it still say syncing?")
+        if result is None or getattr(result, "status", "ok") == "error":
+            self.mp_card.set_status("Sync failed", "bad")
+            self.mp_card.set_note(f"Sync failed: {error or getattr(result, 'message', '')}", "bad")
             return
         if getattr(result, "token_rejected", False):
+            self.mp_card.set_status("Token refused", "bad")
             self.mp_card.set_note("MangaPixer refused the token (wrong, revoked or expired). Enter a new one under Edit.")
             return
+        self.mp_card.set_status("Connected", "ok")
         if not scan_forbidden(self._cache):                     # that warning stays visible
             self.mp_card.set_note(f"Sync: {getattr(result, 'message', 'done')}", "muted")
         self.mangapixer_changed.emit()
