@@ -310,6 +310,43 @@ def test_other_sources_by_title_leave_out_the_matched_one(world):
     assert not any(OTHER in str(v) for v in searches)
 
 
+def by_query(variables):
+    """The MangaDex id search finds the linked manga; a title search finds it on the other source."""
+    return "search_id.json" if str(variables.get("query", "")).startswith("id:") else titles_on_other_source()
+
+
+def test_mangadex_without_any_chapter_offers_the_other_sources(world):
+    # owner, 2026-10-11: "why did lookup fail here?" - MangaDex lists no chapters for a licensed series, Suwayomi
+    # reports that as an error, and the lookup stopped there instead of trying the other sources
+    backend, session, sid = world["backend"], world["session"], world["sid"]
+    link_mangadex(world["db"], world["root"].id)
+    connect(world)
+    session.answers["MangaListSources"] = with_other_source()
+    session.answers["MangaListSearch"] = by_query
+    session.answers["MangaListChapters"] = "no_chapters.json"
+    backend.set_suwayomi_sources([MANGADEX_EN, OTHER])
+    lookup = backend.chapter_lookup(sid, ("1", "2"), (SERIES,))
+    assert lookup.error is None and lookup.match.how == chm.HOW_MANGADEX and lookup.source_empty
+    assert "MangaDex has none of the missing chapters" in lookup.notes
+    assert lookup.candidates and {c.source.id for c in lookup.candidates} == {OTHER}
+
+
+def test_a_saved_source_that_lists_nothing_now_says_so_and_offers_the_others(world):
+    # owner, 2026-10-10: "if a series appears removed from the saved source, notify"
+    backend, session, sid = world["backend"], world["session"], world["sid"]
+    connect(world)
+    session.answers["MangaListSources"] = with_other_source()
+    session.answers["MangaListSearch"] = titles_on_other_source()
+    backend.set_suwayomi_sources([MANGADEX_EN, OTHER])
+    backend.confirm_match(sid, [c for c in backend.chapter_lookup(sid, ("1",), (SERIES,)).candidates
+                                if c.source.id == OTHER][0])
+    session.answers["MangaListChapters"] = "no_chapters.json"
+    lookup = backend.chapter_lookup(sid, ("1", "2"), (SERIES,))
+    assert lookup.error is None and lookup.source_empty and lookup.rows and not lookup.available
+    assert any("lists no chapters for this series now" in n for n in lookup.notes)
+    assert lookup.candidates and OTHER not in {c.source.id for c in lookup.candidates}
+
+
 def test_the_series_group_is_remembered_and_wins_over_the_default(world):
     backend, sid = world["backend"], world["sid"]
     link_mangadex(world["db"], world["root"].id)
