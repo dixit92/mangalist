@@ -96,7 +96,7 @@ def _sub(d):
     if exp != -3 or len(digits) < 3 or digits[-3] != 0 or not any(digits[-2:]):
         return d
     whole = d.to_integral_value(rounding="ROUND_DOWN")
-    return Decimal(f"{whole}.{int(''.join(map(str, digits[-3:])))}")
+    return Decimal(f"{whole}.{int(''.join(map(str, digits[-3:])))}").normalize()
 
 
 def _unpadded(unit):
