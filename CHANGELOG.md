@@ -7,6 +7,17 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.19] - 2026-10-11
+
+The eighteenth MangaList release (testing build): season and part subfolders belong to their series, and a filed chapter that left the library can be downloaded again.
+
+- **Season and part subfolders belong to their series.** A series split into `Season 01`, `Season 02`, ... (or `Part 1`, `Volumes`, `Chapters`, `Extras`) is now ONE series holding all their files, named after its folder, as in MangaPixer. Before, each season was a series of its own, named "Season 01", missing the chapters the other seasons hold. Only two or more subfolders that are not units (two separate works) make a franchise of separate series.
+- **Numbering that starts again in each season** (Season 2 starting at chapter 1 again) is not compared with one total: no chapters are reported missing that way, and the state says why ("Can't tell"). A chapter repeated at a season boundary is not a restart.
+- **New chapters go to the latest season folder** (the one with the highest chapters); the chapters panel shows it and offers the others.
+- **The old per-season series** carry over to their series on the next scan (their downloads with them) instead of showing in the Missing series list.
+- **A filed chapter that left the library can be downloaded again.** A chapter moved away (for example to replace it with another source's copy) stayed "Filed" in the chapters panel and could not be ticked; it now counts as held only while its file is in the series folder.
+- **Failed chapter lookups are logged** with Suwayomi's answer (they showed "Lookup failed" with nothing in the log).
+
 ## [2026.10.18] - 2026-10-10
 
 The seventeenth MangaList release (testing build): rescans after duplicates and downloads cover only the libraries that changed, a rescan asked for during another is no longer lost, and the Renamer shows the new names after a rename.
