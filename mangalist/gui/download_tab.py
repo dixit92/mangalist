@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLineEdit,
+    QMenu,
     QSplitter,
     QStackedWidget,
     QStyle,
@@ -313,6 +314,8 @@ class DownloadTab(QWidget):
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.tree.setFrameShape(QFrame.Shape.NoFrame)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_tree_menu)
         self.tree.setItemDelegate(_ToGetDelegate(self.tree, mono_sub=True, row_height=46, left_pad=12))
         self.tree.currentItemChanged.connect(self._on_current_changed)
         self.tree.itemChanged.connect(self._on_item_changed)
@@ -795,6 +798,25 @@ class DownloadTab(QWidget):
             self._chapter_states[series.folder] = SEARCH_RUNNING
             self._refresh_statuses()
         self.chapters.open_series(sid, series.title, series.missing, series.titles or (series.title,), cached=cached)
+
+    def _exec_menu(self, menu: QMenu, pos):
+        return menu.exec(pos)
+
+    def _on_tree_menu(self, pos) -> None:
+        """A To get row's menu: Check for new chapters (owner, 2026-10-11: "Can I check for new chapters on a
+        volumes-based series within the download view?")."""
+        item = self.tree.itemAt(pos)
+        folder = item.data(0, ROLE_FOLDER) if item is not None else None
+        series = self._by_folder.get(folder) if folder else None
+        if series is None:
+            return
+        menu = QMenu(self.tree)
+        act_new = menu.addAction("Check for new chapters…")
+        act_new.setToolTip("Ask the series' Suwayomi source for chapters newer than the newest one you have (for "
+                           "volumes: the last chapter of your newest volume)")
+        if self._exec_menu(menu, self.tree.viewport().mapToGlobal(pos)) is act_new:
+            sid = self._series_ids.get(folder) or series.series_id
+            self.check_new_chapters(sid, folder, series.title, series.titles or (series.title,))
 
     def check_new_chapters(self, series_id: Optional[int], folder: str, title: str, titles: Sequence[str]) -> bool:
         """"Check for new chapters" (the List's row menu; owner, 2026-10-11): the chapters panel with what the series'

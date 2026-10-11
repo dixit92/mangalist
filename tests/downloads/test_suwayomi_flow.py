@@ -72,11 +72,14 @@ def world(db, tmp_path):
             "backend": backend, "conns": conns, "namer": namer}
 
 
-def link_mangadex(db, root_id, mangadex_id=MD_ID):
-    """MangaPixer's export item for the series (Confirmed) with its MangaDex companion id."""
+def link_mangadex(db, root_id, mangadex_id=MD_ID, volumes=()):
+    """MangaPixer's export item for the series (Confirmed) with its MangaDex companion id (and *volumes*: its volume
+    list, ``(volume, first chapter, last chapter)``)."""
     cache = MangaPixerCache(db)
     item = mp_item("n01", [SERIES])
     item["companions"]["mangadex"] = mangadex_id
+    item["volumes"]["items"] = [{"volume": v, "title": None, "chapters": {"from": f, "to": t}, "englishDate": None,
+                                 "englishDateKind": None, "isbn": None, "sources": []} for v, f, t in volumes]
     cache.save_libraries([Lib()])
     cache.apply_page("lib0", [], [item])
     cache.save_mapping(Mapping(root_id=root_id, library_id="lib0"))
@@ -351,6 +354,23 @@ def test_check_for_new_chapters_lists_the_sources_chapters_after_the_newest_held
     session.answers["MangaListChapters"] = answer
     none = backend.chapter_lookup(sid, (), (SERIES,), newer=True)
     assert none.missing == () and not none.candidates and none.match is not None
+
+
+def test_check_for_new_chapters_counts_the_newest_volumes_last_chapter_as_held(world):
+    # owner, 2026-10-11: "Can I check for new chapters on a volumes-based series within the download view?"
+    backend, sid, sdir = world["backend"], world["sid"], world["dir"]
+    for f in sdir.iterdir():
+        f.unlink()                                                    # a folder of volumes only: v01-v02
+    for n in (1, 2):
+        (sdir / f"{SERIES} v{n:02d}.cbz").write_bytes(data(f"v{n}"))
+    scan(world["db"])
+    link_mangadex(world["db"], world["root"].id, volumes=[("1", "1", "200"), ("2", "201", "332"), ("3", "333", "340")])
+    connect(world)
+    lookup = backend.chapter_lookup(sid, (), (SERIES,), newer=True)
+    assert lookup.newer_than == "332" and lookup.missing == ("333", "334", "335", "953.5", "953.6")
+    link_mangadex(world["db"], world["root"].id)                      # no volume list: it says why, lists nothing
+    lookup = backend.chapter_lookup(sid, (), (SERIES,), newer=True)
+    assert lookup.missing == () and any("volume 2" in n for n in lookup.notes)
 
 
 def test_a_saved_source_that_lists_nothing_now_says_so_and_offers_the_others(world):
