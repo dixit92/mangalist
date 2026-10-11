@@ -148,6 +148,10 @@ QPushButton:hover, QToolButton:hover {{ background: {HOVER}; }}
 QPushButton:pressed, QToolButton:pressed, QPushButton:checked {{ background: {PRESSED}; }}
 QPushButton:disabled, QToolButton:disabled {{ color: {DISABLED}; border-color: {BORDER}; background: {PANEL_SUBTLE}; }}
 QPushButton:focus {{ border-color: {ACCENT}; }}
+/* a text box's own clear button: not a 34 px button (it sat 9 px low in the box - owner, 2026-10-11) */
+QLineEdit QToolButton, QLineEdit QToolButton:hover, QLineEdit QToolButton:pressed {{
+    min-height: 0px; min-width: 0px; padding: 0px; border: none; background: transparent;
+}}
 QPushButton[variant="primary"] {{
     min-height: 38px; background: {ACCENT}; border-color: {ACCENT}; color: #ffffff; font-weight: 600;
 }}
