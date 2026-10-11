@@ -100,6 +100,15 @@ replace are moved to a **holding folder** outside every library (Settings > Auto
 confirmation** listing every file. On Unraid, a holding folder on the same share as the library avoids moves across
 disks (a move the share refuses shows as failed, with Try again; nothing is lost).
 
+**Automatic downloads.** Every series has a mode - **Off**, **Notify** (the default) or **Auto** - set in the List's row
+menu (**Automatic downloads**, also for a selection); the default is in Settings > Automation, and a series whose own
+mode differs from it shows a small chip after its title. A scheduled **find pass** (`MANGALIST_DISPATCH_SCHEDULE`,
+default `daily@04:30`; **Find now** runs it at once) searches the series in the Download tab's "To get" list. On Auto,
+a release goes out by itself only when it certainly fills a missing volume and is a single volume or a pack narrowed to
+the missing volumes, and chapters only from the series' saved Suwayomi source; everything else waits in the Download
+tab's **Found** list with the reason, for you to **Send** or **Skip**. **Bulk find** (select series in the List) fills
+the same list without sending anything.
+
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 
 > **Local use only - do not expose it to the internet.** MangaList is a personal, single-user desktop

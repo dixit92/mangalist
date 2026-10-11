@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Automatic downloads.** Each series has a mode: **Off** (never searched), **Notify** (searched; what is found waits for you) or **Auto** (searched and sent by itself within the guards). The default is Notify (Settings > Automation); change a series, or a selection, in the List's row menu under **Automatic downloads**. Only a series whose own mode differs from the default shows a small chip after its title.
+- **The find pass** searches exactly the Download tab's "To get" list (missing volumes, upgrades, missing chapters), leaving out series on Off and those with a download in flight. It runs on its own schedule (`MANGALIST_DISPATCH_SCHEDULE`, default daily at 04:30) and on **Find now**. Volumes: nyaa, the best release first, then the best for what is still missing. Auto sends a release by itself only when it certainly fills a missing volume and is a single volume or a pack narrowed to the missing volumes; the download budget still applies. Chapters come only from the series' saved Suwayomi source, extras never; a saved source that no longer has the series says "Change source?".
+- **Found** in the Download tab: everything the pass found that waits for you, with what it would get, its size and why it waits - **Send**, **Skip** (not offered again for the same release) or **Send all**. The tab's badge counts them.
+- **Bulk find**: select series in the List (or a whole To get group) and find releases for all of them in one go; the results go to Found and nothing is sent by itself. The old "Find releases for selected" is now "Search selected on nyaa".
+- **Log viewer**: Settings > Logging > **View logs** shows the app's and the scheduled jobs' logs live, with level, area and search filters, Pause / Follow, older lines and copy (read-only).
+- Database version 7 (automatic-download modes and findings); upgraded on first start.
+
 ## [2026.10.21] - 2026-10-11
 
 The twentieth MangaList release (testing build): a volume starting at part 1 of a chapter covers that chapter, more bare-number names are read, and the Renamer shows when it is waiting for a rescan.
