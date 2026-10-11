@@ -51,6 +51,8 @@ class FakeSession:
         if self.status is not None:
             return Response(self.status, "Unauthorized" if self.status == 401 else "boom")
         answer = self.answers.get(name)
+        if callable(answer):                    # an answer that depends on the variables (e.g. one per search)
+            answer = answer(body["variables"])
         if answer is None:
             return Response(200, json.dumps({"data": {"updateManga": {"manga": {"id": 1, "inLibrary": True}}}}))
         if isinstance(answer, str):
