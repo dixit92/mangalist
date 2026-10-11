@@ -93,7 +93,7 @@ def test_it_opens_on_the_app_log_with_the_newest_line_at_the_bottom(make):
     assert viewer.view.currentIndex().row() in (-1, len(APP_LINES) - 1)
     assert viewer.info_label.text() == f"mangalist.log - {log_tail.size_text(viewer.path.stat().st_size)} - 7 lines loaded"
     assert "Following" in viewer.status_label.text() and viewer.btn_follow.text() == "Pause"
-    assert not viewer.btn_older.isEnabled(), "the whole file is loaded"
+    assert viewer.btn_older.isHidden(), "the whole file is loaded"
     assert not viewer.btn_copy.isEnabled()
 
 
@@ -188,7 +188,7 @@ def test_the_scheduled_jobs_log_before_and_after_it_is_written(make, logs):
     assert viewer.log_key == "jobs" and viewer.path.name == "headless.log"
     assert viewer.stack.currentWidget() is viewer.empty_label
     assert "Nothing has been written to headless.log yet" in viewer.empty_label.text()
-    assert viewer.info_label.text() == "headless.log - not written yet" and not viewer.btn_older.isVisible()
+    assert viewer.info_label.text() == "headless.log - not written yet" and viewer.btn_older.isHidden()
     viewer.poll()
     assert viewer.model.rowCount() == 0
     write(logs / "headless.log", [line(1, "INFO", "mangalist.headless", "Runner started"),
@@ -233,10 +233,11 @@ def test_older_lines_load_on_request_then_from_the_rotated_copy(make, logs):
     viewer = make(chunk_bytes=3000)
     first = shown(viewer)
     assert first[-1] == line(299) and len(first) < 60
-    assert viewer.btn_older.isEnabled() and "and 1 older file" in viewer.info_label.text()
-    assert viewer.info_label.text().endswith("(older lines not loaded)")
+    assert viewer.btn_older.isEnabled() and not viewer.btn_older.isHidden()
+    assert "and 1 older file" in viewer.info_label.text()
+    assert "Older lines are not loaded yet" in viewer.info_label.toolTip()
     rounds = 0
-    while viewer.btn_older.isEnabled():
+    while not viewer.btn_older.isHidden():
         viewer.btn_older.click()
         rounds += 1
         assert rounds < 30
@@ -301,8 +302,8 @@ def test_a_50_mb_log_is_read_off_the_ui_thread_and_only_its_end(make, logs, qapp
     rows = viewer.model.rowCount()
     assert 0 < rows < 50_000 and shown(viewer)[-1].endswith(" 000999")
     size = log_tail.size_text((logs / "mangalist.log").stat().st_size)
-    assert viewer.btn_older.isEnabled()
-    assert viewer.info_label.text() == f"mangalist.log - {size} - {rows:,} lines loaded (older lines not loaded)"
+    assert viewer.btn_older.isEnabled() and not viewer.btn_older.isHidden()
+    assert viewer.info_label.text() == f"mangalist.log - {size} - {rows:,} lines loaded"
     viewer.level_combo.setCurrentIndex(1)
     assert 0 < viewer.model.rowCount() < rows
     with open(logs / "mangalist.log", "a", encoding="utf-8") as fh:

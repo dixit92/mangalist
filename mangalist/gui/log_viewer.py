@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListView,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -73,6 +74,7 @@ QFrame#logViewerBar {{ background: #ffffff; border: none; border-bottom: 1px sol
 QFrame#logViewerFooter {{ background: #fafaf8; border: none; border-top: 1px solid {LINE}; }}
 QListView#logLines {{ border: none; background: #ffffff; outline: 0; selection-background-color: {SELECTED};
                       selection-color: {INK}; }}
+QListView#logLines::item {{ padding: 0 16px; min-height: 20px; }}
 QLabel#logEmpty {{ background: #ffffff; color: {MUTED}; padding: 32px; }}
 QPushButton[segment] {{ min-height: 32px; padding: 0 14px; border: 1px solid {FIELD_LINE}; background: #ffffff; }}
 QPushButton[segment="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
@@ -257,8 +259,12 @@ class LogViewer(QWidget):
                                               "keep to the newest line.")
         self.btn_copy = button("Copy selected lines")
         self.btn_folder = button("Open the log folder", tip="On the desktop: opens the folder in the file manager.")
-        bv.addLayout(hbox(self.info_label, self.btn_older, None, self.btn_follow, self.btn_copy, self.btn_folder,
-                          spacing=10))
+        self.info_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)   # never widens
+        row2 = hbox(self.info_label, spacing=10)
+        row2.setStretch(0, 1)
+        for widget in (self.btn_older, self.btn_follow, self.btn_copy, self.btn_folder):
+            row2.addWidget(widget)
+        bv.addLayout(row2)
         outer.addWidget(bar)
 
         self.model = LogModel(self)
@@ -552,16 +558,17 @@ class LogViewer(QWidget):
             lines = log_tail.line_count(self.records)
             shown = self.model.rowCount()
             match = f", {shown:,} shown" if shown != lines else ""
-            more = " (older lines not loaded)" if self._more else ""
-            self.info_label.setText(f"{name}{files} - {log_tail.size_text(self._total)} - "
-                                    f"{lines:,} lines loaded{match}{more}")
+            text = f"{name}{files} - {log_tail.size_text(self._total)} - {lines:,} lines loaded{match}"
+            self.info_label.setText(text)
+            more = "\nOlder lines are not loaded yet: Load older lines." if self._more else ""
+            self.info_label.setToolTip(f"{text}\n{self.path}{more}")
         else:
             self.info_label.setText(name)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        self.btn_older.setEnabled(self._more and not self._busy)
-        self.btn_older.setVisible(self._loaded and not self._missing)
+        self.btn_older.setEnabled(not self._busy)
+        self.btn_older.setVisible(self._loaded and not self._missing and self._more)
         self.btn_copy.setEnabled(bool(self.view.selectionModel().selectedRows()))
         self.btn_follow.setText("Pause" if self.following else "Follow")
         set_prop(self.btn_follow, "primary", not self.following)
