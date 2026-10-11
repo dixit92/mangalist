@@ -230,7 +230,9 @@ def test_bulk_never_sends_anything(qapp):
     tab.find_selected()
     settle(qapp, tab)
     assert backend.sent == [] and not hasattr(tab, "send_all")
-    assert [b.text() for b in tab.findChildren(type(tab.btn_find)) if "all" in b.text().lower()] == []
+    # the Found view's Send all (automatic downloads) is the owner's own action, asked first - not the bulk search's
+    assert [b.text() for b in tab.findChildren(type(tab.btn_find))
+            if "all" in b.text().lower() and not tab.found.isAncestorOf(b)] == []
 
 
 def test_bulk_skips_what_is_already_searched_and_says_so(qapp):

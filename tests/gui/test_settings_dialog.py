@@ -647,7 +647,7 @@ def test_automation_schedules_are_choices_and_say_who_uses_them(qapp, db, cache)
     dlg, _ = make(qapp, db, cache, env={"MANGALIST_RESCAN_SCHEDULE": "daily@02:15"})
     page = dlg.pages[SECTION_AUTOMATION]
     assert {job: c.currentText() for job, c in page.schedule_modes.items()} == {
-        "rescan": "Daily", "mangapixer-sync": "Daily", "downloads": "Every hour"}
+        "rescan": "Daily", "mangapixer-sync": "Daily", "downloads": "Every hour", "dispatch-batch": "Daily"}
     assert _choices(page, "rescan") == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]   # owner, 2026-10-10
     assert _choices(page, "downloads") == ["Every hour", "Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]
     assert page.schedule_times["rescan"].time().toString("HH:mm") == "02:15"
@@ -655,12 +655,12 @@ def test_automation_schedules_are_choices_and_say_who_uses_them(qapp, db, cache)
     assert page.schedule_times["downloads"].isHidden() and page.schedule_days["downloads"].isHidden()
     assert {job: l.text() for job, l in page.schedule_reading.items()} == {
         "rescan": "daily 02:15", "mangapixer-sync": "daily 03:15",
-        "downloads": "every hour (and Check downloads now)"}
+        "downloads": "every hour (and Check downloads now)", "dispatch-batch": "daily 04:30 (and Find now)"}
     assert all(btn.isHidden() for btn in page.schedule_reset.values()), "nothing stored yet: nothing to reset"
     text = all_text(page)
     assert "background runner in the Docker / Unraid container" in text and "no restart" in text
     assert "daily@03:30" not in text                            # no syntax to learn any more
-    assert "Automatic downloads" in text and "next phase" in text
+    assert "Automatic downloads" in text and "next phase" not in text        # the placeholder became the default mode
 
 
 def test_a_schedule_chosen_in_settings_is_stored_and_beats_the_container(qapp, db, cache):
