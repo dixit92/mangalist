@@ -43,6 +43,7 @@ settings), so the store class itself is unchanged. It implements
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -225,10 +226,7 @@ class DownloadLedger:
         skipped: List[str] = []
         with self.connect(durable=True) as con:
             con.execute("BEGIN IMMEDIATE")          # the in-hand check and the inserts as one step
-            held = self._chapters_in_hand(con, series_id)
-            refs = {r[0] for r in con.execute(
-                f"SELECT external_ref FROM ledger WHERE tool = ? AND status IN ({','.join('?' * len(TRACKED))})",
-                (TOOL_SUWAYOMI, *TRACKED))}
+            held, refs = self._chapters_in_hand(con, series_id)
             for ch in chapters:
                 number = exact_number(ch.number) if ch.number and not ch.number.startswith("-") else None
                 if number is None:
@@ -254,18 +252,38 @@ class DownloadLedger:
 
     def chapters_in_hand(self, series_id: int) -> Set[str]:
         """The chapter numbers of *series_id* that a chapter download has in hand (sent, downloaded, filed - also
-        removed: filed, Suwayomi's copy gone), exact strings: never sent again."""
+        removed: filed, Suwayomi's copy gone - while a filed file is still in the series folder), exact strings: not
+        sent again."""
         with self.connect() as con:
-            return self._chapters_in_hand(con, series_id)
+            return self._chapters_in_hand(con, series_id)[0]
 
     @staticmethod
-    def _chapters_in_hand(con, series_id: int) -> Set[str]:
+    def _chapters_in_hand(con, series_id: int) -> Tuple[Set[str], Set[str]]:
+        """The series' chapter numbers in hand and the Suwayomi chapter ids already used: on their way (queued, sent,
+        downloaded), or filed while a file it filed is still in the series folder. A filed chapter whose file was moved
+        away (to be replaced by another source's copy) can be sent again (owner, 2026-10-11: "skipped 9 ... already
+        sent" for chapters moved to the holding folder)."""
+        filed = (DownloadStatus.FILED, DownloadStatus.REMOVED)
         keep = (*TRACKED, DownloadStatus.REMOVED)
-        out: Set[str] = set()
-        for r in con.execute(f"SELECT request FROM ledger WHERE tool = ? AND series_id = ? AND status IN "
-                             f"({','.join('?' * len(keep))})", (TOOL_SUWAYOMI, int(series_id), *keep)):
-            out.update(str(c) for c in _loads(r["request"], {}).get("wanted_chapters") or ())
-        return out
+        row = con.execute("SELECT r.path AS root, s.rel_path AS rel FROM series s JOIN roots r ON r.id = s.root_id"
+                          " WHERE s.id = ?", (int(series_id),)).fetchone()
+        series_dir = os.path.join(row["root"], *row["rel"].split("/")) if row is not None and row["rel"] else None
+
+        def still_there(files) -> bool:
+            if series_dir is None:
+                return True                         # cannot look: counted, as before
+            return any(os.path.isfile(os.path.join(series_dir, *str(f).replace("\\", "/").split("/"))) for f in files)
+
+        numbers: Set[str] = set()
+        refs: Set[str] = set()
+        for r in con.execute(f"SELECT request, status, filed_files, external_ref FROM ledger WHERE tool = ? AND"
+                             f" series_id = ? AND status IN ({','.join('?' * len(keep))})",
+                             (TOOL_SUWAYOMI, int(series_id), *keep)):
+            if r["status"] in filed and not still_there(_loads(r["filed_files"], [])):
+                continue
+            numbers.update(str(c) for c in _loads(r["request"], {}).get("wanted_chapters") or ())
+            refs.add(r["external_ref"])
+        return numbers, refs
 
     def get(self, record_id: int) -> Optional[DownloadRecord]:
         with self.connect() as con:
