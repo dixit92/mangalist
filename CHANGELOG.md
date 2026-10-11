@@ -7,11 +7,19 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.22] - 2026-10-11
+
+The twenty-first MangaList release (testing build): automatic downloads, a Found list, bulk find, a log viewer, and Check for new chapters.
+
 - **Automatic downloads.** Each series has a mode: **Off** (never searched), **Notify** (searched; what is found waits for you) or **Auto** (searched and sent by itself within the guards). The default is Notify (Settings > Automation); change a series, or a selection, in the List's row menu under **Automatic downloads**. Only a series whose own mode differs from the default shows a small chip after its title.
 - **The find pass** searches exactly the Download tab's "To get" list (missing volumes, upgrades, missing chapters), leaving out series on Off and those with a download in flight. It runs on its own schedule (`MANGALIST_DISPATCH_SCHEDULE`, default daily at 04:30) and on **Find now**. Volumes: nyaa, the best release first, then the best for what is still missing. Auto sends a release by itself only when it certainly fills a missing volume and is a single volume or a pack narrowed to the missing volumes; the download budget still applies. Chapters come only from the series' saved Suwayomi source, extras never; a saved source that no longer has the series says "Change source?".
 - **Found** in the Download tab: everything the pass found that waits for you, with what it would get, its size and why it waits - **Send**, **Skip** (not offered again for the same release) or **Send all**. The tab's badge counts them.
 - **Bulk find**: select series in the List (or a whole To get group) and find releases for all of them in one go; the results go to Found and nothing is sent by itself. The old "Find releases for selected" is now "Search selected on nyaa".
 - **Log viewer**: Settings > Logging > **View logs** shows the app's and the scheduled jobs' logs live, with level, area and search filters, Pause / Follow, older lines and copy (read-only).
+- **Check for new chapters.** In the List's row menu, for any series (also one that is Up to date): MangaList asks the series' saved Suwayomi source for every chapter after the newest one you have, and opens the chapters panel with them to send. MangaUpdates' latest chapter, which the gaps count up to, can trail the sites by days.
+- **A source with no chapters falls through to the others.** Suwayomi reports "No chapters found" as an error (typical for a licensed series whose chapters MangaDex took down); the Download tab showed "Lookup failed" and stopped. MangaList now offers the series on your other sources, and a saved source that lists nothing says so. A lookup that fails for any reason now offers **Change source…** too.
+- **An empty folder for a licensed series with no English volume** (a webtoon) lists every chapter up to the latest one under Missing chapters, instead of "awaiting release" with nothing to get; with no volume announced it reads **Wanted**.
+- **Settings:** after Sync now, the MangaPixer badge no longer stays on "Syncing...". A text box's clear (x) button is centred.
 - Database version 7 (automatic-download modes and findings); upgraded on first start.
 
 ## [2026.10.21] - 2026-10-11
