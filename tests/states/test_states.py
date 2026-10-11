@@ -460,7 +460,7 @@ def test_a_volume_list_without_english_dates_falls_back_to_the_publishers_count(
 
 def _four_koma(**kw):
     vols = (VolumeInfo("1", "1", "141.15"), VolumeInfo("2", "101.11", "209"), VolumeInfo("3", "210", "260"))
-    base = dict(licensed_en=False, latest_chapter="717", origin_volumes=Decimal(7), origin_status="Complete",
+    base = dict(licensed_en=False, latest_chapter="717", origin_volumes="7", origin_status="Complete",
                 translation_complete=True, volumes=vols)
     base.update(kw)
     return own(**base)
