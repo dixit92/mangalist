@@ -331,6 +331,27 @@ def test_mangadex_without_any_chapter_offers_the_other_sources(world):
     assert lookup.candidates and {c.source.id for c in lookup.candidates} == {OTHER}
 
 
+def test_check_for_new_chapters_lists_the_sources_chapters_after_the_newest_held(world):
+    # owner, 2026-10-11: a chapter out on the sites before MangaUpdates lists it - the folder holds 3-4
+    backend, session, sid = world["backend"], world["session"], world["sid"]
+    link_mangadex(world["db"], world["root"].id)
+    connect(world)
+    lookup = backend.chapter_lookup(sid, ("1", "2"), (SERIES,), newer=True)
+    assert lookup.newer and lookup.newer_than == "4" and lookup.error is None
+    assert lookup.missing == ("331", "332", "333", "334", "335", "953.5", "953.6")       # 1-2 (older) left out
+    assert {r.number for r in lookup.available} == set(lookup.missing) and not lookup.candidates
+    assert session.names().count("MangaListChapters") == 1                              # one fetch
+    # nothing newer: no "MangaDex has none" detour to the other sources
+    session.answers["MangaListSources"] = with_other_source()
+    backend.set_suwayomi_sources([MANGADEX_EN, OTHER])
+    answer = json.loads(recorded("fetch_manga_and_chapters.json"))
+    answer["data"]["fetchMangaAndChapters"]["chapters"] = [
+        c for c in answer["data"]["fetchMangaAndChapters"]["chapters"] if float(c["chapterNumber"]) <= 4]
+    session.answers["MangaListChapters"] = answer
+    none = backend.chapter_lookup(sid, (), (SERIES,), newer=True)
+    assert none.missing == () and not none.candidates and none.match is not None
+
+
 def test_a_saved_source_that_lists_nothing_now_says_so_and_offers_the_others(world):
     # owner, 2026-10-10: "if a series appears removed from the saved source, notify"
     backend, session, sid = world["backend"], world["session"], world["sid"]
@@ -419,3 +440,16 @@ def test_the_flow_files_under_the_real_naming_scheme(world):
     scheme = re.compile(r"^Ch\. 000[12]\.00( Vol\. \d{3})? \(Example Title [12]\) \[Alpha Scans\]\.cbz$")
     filed = [n for n in os.listdir(sdir) if n.startswith("Ch. ")]
     assert len(filed) == 2 and all(scheme.match(n) for n in filed), filed
+
+
+def test_newer_numbers_keeps_each_newer_chapter_once_in_the_sources_spelling():
+    from decimal import Decimal
+
+    from mangalist.downloads.contracts import SuwayomiChapter
+
+    def ch(i, number):
+        return SuwayomiChapter(id=i, manga_id=1, name=f"Ch.{number}", number=number, scanlator=None)
+
+    chs = [ch(1, "137"), ch(2, "138"), ch(3, "138"), ch(4, "138.5"), ch(5, "-1"), ch(6, "136")]
+    assert chm.newer_numbers(chs, Decimal("137")) == ["138", "138.5"]
+    assert chm.newer_numbers(chs, None) == ["136", "137", "138", "138.5"]        # nothing held: all of them
