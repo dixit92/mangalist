@@ -209,3 +209,36 @@ def test_record_library_scan_reports_renamed_series(db, library):
     result = scan_library(db.list_roots(), db=db)
     renamed = record_library_scan(db, result)
     assert renamed == [(library.resolve() / "Old", library.resolve() / "New")]
+
+
+def test_a_scan_recording_at_the_same_time_as_another_does_not_fail(db, library, monkeypatch):
+    # 2026-10-11: after a filing the GUI and the headless runner rescanned at once; the GUI's recording failed with
+    # "UNIQUE constraint failed: archives.root_id, archives.rel_path" (the runner had recorded the new file first)
+    make_archive(library / "Series A" / "ch01.cbz", seed="s1")
+    root = db.add_root(str(library))
+    scan(db)
+    make_archive(library / "Series A" / "ch02.cbz", seed="s2")
+    real_connect, calls = db.connect, []
+
+    import sys
+
+    def racing_connect(*a, **kw):
+        calls.append(1)
+        caller = sys._getframe(1)
+        # right before this scan writes (its read is done: paired_obs exists), the other scan records the file
+        if caller.f_code.co_name == "record_archives" and "paired_obs" in caller.f_locals and len(calls) < 99:
+            calls.extend([0] * 99)
+            with real_connect() as con:
+                con.execute("INSERT INTO archives (root_id, series_id, rel_path, size, mtime_ns, signature, status,"
+                            " first_seen_at, last_seen_at, first_seen_scan, last_seen_scan) SELECT root_id, series_id,"
+                            " 'Series A/ch02.cbz', size, mtime_ns, NULL, 'present', first_seen_at, last_seen_at,"
+                            " first_seen_scan, last_seen_scan FROM archives WHERE rel_path = 'Series A/ch01.cbz'")
+        return real_connect(*a, **kw)
+
+    entries = scan_library(db.list_roots(), db=db)
+    monkeypatch.setattr(db, "connect", racing_connect)
+    rep = moves.record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in entries.roots])
+    monkeypatch.setattr(db, "connect", real_connect)
+    assert len(calls) >= 2 and rep is not None
+    row = db.archive_at(root.id, "Series A/ch02.cbz")
+    assert row is not None and row.status == "present"
