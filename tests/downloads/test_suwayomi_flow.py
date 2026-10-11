@@ -248,6 +248,14 @@ def test_the_whole_flow_from_mangadex_id_to_the_filed_chapters(world, caplog):
     (sdir / "Ch. 0001.00 Vol. 001 (Example Title 1) [Alpha Scans].cbz").rename(moved)
     rows = {r.number: r for r in backend.chapter_lookup(sid, ("1", "2"), (SERIES,)).rows}
     assert rows["1"].in_hand is None and rows["2"].in_hand is not None
+    # ... and the send takes it (owner, 2026-10-11: "skipped 9 ... already sent" after the panel offered them)
+    assert backend.chapter_ledger.chapters_in_hand(sid) == {"2"}
+    again = backend.send_chapters(sid, lookup.match, [rows["1"].default], str(sdir), lookup.manga_title,
+                                  lookup.source_name)
+    assert again.error is None and not again.skipped and [r.wanted_chapters for r in again.records] == [("1",)]
+    refused = backend.send_chapters(sid, lookup.match, [rows["2"].default], str(sdir), lookup.manga_title,
+                                    lookup.source_name)
+    assert not refused.records and refused.skipped == ["ch 2: already sent"]
 
 
 def test_a_title_match_on_another_source_waits_for_the_owners_confirmation(world):
