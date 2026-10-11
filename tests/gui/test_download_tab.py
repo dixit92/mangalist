@@ -13,6 +13,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 
 from mangalist.downloads.contracts import DownloadStatus as S  # noqa: E402
+from mangalist.gui import download_rules as dr  # noqa: E402
 from mangalist.gui import download_tab as dt  # noqa: E402
 from mangalist.gui.download_tab import DownloadTab  # noqa: E402
 from mangalist.gui.download_widgets import ROLE_CHIPS  # noqa: E402
@@ -105,6 +106,22 @@ def test_the_filter_narrows_the_list_and_the_count(qapp):
     assert tab.group_chips[GROUP_CHAPTERS].count == 0 and tab.count_label.text() == "1 of 5 series"
     tab.filter_edit.clear()
     assert len(rows(tab)[1]) == 3 and tab.count_label.text() == "5 series"       # the Volumes group again
+
+
+def test_the_list_sorts_by_how_much_is_missing_and_remembers_it(qapp):
+    # owner, 2026-10-11: "Can I sort this? For example by highest number of missing volumes"
+    many = ws("Akira Saga", "Vol. 3-9", sid=6, missing=tuple(str(n) for n in range(3, 10)))
+    tab, _ = make(qapp, wanted=WANTED + [many])
+    try:
+        assert rows(tab)[1] == ["Akira Saga", "Frieren", "Oshi no Ko", "Vinland Saga"]          # title, the default
+        tab.set_sort(dr.SORT_MOST)
+        assert rows(tab)[1] == ["Akira Saga", "Frieren", "Oshi no Ko", "Vinland Saga"]          # 7, 2, 1, 1 (ties: title)
+        tab.set_sort(dr.SORT_FEWEST)
+        assert rows(tab)[1] == ["Oshi no Ko", "Vinland Saga", "Frieren", "Akira Saga"]
+        again, _ = make(qapp)                                                                   # remembered
+        assert again.sort_key() == dr.SORT_FEWEST
+    finally:
+        tab.set_sort(dr.SORT_TITLE)
 
 
 def test_checking_series_counts_them_and_survives_a_filter(qapp):

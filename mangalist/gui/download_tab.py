@@ -42,6 +42,7 @@ from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLineEdit,
@@ -70,6 +71,8 @@ from .download_rules import (
     SEARCH_QUEUED,
     SEARCH_READY,
     SEARCH_RUNNING,
+    SORT_TITLE,
+    SORTS,
     count_text,
     grouped,
     merge_entries,
@@ -275,7 +278,19 @@ class DownloadTab(QWidget):
         self.filter_edit.setClearButtonEnabled(True)
         self.filter_edit.setAccessibleName("Filter series to get")
         self.filter_edit.textChanged.connect(self._rebuild)
-        hv.addWidget(self.filter_edit)
+        # owner, 2026-10-11: "Can I sort this? For example by highest number of missing volumes"
+        self.sort_combo = QComboBox()
+        self.sort_combo.setAccessibleName("Sort series to get")
+        for key, text in SORTS:
+            self.sort_combo.addItem(text, key)
+        saved_sort = config.load().get(CFG_SORT)
+        self.sort_combo.setCurrentIndex(max(0, self.sort_combo.findData(saved_sort)))
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+        filter_row.addWidget(self.filter_edit, 1)
+        filter_row.addWidget(self.sort_combo)
+        hv.addLayout(filter_row)
         self.group_chips: Dict[str, ChipButton] = {}
         chip_box = QWidget()
         chips = FlowLayout(chip_box, spacing=6)         # wraps when the panel is narrow (four chips with Found)
@@ -464,7 +479,7 @@ class DownloadTab(QWidget):
         self._items.clear()
         self._rows.clear()
         self._header_items.clear()
-        groups = grouped(self._wanted, self.filter_edit.text())
+        groups = grouped(self._wanted, self.filter_edit.text(), self.sort_key())
         counts = {g: len(items) for g, items in groups}
         found = self._found_by_series()
         counts[GROUP_FOUND] = len(self._findings)
@@ -625,6 +640,20 @@ class DownloadTab(QWidget):
     def chip_groups(self) -> tuple:
         """The chips above the list: the "To get" groups, and Found when the backend can find."""
         return TAB_GROUPS + ((GROUP_FOUND,) if self._automation else ())
+
+    def sort_key(self) -> str:
+        return self.sort_combo.currentData() or SORT_TITLE
+
+    def set_sort(self, key: str) -> None:
+        index = self.sort_combo.findData(key)
+        if index >= 0:
+            self.sort_combo.setCurrentIndex(index)
+
+    def _on_sort_changed(self, _index: int) -> None:
+        cfg = config.load()
+        cfg[CFG_SORT] = self.sort_key()
+        config.save(cfg)
+        self._rebuild()
 
     def show_group(self, group: str) -> None:
         """Show one group of the "To get" list (Volumes / Upgrades / Chapters), or Found; remembered."""
@@ -1193,5 +1222,6 @@ class DownloadTab(QWidget):
 TAB_GROUPS = (GROUP_VOLUMES, GROUP_UPGRADES, GROUP_CHAPTERS)
 FOUND_TITLE = "Found"
 CFG_GROUP = "download_tab_group"
+CFG_SORT = "download_tab_sort"
 CFG_SPLIT = "download_tab_split"
 CFG_VSPLIT = "download_tab_progress_split"
