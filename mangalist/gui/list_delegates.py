@@ -11,11 +11,12 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from . import theme
-from .table_model import REVIEW_ROLE, STATE_ROLE, SUBTITLE_ROLE, state_text
+from .table_model import AUTO_ROLE, REVIEW_ROLE, STATE_ROLE, SUBTITLE_ROLE, state_text
 
 ROW_HEIGHT = 50                 # two lines of the Title cell with the mockup's 9 px padding
 TITLE_PAD = 20                  # the first column's left padding
 CELL_PAD = 12
+AUTO_CHIP = "Auto"              # automatic downloads on Auto (owner decisions 2026-10-10)
 
 
 def _draw_cell(option: QStyleOptionViewItem, painter: QPainter, index, delegate: QStyledItemDelegate) -> QStyleOptionViewItem:
@@ -42,6 +43,8 @@ class TitleDelegate(QStyledItemDelegate):
         main = theme.font(13, 500)
         small = theme.font(12, 400)
         painter.save()
+        if index.data(AUTO_ROLE):                       # the chip at the right; the title elides before it
+            rect.setRight(rect.right() - _paint_auto_chip(painter, rect) - 8)
         main_h = QFontMetrics(main).height()
         small_h = QFontMetrics(small).height() if subtitle else 0
         top = rect.top() + (rect.height() - main_h - small_h) / 2
@@ -58,7 +61,28 @@ class TitleDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index) -> QSize:
         title = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
-        return QSize(QFontMetrics(theme.font(13, 500)).horizontalAdvance(title) + TITLE_PAD + CELL_PAD, ROW_HEIGHT)
+        chip = QFontMetrics(theme.font(11, 600)).horizontalAdvance(AUTO_CHIP) + 21 if index.data(AUTO_ROLE) else 0
+        return QSize(QFontMetrics(theme.font(13, 500)).horizontalAdvance(title) + TITLE_PAD + CELL_PAD + chip,
+                     ROW_HEIGHT)
+
+
+def _paint_auto_chip(painter: QPainter, rect: QRectF) -> float:
+    """The small "Auto" chip right-aligned in *rect*, vertically centred; returns its width."""
+    font = theme.font(11, 600)
+    fm = QFontMetrics(font)
+    width = fm.horizontalAdvance(AUTO_CHIP) + 1 + 12
+    height = fm.height() + 2
+    box = QRectF(rect.right() - width, rect.top() + (rect.height() - height) / 2, width, height)
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(theme.ACCENT_TINT))
+    painter.drawRoundedRect(box, height / 2, height / 2)
+    painter.setFont(font)
+    painter.setPen(QColor(theme.ACCENT))
+    painter.drawText(box, Qt.AlignmentFlag.AlignCenter, AUTO_CHIP)
+    painter.restore()
+    return width
 
 
 class StateBadgeDelegate(QStyledItemDelegate):
