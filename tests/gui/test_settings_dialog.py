@@ -777,6 +777,11 @@ def test_sync_now_is_on_the_mangapixer_card_not_only_under_edit(qapp, db, cache,
     wait_until(qapp, lambda: not page._syncing)
     assert synced == [(True, True)] and changed == [1]
     assert page.mp_sync.isEnabled() and "Sync: 2 libraries, 5 items" in page.mp_card.note_label.text()
+    assert page.mp_card.badge.text() == "Connected"              # not "Syncing..." any more (owner, 2026-10-11)
+    monkeypatch.setattr(mp_sync, "sync_all", lambda c, **kw: mp_sync.SyncResult(status="error", message="boom"))
+    assert page.sync_mangapixer()
+    wait_until(qapp, lambda: not page._syncing)
+    assert page.mp_card.badge.text() == "Sync failed" and "boom" in page.mp_card.note_label.text()
 
 
 def test_automation_empties_the_holding_folder_now_after_a_yes(qapp, db, cache, monkeypatch):
