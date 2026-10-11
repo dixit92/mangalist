@@ -430,6 +430,7 @@ class ChapterLookup:
     placement: Optional[Placement] = None
     placement_error: Optional[str] = None
     error: Optional[str] = None                     # the lookup failed (Suwayomi unreachable, ...)
+    source_empty: bool = False                      # the matched manga lists no chapters at all on its source
 
     @property
     def available(self) -> List[ChapterRow]:
@@ -462,7 +463,7 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
     return ChapterLookup(series_id=series_id, missing=tuple(missing), match=match,
                          manga_title=fetched.manga.title or match.manga.title,
                          source_name=fetched.source_name or match.source.display_name, rows=rows, group=choice,
-                         groups=counts, queued_in_suwayomi=queued)
+                         groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters)
 
 
 # --- sending ---------------------------------------------------------------------------------------------------

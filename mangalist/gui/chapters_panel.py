@@ -292,6 +292,11 @@ class ChaptersPanel(QWidget):
         if series_id == self._series_id:
             self.show_message(self._title, f"Suwayomi could not be asked: {message}")
             self.btn_again.setVisible(True)
+            # a way out without a match: Change source looks the series up on every allowed source (owner, 2026-10-11:
+            # "There's no option to do this" on a failed lookup)
+            self.lookup = ChapterLookup(series_id=series_id, missing=self._missing)
+            self._before_other = None
+            self.btn_other.setVisible(callable(getattr(self._backend, "other_candidates", None)))
 
     def show_lookup(self, lookup: ChapterLookup) -> None:
         self.lookup = lookup
@@ -309,7 +314,8 @@ class ChaptersPanel(QWidget):
             return
         match = lookup.match
         self.match_label.setText(f"{match.source.display_name}: {lookup.manga_title or match.manga.title} - "
-                                 f"{how_text(match)}")
+                                 f"{how_text(match)}" + (f" - {lookup.notes[-1]}" if lookup.source_empty and
+                                                         lookup.notes else ""))
         queued = lookup.queued_in_suwayomi
         self.queued_label.setText(f"Already in Suwayomi's download queue: ch {numbers_text(queued)}" if queued else "")
         self.queued_label.setVisible(bool(queued))
@@ -344,7 +350,7 @@ class ChaptersPanel(QWidget):
             self.cand_note.setText(lead + "Pick where this series' chapters come from - it is remembered for the "
                                    "series. Chapters already sent stay as they are.")
         else:
-            self.cand_note.setText(("MangaDex has none of the missing chapters. " if keep_match else "") +
+            self.cand_note.setText((f"{lookup.notes[-1]}. " if keep_match and lookup.notes else "") +
                                    "MangaList found these by title on your other sources. Pick the one that is this "
                                    "series - it is remembered for the series - or look again later.")
         self.cand_table.setRowCount(len(lookup.candidates))
@@ -583,9 +589,9 @@ class ChaptersPanel(QWidget):
         UI thread)."""
         lookup, sid = self.lookup, self._series_id
         find = getattr(self._backend, "other_candidates", None)
-        if lookup is None or lookup.match is None or sid is None or self._busy or not callable(find):
+        if lookup is None or sid is None or self._busy or not callable(find):
             return False
-        exclude, titles = lookup.match.source.id, self._titles
+        exclude, titles = (lookup.match.source.id if lookup.match is not None else None), self._titles
         set_tone(self.status_label, "")
         self.status_label.setText("Looking for this series on your other sources...")
         self._set_busy(True)
@@ -601,13 +607,18 @@ class ChaptersPanel(QWidget):
                                       "Settings > Download sources > Suwayomi sources.")
             return
         self.status_label.setText("")
-        self._before_other = before
         self.lookup = replace(before, candidates=list(found))
+        missing = f"Missing {html.escape('ch ' + numbers_text(before.missing))}"
+        if before.match is None:                        # after a failed lookup: nothing to go back to
+            self._before_other = None
+            self._show_candidates(self.lookup, missing, keep_match=True, lead="The lookup failed. ")
+            self.btn_cand_back.setVisible(False)
+            return
+        self._before_other = before
         source = before.source_name or before.match.source.display_name
         lead = f"Now: {source}" + (f", which does not have ch {numbers_text(before.not_available)}. "
                                    if before.not_available else ". ")
-        self._show_candidates(self.lookup, f"Missing {html.escape('ch ' + numbers_text(before.missing))}",
-                              keep_match=True, lead=lead)
+        self._show_candidates(self.lookup, missing, keep_match=True, lead=lead)
 
     def back_to_chapters(self) -> None:
         if self._before_other is not None:
