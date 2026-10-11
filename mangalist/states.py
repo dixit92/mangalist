@@ -16,6 +16,8 @@ The rules, in order (the full table is in the lane note):
 1. An **empty folder** is wanted (A7): licensed with an English volume (or chapter) out -> *Wanted -
    official available*; licensed with nothing out yet -> *Wanted - awaiting release* (the announced
    date when one is known); not licensed -> *Wanted - scanlation only*; nothing known -> *Wanted*.
+   Without an English volume out, every chapter up to the latest known one is a gap (Suwayomi's); with
+   chapters known and no volume announced (a webtoon) the state is plain *Wanted*.
 2. **Nothing known** (no linked record, or no number to compare with) -> *Can't tell*.
 3. Gaps: **volumes** - an English volume that is out, not held as a volume and not wholly held as
    chapters is missing (in a folder that holds volumes, or holds nothing but volumes' worth); a volume
@@ -553,21 +555,28 @@ def compute_state(
         if not known:
             return finish(State.WANTED, reasons=["Empty folder; the series is not matched yet"])
         if k.licensed:
-            if out_vols or (k.publisher_chapters or 0) > 0:
-                what = f"{len(out_vols)} English volume(s) out" if out_vols else "English chapters out"
+            if out_vols:
                 return finish(State.WANTED_OFFICIAL, [Gap(GAP_VOLUME, v.volume, note=_date_note(v)) for v in out_vols],
-                              [f"Empty folder; {what}"])
+                              [f"Empty folder; {len(out_vols)} English volume(s) out"])
+            # No English volume (a webtoon never gets one): the chapters up to the latest known one, which the
+            # Download tab offers from Suwayomi (owner, 2026-10-11: an empty licensed webtoon offered nothing)
+            target = _chapter_target(k)
+            gaps = _chapter_gaps(_empty_folder_chapters(target)) if target is not None else []
+            latest = f"; latest chapter {fmt_num(target)}" if target is not None else ""
+            if (k.publisher_chapters or 0) > 0:
+                return finish(State.WANTED_OFFICIAL, gaps, [f"Empty folder; English chapters out{latest}"])
+            if gaps and not (upcoming_vol and upcoming_vol.english_date):
+                # chapters out and no volume announced (a webtoon): plain Wanted (owner, 2026-10-11)
+                return finish(State.WANTED, gaps, [f"Empty folder; licensed, no English volume announced{latest}"])
             when = f" (announced {upcoming_vol.english_date})" if upcoming_vol and upcoming_vol.english_date else ""
-            return finish(State.WANTED_AWAITING, reasons=[f"Empty folder; licensed, no English volume out yet{when}"])
+            return finish(State.WANTED_AWAITING, gaps,
+                          [f"Empty folder; licensed, no English volume out yet{when}{latest}"])
         # Scanlation only: every chapter up to the latest known one is missing - the Download tab's Missing chapters
         # group offers them from Suwayomi (owner, 2026-10-10: "should be fixed now that we have a scanlation provider").
         target = _chapter_target(k)
         if target is None:
             return finish(State.WANTED_SCANLATION, reasons=["Empty folder; not licensed in English"])
-        missing = sorted(_whole_numbers(Decimal(1), target))
-        if target != target.to_integral_value():
-            missing.append(target)
-        return finish(State.WANTED_SCANLATION, _chapter_gaps(missing),
+        return finish(State.WANTED_SCANLATION, _chapter_gaps(_empty_folder_chapters(target)),
                       [f"Empty folder; not licensed in English; latest chapter {fmt_num(target)}"])
 
     if not known:
@@ -707,6 +716,14 @@ def _scan_volume_total(k: SeriesKnowledge) -> Optional[Decimal]:
 
 def _span(numbers: Sequence[Decimal]) -> str:
     return fmt_num(numbers[0]) if len(numbers) == 1 else f"{fmt_num(numbers[0])}-{fmt_num(numbers[-1])}"
+
+
+def _empty_folder_chapters(target: Decimal) -> List[Decimal]:
+    """Every whole chapter 1..*target*, plus *target* itself when it is a decimal (``12.5``)."""
+    missing = sorted(_whole_numbers(Decimal(1), target))
+    if target != target.to_integral_value():
+        missing.append(target)
+    return missing
 
 
 def _chapter_target(k: SeriesKnowledge) -> Optional[Decimal]:
