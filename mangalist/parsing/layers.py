@@ -202,8 +202,10 @@ _RELEASE_VOLUME_LAST = re.compile(
 _SERIES_ENDS_IN_LABEL = re.compile(rf"(?<![A-Za-z]){CHAPTER_LABELS}\.?\s*[#-]?$", re.IGNORECASE)
 
 # A zero-padded or fractional number right before the volume token is the chapter of that volume ("<Series> 001 Vol 01",
-# "<Series> 012.5 v02"); a plain number stays part of the title ("<Series> 2049 v01").
-_CHAPTER_NUMBER = r"(?:0\d+(?:\.\d+)?|\d+\.\d+)"
+# "<Series> 012.5 v02"), and so is a plain three-digit one or a four-digit one that cannot be a year (owner, 2026-10-11:
+# "<Series> 099 Vol 11" was chapter 99 but "<Series> 100 Vol 11" read as volume 11, so 14 chapters collided). A short or
+# year-like plain number stays part of the title ("<Series> 2 Vol 3", "<Series> 2049 v01").
+_CHAPTER_NUMBER = r"(?:0\d+(?:\.\d+)?|[1-9]\d{2}(?:\.\d+)?|(?!19|20)[1-9]\d{3}(?:\.\d+)?|\d+\.\d+)"
 # Not after a word that the number belongs to: "<Series> Season 02 v03" is volume 3 of season 2.
 _SERIES_ENDS_IN_CHAPTER = re.compile(
     rf"\S(?<!season)(?<!part)(?<!book)(?<!tome)(?<!arc)\s+(?:-\s+)?{_CHAPTER_NUMBER}$", re.IGNORECASE)
