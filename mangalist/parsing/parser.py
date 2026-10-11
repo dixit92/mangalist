@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, replace
 from pathlib import PurePath
 from typing import Iterable, Optional, Tuple, Union
@@ -78,10 +79,25 @@ def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseCont
     elif not isinstance(name, str):
         name = os.path.basename(os.fspath(name))
     ctx = context or _NO_CONTEXT
-    result = _first(name, ctx, file_size)
+    read = _without_watermark(name)
+    result = _first(read, ctx, file_size)
     if result is None:
         return ParsedName(name=name, notes=("no layer recognised the name",))
+    if read != name:
+        result = replace(result, name=name, notes=result.notes + ("a site's watermark left out of the name",))
     return _finish(_apply_hint(result, ctx.kind_hint))
+
+
+# A site's watermark at the end of a downloaded file's name ("<Series> 001 Read Online.cbz" - owner, 2026-10-11: such
+# a bare number was not read at all, so the "volumes or chapters?" answer could not help). Left out before reading.
+_WATERMARK = re.compile(r"[\s_-]+(?:read[\s_]+(?:manga[\s_]+)?(?:online|free)(?:[\s_]+free)?|online[\s_]+free)\s*$",
+                        re.IGNORECASE)
+
+
+def _without_watermark(name: str) -> str:
+    stem, ext = split_extension(name)
+    cut = _WATERMARK.sub("", stem)
+    return cut + ext if cut and cut != stem else name
 
 
 def _finish(result: ParsedName) -> ParsedName:

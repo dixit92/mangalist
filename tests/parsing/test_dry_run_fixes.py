@@ -290,3 +290,17 @@ def test_series_titles_ending_in_a_number_stay_titles():
     assert parse_name("Some Series 2 - The Return.cbz").title is None
     r = parse_name("Some Series 07.cbz", ParseContext(series_title="Some Series"))
     assert str(r.number or r.chapter) == "7"
+# --- owner, 2026-10-11: a site's watermark after a bare number ("<Series> 001 Read Online.cbz") ---------------------
+
+@pytest.mark.parametrize("name", ["Some Series - Some Series 001 Read Online.cbz", "Some Series 001 read online.cbz",
+                                  "Some Series 001 Read Manga Online Free.cbz", "Some Series 001 - Online Free.cbz"])
+def test_a_watermark_after_a_bare_number_is_left_out(name):
+    r = parse_name(name, ParseContext(series_title="Some Series"))
+    assert str(r.number) == "1" and r.name == name and r.title is None
+    answered = parse_name(name, ParseContext(series_title="Some Series", kind_hint="chapters"))
+    assert answered.kind == Kind.CHAPTER and str(answered.chapter) == "1"
+
+
+def test_a_watermark_after_a_chapter_label_reads_as_before():
+    r = parse_name("Some Series - Some Series Ch.005 Read Online.cbz", ParseContext(series_title="Some Series"))
+    assert (r.kind, str(r.chapter), r.title) == (Kind.CHAPTER, "5", None)

@@ -184,6 +184,7 @@ class FilePlan:
     title_cut: bool = False         # the length rule shortened the chapter title
     group_cut: bool = False         # ... or the group
     unit_words: bool = False        # the chapter title holds a unit word (a parser may read a number from it)
+    needs_kind: bool = False        # left alone: a bare number whose kind only the series' "volumes or chapters?" settles
 
     @property
     def name(self) -> str:
@@ -222,6 +223,11 @@ class SeriesPreview:
     @property
     def collisions(self) -> List[FilePlan]:
         return self.of(COLLISION)
+
+    @property
+    def needs_kind(self) -> List[FilePlan]:
+        """Files left alone until the series' "volumes or chapters?" is answered (the Renamer window asks)."""
+        return [f for f in self.files if f.needs_kind]
 
     @property
     def left_alone(self) -> List[FilePlan]:
@@ -421,10 +427,13 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
             first.append(FilePlan(path, None, LEFT_ALONE, layer, f"naming failed ({type(exc).__name__})"))
             continue
         if target is None:
+            bare = getattr(parsed, "number", None) is not None and (
+                str(getattr(getattr(parsed, "kind", None), "value", "")) == "unknown" or getattr(parsed, "guessed", False))
             why = ("an extra (no chapter number)" if getattr(parsed, "is_extra", False)
+                   else "a bare number: chapters or volumes? (answer above)" if bare
                    else "the name says no volume or chapter number" if not getattr(parsed, "has_units", True)
                    else "the name could not be read with certainty")
-            first.append(FilePlan(path, None, LEFT_ALONE, layer, why))
+            first.append(FilePlan(path, None, LEFT_ALONE, layer, why, needs_kind=bare))
             continue
         problem = _name_problem(target)
         if problem:
@@ -674,6 +683,17 @@ class Renamer:
         with self.db.connect() as con:
             row = con.execute("SELECT root_id, rel_path FROM series WHERE id = ?", (int(series_id),)).fetchone()
         return self.db.get_series(row["root_id"], row["rel_path"]) if row else None
+
+    def answer_kind(self, series_id: int, kind: Optional[str]) -> bool:
+        """Store the series' "volumes or chapters?" answer (``"volumes"`` / ``"chapters"``, None: no answer) - the same
+        answer as the List's question (owner, 2026-10-11: "You should be able to set unknown as chapters or volumes from
+        within the renamer"). The next dry run reads the names with it; a rescan brings the List along."""
+        series = self.series_by_id(series_id)
+        if series is None:
+            return False
+        done = self.db.set_series_kind(series.root_id, series.rel_path, kind)
+        _log.info("Renamer: %s: the numbers are %s (the owner's answer)", series.rel_path, kind or "not answered")
+        return bool(done)
 
     def series_id_for_folder(self, folder) -> Optional[int]:
         s = self.db.series_for_folder(folder)
