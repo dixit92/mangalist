@@ -384,3 +384,28 @@ def test_exclude_from_its_library_adds_an_anchored_pattern_and_rescans_that_root
     assert win._db.get_root(root.id).exclusions == ["*.txt", "Series A/**"]     # anchored: only that folder
     assert scans == [[root.id]] and asked == [["Series A"], ["Series A"]]
     assert win.exclude_from_library([entry]) == 0                                # already excluded: nothing added
+
+
+def test_the_last_column_is_never_squeezed_below_its_header(make_window, qapp):
+    # owner, 2026-10-11: "the last column gets cut off" / "I cannot drag the last column back to the viewable area" -
+    # the stretched last column got only what was left of the view (its header read "LAS"), its right edge at the
+    # view's edge where it cannot be dragged
+    from mangalist.gui.table_model import COLUMNS
+
+    win = make_window()
+    table, header = win._table, win._table.horizontalHeader()
+    last = COLUMNS.index("Last Modified")
+    win._toggle_column(COLUMNS.index("Official source"))
+    win._toggle_column(last)                             # shown: last in the default order
+    win.resize(1100, 700)
+    win.show()
+    qapp.processEvents()
+    header.resizeSection(last, 40)                       # a sliver, as the owner's saved layout had it
+    header.moveSection(header.visualIndex(COLUMNS.index("Files")), header.visualIndex(COLUMNS.index("State")))
+    qapp.processEvents()
+    assert header.sectionSize(last) >= header.sectionSizeHint(last)
+    if header.length() > table.viewport().width():       # it scrolls sideways to show it whole
+        bar = table.horizontalScrollBar()
+        bar.setValue(bar.maximum())
+        qapp.processEvents()
+        assert header.sectionViewportPosition(last) + header.sectionSize(last) <= table.viewport().width()
