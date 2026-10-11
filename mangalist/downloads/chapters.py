@@ -113,8 +113,10 @@ def group_key(group: Optional[str]) -> str:
 
 def chapter_placement(series_dir: str, units: Sequence) -> Placement:
     """Where the series' new chapter archives go: the one folder its chapter files live in (the series folder itself or
-    a subfolder such as ``Chapters``); chapters spread over several folders -> ambiguous (the options, most chapters
-    first, the series folder too); no chapter files -> the series folder."""
+    a subfolder such as ``Chapters``); chapters spread over unit subfolders (``Season 01`` ... ``Season 04``, ``Part 2``)
+    -> the one holding the highest chapter, the latest season (owner, 2026-10-10), the others offered too; spread over
+    other folders -> ambiguous (the options, most chapters first, the series folder too); no chapter files -> the series
+    folder."""
     from .placement import _folder, _is_archive, _options
 
     series_dir = os.path.normpath(os.path.abspath(series_dir))
@@ -122,11 +124,16 @@ def chapter_placement(series_dir: str, units: Sequence) -> Placement:
         return Placement(series_dir, None, "the series folder is not there (moved, or its root is not mounted); "
                                            "rescan first")
     folders: Counter = Counter()
+    highest: Dict[str, Decimal] = {}
     for u in units:
         if getattr(u, "kind", None) in ("chapter", "both"):
             rel = (u.rel_path or "").replace("\\", "/").strip("/")
             if rel and _is_archive(rel):
-                folders[os.path.dirname(rel)] += 1
+                folder = os.path.dirname(rel)
+                folders[folder] += 1
+                number = to_decimal(getattr(u, "ch_to", None) or getattr(u, "ch_from", None))
+                if number is not None and number > highest.get(folder, Decimal(-1)):
+                    highest[folder] = number
     if len(folders) == 1:
         (folder,) = folders
         target = _folder(series_dir, folder)
@@ -135,11 +142,26 @@ def chapter_placement(series_dir: str, units: Sequence) -> Placement:
                                                "first")
         return Placement(series_dir, target, "chapters live in the series folder" if not folder
                          else f'chapters live in "{folder}"')
+    subs = [f for f in folders if f]
+    if len(subs) > 1 and all(_is_unit_subfolder(f.split("/")[0]) for f in subs) and highest:
+        latest = max(subs, key=lambda f: (highest.get(f, Decimal(-1)), f))
+        target = _folder(series_dir, latest)
+        if target is not None and os.path.isdir(target):
+            ordered = sorted(folders, key=lambda f: (-highest.get(f, Decimal(-1)), f))
+            return Placement(series_dir, target, f'chapters live in {len(subs)} season / part folders; new ones go to '
+                                                 f'"{latest}", the one with the latest chapters',
+                             _options(series_dir, ordered + ([""] if "" not in ordered else [])))
     if len(folders) > 1:
         ordered = [f for f, _ in sorted(folders.items(), key=lambda kv: (-kv[1], kv[0]))]
         return Placement(series_dir, None, f"chapters are spread over {len(folders)} folders; choose one",
                          _options(series_dir, ordered + ([""] if "" not in ordered else [])))
     return Placement(series_dir, series_dir, "no chapters held yet; the series folder itself")
+
+
+def _is_unit_subfolder(name: str) -> bool:
+    from ..scanner import _is_unit_subfolder as unit
+
+    return unit(name)
 
 
 def chapter_placement_for(db, series_id: int) -> Placement:
