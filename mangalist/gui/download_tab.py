@@ -64,6 +64,7 @@ from .automation_rules import bulk_find_label, by_series, has_automation, report
 from .download_rules import (
     CHAPTER_CHIPS,
     GROUP_TITLES,
+    NOT_NYAA_REASONS,
     SEARCH_FAILED,
     SEARCH_NONE,
     SEARCH_QUEUED,
@@ -762,6 +763,25 @@ class DownloadTab(QWidget):
             self._chapter_states[series.folder] = SEARCH_RUNNING
             self._refresh_statuses()
         self.chapters.open_series(sid, series.title, series.missing, series.titles or (series.title,), cached=cached)
+
+    def check_new_chapters(self, series_id: Optional[int], folder: str, title: str, titles: Sequence[str]) -> bool:
+        """"Check for new chapters" (the List's row menu; owner, 2026-10-11): the chapters panel with what the series'
+        source has after the newest chapter held - also for a series with no gaps, since MangaUpdates' latest chapter
+        (what the gaps count up to) can be behind the sites."""
+        self._show_upgrade_note(None)
+        self._delay.stop()
+        if not self.suwayomi_ready() or series_id is None:
+            self.panels.setCurrentIndex(PANEL_RELEASES)
+            ready = self.suwayomi_ready()
+            self.releases.show_message(title, NOT_NYAA_REASONS[GROUP_CHAPTERS] if not ready else
+                                       "MangaList has not scanned this folder yet: rescan first.",
+                                       None if ready else "Open Settings", None if ready else SECTION_SERVICES)
+            self.releases.subtitle_label.setText("")
+            return False
+        self._current = folder
+        self.panels.setCurrentIndex(PANEL_CHAPTERS)
+        self.chapters.open_series(series_id, title, (), tuple(titles) or (title,), newer=True)
+        return True
 
     def _on_chapter_lookup(self, series_id: int, lookup) -> None:
         folder = next((f for f, sid in self._series_ids.items() if sid == series_id), None)
