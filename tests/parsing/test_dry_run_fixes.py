@@ -266,3 +266,27 @@ def test_the_series_answer_still_decides_a_guess_with_a_qualifier():
     r = parse_name("Some Series Season 2 07.cbz", ParseContext(kind_hint="volumes"))
     assert (r.kind, str(r.volume), r.qualifier) == (Kind.VOLUME, "7", "Season 2")
     assert target_name(r, ext=".cbz", series_title="Some Series") == "Some Series Season 2 - Vol. 007.cbz"
+
+
+
+# --- owner, 2026-10-11: a chapter title ending in a number ("..., Part 2") ---------------------------------------
+
+@pytest.mark.parametrize("name, ch, title", [
+    ("Some Series 014.5  Baseball, That Is, A Game of Life and Death, Part 2.cbz", "14.5",
+     "Baseball, That Is, A Game of Life and Death, Part 2"),
+    ("Some Series 038.1  The New President, That Is, Chaos Part 1.cbz", "38.1", "The New President, That Is, Chaos Part 1"),
+    ("Some Series 050.5  Doubles Marathon, Part 1.cbz", "50.5", "Doubles Marathon, Part 1"),
+    ("Some Series 064  After The Truth.cbz", "64", "After The Truth"),
+])
+def test_a_chapter_title_ending_in_a_number_keeps_the_chapter_number(name, ch, title):
+    r = parse_name(name, ParseContext(series_title="Some Series"))
+    assert (str(r.number or r.chapter), r.title) == (ch, title)
+    # the owner answered "Chapters" for such series: then the renamer names them
+    assert _t(name, ctx=ParseContext(series_title="Some Series", kind_hint="chapters")).startswith(
+        f"Ch. {float(ch):07.2f} (")
+
+
+def test_series_titles_ending_in_a_number_stay_titles():
+    assert parse_name("Some Series 2 - The Return.cbz").title is None
+    r = parse_name("Some Series 07.cbz", ParseContext(series_title="Some Series"))
+    assert str(r.number or r.chapter) == "7"
