@@ -92,8 +92,13 @@ def test_empty_licensed_folder_without_an_english_volume_lists_the_chapters():
     # nothing to get - its chapters are what Suwayomi can get
     k = own(licensed_en=True, latest_chapter="122", english_publishers=(EnglishPublisher("Example Webtoon"),))
     s = state(inv(), k, folder_empty=True)
-    assert s.state == State.WANTED_AWAITING and s.missing_chapters == (("1", "122"),) and not s.missing_volumes
-    assert "latest chapter 122" in s.reasons[0]
+    assert s.state == State.WANTED and s.missing_chapters == (("1", "122"),) and not s.missing_volumes
+    assert "latest chapter 122" in s.reasons[0]                     # no volume announced: plain Wanted (owner)
+    it = item(volumes={"items": [vol("1", date="2027-01", kind="announced")]})
+    it["record"]["englishPublishers"] = [{"name": "Example Press", "volumes": None, "chapters": None,
+                                          "status": "Ongoing"}]
+    s = state(inv(), from_mangapixer_item(it), folder_empty=True)
+    assert s.state == State.WANTED_AWAITING                         # a volume announced: awaiting, with its date
     k = own(licensed_en=True, latest_chapter="30", english_publishers=(EnglishPublisher("Example Webtoon",
                                                                                          chapters=30),))
     s = state(inv(), k, folder_empty=True)

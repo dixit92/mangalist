@@ -16,7 +16,8 @@ The rules, in order (the full table is in the lane note):
 1. An **empty folder** is wanted (A7): licensed with an English volume (or chapter) out -> *Wanted -
    official available*; licensed with nothing out yet -> *Wanted - awaiting release* (the announced
    date when one is known); not licensed -> *Wanted - scanlation only*; nothing known -> *Wanted*.
-   Without an English volume out, every chapter up to the latest known one is a gap (Suwayomi's).
+   Without an English volume out, every chapter up to the latest known one is a gap (Suwayomi's); with
+   chapters known and no volume announced (a webtoon) the state is plain *Wanted*.
 2. **Nothing known** (no linked record, or no number to compare with) -> *Can't tell*.
 3. Gaps: **volumes** - an English volume that is out, not held as a volume and not wholly held as
    chapters is missing (in a folder that holds volumes, or holds nothing but volumes' worth); a volume
@@ -564,6 +565,9 @@ def compute_state(
             latest = f"; latest chapter {fmt_num(target)}" if target is not None else ""
             if (k.publisher_chapters or 0) > 0:
                 return finish(State.WANTED_OFFICIAL, gaps, [f"Empty folder; English chapters out{latest}"])
+            if gaps and not (upcoming_vol and upcoming_vol.english_date):
+                # chapters out and no volume announced (a webtoon): plain Wanted (owner, 2026-10-11)
+                return finish(State.WANTED, gaps, [f"Empty folder; licensed, no English volume announced{latest}"])
             when = f" (announced {upcoming_vol.english_date})" if upcoming_vol and upcoming_vol.english_date else ""
             return finish(State.WANTED_AWAITING, gaps,
                           [f"Empty folder; licensed, no English volume out yet{when}{latest}"])
