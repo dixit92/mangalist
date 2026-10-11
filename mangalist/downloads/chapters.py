@@ -480,15 +480,15 @@ class ChapterLookup:
 def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str], match: MangaMatch,
                  held: Mapping[Decimal, Sequence[str]], stored_group: Optional[str],
                  in_hand: Optional[Mapping[str, DownloadRecord]] = None,
-                 fetched: Optional[MangaChapters] = None) -> ChapterLookup:
+                 fetched: Optional[MangaChapters] = None, with_extras: bool = True) -> ChapterLookup:
     """The chapters of a confirmed *match* against the series' *missing* chapters (*fetched*: the source's list when
-    the caller has it already)."""
+    the caller has it already; *with_extras*: also offer the side chapters around them, e.g. 71.5)."""
     if fetched is None:
         fetched = client.chapters(match.manga.id)
     numbers = [d for d in (to_decimal(n) for n in missing) if d is not None]
     counts = group_counts(fetched.chapters, numbers)
     choice = default_group(counts, held, numbers, stored_group)
-    extras = extra_numbers(fetched.chapters, missing, held)
+    extras = extra_numbers(fetched.chapters, missing, held) if with_extras else ()
     rows = chapter_rows(fetched.chapters, missing, choice.group, in_hand, extras)
     queued: Tuple[str, ...] = ()
     try:

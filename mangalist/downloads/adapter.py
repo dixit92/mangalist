@@ -502,7 +502,7 @@ class Backend:
                     missing = tuple(newer_numbers(fetched.chapters, newest))
             built = build_lookup(client, series_id=series_id, missing=missing, match=found.match,
                                  held=self._held_groups(series_id), stored_group=stored.get("group"), in_hand=in_hand,
-                                 fetched=fetched)
+                                 fetched=fetched, with_extras=not newer)
             built.placement, built.placement_error = lookup.placement, lookup.placement_error
             built.notes = lookup.notes
             if newer:
