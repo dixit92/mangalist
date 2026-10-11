@@ -281,7 +281,9 @@ def test_the_series_answer_still_decides_a_guess_with_a_qualifier():
 def test_a_chapter_title_ending_in_a_number_keeps_the_chapter_number(name, ch, title):
     r = parse_name(name, ParseContext(series_title="Some Series"))
     assert (str(r.number or r.chapter), r.title) == (ch, title)
-    assert _t(name).startswith(f"Ch. {float(ch):07.2f} (")
+    # the owner answered "Chapters" for such series: then the renamer names them
+    assert _t(name, ctx=ParseContext(series_title="Some Series", kind_hint="chapters")).startswith(
+        f"Ch. {float(ch):07.2f} (")
 
 
 def test_series_titles_ending_in_a_number_stay_titles():
