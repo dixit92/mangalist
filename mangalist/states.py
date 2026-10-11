@@ -614,6 +614,22 @@ def compute_state(
             elif not v.has_chapters:
                 unmapped_for_chapters.append(v)
         reasons.append(f"{len(out_vols)} English volume(s) out")
+    elif k.licensed and held.has_volumes and not out_vols and _jp_volumes_out(k):
+        # No English volume list (the English edition is chapters in an app): the original edition's volumes whose
+        # chapters are all out in English - nyaa often has the English chapters compiled into them (owner, 2026-10-11:
+        # "if English volume list is not available but JP is, compare with JP").
+        compared = True
+        jp_out = _jp_volumes_out(k)
+        for v in jp_out:
+            vd = to_decimal(v.volume)
+            if vd is None or vd in held.volumes:
+                continue
+            if _range_held(held, to_decimal(v.chapters_from), to_decimal(v.chapters_to)):
+                gaps.append(Gap(GAP_UPGRADE, v.volume, note=f"chapters {v.chapters_from}-{v.chapters_to} held"))
+            else:
+                gaps.append(Gap(GAP_VOLUME, v.volume, note=f"original volume; chapters {v.chapters_from}-"
+                                                            f"{v.chapters_to} out in English"))
+        reasons.append(f"No English volume list: {len(jp_out)} original volume(s) whose chapters are out in English")
     elif not k.licensed and held.has_volumes and _scan_volume_total(k):
         compared = True
         total = _scan_volume_total(k)
@@ -660,7 +676,7 @@ def compute_state(
             gaps += _chapter_gaps(missing)
             chapters_checked = True
             reasons.append(f"Latest chapter {fmt_num(target)}")
-    elif target is not None and held.has_volumes and k.licensed and not out_vols:
+    elif target is not None and held.has_volumes and k.licensed and not out_vols and not _jp_volumes_out(k):
         reasons.append("No English volume list to compare with")
 
     # Owner rule (b), 2026-10-03: a chapter-only folder of a licensed series never shows Missing
@@ -716,6 +732,22 @@ def _scan_volume_total(k: SeriesKnowledge) -> Optional[Decimal]:
 
 def _span(numbers: Sequence[Decimal]) -> str:
     return fmt_num(numbers[0]) if len(numbers) == 1 else f"{fmt_num(numbers[0])}-{fmt_num(numbers[-1])}"
+
+
+def _jp_volumes_out(k: SeriesKnowledge) -> List[VolumeInfo]:
+    """The volume list's (original edition) volumes whose last chapter is out in English - the English chapter count
+    or the latest scanlated chapter, whichever is higher. A volume without a chapter range, a volume 0 (a special)
+    and every volume of a series with an English omnibus edition (numbered its own way) are not counted."""
+    target = _chapter_target(k)
+    if target is None or any(p.omnibus for p in k.english_publishers):
+        return []                               # an omnibus edition numbers its volumes its own way
+    out = []
+    for v in k.volumes or ():
+        number = to_decimal(v.volume)
+        last = to_decimal(v.chapters_to) if v.has_chapters else None
+        if number is not None and number >= 1 and last is not None and last <= target:     # volume 0: a special
+            out.append(v)
+    return out
 
 
 def _empty_folder_chapters(target: Decimal) -> List[Decimal]:
