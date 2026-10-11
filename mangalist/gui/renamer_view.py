@@ -209,6 +209,25 @@ class RenamerWindow(QDialog):
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 3)
         split.setSizes([260, 780])
+        # owner, 2026-10-11: "You should be able to set unknown as chapters or volumes from within the renamer" - the
+        # selected series' "volumes or chapters?" answer, when some of its files are bare numbers left alone for it
+        self.kind_bar = QWidget()
+        kb = QHBoxLayout(self.kind_bar)
+        kb.setContentsMargins(0, 0, 0, 6)
+        kb.setSpacing(8)
+        self.kind_label = QLabel("")
+        self.kind_label.setWordWrap(True)
+        self.btn_kind_chapters = QPushButton("Chapters")
+        self.btn_kind_chapters.setToolTip("This series' bare numbers are chapters (saved for the series, as in the List)")
+        self.btn_kind_chapters.clicked.connect(lambda: self.answer_kind("chapters"))
+        self.btn_kind_volumes = QPushButton("Volumes")
+        self.btn_kind_volumes.setToolTip("This series' bare numbers are volumes (saved for the series, as in the List)")
+        self.btn_kind_volumes.clicked.connect(lambda: self.answer_kind("volumes"))
+        kb.addWidget(self.kind_label, 1)
+        kb.addWidget(self.btn_kind_chapters)
+        kb.addWidget(self.btn_kind_volumes)
+        self.kind_bar.setVisible(False)
+        sp.addWidget(self.kind_bar)
         sp.addWidget(split, 1)
         # owner, 2026-10-10: after a library's rename every series said a small "in the scheme" - they are hidden now
         self.show_done = QCheckBox("Show series already in the scheme")
@@ -421,9 +440,36 @@ class RenamerWindow(QDialog):
         series = getattr(self, "_series", [])
         return series[row] if 0 <= row < len(series) else None
 
+    def _show_kind_bar(self, s: Optional[SeriesPreview]) -> None:
+        bare = s.needs_kind if s is not None else []
+        self.kind_bar.setVisible(bool(bare))
+        if bare:
+            example = bare[0].name
+            self.kind_label.setText(f"{_plural(len(bare), 'file')} of this series {'is a' if len(bare) == 1 else 'are'} "
+                                    f"bare number{'s' if len(bare) != 1 else ''} (e.g. {example}) - are they:")
+        enabled = not self._busy and bool(bare)
+        self.btn_kind_chapters.setEnabled(enabled)
+        self.btn_kind_volumes.setEnabled(enabled)
+
+    def answer_kind(self, kind: str) -> bool:
+        """Save the selected series' "volumes or chapters?" answer, then look again (after the library's rescan when the
+        host rescans, like after a rename)."""
+        s = self._current_series()
+        if self._busy or s is None or s.series_id is None or not s.needs_kind:
+            return False
+        if not self._renamer.answer_kind(s.series_id, kind):
+            self.result_label.setProperty("tone", "bad")
+            self.result_label.setText(f"Could not save the answer for {s.title}.")
+            return False
+        self.result_label.setProperty("tone", "ok")
+        self.result_label.setText(f"{s.title}: its bare numbers are {kind} (saved for the series).")
+        self._after_change([s.root_id] if s.root_id is not None else [])
+        return True
+
     def _show_series(self, _row: int) -> None:
         self.preview.clear()
         s = self._current_series()
+        self._show_kind_bar(s)
         if s is None:
             self._update_buttons()
             return
