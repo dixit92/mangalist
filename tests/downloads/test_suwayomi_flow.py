@@ -241,6 +241,14 @@ def test_the_whole_flow_from_mangadex_id_to_the_filed_chapters(world, caplog):
     assert all(p.exists() for p in sources)             # (recorded answers: nothing here deletes Suwayomi's files)
     assert PASSWORD not in caplog.text and PASSWORD not in message
 
+    # Filed chapters stay in hand while their files are in the library; one moved away (to be replaced from another
+    # source - owner, 2026-10-11) can be sent again.
+    assert all(r.in_hand is not None for r in backend.chapter_lookup(sid, ("1", "2"), (SERIES,)).rows)
+    moved = sdir.parent / "elsewhere.cbz"
+    (sdir / "Ch. 0001.00 Vol. 001 (Example Title 1) [Alpha Scans].cbz").rename(moved)
+    rows = {r.number: r for r in backend.chapter_lookup(sid, ("1", "2"), (SERIES,)).rows}
+    assert rows["1"].in_hand is None and rows["2"].in_hand is not None
+
 
 def test_a_title_match_on_another_source_waits_for_the_owners_confirmation(world):
     backend, session, sid, sdir = world["backend"], world["session"], world["sid"], world["dir"]
