@@ -47,7 +47,7 @@ import os
 import re
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequence, Set, Tuple
 
@@ -623,6 +623,66 @@ def request_mangapixer_scans(db, series_ids: Sequence[int]) -> str:
     return request_scans(cache, libraries).summary()
 
 
+# --- what the owner says a file holds ---------------------------------------------------------------------------
+
+UNIT_CHAPTER, UNIT_VOLUME = "chapter", "volume"
+MANUAL_REASON = "number set by you"
+_UNIT_NUMBER = r"\d+(?:\.\d+)?"
+_UNIT_RANGE = re.compile(rf"^\s*({_UNIT_NUMBER})\s*(?:-\s*({_UNIT_NUMBER}))?\s*$")
+# what an unreadable name leaves at the start of its "title": "Ch. 0017.1.5 - Short notice" -> "Short notice"
+_LEADING_UNITS = re.compile(r"^\s*(?:(?:vol(?:ume)?|ch(?:apter)?|v|c)\.?\s*\d[\d.]*[\s,]*)+(?:[-:\u2013]\s*)?",
+                            re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class FileUnits:
+    """What one file holds, as the owner says in the Renamer ("Set chapter / volume..."; owner, 2026-10-11: "I still
+    can't set volume or chapter in the rename window") - for a name the parser cannot read, e.g. one cut off after
+    ``Ch``. *volume*: a chapter's volume (None: the one the name states, else the volume list's)."""
+
+    kind: str                       # UNIT_CHAPTER | UNIT_VOLUME
+    start: Decimal
+    end: Decimal
+    volume: Optional[Decimal] = None
+
+
+def file_units(kind: str, numbers: str, volume: str = "") -> FileUnits:
+    """``("chapter", "106-110", "")`` -> :class:`FileUnits`; a ValueError says what is wrong."""
+    if kind not in (UNIT_CHAPTER, UNIT_VOLUME):
+        raise ValueError("choose chapter or volume")
+    m = _UNIT_RANGE.match(numbers or "")
+    if m is None:
+        raise ValueError("write a number (12, 12.5) or a range (106-110)")
+    start = Decimal(m.group(1))
+    end = Decimal(m.group(2)) if m.group(2) else start
+    if end < start:
+        raise ValueError("a range goes from the smaller number to the larger")
+    vol: Optional[Decimal] = None
+    if kind == UNIT_CHAPTER and (volume or "").strip():
+        vm = _UNIT_RANGE.match(volume)
+        if vm is None or vm.group(2):
+            raise ValueError("the volume is one number")
+        vol = Decimal(vm.group(1))
+    return FileUnits(kind, start, end, vol)
+
+
+def with_units(parsed: Any, units: FileUnits, name: str) -> Any:
+    """*parsed* (the parser's reading of *name*, or None) with the units the owner set; its title and group stay."""
+    from .parsing.model import Kind, ParsedName, UnitRange
+
+    base = parsed if parsed is not None else ParsedName(name=name)
+    rng = UnitRange(units.start, units.end)
+    title = _LEADING_UNITS.sub("", base.title).strip() if base.title else ""
+    common = dict(number=None, is_extra=False, guessed=False, ambiguous=False, title=title or None)
+    if units.kind == UNIT_VOLUME:
+        return replace(base, kind=Kind.VOLUME, volume=rng, chapter=None, **common)
+    if units.volume is not None:
+        vol = UnitRange(units.volume, units.volume)
+    else:                                   # blank: the volume the name states (one), else the volume list's
+        vol = base.volume if base.volume is not None and not base.volume.is_range else None
+    return replace(base, kind=Kind.CHAPTER, chapter=rng, volume=vol, **common)
+
+
 class Renamer:
     """The renamer's actions over one library database. Every method may block (disk, database, MangaPixer): the GUI
     calls them off the UI thread.
@@ -646,6 +706,19 @@ class Renamer:
         self._rescan = rescan
         self._request_scans = request_scans
         self.batch_size = max(1, int(batch_size))
+        self._manual: Dict[str, FileUnits] = {}         # path -> what the owner says it holds (this session)
+
+    def set_file_units(self, path: str, units: Optional[FileUnits]) -> None:
+        """What *path* holds, as the owner says (None forgets it): the next preview names it by these numbers. Kept for
+        this Renamer only - once renamed, the file's new name says it."""
+        key = os.path.normpath(str(path))
+        if units is None:
+            self._manual.pop(key, None)
+        else:
+            self._manual[key] = units
+
+    def file_units(self, path: str) -> Optional[FileUnits]:
+        return self._manual.get(os.path.normpath(str(path)))
 
     # --- small helpers --------------------------------------------------------------------------------------------
 
@@ -716,7 +789,11 @@ class Renamer:
                 size = os.path.getsize(path)
             except OSError:
                 size = 0
-            out.append((path, parse_name(os.path.basename(path), ctx, file_size=size)))
+            parsed = parse_name(os.path.basename(path), ctx, file_size=size)
+            units = self._manual.get(os.path.normpath(path))
+            if units is not None:
+                parsed = with_units(parsed, units, os.path.basename(path))
+            out.append((path, parsed))
         return out
 
     def _preview(self, root, series, files: Sequence[Tuple[str, Any]], limits: Any) -> SeriesPreview:
@@ -733,6 +810,10 @@ class Renamer:
             return preview
         preview.files = plan_files(files, namer=self.namer, series_title=title, volume_of=self._volume_of(series.id),
                                    limits=limits)
+        if self._manual:
+            preview.files = [replace(f, reason=f.reason or MANUAL_REASON)
+                             if f.status in (RENAME, UNCHANGED) and os.path.normpath(f.path) in self._manual else f
+                             for f in preview.files]
         return preview
 
     def preview_series(self, series_id: int) -> SeriesPreview:

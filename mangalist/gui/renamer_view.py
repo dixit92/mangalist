@@ -25,15 +25,21 @@ from typing import Callable, List, Optional, Sequence, Set, Tuple
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QSplitter,
     QTabWidget,
     QTreeWidget,
@@ -42,7 +48,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..renamer import COLLISION, LEFT_ALONE, RENAME, UNCHANGED, BatchRecord, BatchResult, DryRun, SeriesPreview
+from ..renamer import (
+    COLLISION,
+    LEFT_ALONE,
+    RENAME,
+    UNCHANGED,
+    UNIT_CHAPTER,
+    UNIT_VOLUME,
+    BatchRecord,
+    BatchResult,
+    DryRun,
+    FileUnits,
+    SeriesPreview,
+    file_units,
+)
 from .download_widgets import ROLE_CHIPS, ROLE_SUB, TwoLineDelegate
 
 _log = logging.getLogger(__name__)
@@ -105,6 +124,73 @@ class Scope:
 
 
 Runner = Callable[[Callable[[], object], Callable[[object], None], Callable[[str], None]], object]
+
+
+ROLE_PATH = Qt.ItemDataRole.UserRole + 1     # the file's path on a preview row
+
+
+def _number_text(start, end) -> str:
+    def one(d):
+        return format(d.normalize(), "f") if d != d.to_integral_value() else str(int(d))
+    return one(start) if end == start else f"{one(start)}-{one(end)}"
+
+
+class UnitsDialog(QDialog):
+    """ "Set chapter / volume...": what one file holds (owner, 2026-10-11: "I still can't set volume or chapter in the
+    rename window"). The answer is ``(kind, numbers, volume)`` as typed; :func:`mangalist.renamer.file_units` checks it."""
+
+    def __init__(self, name: str, current: Optional[FileUnits] = None, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Set chapter / volume")
+        lay = QVBoxLayout(self)
+        intro = QLabel(f"What does this file hold?\n{name}")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        self.rb_chapter = QRadioButton("Chapter")
+        self.rb_volume = QRadioButton("Volume")
+        group = QButtonGroup(self)
+        group.addButton(self.rb_chapter)
+        group.addButton(self.rb_volume)
+        kinds = QHBoxLayout()
+        kinds.addWidget(self.rb_chapter)
+        kinds.addWidget(self.rb_volume)
+        kinds.addStretch(1)
+        lay.addLayout(kinds)
+        form = QFormLayout()
+        self.numbers = QLineEdit()
+        self.numbers.setPlaceholderText("12, 12.5 or 106-110")
+        self.volume = QLineEdit()
+        self.volume.setPlaceholderText("blank: the name's, else the volume list's")
+        form.addRow("Number", self.numbers)
+        form.addRow("Its volume", self.volume)
+        lay.addLayout(form)
+        self.error = QLabel("")
+        self.error.setProperty("role", "muted")
+        lay.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.rb_chapter.toggled.connect(lambda on: self.volume.setEnabled(on))
+        is_volume = current is not None and current.kind == UNIT_VOLUME
+        (self.rb_volume if is_volume else self.rb_chapter).setChecked(True)
+        self.volume.setEnabled(not is_volume)
+        if current is not None:
+            self.numbers.setText(_number_text(current.start, current.end))
+            if current.volume is not None:
+                self.volume.setText(_number_text(current.volume, current.volume))
+
+    def answer(self) -> Tuple[str, str, str]:
+        kind = UNIT_VOLUME if self.rb_volume.isChecked() else UNIT_CHAPTER
+        return kind, self.numbers.text(), self.volume.text() if kind == UNIT_CHAPTER else ""
+
+    def _accept(self) -> None:
+        try:
+            file_units(*self.answer())
+        except ValueError as exc:
+            self.error.setText(str(exc).capitalize() + ".")
+            return
+        self.accept()
 
 
 def _thread_runner(fn, on_done, on_error):
@@ -204,6 +290,8 @@ class RenamerWindow(QDialog):
         self.preview.setUniformRowHeights(True)
         self.preview.setColumnWidth(0, 360)
         self.preview.setColumnWidth(1, 360)
+        self.preview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.preview.customContextMenuRequested.connect(self._on_preview_menu)
         split.addWidget(self.series_list)
         split.addWidget(self.preview)
         split.setStretchFactor(0, 1)
@@ -484,6 +572,8 @@ class RenamerWindow(QDialog):
                 "(as it is)" if f.status != UNCHANGED else prefix + f.name)
             what = STATUS_TEXT[f.status] + (f": {f.reason}" if f.reason and f.status != COLLISION else
                                             f" - {f.reason}" if f.reason else "")
+            if f.status == LEFT_ALONE and not f.needs_kind:
+                what += " - right-click to set its chapter or volume"
             flags = [t for t, on in (("title shortened", f.title_cut), ("group shortened", f.group_cut),
                                      ("title holds a volume / chapter word", f.unit_words)) if on]
             if flags and f.status == RENAME:
@@ -495,6 +585,7 @@ class RenamerWindow(QDialog):
             item.setToolTip(0, f.path)
             item.setToolTip(2, what)
             item.setData(0, Qt.ItemDataRole.UserRole, f.status)
+            item.setData(0, ROLE_PATH, f.path)
             self.preview.addTopLevelItem(item)
         self._update_buttons()
 
@@ -524,6 +615,52 @@ class RenamerWindow(QDialog):
             self.notes.addTopLevelItem(top)
             top.setExpanded(len(found) <= 20)
         self.tabs.setTabText(1, f"To check ({total})" if total else "To check")
+
+    # --- one file's numbers ---------------------------------------------------------------------------------------
+
+    def _exec_menu(self, menu: QMenu, pos):
+        return menu.exec(pos)
+
+    def _ask_units(self, name: str, current: Optional[FileUnits]) -> Optional[Tuple[str, str, str]]:
+        dialog = UnitsDialog(name, current, self)
+        return dialog.answer() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+    def _on_preview_menu(self, pos) -> None:
+        item = self.preview.itemAt(pos)
+        path = item.data(0, ROLE_PATH) if item is not None else None
+        if not path or self._busy or not callable(getattr(self._renamer, "set_file_units", None)):
+            return
+        menu = QMenu(self.preview)
+        act_set = menu.addAction("Set chapter / volume…")
+        act_set.setToolTip("Say which chapter or volume this file holds; it is then named by the scheme")
+        act_forget = (menu.addAction("Forget the number I set") if self._renamer.file_units(path) is not None
+                      else None)
+        chosen = self._exec_menu(menu, self.preview.viewport().mapToGlobal(pos))
+        if chosen is act_set:
+            self.set_units_for(path)
+        elif act_forget is not None and chosen is act_forget:
+            self._renamer.set_file_units(path, None)
+            self.refresh()
+
+    def set_units_for(self, path: str) -> bool:
+        """Ask what *path* holds, then look again: the file shows the scheme's name for it, to rename with the rest."""
+        if self._busy:
+            return False
+        answer = self._ask_units(os.path.basename(path), self._renamer.file_units(path))
+        if answer is None:
+            return False
+        try:
+            units = file_units(*answer)
+        except ValueError:
+            return False
+        self._renamer.set_file_units(path, units)
+        kind, numbers, volume = answer
+        self.result_label.setProperty("tone", "ok")
+        self.result_label.setText(f"{os.path.basename(path)}: {kind} {numbers.strip()}"
+                                  + (f" of volume {volume.strip()}" if volume.strip() else "")
+                                  + " - check its new name, then Rename.")
+        self.refresh()
+        return True
 
     # --- acting -------------------------------------------------------------------------------------------------
 
