@@ -102,3 +102,53 @@ def test_a_folder_that_cannot_be_opened_says_so_and_points_at_the_path(qapp, db,
     assert page.open_log_folder() is False
     assert "Could not open" in page.folder_status.text() and "copy it" in page.folder_status.text()
     assert page.folder_status.property("tone") == "bad"
+
+
+def test_view_logs_opens_the_viewer_for_the_window_the_page_is_in(qapp, db, logs):
+    asked = []
+    page = make(db, view_logs=lambda owner: asked.append(owner) or "viewer")
+    try:
+        assert page.btn_view.text() == "View logs" and page.btn_view.property("primary") is True
+        page.btn_view.click()
+        assert asked == [page.window()] and page.viewer == "viewer"
+        page.stop()                                                       # not a real viewer: nothing to move
+        assert page.viewer is None
+    finally:
+        page.deleteLater()
+
+
+def test_the_viewer_outlives_settings_and_moves_to_the_main_window(qapp, db, logs):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
+
+    from mangalist.gui import log_viewer
+
+    from .conftest import wait_until
+
+    logging.getLogger("mangalist.scanner").warning("something to show")
+    for h in logging.getLogger().handlers:
+        h.flush()
+    main = QWidget()
+    dialog = QDialog(main)
+    page = make(db)
+    QVBoxLayout(dialog).addWidget(page)
+    viewer = None
+    try:
+        viewer = page.view_logs()                                         # the real one, real background reads
+        assert isinstance(viewer, log_viewer.LogViewer) and viewer.parentWidget() is dialog
+        wait_until(qapp, lambda: not viewer._busy)
+        assert viewer.path == paths.log_dir() / "mangalist.log"
+        assert any("something to show" in row[0] for row in viewer.model.rows)
+        assert page.view_logs() is viewer, "a second click brings the same window up"
+        page.stop()                                                       # Settings closes
+        assert viewer.parentWidget() is main and viewer.isVisible()
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        assert log_viewer.current_viewer() is viewer, "deleting Settings does not take the viewer with it"
+    finally:
+        if viewer is not None and log_viewer.current_viewer() is viewer:
+            wait_until(qapp, lambda: not viewer._busy)
+            viewer.close()
+        main.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()

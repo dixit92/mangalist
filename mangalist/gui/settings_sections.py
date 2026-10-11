@@ -776,18 +776,35 @@ LOG_LEVEL_HELP = {
 
 
 class LoggingPage(SectionPage):
-    """The log level (one for the app and the container's runner: both read the same settings), optional levels per
-    area, the size of the files, and the log folder. Every change is stored and applied at once (no Save)."""
+    """The log viewer (View logs), the log level (one for the app and the container's runner: both read the same
+    settings), optional levels per area, the size of the files, and the log folder. Every change is stored and
+    applied at once (no Save)."""
 
     def __init__(self, db, parent: Optional[QWidget] = None, env: Optional[Mapping[str, str]] = None,
                  open_folder: Optional[Callable[[str], object]] = None,
-                 copy_text: Optional[Callable[[str], object]] = None):
+                 copy_text: Optional[Callable[[str], object]] = None,
+                 view_logs: Optional[Callable[[Optional[QWidget]], object]] = None):
         super().__init__("Logging", LOGGING_LEAD, parent)
         self._db = db
         self._env = env
         self._loading = True
         self._open_folder = open_folder or (lambda folder: QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
         self._copy_text = copy_text or (lambda text: QApplication.clipboard().setText(text))
+        self._view_logs = view_logs
+        self.viewer = None
+
+        viewer = card("true")
+        vv = QVBoxLayout(viewer)
+        vv.setContentsMargins(20, 16, 20, 16)
+        vv.setSpacing(8)
+        vv.addWidget(label("Log viewer", "name"))
+        vv.addWidget(label("Read the app's log and the scheduled jobs' log here: newest lines at the bottom, "
+                           "following live, with filters for the level, the part of the app and a search. "
+                           "Nothing in the files is changed.", "muted", wrap=True))
+        self.btn_view = button("View logs", primary=True)
+        self.btn_view.setAccessibleName("View logs")
+        vv.addLayout(hbox(self.btn_view, None))
+        self.body.addWidget(viewer)
 
         box = card("true")
         bv = QVBoxLayout(box)
@@ -869,6 +886,7 @@ class LoggingPage(SectionPage):
         self.keep_spin.valueChanged.connect(self._changed)
         self.btn_open.clicked.connect(self.open_log_folder)
         self.btn_copy.clicked.connect(self.copy_log_folder)
+        self.btn_view.clicked.connect(self.view_logs)
         self._loading = False
 
     def refresh(self) -> None:
@@ -926,3 +944,25 @@ class LoggingPage(SectionPage):
 
     def on_show(self) -> None:
         self.refresh()
+
+    def view_logs(self):
+        """Open the log viewer (one window; a second click brings it to the front). It belongs to the Settings
+        window while that is open (Settings is modal), and moves to the main window when Settings closes."""
+        if self._view_logs is not None:
+            self.viewer = self._view_logs(self.window())
+        else:
+            from .log_viewer import open_log_viewer
+
+            self.viewer = open_log_viewer(self.window())
+        return self.viewer
+
+    def stop(self) -> None:
+        viewer, self.viewer = self.viewer, None
+        if viewer is None or not hasattr(viewer, "move_to"):
+            return
+        try:
+            from shiboken6 import isValid
+        except ImportError:  # pragma: no cover - shiboken ships with PySide6
+            isValid = bool  # noqa: N806
+        if isValid(viewer) and viewer.parentWidget() is self.window():
+            viewer.move_to(self.window().parentWidget())        # outlives Settings, owned by the main window
