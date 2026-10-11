@@ -340,6 +340,7 @@ def test_check_for_new_chapters_lists_the_sources_chapters_after_the_newest_held
     assert lookup.newer and lookup.newer_than == "4" and lookup.error is None
     assert lookup.missing == ("331", "332", "333", "334", "335", "953.5", "953.6")       # 1-2 (older) left out
     assert {r.number for r in lookup.available} == set(lookup.missing) and not lookup.candidates
+    assert not any(r.extra for r in lookup.rows)                     # older side chapters are not "new"
     assert session.names().count("MangaListChapters") == 1                              # one fetch
     # nothing newer: no "MangaDex has none" detour to the other sources
     session.answers["MangaListSources"] = with_other_source()
