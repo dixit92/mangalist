@@ -90,14 +90,18 @@ class TestExtractSubseries:
         sub1.mkdir()
         _create_fake_archive(sub1, "Ch.10.cbz")
 
-        sub2 = parent / "Volume 1"  # Should be included
+        sub2 = parent / "Volume 1"  # a unit of the parent (MangaPixer's rule, 2026-10-10): skipped too
         sub2.mkdir()
         _create_fake_archive(sub2, "Vol.1.cbz")
+
+        sub3 = parent / "Another Work"  # Should be included
+        sub3.mkdir()
+        _create_fake_archive(sub3, "Vol.1.cbz")
 
         entries = _extract_subseries(parent, "Manga", 0.0)
 
         assert len(entries) == 1
-        assert entries[0].title == "Volume 1"
+        assert entries[0].title == "Another Work"
 
     def test_skip_extras_subdir(self, tmp_path: Path):
         """Skip subdirectories named 'Extras', 'Bonus', 'Specials', 'Omake'."""
@@ -152,8 +156,8 @@ class TestScanRootFranchise:
         # Direct file in parent
         _create_fake_archive(franchise, "Vol.1.cbz")
 
-        # Subseries
-        sub = franchise / "Side Story"
+        # Subseries ("Side Story" would be a unit of the parent - MangaPixer's rule)
+        sub = franchise / "Spin-off Work"
         sub.mkdir()
         _create_fake_archive(sub, "Vol.1.cbz")
 
@@ -163,10 +167,10 @@ class TestScanRootFranchise:
         assert len(entries) == 2
         titles = {e.title for e in entries}
         assert "Big Series" in titles
-        assert "Side Story" in titles
+        assert "Spin-off Work" in titles
 
         # Subseries should have parent marked
-        sub_entry = next(e for e in entries if e.title == "Side Story")
+        sub_entry = next(e for e in entries if e.title == "Spin-off Work")
         assert sub_entry.parent_folder == franchise
 
     def test_normal_folder_unchanged(self, tmp_path: Path):
