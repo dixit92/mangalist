@@ -26,6 +26,7 @@ No Qt here.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -203,10 +204,13 @@ def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer
                     (old.signature, old.last_seen_scan)).fetchone():
                 rep.ambiguous += 1           # CopiedElsewhere: a live copy appeared after it was last seen
                 continue
-            cur = con.execute("UPDATE archives SET root_id = ?, rel_path = ?, series_id = ?, size = ?, mtime_ns = ?,"
-                              " status = 'present', missing_since = NULL, last_seen_at = ?, last_seen_scan = ?"
-                              " WHERE id = ? AND status = 'missing'",
-                              (ob.root_id, ob.rel_path, ob.series_id, ob.size, ob.mtime_ns, stamp, rev, old.id))
+            try:
+                cur = con.execute("UPDATE archives SET root_id = ?, rel_path = ?, series_id = ?, size = ?,"
+                                  " mtime_ns = ?, status = 'present', missing_since = NULL, last_seen_at = ?,"
+                                  " last_seen_scan = ? WHERE id = ? AND status = 'missing'",
+                                  (ob.root_id, ob.rel_path, ob.series_id, ob.size, ob.mtime_ns, stamp, rev, old.id))
+            except sqlite3.IntegrityError:
+                continue                     # another scan (the GUI's or the runner's) recorded that path meanwhile
             if cur.rowcount != 1:
                 continue
             mv = ArchiveMove(old.id, old.root_id, old.rel_path, ob.root_id, ob.rel_path, old.series_id, ob.series_id, "scan")
@@ -216,9 +220,14 @@ def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer
         for ob in new_obs:
             if id(ob) in paired_obs:
                 continue
+            # ON CONFLICT: another scan recorded the same new file between this one's read and write (the GUI and
+            # the headless runner rescan at once after a filing, 2026-10-11) - it is present, seen now
             con.execute("INSERT INTO archives (root_id, series_id, rel_path, size, mtime_ns, signature, status,"
                         " first_seen_at, last_seen_at, first_seen_scan, last_seen_scan)"
-                        " VALUES (?,?,?,?,?,?, 'present', ?, ?, ?, ?)",
+                        " VALUES (?,?,?,?,?,?, 'present', ?, ?, ?, ?)"
+                        " ON CONFLICT(root_id, rel_path) DO UPDATE SET status = 'present', missing_since = NULL,"
+                        " series_id = excluded.series_id, last_seen_at = excluded.last_seen_at,"
+                        " last_seen_scan = excluded.last_seen_scan",
                         (ob.root_id, ob.series_id, ob.rel_path, ob.size, ob.mtime_ns, ob.signature, stamp, stamp, rev, rev))
             rep.archives_new += 1
     if rep.moves:
