@@ -212,6 +212,34 @@ def held_chapter_span(db, series_id: int) -> Tuple[Optional[Decimal], bool]:
     return newest, volumes
 
 
+def newest_held_chapter(db, series_id: int) -> Tuple[Optional[Decimal], str]:
+    """The newest chapter the series holds - in a chapter file, or at the end of its newest volume by MangaPixer's
+    volume list (owner, 2026-10-11: "Can I check for new chapters on a volumes-based series") - and, when it cannot be
+    told, why ('' otherwise)."""
+    from .placement import locate_series, series_units
+
+    newest, _volumes = held_chapter_span(db, series_id)
+    series, _root, _dir = locate_series(db, series_id)
+    tops = [to_decimal(u.vol_to or u.vol_from) for u in series_units(db, series)
+            if getattr(u, "kind", None) in ("volume", "both")]
+    tops = [t for t in tops if t is not None]
+    if not tops:
+        return newest, "" if newest is not None else "no file of this series states a chapter number"
+    top = max(tops)
+    from ..upgrades import _knowledge_volumes
+
+    listed, why = _knowledge_volumes(db, series)
+    ends = [to_decimal(v.chapters_to) for v in listed or () if v.has_chapters
+            and (to_decimal(v.volume) or Decimal(-1)) <= top]
+    ends = [e for e in ends if e is not None]
+    if ends and (newest is None or max(ends) > newest):
+        newest = max(ends)
+    if newest is None:
+        return None, (f"the volume list does not say which chapter volume {top} ends with"
+                      if not why else f"{why}, so the chapter volume {top} ends with is not known")
+    return newest, ""
+
+
 def newer_numbers(chapters: Sequence[SuwayomiChapter], newest: Optional[Decimal]) -> List[str]:
     """The chapter numbers the source lists after *newest* (all of them when None), oldest first, each once in the
     source's own spelling; a chapter without a number is left out."""

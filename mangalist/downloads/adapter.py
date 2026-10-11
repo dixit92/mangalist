@@ -78,9 +78,9 @@ from .chapters import (
     chapter_placement_for,
     find_manga,
     held_chapter_groups,
-    held_chapter_span,
     mangadex_id_for,
     newer_numbers,
+    newest_held_chapter,
     send_chapters,
     title_candidates,
 )
@@ -505,13 +505,12 @@ class Backend:
             if newer:
                 fetched = client.chapters(found.match.manga.id)
                 try:
-                    newest, volumes_only = held_chapter_span(self.db, series_id)
+                    newest, why = newest_held_chapter(self.db, series_id)
                 except LookupError:
-                    newest, volumes_only = None, False
-                if newest is None and volumes_only:
+                    newest, why = None, ""
+                if newest is None and why and why != "no file of this series states a chapter number":
                     missing = ()
-                    lookup.notes.append("this series holds volumes only, so there is no newest chapter to compare "
-                                        "with")
+                    lookup.notes.append(why)
                 else:
                     missing = tuple(newer_numbers(fetched.chapters, newest))
             built = build_lookup(client, series_id=series_id, missing=missing, match=found.match,

@@ -134,3 +134,18 @@ def test_the_in_progress_list_has_no_torrent_menu_for_chapters(qapp, monkeypatch
     assert menus == []
     tab.show_group(GROUP_CHAPTERS)
     assert tab.status_of(FOLDER) == "Filed ch 41"
+
+
+def test_a_to_get_row_menu_checks_a_volume_series_for_new_chapters(qapp):
+    # owner, 2026-10-11: "Can I check for new chapters on a volumes-based series within the download view?"
+    tab, backend = make(qapp)
+    tab.show_group(GROUP_VOLUMES)
+    row = next(tab.tree.topLevelItem(i) for i in range(tab.tree.topLevelItemCount())
+               if tab.tree.topLevelItem(i).data(0, dt.ROLE_FOLDER) == "/lib/Oshi no Ko")
+    menus = []
+    tab._exec_menu = lambda menu, pos: menus.append([a.text() for a in menu.actions()]) or menu.actions()[0]
+    tab._on_tree_menu(tab.tree.visualItemRect(row).center())
+    assert menus == [["Check for new chapters…"]]
+    settle(qapp, tab)
+    assert backend.lookups[-1][0] == 3 and backend.lookups[-1][-1] == "newer"
+    assert tab.panels.currentIndex() == dt.PANEL_CHAPTERS and tab.current_folder() == "/lib/Oshi no Ko"
