@@ -10,9 +10,10 @@ parsed again from their names with exactly the scanner's context (the folder tit
 "volumes or chapters?" answer - :func:`mangalist.scanner._parse_context` + :func:`mangalist.classifier.annotate_file`), so
 the rebuilt :class:`~mangalist.models.MangaEntry` reads the same as the scanned one: the same inventory, the same
 "volumes or chapters?" question (a guessed chapter is not in the ``units`` rows, so those are not used), the same
-numbering-restart rule (season subfolders). Why not walk the disk again: the rescan just did, a second walk of a large
-library costs minutes on spinning disks (the database costs well under a second), and the List shows what the last scan
-recorded too.
+numbering-restart rule (season subfolders). Why not walk the disk again: the rescan just did, a second walk wakes the
+array's disks and takes as long as the rescan itself, and the List shows what the last scan recorded too. A folder that
+changed since the last scan is read at the next one (the same as the List). Cost: about 5 s for 700 series with 22,000
+archives on the dev box, half of it ``pathlib`` in the inventory and the restart rule (shared with the window).
 
 **One implementation.** The window's state providers (``MainWindow._mp_item_for`` / ``_knowledge_for`` /
 ``_inventory_for``), the table model's ``_evaluate`` and the window's ``_rebuild_wanted`` loop call the functions below;
