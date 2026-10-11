@@ -7,6 +7,18 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.20] - 2026-10-11
+
+The nineteenth MangaList release (testing build): chapters moved away can be sent again, four file-name readings fixed, "volumes or chapters?" answered in the Renamer, and a finished series held as all its volumes is Complete.
+
+- **Chapters moved away can be sent again.** After 2026.10.19 the chapters panel let them be ticked, but Send still skipped them as "already sent": the send's own check counted every filed download. Both now count a filed chapter only while its file is in the series folder.
+- **Chapter 100 onwards before its volume** (`<Series> 100 Vol 11 <title>`) is a chapter: before, only a zero-padded number counted, so chapter 100 onwards read as the volume and collided. Short or year-like numbers (`<Series> 2049 v01`) stay part of the title.
+- **A chapter title ending in a number** (`<Series> 014.5  <title>, Part 2`) keeps its chapter number (it read as chapter 2).
+- **A padded sub-number** (`Ch.014.005`) is chapter 14.5, as the sites that write it mean (`021.010` is 21.1).
+- **Answer "volumes or chapters?" in the Renamer.** A series whose files are bare numbers left alone for that answer shows "are they: Chapters / Volumes" in the Renamer window; the answer is the same one the List asks for.
+- **A site's watermark** at the end of a name ("Read Online", "Read Manga Online", "Read Free", "Online Free") is left out when the name is read.
+- **Every volume of a finished series held is Complete**, also when the volume list maps only the first volumes and MangaUpdates counts chapters differently (a 4-koma counted in strips showed "Missing chapters 261-717"). With MangaUpdates saying the translation is complete, a series with no English edition is compared with its original volume count.
+
 ## [2026.10.19] - 2026-10-11
 
 The eighteenth MangaList release (testing build): season and part subfolders belong to their series, and a filed chapter that left the library can be downloaded again.
