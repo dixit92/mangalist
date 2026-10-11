@@ -61,6 +61,16 @@ def make_window(qapp, monkeypatch):
         monkeypatch.setattr(mw.MainWindow, "_make_volumes_backend", lambda self: backend)
         from mangalist.gui import background as bg
 
+        # Every GUI module first, with the real runner: a module first imported inside the patch below would keep
+        # the synchronous runner for the rest of the session (`from .background import start_call`), and later test
+        # files would run synchronously - CI's single process failed test_volumes_window that way.
+        import importlib
+        import pkgutil
+
+        import mangalist.gui as gui
+
+        for module in pkgutil.iter_modules(gui.__path__):
+            importlib.import_module(f"mangalist.gui.{module.name}")
         with monkeypatch.context() as patch:            # the window's own runner, at once from the start
             patch.setattr(bg, "start_call", _sync)
             win = mw.MainWindow()

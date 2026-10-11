@@ -261,6 +261,8 @@ def test_copy_selected_lines_with_the_button_and_ctrl_c(make):
     sel.clearSelection()
     sel.select(viewer.model.index(0, 0), QItemSelectionModel.SelectionFlag.Select)
     QTest.keyClick(viewer.view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    # Qt keeps Ctrl "held" after a modified key click; let it go, or later tests' clicks extend selections
+    QTest.keyRelease(viewer.view, Qt.Key.Key_Control)
     assert copied[-1] == APP_LINES[0]
     sel.clearSelection()
     assert viewer.copy_selected() == 0 and len(copied) == 2
