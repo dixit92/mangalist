@@ -219,6 +219,29 @@ def test_a_failed_lookup_offers_change_source_on_every_allowed_source(qapp):
     assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS and "confirmed by you" in panel.match_label.text()
 
 
+def test_check_for_new_chapters_lists_what_the_source_has_after_the_newest_held(qapp):
+    # owner, 2026-10-11: a chapter was out on the sites, MangaUpdates did not list it yet, the series was Up to date
+    panel, backend, _ = make(qapp)
+    panel.open_series(4, "Example Webcomic", (), ("Example Webcomic",), newer=True)
+    settle(qapp, panel)
+    assert backend.lookups[-1] == (4, (), ("Example Webcomic",), "newer")
+    assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS
+    assert "New on the source: ch 42-43 (after ch 41)" in panel.subtitle_label.text()
+    assert [r[1] for r in table(panel)] == ["42", "43"] and panel.picks()
+    panel.look_up_again()                                             # Refresh keeps the mode
+    settle(qapp, panel)
+    assert backend.lookups[-1][-1] == "newer"
+    backend.newer_found = ()
+    panel.look_up_again()
+    settle(qapp, panel)
+    assert panel.stack.currentIndex() == cp.PAGE_MESSAGE
+    assert "MangaDex (EN) has nothing newer than ch 41" in panel.message_text.text()
+    assert not panel.btn_other.isHidden() and not panel.btn_again.isHidden()
+    panel.open_series(4, "Example Webcomic", MISSING, ("Example Webcomic",))   # an ordinary lookup again
+    settle(qapp, panel)
+    assert backend.lookups[-1] == (4, MISSING, ("Example Webcomic",)) and "Missing ch 41-44" in panel.subtitle_label.text()
+
+
 def test_an_ambiguous_folder_must_be_chosen_and_a_cached_lookup_is_shown_at_once(qapp):
     panel, backend, _ = make(qapp)
     placement = Placement(FOLDER, None, "chapters are in two folders", options=(FOLDER, FOLDER + "/Side"))

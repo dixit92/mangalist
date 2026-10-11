@@ -56,6 +56,7 @@ from .table_model import (
     COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label, state_matches,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
+from .volumes_target import search_titles
 from .links import open_link
 
 
@@ -695,6 +696,24 @@ class MainWindow(QMainWindow):
         self.show_tab(TAB_DOWNLOAD)
         self._download_tab.focus(folder)
         return True
+
+    def check_new_chapters(self, folder: str) -> bool:
+        """"Check for new chapters": switch to the Download tab with the chapters panel asking *folder*'s source for
+        chapters newer than the newest one held (owner, 2026-10-11: a chapter out on the sites before MangaUpdates
+        lists it)."""
+        if self._download_tab is None:
+            return False
+        row = self._row_for_folder(folder)
+        entry = self._model.entry_at(row) if row is not None else None
+        if entry is None:
+            return False
+        knowledge = self._model.knowledge_at(row)
+        own = (entry.english_title, entry.title)
+        titles = (search_titles(knowledge, *own) if knowledge is not None
+                  else tuple(dict.fromkeys(t.strip() for t in own if t and t.strip())))
+        series_id = self._volumes.series_id_for(entry) if self._volumes is not None else None
+        self.show_tab(TAB_DOWNLOAD)
+        return self._download_tab.check_new_chapters(series_id, folder, entry.title, titles)
 
     def _row_for_folder(self, folder: str) -> Optional[int]:
         for r in range(self._model.rowCount()):
@@ -1746,7 +1765,7 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self._table)
         act_kind = None
-        act_get = None
+        act_get = act_new = None
         act_dupes = act_mangapixer = None
         act_exclude = None
         act_rename = act_rename_library = None
@@ -1781,6 +1800,9 @@ class MainWindow(QMainWindow):
                 act_get.setEnabled(bool(groups))
                 act_get.setToolTip("Open this series in the Download tab" if groups else
                                    "Nothing missing: no gaps to download")
+                act_new = menu.addAction("Check for new chapters…")
+                act_new.setToolTip("Ask the series' Suwayomi source for chapters newer than the newest one you have - "
+                                   "also before MangaUpdates lists them")
                 menu.setToolTipsVisible(True)
             vols, chs = self._model.duplicate_files_at(rows[0])
             if vols or chs:
@@ -1867,6 +1889,8 @@ class MainWindow(QMainWindow):
             self._open_in_explorer(entries[0].folder)
         elif chosen is act_get and act_get is not None:
             self.get_missing(str(entries[0].folder))
+        elif chosen is act_new and act_new is not None:
+            self.check_new_chapters(str(entries[0].folder))
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)
         elif chosen is act_confirm_mu:
