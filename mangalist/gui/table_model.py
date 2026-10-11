@@ -8,16 +8,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
-from ..knowledge import (LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, fmt_num, from_own_matcher,
-                         to_decimal)
+from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, from_own_matcher
 from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 from ..official_sources import KIND_SEARCH, official_links, primary_label
 from .list_text import english_text
 from .shell import DuplicateSeries
-from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, State, compute_state, \
-    fallback_inventory_from_entry
+from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, State, fallback_inventory_from_entry
+from ..wanted import evaluate, held_volumes
 
 COLUMNS = [
     "✓",
@@ -195,13 +194,9 @@ class MangaTableModel(QAbstractTableModel):
         e = self.entry_at(row)
         if e is None:
             return None
-        knowledge = self._knowledge_for(e) or from_own_matcher(e)
-        inventory = self._inventory_for(e)
-        if inventory is None:
-            inventory = fallback_inventory_from_entry(e)
-        st = compute_state(inventory, knowledge, folder_empty=e.n_files == 0, needs_kind=self._needs_kind_for(e),
-                           rename_count=self._rename_counts.get(str(e.folder), 0),
-                           behind_override=e.behind_override, today=self._today, restarts=e.restarting_units)
+        st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
+                                 needs_kind=self._needs_kind_for(e),
+                                 rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today)
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
         self._state_cache[row] = (st, links, knowledge)
         return st, links, knowledge
@@ -224,9 +219,7 @@ class MangaTableModel(QAbstractTableModel):
         e = self.entry_at(row)
         if e is None:
             return ()
-        inventory = self._inventory_for(e) or fallback_inventory_from_entry(e)
-        nums = [d for d in (to_decimal(v) for v in inventory.held_volumes) if d is not None]
-        return tuple(fmt_num(d) for d in sorted(set(nums)))
+        return held_volumes(self._inventory_for(e) or fallback_inventory_from_entry(e))
 
     def held_chapters_at(self, row: int) -> Tuple[Any, ...]:
         """The chapters *row*'s folder holds as chapter archives (numbers, or ``(from, to)`` for a range archive)."""
