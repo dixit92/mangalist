@@ -372,6 +372,14 @@ class ChaptersPanel(QWidget):
                 self.folder_combo.addItem(option, option)
             self.folder_combo.setVisible(True)
             self.folder_row.setVisible(True)
+        elif placement.options:
+            # a default with other choices (the latest season folder; owner, 2026-10-10): shown, and changeable
+            self.folder_label.setText(f"Folder for the chapters: {placement.reason}")
+            for option in placement.options:
+                self.folder_combo.addItem(option, option)
+            self.folder_combo.setCurrentIndex(max(0, self.folder_combo.findData(placement.target_dir)))
+            self.folder_combo.setVisible(True)
+            self.folder_row.setVisible(True)
         else:
             self.folder_row.setVisible(False)
         self.folder_combo.blockSignals(False)
@@ -489,7 +497,7 @@ class ChaptersPanel(QWidget):
         lookup = self.lookup
         if lookup is None or lookup.placement is None or lookup.placement_error:
             return None
-        if lookup.placement.ambiguous:
+        if lookup.placement.ambiguous or lookup.placement.options:
             return self.folder_combo.currentData()
         return lookup.placement.target_dir
 
