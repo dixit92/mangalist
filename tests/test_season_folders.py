@@ -81,3 +81,34 @@ def test_new_chapters_go_to_the_latest_season(tmp_path):
     (s / "Misc").mkdir()
     mixed = chm.chapter_placement(str(s), units + [Unit("Misc/Ch. 0100.00.cbz", "chapter", ch_from="100", ch_to="100")])
     assert mixed.ambiguous
+
+
+def test_old_season_rows_are_folded_into_the_parent_not_listed_missing(tmp_path, monkeypatch):
+    # The library database of a scan made before the rule: one series row per season folder. The first scan with the
+    # rule makes the parent the series; the season rows carry over to it instead of showing as missing series.
+    from mangalist import scanner, store
+    from mangalist.identity.carry import missing_count
+    from mangalist.scanner import record_library_scan, scan_library
+
+    store.reset_stores()
+    db = store.get_store()
+    root = tmp_path / "Manhwa"
+    _season(root, "Example Hunter", "Season 01", range(1, 3))
+    _season(root, "Example Hunter", "Season 02", range(3, 5))
+    r = db.add_root(str(root), "Manhwa")
+    monkeypatch.setattr(scanner, "_is_unit_subfolder", lambda name: False)        # the old behaviour
+    record_library_scan(db, scan_library(db.list_roots(), db=db), pair=False)
+    assert sorted(s.rel_path for s in db.list_series(r.id)) == ["Example Hunter/Season 01", "Example Hunter/Season 02"]
+    s1 = db.get_series(r.id, "Example Hunter/Season 01").id
+    with db.connect() as con:                                                     # a download that pointed at a season
+        con.execute("INSERT INTO ledger (series_id, request, tool, status, created_at, updated_at) VALUES (?, '{}',"
+                    " 'suwayomi', 'removed', 'now', 'now')", (s1,))
+    monkeypatch.undo()
+    record_library_scan(db, scan_library(db.list_roots(), db=db), pair=False)
+    live = [s for s in db.list_series(r.id) if s.status == "present"]
+    assert [s.rel_path for s in live] == ["Example Hunter"] and missing_count(db) == 0
+    with db.connect() as con:
+        assert con.execute("SELECT series_id FROM ledger").fetchone()[0] == live[0].id
+        hows = {row[0] for row in con.execute("SELECT how FROM series_carries")}
+    assert hows == {"unit-folder"}
+    assert {a.series_id for a in db.list_archives(r.id)} == {live[0].id}
