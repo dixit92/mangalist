@@ -19,6 +19,7 @@ Lines are shown as written: ``log_config``'s formatter already masks secrets in 
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -93,6 +94,7 @@ AREA_ORDER: Tuple[str, ...] = tuple(dict.fromkeys(
     + ["Suwayomi", "Renamer", "Library database", "Scheduled jobs", "Window", "Logging", OTHER_AREA]))
 
 
+@functools.lru_cache(maxsize=1024)
 def area_of(logger: str) -> str:
     """The area of a logger name (``mangalist.services.suwayomi.client`` -> ``Suwayomi``); ``Other`` when none."""
     for prefix, area in _AREA_RULES:
