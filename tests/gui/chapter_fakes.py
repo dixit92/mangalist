@@ -69,6 +69,7 @@ class FakeChapterBackend(FakeBackend):
         self.series_group: dict = {}
         self.chapter_send_error: Optional[str] = None
         self.gate: Optional[threading.Event] = None
+        self.newer_found = ("42", "43")               # Check for new chapters: the source's after the newest held
 
     # --- Settings ---
     def suwayomi_ready(self):
@@ -103,9 +104,14 @@ class FakeChapterBackend(FakeBackend):
         self.allowed = None
 
     # --- the chapters panel ---
-    def chapter_lookup(self, series_id, missing, titles):
+    def chapter_lookup(self, series_id, missing, titles, newer=False):
         self.threads.append(threading.get_ident())
-        self.lookups.append((series_id, tuple(missing), tuple(titles)))
+        self.lookups.append((series_id, tuple(missing), tuple(titles)) + (("newer",) if newer else ()))
+        if newer and not self.lookup_error and series_id not in self.title_only:
+            out = lookup_for(series_id, self.newer_found,
+                             match=self.matches.get(series_id) or chm.MangaMatch(MANGADEX, MANGA, chm.HOW_MANGADEX))
+            out.newer, out.newer_than = True, "41"
+            return out
         if self.gate is not None:
             self.gate.wait(10)
         if self.lookup_error:

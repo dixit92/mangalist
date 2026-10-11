@@ -229,3 +229,28 @@ def test_a_refresh_asked_for_during_a_read_runs_right_after_it(make_window, qapp
     gate.set()
     wait_until(qapp, lambda: len(reads) == 2 and win._volumes._call is None)
     assert win._volumes.status_for_row(_row(win, QUEST))[0] == "Downloading"
+
+
+def test_check_for_new_chapters_opens_the_chapters_panel_also_without_gaps(make_window, qapp):
+    # owner, 2026-10-11: an Up to date series whose next chapter MangaUpdates does not list yet
+    from .chapter_fakes import FakeChapterBackend
+
+    ids = {str(Path("/lib") / t): i for i, t in enumerate((QUEST, REVIEW, OWN, DONE), start=1)}
+    backend = FakeChapterBackend(series_ids=ids)
+    win = make_window(backend)
+    win._rebuild_wanted()
+    menus = []
+    win._exec_menu = lambda menu, pos: menus.append(menu) or None
+    win._select_source_row(_row(win, DONE))
+    rect = win._table.visualRect(win._proxy.mapFromSource(win._model.index(_row(win, DONE), 2)))
+    win._on_context_menu(rect.center())
+    act = {a.text(): a for a in menus[0].actions()}["Check for new chapters…"]
+    assert act.isEnabled() and "newer than the newest" in act.toolTip()
+    folder = str(Path("/lib") / DONE)
+    assert win.check_new_chapters(folder)
+    tab = win._download_tab
+    assert win._pages.currentWidget() is tab and tab.current_folder() == folder
+    wait_until(qapp, lambda: backend.lookups and not tab.chapters._busy)
+    sid, missing, titles, mode = backend.lookups[-1]
+    assert (sid, missing, mode) == (4, (), "newer") and titles[0] == DONE
+    assert "New on the source: ch 42-43" in tab.chapters.subtitle_label.text()

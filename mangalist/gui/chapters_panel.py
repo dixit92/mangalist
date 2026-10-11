@@ -95,6 +95,7 @@ class ChaptersPanel(QWidget):
         self._series_id: Optional[int] = None
         self._title = ""
         self._missing: tuple = ()
+        self._newer = False                 # Check for new chapters (see open_series)
         self._titles: tuple = ()
         self.lookup: Optional[ChapterLookup] = None
         self._busy = False
@@ -239,12 +240,16 @@ class ChaptersPanel(QWidget):
         self.stack.setCurrentIndex(PAGE_MESSAGE)
 
     def open_series(self, series_id: int, title: str, missing: Sequence[str], titles: Sequence[str],
-                    cached: Optional[ChapterLookup] = None) -> None:
-        """Show the series' chapters: *cached* when the host kept a lookup, else look it up now (off the UI thread)."""
+                    cached: Optional[ChapterLookup] = None, newer: bool = False) -> None:
+        """Show the series' chapters: *cached* when the host kept a lookup, else look it up now (off the UI thread).
+        *newer*: "Check for new chapters" - what the source has after the newest chapter held, whatever *missing*
+        says."""
         self._series_id, self._title = series_id, title
         self._missing, self._titles = tuple(missing), tuple(titles) or (title,)
+        self._newer = newer
         self.status_label.setText("")
-        if cached is not None and cached.series_id == series_id and cached.missing == self._missing:
+        if (cached is not None and not newer and not cached.newer and cached.series_id == series_id
+                and cached.missing == self._missing):
             self.show_lookup(cached)
             return
         self._look_up()
@@ -254,13 +259,18 @@ class ChaptersPanel(QWidget):
             self._look_up()
 
     def _look_up(self) -> None:
-        sid, missing, titles = self._series_id, self._missing, self._titles
+        sid, missing, titles, newer = self._series_id, self._missing, self._titles, self._newer
         self.lookup = None
-        self.show_message(self._title, "Looking the series up in Suwayomi...")
-        self.subtitle_label.setText(f"Missing {html.escape('ch ' + numbers_text(missing))}")
+        if newer:
+            self.show_message(self._title, "Asking the source for chapters newer than the ones you have...")
+            self.subtitle_label.setText("New chapters on the source")
+        else:
+            self.show_message(self._title, "Looking the series up in Suwayomi...")
+            self.subtitle_label.setText(self._wanted_text(missing))
         self._set_busy(True)
         backend = self._backend
-        self._spawn(lambda: backend.chapter_lookup(sid, missing, titles),
+        self._spawn((lambda: backend.chapter_lookup(sid, missing, titles, newer=True)) if newer else
+                    (lambda: backend.chapter_lookup(sid, missing, titles)),
                     lambda lookup, s=sid: self._on_lookup(s, lookup),
                     lambda message, s=sid: self._on_lookup_error(s, message))
 
@@ -303,7 +313,7 @@ class ChaptersPanel(QWidget):
         self.title_label.setText(self._title)
         self.btn_again.setVisible(True)
         self._show_folder(lookup)
-        missing = f"Missing {html.escape('ch ' + numbers_text(lookup.missing))}"
+        missing = self._wanted_text(lookup.missing)
         if lookup.error:
             self.show_message(self._title, f"Cannot look this series up: {lookup.error}", "Open Settings",
                               SECTION_SOURCES)
@@ -321,6 +331,15 @@ class ChaptersPanel(QWidget):
         self.queued_label.setVisible(bool(queued))
         if lookup.candidates:                               # MangaDex has none of them: the owner's other sources
             self._show_candidates(lookup, missing, keep_match=True)
+            return
+        if lookup.newer and not lookup.missing:             # Check for new chapters: nothing after the newest held
+            source = lookup.source_name or match.source.display_name
+            after = f" than ch {lookup.newer_than}" if lookup.newer_than else ""
+            note = f" ({'; '.join(lookup.notes)})" if lookup.notes else ""
+            self.show_message(self._title, f"{source} has nothing newer{after}{note}. Change source… looks on your "
+                              "other sources.")
+            self.btn_again.setVisible(True)
+            self.btn_other.setVisible(callable(getattr(self._backend, "other_candidates", None)))
             return
         self._before_other = None
         self._fill_groups(lookup)
@@ -390,12 +409,21 @@ class ChaptersPanel(QWidget):
             self.folder_row.setVisible(False)
         self.folder_combo.blockSignals(False)
 
+    def _wanted_text(self, missing: Sequence[str]) -> str:
+        """The subtitle's first part: ``Missing ch 3-5``, or for Check for new chapters ``New on the source: ch 138
+        (after ch 137)``."""
+        if not self._newer:
+            return f"Missing {html.escape('ch ' + numbers_text(missing))}"
+        after = self.lookup.newer_than if self.lookup is not None else None
+        tail = f" (after ch {html.escape(after)})" if after else ""
+        return f"New on the source: {html.escape('ch ' + numbers_text(missing))}{tail}"
+
     def _update_subtitle(self) -> None:
         lookup = self.lookup
         if lookup is None:
             return
         target, placement = self.chosen_target_dir(), lookup.placement
-        missing = f"Missing {html.escape('ch ' + numbers_text(lookup.missing))}"
+        missing = self._wanted_text(lookup.missing)
         if placement is not None and target:
             where = f"files go to {html.escape(folder_text(target, placement.series_dir))}"
             if not placement.ambiguous and placement.reason:
@@ -608,7 +636,7 @@ class ChaptersPanel(QWidget):
             return
         self.status_label.setText("")
         self.lookup = replace(before, candidates=list(found))
-        missing = f"Missing {html.escape('ch ' + numbers_text(before.missing))}"
+        missing = self._wanted_text(before.missing)
         if before.match is None:                        # after a failed lookup: nothing to go back to
             self._before_other = None
             self._show_candidates(self.lookup, missing, keep_match=True, lead="The lookup failed. ")
