@@ -304,3 +304,18 @@ def test_a_watermark_after_a_bare_number_is_left_out(name):
 def test_a_watermark_after_a_chapter_label_reads_as_before():
     r = parse_name("Some Series - Some Series Ch.005 Read Online.cbz", ParseContext(series_title="Some Series"))
     assert (r.kind, str(r.chapter), r.title) == (Kind.CHAPTER, "5", None)
+
+
+# --- owner, 2026-10-11: "Ch.014.005" is chapter 14.5 ("It is .5") -----------------------------------------------------
+
+@pytest.mark.parametrize("name, ch", [
+    ("Some Series - Some Series Ch.014.005 Read Online.cbz", "14.5"),
+    ("Some Series - Some Series Ch.021.005 Read Online.cbz", "21.5"),
+    ("Some Series Ch.021.010.cbz", "21.1"),
+    ("Some Series Ch.014.5.cbz", "14.5"),            # unpadded: as before
+    ("Some Series Ch.014.25.cbz", "14.25"),
+    ("Some Series Ch.014.125.cbz", "14.125"),        # three digits not starting with 0: as written
+])
+def test_a_padded_sub_number_after_the_point(name, ch):
+    r = parse_name(name, ParseContext(series_title="Some Series"))
+    assert str(r.chapter) == ch
