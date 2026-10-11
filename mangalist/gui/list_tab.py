@@ -162,6 +162,8 @@ class ListTab(QWidget):
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
+        # by pixel: a column at a time never brought the last column fully into view (owner, 2026-10-11)
+        table.setHorizontalScrollMode(QTableView.ScrollMode.ScrollPerPixel)
         header.setSectionsMovable(True)
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
