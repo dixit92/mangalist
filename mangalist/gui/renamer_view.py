@@ -193,6 +193,15 @@ class UnitsDialog(QDialog):
         self.accept()
 
 
+AUTOMATIC_TITLE = "Keep this library in the scheme?"
+
+
+def automatic_text(name: str) -> str:
+    return (f"{name} is being renamed to the naming scheme. Rename its new files automatically from now on?\n\n"
+            "Downloaded volumes are then filed under the scheme's names, and the scheduled rescan renames anything else "
+            "named differently (each batch can be undone). You can change this later in Settings > Library.")
+
+
 def _thread_runner(fn, on_done, on_error):
     from .background import start_call
 
@@ -222,6 +231,8 @@ class RenamerWindow(QDialog):
         self._renamer = renamer
         self._scope = scope
         self._confirm = confirm or self._ask
+        if confirm is not None:             # the host answers every question (tests): this one too
+            self._ask_automatic = lambda name: confirm(AUTOMATIC_TITLE, automatic_text(name))
         self._run = run or _thread_runner
         self._call = None
         self._dry: Optional[DryRun] = None
@@ -725,7 +736,36 @@ class RenamerWindow(QDialog):
         self.result_label.setProperty("tone", "bad" if bad else "ok")
         self.result_label.setText(" ".join(lines))
         roots = sorted({rid for r in results if r.renamed for rid in r.root_ids})
+        if self._scope.kind in (SCOPE_ROOT, SCOPE_ALL) and renamed and not bad:
+            self._offer_automatic(roots)
         self._after_change(roots)
+
+    @staticmethod
+    def _ask_automatic(name: str) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Question, AUTOMATIC_TITLE, automatic_text(name))
+        yes = box.addButton("Rename automatically", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(yes)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _offer_automatic(self, root_ids: Sequence[int]) -> None:
+        """After a library's first rename from here: ask, once per library, to keep it in the scheme automatically
+        (owner, 2026-10-12)."""
+        offers = getattr(self._renamer, "automatic_offers", None)
+        if not callable(offers):
+            return
+        try:
+            roots = offers(root_ids)
+        except Exception:  # noqa: BLE001 - a question only
+            _log.warning("Renamer: could not read the libraries' rename setting", exc_info=True)
+            return
+        for root in roots:
+            on = self._ask_automatic(root.name)
+            try:
+                self._renamer.answer_automatic(root.id, on)
+            except Exception:  # noqa: BLE001
+                _log.warning("Renamer: could not save the answer for %s", root.name, exc_info=True)
 
     def undo_last(self) -> None:
         last = self._last
