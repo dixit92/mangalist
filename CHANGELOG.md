@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.25] - 2026-10-12
+
+The twenty-fourth MangaList release (testing build): libraries kept in the naming scheme get their downloads under the scheme's names, and MangaList offers to keep a library in the scheme after its first rename.
+
+- **Downloads filed under the scheme's names.** In a library set to "Rename automatically" whose conversion was started from the Renamer window, a downloaded volume is filed straight under the scheme's name (`<Series> - Vol. 007 [group].cbz`) instead of its release name - still a hard link, so seeding is unaffected. A release name the scheme cannot read with certainty keeps its own name; other libraries keep release names as before.
+- **Asked once after a library's first rename.** When a library-wide rename from the Renamer window finishes, each library it renamed that is not set to "Rename automatically" and was never asked gets the question: Rename automatically / Not now. The answer is remembered either way (Settings > Library changes it later).
+
 ## [2026.10.24] - 2026-10-11
 
 The twenty-third MangaList release (testing build): series licensed only as app chapters are compared with the original volume list, the To get list sorts by how much is missing, and Check for new chapters works for volume series and from the Download tab.
