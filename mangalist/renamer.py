@@ -55,6 +55,7 @@ _log = logging.getLogger(__name__)
 
 KEY_WINDOWS_SERVER = "naming.windows_server"     # Settings > Library: the server name of the Windows path (optional)
 KEY_GUIDED_ROOTS = "renamer.guided_roots"         # root ids the owner started converting from the Renamer window
+KEY_AUTOMATIC_OFFERED = "renamer.automatic_offered"  # root ids already asked "Rename automatically from now on?"
 PLAN_REASON = "rename to the scheme"
 BATCH_SIZE = 200            # files per journal plan (whole series only: a bigger series is a batch of its own)
 AUTO_LIMIT = 500            # files the automatic pass renames per run at most (the rest waits for the next run)
@@ -1156,6 +1157,34 @@ class Renamer:
         if new:
             self.db.set_setting(KEY_GUIDED_ROOTS, sorted(have | new))
             _log.info("Renamer: guided conversion started for root(s) %s", ", ".join(str(r) for r in sorted(new)))
+
+    def automatic_offers(self, root_ids: Iterable[int]) -> List[Any]:
+        """The roots among *root_ids* to ask "Rename automatically from now on?" after their first rename from the
+        window (owner, 2026-10-12: "The user should be prompted to enable this after they have done their first library
+        renaming for a given library"): not set to it already, never asked before."""
+        try:
+            asked = {int(r) for r in self.db.get_setting(KEY_AUTOMATIC_OFFERED, []) or []}
+        except Exception:  # noqa: BLE001
+            asked = set()
+        wanted = {int(r) for r in root_ids if r is not None}
+        return [r for r in self.db.list_roots()
+                if r.id in wanted and r.id not in asked and r.enforce_naming != ENFORCE_AUTOMATIC]
+
+    def answer_automatic(self, root_id: int, on: bool) -> None:
+        """The owner's answer for *root_id*: remembered (asked once); yes sets the root to "Rename automatically"."""
+        from dataclasses import replace as _replace
+
+        try:
+            asked = {int(r) for r in self.db.get_setting(KEY_AUTOMATIC_OFFERED, []) or []}
+        except Exception:  # noqa: BLE001
+            asked = set()
+        self.db.set_setting(KEY_AUTOMATIC_OFFERED, sorted(asked | {int(root_id)}))
+        if on:
+            root = self.db.get_root(root_id)
+            if root is not None and root.enforce_naming != ENFORCE_AUTOMATIC:
+                self.db.update_root(_replace(root, enforce_naming=ENFORCE_AUTOMATIC))
+                _log.info("Renamer: %s now renames automatically (the owner's answer after its first rename)",
+                          root.name)
 
     def automatic_pass(self, should_stop: Optional[Callable[[], bool]] = None, limit: int = AUTO_LIMIT) -> AutoReport:
         """The scheduled pass (headless rescan): rename what is pending in roots set to "Rename automatically" that the
