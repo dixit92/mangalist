@@ -55,6 +55,7 @@ _log = logging.getLogger(__name__)
 
 KEY_WINDOWS_SERVER = "naming.windows_server"     # Settings > Library: the server name of the Windows path (optional)
 KEY_GUIDED_ROOTS = "renamer.guided_roots"         # root ids the owner started converting from the Renamer window
+KEY_AUTOMATIC_OFFERED = "renamer.automatic_offered"  # root ids already asked "Rename automatically from now on?"
 PLAN_REASON = "rename to the scheme"
 BATCH_SIZE = 200            # files per journal plan (whole series only: a bigger series is a batch of its own)
 AUTO_LIMIT = 500            # files the automatic pass renames per run at most (the rest waits for the next run)
@@ -733,6 +734,31 @@ class Renamer:
     def limits(self):
         return self.namer.limits(windows_server(self.db))
 
+    def keeps_in_scheme(self, root) -> bool:
+        """*root* is set to "Rename automatically" and the owner started its conversion: what is filed there is
+        named by the scheme at once (owner, 2026-10-12: "Doesn't Mangalist automatically rename to the scheme when
+        it fills?")."""
+        return getattr(root, "enforce_naming", None) == ENFORCE_AUTOMATIC and root.id in guided_roots(self.db)
+
+    def scheme_name(self, root, series, name: str, *, size: int = 0) -> Optional[str]:
+        """The scheme's name for an archive called *name* about to be filed into *series* (read like the series' own
+        files: the root's scheme, the "volumes or chapters?" answer, the series title, its volume list, the length
+        rule) - None when the name cannot be read with certainty or the naming scheme is not in this build."""
+        from .parsing import parse_name
+
+        try:
+            folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
+            ctx = _parse_context(os.path.basename(folder), series.kind_hint, getattr(root, "naming_scheme", None))
+            parsed = parse_name(name, ctx, file_size=size)
+            title = self._title(root, series) or os.path.basename(folder)
+            target = self.namer.target_name(parsed, ext=os.path.splitext(name)[1], series_title=title,
+                                            volume_of=self._volume_of(series.id), folder=folder,
+                                            limits=self.limits())
+        except Exception:  # noqa: BLE001 - NamingUnavailable or an odd name: the file keeps its own name
+            _log.debug("Renamer: no scheme name for %s", name, exc_info=True)
+            return None
+        return target if target and not _name_problem(target) else None
+
     def _title(self, root, series) -> Optional[str]:
         if self._title_for is None:
             self._title_for = _default_title_for(self.db)
@@ -1131,6 +1157,34 @@ class Renamer:
         if new:
             self.db.set_setting(KEY_GUIDED_ROOTS, sorted(have | new))
             _log.info("Renamer: guided conversion started for root(s) %s", ", ".join(str(r) for r in sorted(new)))
+
+    def automatic_offers(self, root_ids: Iterable[int]) -> List[Any]:
+        """The roots among *root_ids* to ask "Rename automatically from now on?" after their first rename from the
+        window (owner, 2026-10-12: "The user should be prompted to enable this after they have done their first library
+        renaming for a given library"): not set to it already, never asked before."""
+        try:
+            asked = {int(r) for r in self.db.get_setting(KEY_AUTOMATIC_OFFERED, []) or []}
+        except Exception:  # noqa: BLE001
+            asked = set()
+        wanted = {int(r) for r in root_ids if r is not None}
+        return [r for r in self.db.list_roots()
+                if r.id in wanted and r.id not in asked and r.enforce_naming != ENFORCE_AUTOMATIC]
+
+    def answer_automatic(self, root_id: int, on: bool) -> None:
+        """The owner's answer for *root_id*: remembered (asked once); yes sets the root to "Rename automatically"."""
+        from dataclasses import replace as _replace
+
+        try:
+            asked = {int(r) for r in self.db.get_setting(KEY_AUTOMATIC_OFFERED, []) or []}
+        except Exception:  # noqa: BLE001
+            asked = set()
+        self.db.set_setting(KEY_AUTOMATIC_OFFERED, sorted(asked | {int(root_id)}))
+        if on:
+            root = self.db.get_root(root_id)
+            if root is not None and root.enforce_naming != ENFORCE_AUTOMATIC:
+                self.db.update_root(_replace(root, enforce_naming=ENFORCE_AUTOMATIC))
+                _log.info("Renamer: %s now renames automatically (the owner's answer after its first rename)",
+                          root.name)
 
     def automatic_pass(self, should_stop: Optional[Callable[[], bool]] = None, limit: int = AUTO_LIMIT) -> AutoReport:
         """The scheduled pass (headless rescan): rename what is pending in roots set to "Rename automatically" that the

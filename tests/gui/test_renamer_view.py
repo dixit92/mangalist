@@ -438,3 +438,38 @@ def test_the_units_dialog_checks_what_is_typed(qapp):
     dlg.volume.setText("2")
     dlg._accept()
     assert dlg.result() == 1 and dlg.answer() == ("chapter", "12.5", "2")
+
+
+def test_the_first_library_rename_asks_once_to_rename_automatically(qapp, db, made):
+    # owner, 2026-10-12: "The user should be prompted to enable this after they have done their first library renaming
+    # for a given library"
+    sid = db.get_series(made.id, "Series A").id
+    asked = []
+    pilot = _window(qapp, _renamer(db), Scope.series([sid], "Series A"))
+    try:
+        pilot._ask_automatic = lambda name: asked.append(name) or True
+        pilot.apply()
+        assert asked == []                                          # a pilot series: not yet
+    finally:
+        pilot.deleteLater()
+    (Path(made.path) / "Series A" / fmd2(3, "0003", "Third", "G")).write_bytes(payload("a3"))
+    from ..renamer.conftest import rescan
+
+    rescan(db)
+    win = _window(qapp, _renamer(db), Scope.root(made.id, "Manga"))
+    try:
+        win._ask_automatic = lambda name: asked.append(name) or True
+        win.apply()
+        assert asked == ["Manga"] and db.get_root(made.id).enforce_naming == rn.ENFORCE_AUTOMATIC
+    finally:
+        win.deleteLater()
+    db.update_root(__import__("dataclasses").replace(db.get_root(made.id), enforce_naming="ask"))
+    (Path(made.path) / "Series A" / fmd2(4, "0004", "Fourth", "G")).write_bytes(payload("a4"))
+    rescan(db)
+    again = _window(qapp, _renamer(db), Scope.root(made.id, "Manga"))
+    try:
+        again._ask_automatic = lambda name: asked.append(name) or True
+        again.apply()
+        assert asked == ["Manga"]                                   # asked once per library, whatever the answer
+    finally:
+        again.deleteLater()
