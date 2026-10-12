@@ -229,6 +229,7 @@ class SeriesKnowledge:
     english_publishers: Tuple[EnglishPublisher, ...] = ()
     translation_complete: Optional[bool] = None
     volumes: Tuple[VolumeInfo, ...] = ()
+    estimated_volumes: Tuple[VolumeInfo, ...] = ()   # MangaPixer's estimated ranges (never in *volumes*)
     # MangaPixer
     completion: Optional[Completion] = None
     official_links: Tuple[OfficialLink, ...] = ()
@@ -336,12 +337,18 @@ def _publishers_from_mangapixer(rows: Any) -> Tuple[EnglishPublisher, ...]:
     return tuple(out)
 
 
-def _volumes_from_mangapixer(block: Any) -> Tuple[VolumeInfo, ...]:
+def _volumes_from_mangapixer(block: Any, estimated: bool = False) -> Tuple[VolumeInfo, ...]:
+    """The volume list's volumes; *estimated*: only those whose chapter range is MangaPixer's estimate instead
+    (1.42.0 ``chaptersEstimated``: the Volumes view's "~ Volume N" from the folder's own files). Estimates never join
+    the list itself - nothing automatic (states, names, upgrades on filing) acts on them (owner, 2026-10-11: "Until then,
+    3 is correct": the owner confirms)."""
     if not isinstance(block, Mapping):
         return ()
     out: List[VolumeInfo] = []
     for v in block.get("items") or ():
         if not isinstance(v, Mapping) or exact_str(v.get("volume")) is None:
+            continue
+        if (v.get("chaptersEstimated") is True) != estimated:
             continue
         ch = v.get("chapters") if isinstance(v.get("chapters"), Mapping) else None
         out.append(VolumeInfo(
@@ -423,6 +430,7 @@ def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str
         translation_complete=(rec.get("translationComplete")
                               if isinstance(rec.get("translationComplete"), bool) else None),
         volumes=_volumes_from_mangapixer(item.get("volumes")),
+        estimated_volumes=_volumes_from_mangapixer(item.get("volumes"), estimated=True),
         completion=_completion_from_mangapixer(item.get("completion")),
         official_links=_links_from_mangapixer(item.get("officialLinks")),
         anilist_id=anilist.get("id") if anilist else None,

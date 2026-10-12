@@ -721,6 +721,71 @@ class MainWindow(QMainWindow):
         self.show_tab(TAB_DOWNLOAD)
         return self._download_tab.check_new_chapters(series_id, folder, entry.title, titles)
 
+    def set_aside_volume_chapters(self, folder: str) -> bool:
+        """"Set aside chapters its volumes hold…" (owner, 2026-10-11: "Until then, 3 is correct"; MangaPixer 1.42.0
+        estimates the volumes its list does not map): list the chapter files inside volumes the series holds, ask, then
+        move the confirmed ones to the holding folder - off the UI thread, then a rescan of that library."""
+        from .. import upgrades
+
+        sid = self._make_renamer().series_id_for_folder(folder)
+        if sid is None:
+            self._status_label.setText("Rescan first: this folder is not in the library database yet")
+            return False
+        db, title = self._db, Path(folder).name
+        self._status_label.setText(f"{title}: looking for chapter files its volumes hold…")
+
+        def found(batch) -> None:
+            if batch.status != "pending":
+                self._status_label.setText(f"{title}: nothing to set aside ({batch.error})")
+                return
+            if not self.confirm_set_aside(title, batch):
+                self._status_label.setText(f"{title}: nothing set aside")
+                return
+            rels = [f.rel for f in batch.files]
+            self._background(lambda: upgrades.set_aside_estimated(db, sid, rels), done,
+                             lambda msg: self._status_label.setText(f"{title}: setting chapters aside failed: {msg}"))
+
+        def done(held) -> None:
+            moved = len(held.files) if held.status == "held" else 0
+            self._status_label.setText(f"{title}: {moved} chapter file(s) set aside - restorable from the Download tab"
+                                       + (f" ({held.error})" if held.error else ""))
+            roots = self._roots_holding([folder])
+            self._start_scan(roots if roots else None)
+            if self._download_tab is not None and hasattr(self._download_tab, "refresh_replaced"):
+                self._download_tab.refresh_replaced()
+
+        self._background(lambda: upgrades.estimated_duplicates(db, sid), found,
+                         lambda msg: self._status_label.setText(f"{title}: looking failed: {msg}"))
+        return True
+
+    def confirm_set_aside(self, title: str, batch) -> bool:
+        """Ask before setting chapter files aside (tests answer for the owner by replacing this on the window)."""
+        from .. import upgrades
+        from ..knowledge import fmt_num, to_decimal
+
+        by_volume: Dict[str, List] = {}
+        for f in batch.files:
+            by_volume.setdefault(f.volume, []).append(f)
+        lines = []
+        for volume in sorted(by_volume, key=lambda v: to_decimal(v) or 0):
+            files = by_volume[volume]
+            numbers = sorted({to_decimal(end) for f in files for end in str(f.chapters).split("-")} - {None})
+            span = f"ch {fmt_num(numbers[0])}-{fmt_num(numbers[-1])}" if numbers else ""
+            lines.append(f"  Volume {volume}: {span} ({len(files)} file{'s' if len(files) != 1 else ''})")
+        days = upgrades.load_settings(self._db).holding_days
+        size = batch.total_size if hasattr(batch, "total_size") else sum(f.size for f in batch.files)
+        box = QMessageBox(QMessageBox.Icon.Question, "Set aside chapters the volumes hold?",
+                          f"{title}: {len(batch.files)} chapter files lie inside volumes you hold, by MangaPixer's "
+                          f"estimated volume ranges:\n\n" + "\n".join(lines) +
+                          f"\n\nThey move to the holding folder ({size / 1e6:.0f} MB): restorable from the Download "
+                          f"tab, emptied after {days} days. The volumes are not touched. Check one volume against its "
+                          "chapters first if unsure - the ranges are estimates.", parent=self)
+        yes = box.addButton(f"Set aside {len(batch.files)} files", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
     def _row_for_folder(self, folder: str) -> Optional[int]:
         for r in range(self._model.rowCount()):
             e = self._model.entry_at(r)
@@ -1773,7 +1838,7 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self._table)
         act_kind = None
-        act_get = act_new = None
+        act_get = act_new = act_aside = None
         act_dupes = act_mangapixer = None
         act_exclude = None
         act_rename = act_rename_library = None
@@ -1812,6 +1877,10 @@ class MainWindow(QMainWindow):
                 act_new.setToolTip("Ask the series' Suwayomi source for chapters newer than the newest one you have - "
                                    "also before MangaUpdates lists them")
                 menu.setToolTipsVisible(True)
+            act_aside = menu.addAction("Set aside chapters its volumes hold…")
+            act_aside.setToolTip("Chapter files inside volumes this series holds, by MangaPixer's estimated volume ranges: "
+                                 "listed for you to confirm, then moved to the holding folder (restorable)")
+            menu.setToolTipsVisible(True)
             vols, chs = self._model.duplicate_files_at(rows[0])
             if vols or chs:
                 act_dupes = menu.addAction(f"Review duplicate files ({vols + chs})…")
@@ -1905,6 +1974,8 @@ class MainWindow(QMainWindow):
             self.get_missing(str(entries[0].folder))
         elif chosen is act_new and act_new is not None:
             self.check_new_chapters(str(entries[0].folder))
+        elif chosen is act_aside and act_aside is not None:
+            self.set_aside_volume_chapters(str(entries[0].folder))
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)
         elif chosen is act_confirm_mu:
