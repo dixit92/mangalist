@@ -105,6 +105,19 @@ def held_volumes(db, series, series_dir: str) -> Set[Decimal]:
     return held
 
 
+def _key(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
+
+def _ident(path: str) -> Optional[str]:
+    """``'<dev>:<ino>'`` of *path* (the journal's record of a hard link), None when it cannot be read."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return f"{st.st_dev}:{st.st_ino}"
+
+
 def _plain(values: Iterable[Decimal]) -> str:
     from ..parsing.model import plain
 
@@ -139,6 +152,7 @@ class _Pass:
         self.db = ledger.store
         self.journal = journal if journal is not None else Journal(self.db)
         self.remove = ledger.remove_completed() if remove_completed is None else bool(remove_completed)
+        self._moves = None                  # the journal's applied moves, read once per pass (see _current_path)
         self.should_stop = should_stop
         self.report = ArrivalsReport()
 
@@ -401,15 +415,42 @@ class _Pass:
             return f"its journal plan {plan_id} is gone"
         for s in (s for s in plan.steps if s.state == "done"):
             name = posixpath.basename(s.dst.replace(os.sep, "/"))
+            path = self._current_path(s.dst, plan_id)
             try:
-                size = os.stat(s.dst).st_size if os.path.isfile(s.dst) else None
+                size = os.stat(path).st_size if os.path.isfile(path) else None
             except OSError:
                 size = None
             if size is None:
                 return f"{name} is no longer in the library"
             if size != s.src_size:
                 return f"{name} in the library is not the filed size"
+            if s.how == "link" and s.dst_ident and _ident(path) not in (None, s.dst_ident):
+                return f"{name} in the library is no longer the filed file"
         return None
+
+    def _current_path(self, path: str, after_plan: int) -> str:
+        """Where a file filed at *path* is now: followed through the moves the journal applied after plan *after_plan*
+        (the renamer's renames to the scheme, their undos), each once (owner, 2026-10-12: completed torrents were not
+        removed - the automatic rename had renamed their filed files)."""
+        if self._moves is None:
+            moves: Dict[str, List[Tuple[int, str]]] = {}
+            try:
+                for plan in self.journal.list_plans():
+                    for step in plan.steps:
+                        if step.op == "move" and step.state == "done" and not step.is_dir:
+                            moves.setdefault(_key(step.src), []).append((plan.id, step.dst))
+            except Exception:  # noqa: BLE001 - no journal: the filed path is all that is known
+                _log.debug("Arrivals: the journal's moves could not be read", exc_info=True)
+            self._moves = moves
+        seen = set()
+        current, since = path, after_plan
+        while _key(current) not in seen:
+            seen.add(_key(current))
+            later = [(pid, dst) for pid, dst in self._moves.get(_key(current), ()) if pid > since]
+            if not later:
+                break
+            since, current = min(later)
+        return current
 
     def _library_problem(self, rec: DownloadRecord, t: TorrentInfo) -> Optional[str]:
         """Why the torrent may not be deleted yet (None: every filed file verified, its data outside the library)."""
