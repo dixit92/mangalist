@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.27] - 2026-10-12
+
+The twenty-sixth MangaList release (testing build): set aside the chapter files that held volumes contain, by MangaPixer's estimated volume ranges.
+
+- **Set aside chapters its volumes hold** (List row menu). MangaPixer 1.42.0 estimates the chapter ranges of volumes its volume list does not map. For a series holding such volumes beside their chapter files, MangaList lists the chapter files inside each held volume's estimated range (per volume: chapters, files, size) and, after a yes, moves them to the holding folder as one batch - restorable from the Download tab, never deleted outright; the volumes are not touched.
+- **Estimates stay suggestions.** MangaPixer's estimated ranges are kept apart from its volume list: states, the volume in chapter file names and the upgrade after filing act only on mapped ranges, as before.
+
 ## [2026.10.26] - 2026-10-12
 
 The twenty-fifth MangaList release (testing build): torrents whose filed volumes were renamed to the scheme are removed at their seed goal again.
