@@ -733,6 +733,31 @@ class Renamer:
     def limits(self):
         return self.namer.limits(windows_server(self.db))
 
+    def keeps_in_scheme(self, root) -> bool:
+        """*root* is set to "Rename automatically" and the owner started its conversion: what is filed there is
+        named by the scheme at once (owner, 2026-10-12: "Doesn't Mangalist automatically rename to the scheme when
+        it fills?")."""
+        return getattr(root, "enforce_naming", None) == ENFORCE_AUTOMATIC and root.id in guided_roots(self.db)
+
+    def scheme_name(self, root, series, name: str, *, size: int = 0) -> Optional[str]:
+        """The scheme's name for an archive called *name* about to be filed into *series* (read like the series' own
+        files: the root's scheme, the "volumes or chapters?" answer, the series title, its volume list, the length
+        rule) - None when the name cannot be read with certainty or the naming scheme is not in this build."""
+        from .parsing import parse_name
+
+        try:
+            folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
+            ctx = _parse_context(os.path.basename(folder), series.kind_hint, getattr(root, "naming_scheme", None))
+            parsed = parse_name(name, ctx, file_size=size)
+            title = self._title(root, series) or os.path.basename(folder)
+            target = self.namer.target_name(parsed, ext=os.path.splitext(name)[1], series_title=title,
+                                            volume_of=self._volume_of(series.id), folder=folder,
+                                            limits=self.limits())
+        except Exception:  # noqa: BLE001 - NamingUnavailable or an odd name: the file keeps its own name
+            _log.debug("Renamer: no scheme name for %s", name, exc_info=True)
+            return None
+        return target if target and not _name_problem(target) else None
+
     def _title(self, root, series) -> Optional[str]:
         if self._title_for is None:
             self._title_for = _default_title_for(self.db)
