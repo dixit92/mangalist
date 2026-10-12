@@ -435,3 +435,31 @@ def test_a_library_set_to_rename_automatically_but_not_converted_keeps_release_n
     qbt.set(HASH, state="uploading", progress=1.0)
     run_arrivals(qbt, ledger)
     assert ledger.get(sent.id).filed_files == ("Series A v02 (Digital).cbz", "Series A v03 (Digital).cbz")
+
+
+def test_filed_files_renamed_to_the_scheme_still_let_the_torrent_go(ledger, sent, qbt, series):
+    # owner, 2026-10-12: "There are a few completed items in qbittorrent ... Why are they not removed?" - the automatic
+    # rename had renamed the filed files, and the check looked for them under their filed names
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    journal = Journal(ledger.store)
+    old, new = sdir / "Series A v02 (Digital).cbz", sdir / "Series A - Vol. 002.cbz"
+    plan = journal.plan("rename to the scheme", [(str(old), str(new))], root_path=str(sdir.parent))
+    journal.apply(plan.id)
+    assert new.exists() and not old.exists()
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [sent.id] and status(ledger, sent) == S.REMOVED
+    assert new.read_bytes() == PACK["Series A v02 (Digital).cbz"]                 # the renamed file survives
+
+
+def test_a_filed_file_that_is_really_gone_still_keeps_the_torrent(ledger, sent, qbt, series):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    (sdir / "Series A v03 (Digital).cbz").unlink()
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [] and status(ledger, sent) == S.FILED
+    assert "is no longer in the library" in ledger.get(sent.id).error
