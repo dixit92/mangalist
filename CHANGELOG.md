@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.26] - 2026-10-12
+
+The twenty-fifth MangaList release (testing build): torrents whose filed volumes were renamed to the scheme are removed at their seed goal again.
+
+- **Remove Completed follows renames.** A torrent stopped at its seed goal stayed in qBittorrent ("not removed: ... is no longer in the library") once the automatic rename had renamed its filed volumes: the check looked for them only under their filed names. It now follows each filed file through the renames MangaList recorded and checks it is the same file (same size; for a hard link, the same file on disk). A filed file that is really gone still keeps the torrent.
+
 ## [2026.10.25] - 2026-10-12
 
 The twenty-fourth MangaList release (testing build): libraries kept in the naming scheme get their downloads under the scheme's names, and MangaList offers to keep a library in the scheme after its first rename.
