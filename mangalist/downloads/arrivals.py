@@ -8,7 +8,8 @@ One pass (:func:`run_arrivals`) is idempotent and safe to run hourly. For each a
 - **SENT** + complete -> DOWNLOADED (and on to filing in the same pass).
 - **DOWNLOADED** -> filing: the torrent's archive files (``scanner.ARCHIVE_EXTS``) whose parsed volume is one of
   the record's ``wanted_volumes`` AND is not held by the series right now (its stored units AND a fresh look at
-  its folder) are linked, under their own names, into the record's ``target_dir`` through ONE journal plan
+  its folder) are linked into the record's ``target_dir`` through ONE journal plan - under their own names, or
+  the naming scheme's when the library is set to "Rename automatically" and its conversion was started
   (:meth:`~mangalist.store.journal.Journal.plan_links`) -> FILED with ``filed_files`` / ``copied``. Nothing
   matched, the series or target folder gone, or the target no longer inside the series folder / a configured
   root -> FAILED with the reason; the torrent is left alone. The plan id is stored on the record BEFORE the plan
@@ -214,7 +215,7 @@ class _Pass:
             return self._settle(rec, plan_id, series_dir, blocked=problem)
         if problem:
             return self._fail(rec, problem + "; nothing filed, the torrent is left alone")
-        links, notes = self._pick(rec, t, series, series_dir)
+        links, notes = self._pick(rec, t, series, series_dir, root)
         if not links:
             return self._fail(rec, f"none of the torrent's archives is a wanted volume still missing from the series "
                                    f"(wanted: {', '.join(rec.wanted_volumes)}; {'; '.join(notes) or 'no archives'})"
@@ -246,7 +247,18 @@ class _Pass:
             return "the target folder is no longer inside a configured library root"
         return None
 
-    def _pick(self, rec: DownloadRecord, t: TorrentInfo, series, series_dir: str):
+    def _scheme_namer(self, root):
+        """The Renamer when *root* keeps its files in the scheme (filed volumes are named by it at once), else None."""
+        try:
+            from ..renamer import Renamer
+
+            renamer = Renamer(self.db)
+            return renamer if renamer.keeps_in_scheme(root) else None
+        except Exception:  # noqa: BLE001 - files keep their release names
+            _log.debug("Arrivals: no scheme naming", exc_info=True)
+            return None
+
+    def _pick(self, rec: DownloadRecord, t: TorrentInfo, series, series_dir: str, root=None):
         request = self.ledger.request(rec.id)
         hint = "volumes" if request.get("vol_from") else None   # the release says it holds volumes
         wanted = {Decimal(v) for v in rec.wanted_volumes}
@@ -256,6 +268,7 @@ class _Pass:
         taken_names: Set[str] = set()
         taken_vols: Set[Decimal] = set()
         notes: List[str] = []
+        namer = self._scheme_namer(root) if root is not None else None
         for f in self.client.files(t.info_hash):
             name = f.name.replace("\\", "/")
             base = posixpath.basename(name)
@@ -285,11 +298,13 @@ class _Pass:
             if not same_or_inside(src, save_path) or not os.path.isfile(src):
                 notes.append(f"{base}: not found under the torrent's save path")
                 continue
-            dst = os.path.join(rec.target_dir, base)
-            if os.path.lexists(dst) or os.path.normcase(base) in taken_names:
+            named = (namer.scheme_name(root, series, base, size=int(getattr(f, "size", 0) or 0))
+                     if namer is not None else None) or base
+            dst = os.path.join(rec.target_dir, named)
+            if os.path.lexists(dst) or os.path.normcase(named) in taken_names:
                 notes.append(f"{base}: a file of that name is already in the target folder")
                 continue
-            taken_names.add(os.path.normcase(base))
+            taken_names.add(os.path.normcase(named))
             taken_vols |= vols
             links.append((src, dst))
         return links, notes

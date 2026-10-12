@@ -406,3 +406,32 @@ def test_remove_now_of_a_torrent_already_gone_from_qbittorrent(ledger, sent, qbt
     del qbt.infos[HASH]
     rec = remove_now(qbt, ledger, sent.id)
     assert rec.status == S.REMOVED and rec.error == "removed in qBittorrent, not by MangaList" and qbt.deleted == []
+
+
+def test_a_library_kept_in_the_scheme_gets_its_volumes_under_the_schemes_names(ledger, sent, qbt, series, db):
+    # owner, 2026-10-12: "Doesn't Mangalist automatically rename to the scheme when it fills?" - in a library set to
+    # "Rename automatically" (its conversion started), filed volumes are named by the scheme at once
+    from dataclasses import replace
+
+    from mangalist.renamer import Renamer
+
+    _, sdir = series
+    root = db.list_roots()[0]
+    db.update_root(replace(root, enforce_naming="automatic"))
+    Renamer(db).mark_guided([root.id])
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    rec = ledger.get(sent.id)
+    assert rec.status == S.FILED and rec.filed_files == ("Series A - Vol. 002.cbz", "Series A - Vol. 003.cbz")
+    torrent_dir = qbt.save_root / "Series A v01-04 (Digital)"
+    assert os.path.samefile(sdir / "Series A - Vol. 002.cbz", torrent_dir / "Series A v02 (Digital).cbz")
+
+
+def test_a_library_set_to_rename_automatically_but_not_converted_keeps_release_names(ledger, sent, qbt, series, db):
+    from dataclasses import replace
+
+    root = db.list_roots()[0]
+    db.update_root(replace(root, enforce_naming="automatic"))                # never converted from the window
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    assert ledger.get(sent.id).filed_files == ("Series A v02 (Digital).cbz", "Series A v03 (Digital).cbz")
