@@ -420,6 +420,105 @@ def examine(db, ledger, record) -> NewBatch:
                     mode=load_settings(db).mode, error=note, **common)
 
 
+# --- chapters the held volumes hold, by MangaPixer's estimate (set aside by hand) ------------------------------
+#
+# Owner, 2026-10-11: a held volume whose chapters the volume list does not map keeps its chapter files beside it
+# ("Until then, 3 is correct"): MangaPixer 1.42.0 exports its Volumes view's estimated ranges (``chaptersEstimated``),
+# and the owner confirms which chapter files to set aside. A batch made here has a negative ``download_id`` (no
+# download behind it) and is always held (never deleted outright), restorable from the Download tab like any other.
+
+
+def _knowledge_estimates(db, series) -> Tuple[Sequence[VolumeInfo], str]:
+    from .knowledge import MANGAPIXER_SERIES_STATES, LINK_NEEDS_REVIEW, from_mangapixer_item
+    from .services.mangapixer import open_cache
+    from .services.mangapixer.resolve import resolve
+
+    try:
+        res = resolve(open_cache(db), series.root_id, series.rel_path)
+    except Exception as exc:  # noqa: BLE001
+        return (), f"MangaPixer's data could not be read ({type(exc).__name__})"
+    if res is None:
+        return (), "MangaPixer does not know this series"
+    if res.link_state not in MANGAPIXER_SERIES_STATES or res.link_state == LINK_NEEDS_REVIEW:
+        return (), f"MangaPixer's link is {res.link_state or 'unknown'}, not matched"
+    estimates = tuple(v for v in from_mangapixer_item(res.item).estimated_volumes if v.has_chapters)
+    if not estimates:
+        return (), "MangaPixer estimates no volume of this series (MangaPixer 1.42.0 or later, synced since)"
+    return estimates, ""
+
+
+def estimated_duplicates(db, series_id: int) -> NewBatch:
+    """The chapter files of *series_id* that volumes it holds contain, by MangaPixer's estimated ranges - for the owner
+    to confirm (nothing is moved here). ``status`` "pending" with the files, else "nothing" with why."""
+    from .downloads.placement import locate_series
+
+    series, root, series_dir = locate_series(db, series_id)
+
+    def nothing(why: str, **kw) -> NewBatch:
+        return NewBatch(download_id=0, series_id=series_id, status="nothing", error=why, **kw)
+
+    estimates, why = _knowledge_estimates(db, series)
+    if not estimates:
+        return nothing(why)
+    units = db.list_units(series.id)
+    held: Dict[Decimal, str] = {}
+    for u in units:
+        if u.kind != "volume" or u.vol_from is None:
+            continue
+        lo, hi = to_decimal(u.vol_from), to_decimal(u.vol_to if u.vol_to is not None else u.vol_from)
+        for n in (_numbers(lo, hi) or []) if lo is not None and hi is not None else []:
+            held.setdefault(n, u.rel_path)
+    covered = [v for v in estimates if to_decimal(v.volume) in held]
+    if not covered:
+        return nothing("no volume you hold has an estimated chapter range")
+    numbers = sorted({to_decimal(v.volume) for v in covered})
+    volume_files = []
+    for rel in dict.fromkeys(held[n] for n in numbers):
+        path = os.path.join(series_dir, *rel.split("/"))
+        st = _plain_below(path, root.path)
+        if st is not None:
+            volume_files.append((path, st.st_size))
+    common = dict(root_path=root.path, series_dir=series_dir, volumes=[fmt_num(n) for n in numbers],
+                  volume_files=volume_files)
+    coverage = chapters_replaced(units, covered, numbers)
+    files: List[ReplacedFile] = []
+    kept = list(coverage.kept)
+    for rel, chapters, volume in coverage.replaced:
+        path = os.path.join(series_dir, *rel.split("/"))
+        st = _plain_below(path, root.path)
+        if st is None:
+            kept.append((rel, "not a plain file in the library now (gone since the last scan?)"))
+            continue
+        files.append(ReplacedFile(path=path, rel=rel, size=st.st_size, modified=_iso_from_ns(st.st_mtime_ns),
+                                  chapters=chapters, volume=volume))
+    if not files:
+        return nothing("no chapter file lies inside the estimated range of a volume you hold", kept=kept, **common)
+    return NewBatch(download_id=0, series_id=series_id, status="pending", files=files, kept=kept, mode=MODE_HOLDING,
+                    error="by MangaPixer's estimated volume ranges", **common)
+
+
+def set_aside_estimated(db, series_id: int, rels: Sequence[str], *, journal=None,
+                        now: Optional[datetime] = None) -> Batch:
+    """Move the confirmed chapter files (*rels*, a subset of :func:`estimated_duplicates`' list, looked at again now)
+    to the holding folder as one batch; restorable like an upgrade's."""
+    found = estimated_duplicates(db, series_id)
+    wanted = {r.replace("\\", "/") for r in rels}
+    files = [f for f in found.files if f.rel in wanted]
+    if found.status != "pending" or not files:
+        raise ReplacementConflict(found.error or "none of the confirmed chapter files is still listed")
+    store = ReplacementStore(db)
+    with db.connect() as con:
+        lowest = con.execute("SELECT MIN(download_id) FROM replacements").fetchone()[0]
+    manual_id = min(-1, (lowest or 0) - 1)
+    batch = store.create(NewBatch(download_id=manual_id, series_id=series_id, status="pending",
+                                  root_path=found.root_path, series_dir=found.series_dir, volumes=found.volumes,
+                                  volume_files=found.volume_files, files=files, kept=found.kept, mode=MODE_HOLDING,
+                                  error=None))
+    _log.info("Upgrades: batch %d: %d chapter file(s) of series %d set aside by hand (volumes %s, MangaPixer's "
+              "estimated ranges)", batch.id, len(files), series_id, ", ".join(found.volumes))
+    return hold_batch(db, batch.id, journal=journal, now=now)
+
+
 # --- the downloads job's hook -----------------------------------------------------------------------------------
 
 
@@ -543,8 +642,9 @@ def hold_batch(db, batch_id: int, *, journal=None, now: Optional[datetime] = Non
                                    os.path.basename(os.path.normpath(root)) or "root")
         try:
             plan = journal.plan_holding(PLAN_REASON, [f.path for f in files], root_path=root, holding_dir=holding_dir,
-                                        note=f"replaced by volume(s) {', '.join(batch.volumes)} (download "
-                                             f"{batch.download_id})")
+                                        note=f"replaced by volume(s) {', '.join(batch.volumes)} ("
+                                             + (f"download {batch.download_id})" if batch.download_id > 0
+                                                else "set aside by hand)"))
         except StepRefused as exc:
             return fail(f"the journal refused the move: {exc}")
         batch = store.update(batch.id, expect=("pending",), mode=MODE_HOLDING, plan_id=plan.id,

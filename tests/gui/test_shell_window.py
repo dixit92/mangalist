@@ -409,3 +409,30 @@ def test_the_last_column_is_never_squeezed_below_its_header(make_window, qapp):
         bar.setValue(bar.maximum())
         qapp.processEvents()
         assert header.sectionViewportPosition(last) + header.sectionSize(last) <= table.viewport().width()
+
+
+def test_set_aside_lists_then_moves_only_after_a_yes(make_window, monkeypatch):
+    # owner, 2026-10-13: MangaPixer 1.42.0's estimated volume ranges to clean up the chapters held volumes contain
+    from mangalist import upgrades
+    from mangalist.store.replacements import NewBatch, ReplacedFile
+
+    win = make_window()
+    monkeypatch.setattr(win._make_renamer().__class__, "series_id_for_folder", lambda self, folder: 7)
+    files = [ReplacedFile(path=f"/lib/X/c{n}.cbz", rel=f"c{n}.cbz", size=1000, modified="", chapters=str(n),
+                          volume="7") for n in (51, 52, 62)]
+    found = NewBatch(download_id=0, series_id=7, status="pending", files=files, volumes=["7"])
+    calls = []
+    monkeypatch.setattr(upgrades, "estimated_duplicates", lambda db, sid: found)
+    monkeypatch.setattr(upgrades, "set_aside_estimated",
+                        lambda db, sid, rels: calls.append((sid, rels)) or type("B", (), {"status": "held",
+                                                                                          "files": files,
+                                                                                          "error": None})())
+    win._background = lambda fn, ok, err=None, fin=None: ok(fn())
+    asked = []
+    win.confirm_set_aside = lambda title, batch: asked.append((title, len(batch.files))) or False
+    assert win.set_aside_volume_chapters(str(LIB / QUEST))
+    assert asked == [(QUEST, 3)] and calls == []                                    # a no moves nothing
+    win.confirm_set_aside = lambda title, batch: True
+    win.set_aside_volume_chapters(str(LIB / QUEST))
+    assert calls == [(7, ["c51.cbz", "c52.cbz", "c62.cbz"])]
+    assert "3 chapter file(s) set aside" in win._status_label.text()
