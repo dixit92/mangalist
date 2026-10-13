@@ -348,3 +348,12 @@ def test_provider_author_reason_carries_no_names():
 
     assert all("given" not in r.lower() for r in c.reasons)
     assert any("author of a series linked in this library" in r for r in c.reasons)
+
+
+@pytest.mark.parametrize("folder_name", ["Second Pen", "Main Pen"])
+def test_provider_author_with_an_alias_in_brackets_is_known_by_either_name(folder_name):
+    # 1.39.0 (rules 4): a linked record's author "Main Pen (Second Pen)" names a folder called after either name.
+    archives = ["Alpha Story.cbz", "Beta Tale.cbz", "Gamma Saga.cbz"]
+
+    assert detector.classify(folder(folder_name, archives, known_authors=["Main Pen (Second Pen)"])).cls \
+        == WorkClass.ARTIST_COLLECTION

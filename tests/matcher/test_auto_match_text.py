@@ -104,6 +104,17 @@ def test_chapter_number_of_is_the_highest_stated_chapter(name, expected):
     ("[Group] Some Title [v2].cbz", "", "", "", "", False),
     ("Some Title Extra.cbz", "", "", "", "", False),
     ("", "", "", "", "", False),
+    # 1.34.0: a running index, then the chapter in the first bracket.
+    ("0002 [0000.5].cbz", "", "", "0.5", "", True),
+    ("0003 [0001 - Some Title].cbz", "", "", "1", "", False),
+    ("0004 [0002 - Some Title].cbz", "", "", "2", "", False),
+    ("0168 [0166 - Some Title (Part 2)].cbz", "", "", "166", "", False),  # an arc title: chapter 166 itself
+    ("0001 [0000].cbz", "", "", "0", "", False),
+    ("12 [10 \u2013 Some Title] [Group].cbz", "", "", "10", "", False),
+    ("0005 [0003 - Some Title Vol. 2].cbz", "", "", "3", "", False),  # nothing is read from the title
+    ("0150 [Chapter Title].cbz", "", "", "150", "", False),  # a title bracket: the leading number stays the chapter
+    ("001 [2019].cbz", "", "", "1", "", False),  # a bracketed year is not a chapter
+    ("001 [1 Punch].cbz", "", "", "1", "", False),  # a number + a word without " - " is a title
 ])
 def test_units_of_keeps_decimals_both_numbers_and_ranges(name, volume, volume_end, chapter, chapter_end, extra):
     def d(s):
@@ -116,6 +127,8 @@ def test_units_of_keeps_decimals_both_numbers_and_ranges(name, volume, volume_en
     ("Some Title v03 c012.cbz", (None, 12)),
     ("Some Title Vol. 01-05.cbz", (5, None)),
     ("001 [Chapter Title].cbz", (None, 1)),
+    # 1.34.0: the matcher keeps the running index (its count rule is unchanged).
+    ("0003 [0001 - Some Title].cbz", (None, 3)),
 ])
 def test_units_of_leaves_the_matcher_integers_alone(name, expected):
     assert not amt.units_of(name).is_empty
@@ -166,3 +179,15 @@ def test_disambiguated_aliases_count_in_full_only_when_the_tag_names_the_records
     assert amt.best_title_score(["Moon Letter"], "Tsuki no Tegami", ["Moon Letter (SATO Hana)"], ["SATO Hana"]) == pytest.approx(1.0, abs=5e-4)
     assert amt.best_title_score(["Moon Letter"], "Tsuki no Tegami", ["Moon Letter (SATO Hana)"]) == pytest.approx(amt.DISAMBIGUATED_ALIAS_FACTOR, abs=5e-4)
     assert amt.best_title_score(["Look Up"], "Look Up (SATO Hana)", []) == pytest.approx(1.0, abs=5e-4)  # the main title strips in full
+
+
+# --- 1.39.0 (rules 4): a record author's alias in brackets ---
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("Main Pen (Second Pen)", ["Main Pen (Second Pen)", "Main Pen", "Second Pen"]),
+    ("Main Pen [Second Pen]", ["Main Pen [Second Pen]", "Main Pen", "Second Pen"]),
+    ("Main Pen (2019)", ["Main Pen (2019)", "Main Pen"]),  # a year is not a name
+    ("Plain Name", ["Plain Name"]),
+])
+def test_author_name_forms_are_the_whole_name_the_name_before_the_brackets_and_each_name_in_them(name, expected):
+    assert amt.author_name_forms(name) == expected
