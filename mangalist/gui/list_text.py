@@ -93,11 +93,13 @@ def english_text(knowledge: Optional[SeriesKnowledge]) -> str:
 
 def match_text(knowledge: Optional[SeriesKnowledge]) -> str:
     """Where the series' data comes from and how sure the link is: ``MangaPixer: confirmed``,
-    ``MangaUpdates: needs review``."""
+    ``MangaUpdates: needs review``; ``MangaPixer: confirmed (MangaDex record)`` for a series MangaUpdates does not list
+    (MangaPixer 1.42.0)."""
     if knowledge is None:
         return ""
     who = "MangaPixer" if knowledge.source == SOURCE_MANGAPIXER else "MangaUpdates"
-    return f"{who}: {_LINK_WORDS.get(knowledge.link_state, knowledge.link_state)}"
+    text = f"{who}: {_LINK_WORDS.get(knowledge.link_state, knowledge.link_state)}"
+    return text + " (MangaDex record)" if knowledge.mangadex_record else text
 
 
 def group_gaps_text(state: SeriesState, group: str) -> str:

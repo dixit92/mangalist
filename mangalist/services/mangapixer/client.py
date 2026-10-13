@@ -16,8 +16,8 @@ Client rules (MangaList's side of the agreed contract):
   and ask the owner to re-map); 409 ``fullSyncRequired`` -> :class:`FullSyncRequired`; 400 codes ->
   :class:`BadRequest`; network / TLS problems -> :class:`ConnectionFailed`.
 - A ``schemaVersion`` above 1 is refused (:class:`UnsupportedSchema`); unknown fields are ignored (the
-  JSON is passed through as given), and so are record providers other than ``mangaupdates``
-  (:func:`usable_record`).
+  JSON is passed through as given), and so are record providers other than ``mangaupdates`` and (MangaPixer 1.42.0)
+  ``mangadex`` (:func:`usable_record`).
 - HTTP and HTTPS both work. Certificates are verified by default; a self-signed MangaPixer certificate
   needs an opt-in: ``verify=False`` (accept any) or ``verify="/path/to/ca.pem"``.
 
@@ -42,7 +42,7 @@ SUPPORTED_SCHEMA = 1
 MIN_MANGAPIXER = "1.33.0"
 INCLUDE_BLOCKS = ("volumes", "completion", "refresh")
 MAX_LIMIT = 500
-KNOWN_PROVIDERS = frozenset({"mangaupdates"})
+KNOWN_PROVIDERS = frozenset({"mangaupdates", "mangadex"})   # knowledge.RECORD_PROVIDERS
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
@@ -173,7 +173,8 @@ class ExportPage:
 
 
 def usable_record(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """The item's ``record`` when its provider is one MangaList knows (``mangaupdates``), else None."""
+    """The item's ``record`` when its provider is one MangaList knows (``mangaupdates``, or ``mangadex`` for a series
+    MangaUpdates does not list - MangaPixer 1.42.0), else None (``gcd``)."""
     record = item.get("record") if isinstance(item, dict) else None
     if isinstance(record, dict) and record.get("provider") in KNOWN_PROVIDERS:
         return record

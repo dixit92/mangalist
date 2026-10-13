@@ -421,14 +421,10 @@ def mangadex_released_for(db, series_id: int) -> Optional[Tuple[str, int]]:
         return None
     if res is None or res.inherited or res.link_state not in ("Confirmed", "Auto"):
         return None
-    companions = res.item.get("companions") if isinstance(res.item.get("companions"), Mapping) else {}
-    released = companions.get("mangadexReleased")
-    if not isinstance(released, Mapping) or not isinstance(released.get("language"), str):
-        return None
-    chapters = released.get("chapters")
-    if isinstance(chapters, bool) or not isinstance(chapters, int) or chapters < 0:
-        return None
-    return released["language"].strip().casefold(), chapters
+    from ..knowledge import mangadex_released_of
+
+    released = mangadex_released_of(res.item)
+    return (released.language, released.chapters) if released is not None else None
 
 
 def mangadex_id_for(db, series_id: int) -> Optional[str]:
