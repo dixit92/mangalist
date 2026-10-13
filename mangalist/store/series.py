@@ -87,6 +87,18 @@ def normalize_kind_hint(kind: Optional[str]) -> Optional[str]:
     return k
 
 
+def top_of(rel_path: str) -> str:
+    """The root's direct child a root-relative path lies in (``Parent/Sub/v01.cbz`` -> ``Parent``): the unit of a
+    folder-level scan (a series folder, or a franchise parent with its subseries and unit folders)."""
+    return rel_path.split("/", 1)[0]
+
+
+def in_scope(rel_path: str, scope: Optional[Iterable[str]]) -> bool:
+    """Is the root-relative *rel_path* inside a scan's *scope* (the root's direct children it read; None = the whole
+    root)? Only rows inside the scope may be judged "gone" by that scan."""
+    return scope is None or top_of(rel_path) in scope
+
+
 def link_key(root_dir: Path, rel_path: str) -> str:
     """The links-cache key of a series: the absolute folder as the scanner builds it."""
     return str(Path(root_dir).joinpath(*rel_path.split("/")))
@@ -108,9 +120,11 @@ class SeriesMixin:
                             (root_id, rel_path)).fetchone()
         return _row(r) if r else None
 
-    def record_scan(self, root_id: int, root_dir: Path, seen: Iterable[SeriesSeen]) -> ScanRecord:
+    def record_scan(self, root_id: int, root_dir: Path, seen: Iterable[SeriesSeen],
+                    scope: Optional[Iterable[str]] = None) -> ScanRecord:
         """Bring the root's series rows in line with a scan of *root_dir* (the folder the scanner
-        walked, resolved).
+        walked, resolved). *scope*: the root's direct children the scan read (a folder-level scan); only rows below
+        them can be missing or let go - None (a whole root) judges every row of the root.
 
         - A known folder: fingerprint / count / last seen refreshed.
         - New folders: new rows. Vanished folders: kept, marked ``missing`` (``missing_since`` set) - unless the root
@@ -124,6 +138,7 @@ class SeriesMixin:
         - Every present row takes its MangaUpdates identity (id + confirmed) from the links cache.
         """
         seen = {s.rel_path: s for s in seen}
+        scope = None if scope is None else set(scope)
         now = utcnow()
         rec = ScanRecord()
         root = self.get_root(root_id)
@@ -131,7 +146,7 @@ class SeriesMixin:
         with self.connect() as con:
             rows = {r["rel_path"]: _row(r) for r in
                     con.execute("SELECT * FROM series WHERE root_id = ?", (root_id,))}
-            gone = [s for rel, s in rows.items() if rel not in seen]
+            gone = [s for rel, s in rows.items() if rel not in seen and in_scope(rel, scope)]
 
             for s in seen.values():
                 if s.rel_path in rows:
