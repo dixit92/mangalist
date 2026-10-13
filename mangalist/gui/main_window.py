@@ -1968,7 +1968,7 @@ class MainWindow(QMainWindow):
             return
 
         if chosen is act_unbundled:
-            self.set_unbundled(entries, act_unbundled.isChecked())
+            self.set_unbundled(entries, not self._unbundled.all_on(e.folder for e in entries))   # the tick, flipped
         elif chosen in auto_actions:
             self._status_label.setText(self._auto_modes.apply([str(e.folder) for e in entries], auto_actions[chosen]))
         elif act_bulk_find is not None and chosen is act_bulk_find:
