@@ -1,6 +1,6 @@
 """Small name helpers shared by the detector, planner and scorer (port of MangaPixer 1.42.0
-``AutoMatchText.cs``; its 1.42.0 series-head readers ``SeriesHeadOf`` / ``UnitsOf(name, head)`` feed no matching and live
-in :mod:`mangalist.parsing.heads`, where MangaList reads units)."""
+``AutoMatchText.cs``; its 1.42.0 series-head readers ``SeriesHeadOf`` / ``UnitsOf(name, head)`` feed no matching and
+live in :mod:`mangalist.parsing.heads`, where MangaList reads units)."""
 
 from __future__ import annotations
 
@@ -500,7 +500,8 @@ class UnitNumbers:
         return self.volume is None and self.chapter is None
 
 
-# Unit numbers v2 (1.29.0; 1.42.0: up to three decimals, unit_number): decimals kept, a range as start / end (the end may repeat the token: "v01-v05").
+# Unit numbers v2 (1.29.0; 1.42.0: up to three decimals, unit_number): decimals kept, a range as start / end (the end
+# may repeat the token: "v01-v05").
 # <t> is the token, so a bracketed single-letter token ("[v2]", a release revision) can be told apart.
 _VOLUME_UNIT = regex.compile(
     r"(?<![\p{L}\p{N}])(?:(?P<t>volumes|volume|vols|vol|v|tome|tomo|band|deel|album|livre)\.?\s*"
@@ -515,7 +516,8 @@ _LEADING_UNIT = regex.compile(r"^\s*(?P<n>\d{1,4}(?:\.\d{1,3})?)(?:\s*-\s*(?P<m>
 
 # 1.34.0: "<running index> [<chapter>]" / "<running index> [<chapter> - <title>]" - a bare leading number, then a FIRST
 # bracket group that is a number, alone or followed by " - " and a title.
-_INDEXED_CHAPTER = regex.compile(r"^\s*\d{1,4}\s*\[\s*(?P<n>\d{1,4}(?:\.\d{1,3})?)(?:\s+[-\u2013\u2014]\s+[^\]]*)?\s*\]")
+_INDEXED_CHAPTER = regex.compile(
+    r"^\s*\d{1,4}\s*\[\s*(?P<n>\d{1,4}(?:\.\d{1,3})?)(?:\s+[-\u2013\u2014]\s+[^\]]*)?\s*\]")
 
 # Comics extras (1.32.0): Annual / FCBD (Free Comic Book Day) with or without a number, Special / One-Shot only with
 # their own number ("Special #1"; "Special Edition" is an edition, a bare "Special" a title word).

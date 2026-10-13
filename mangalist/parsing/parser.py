@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass, replace
 from pathlib import PurePath
 from typing import Iterable, Optional, Tuple, Union
 
-from ._common import DANGLING_CHAPTER, ENDS_IN_UNIT_WORD, real_group, series_qualifier, split_extension, without_watermark
+from ._common import (
+    DANGLING_CHAPTER, ENDS_IN_UNIT_WORD, real_group, series_qualifier, split_extension, without_watermark,
+)
 from .heads import SeriesHead, padded_sub_number, series_head_of
 from .layers import (
     parse_bare, parse_comics_extra, parse_fmd2, parse_generic, parse_labelled, parse_release, parse_scheme,
@@ -98,15 +99,12 @@ def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseCont
     return _finish(_apply_hint(result, ctx.kind_hint))
 
 
-# A sub-number padded to three digits after the point, like the chapter number before it ("Ch.014.005" - owner,
-# 2026-10-11: "It is .5"): the three digits are the sub-number, so 014.005 is 14.5 and 021.010 is 21.10 (= 21.1).
-_sub = padded_sub_number
-
-
 def _unpadded(unit):
+    """A chapter whose sub-number is padded to three digits like the number before it (``Ch.014.005`` - owner,
+    2026-10-11: "It is .5"): 014.005 is 14.5 and 021.010 is 21.10 (= 21.1); see :func:`heads.padded_sub_number`."""
     if unit is None:
         return None
-    start, end = _sub(unit.start), _sub(unit.end)
+    start, end = padded_sub_number(unit.start), padded_sub_number(unit.end)
     return unit if (start, end) == (unit.start, unit.end) else replace(unit, start=start, end=end)
 
 

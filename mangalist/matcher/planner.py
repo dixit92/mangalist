@@ -92,7 +92,7 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
         single = normalize(archives[0]).primary
         if single:
             variants.add(single, QueryVariantKind.ARCHIVE_DERIVED_TITLE)
-    _add_character_fallback(variants, [folder.display_name, archives[0]] if len(archives) == 1 else [folder.display_name])
+    _add_character_fallback(variants, [folder.display_name, *archives] if len(archives) == 1 else [folder.display_name])
 
     anatomies = [_anatomy.parse(a) for a in archives]
     author_tags = _dominant_creator_tags(anatomies)
@@ -226,9 +226,9 @@ def _add_name_variants(variants: _VariantList, name: NormalizedTitle) -> None:
 
 
 def _add_character_fallback(variants: _VariantList, display_names) -> None:
-    """The character the first dated doujin name with a title is about (1.34.2), as the last search: the name's own title
-    is searched first, the character only when nothing confident was found - and it can never link on its own (the
-    scorer caps it)."""
+    """The character the first dated doujin name with a title is about (1.34.2), as the last search: the name's own
+    title is searched first, the character only when nothing confident was found - and it can never link on its own
+    (the scorer caps it)."""
     character = next((d.character for d in (dated_doujin.try_parse(n) for n in display_names)
                       if d is not None and d.title is not None and d.character is not None), None)
     clean = normalize(character).primary

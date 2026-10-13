@@ -1,7 +1,8 @@
-"""The series head of one folder's archive names (MangaPixer 1.42.0 ``AutoMatchText.SeriesHeadOf``, Mihon's rule): which
-number in a name is the unit and which one belongs to the title. A name alone cannot tell ``<Series> 100 Vol 11 <title>``
-(chapter 100 of volume 11) from ``<Series Title 100> Vol 1`` (a title that ends in a number); the folder can: the unit is
-the number that VARIES between the names, a number every name shares is part of the title. Pure; sees names only."""
+"""The series head of one folder's archive names (MangaPixer 1.42.0 ``AutoMatchText.SeriesHeadOf``, Mihon's rule):
+which number in a name is the unit and which one belongs to the title. A name alone cannot tell ``<Series> 100 Vol 11
+<title>`` (chapter 100 of volume 11) from ``<Series Title 100> Vol 1`` (a title that ends in a number); the folder can:
+the unit is the number that VARIES between the names, a number every name shares is part of the title. Pure; sees names
+only."""
 
 from __future__ import annotations
 

@@ -42,8 +42,8 @@ def name_lines(name: str) -> List[str]:
         f"UNITS|{name}|{_d(u.volume)}|{_d(u.volume_end)}|{_d(u.chapter)}|{_d(u.chapter_end)}|{u.is_extra}",
         f"NORM|{name}|{n.primary}|{';'.join(x.text for x in n.derived)}",
         f"BASE|{name}|{archive_base_title(name)}",
-        f"ANAT|{name}|{_s(a.leading_tag)}|{_s(a.circle)}|{_s(a.artist)}|{_s(a.parody)}|{a.is_dated}|{a.is_doujin_shaped}"
-        f"|{a.title}|{';'.join(a.creator_tags)}",
+        f"ANAT|{name}|{_s(a.leading_tag)}|{_s(a.circle)}|{_s(a.artist)}|{_s(a.parody)}|{a.is_dated}"
+        f"|{a.is_doujin_shaped}|{a.title}|{';'.join(a.creator_tags)}",
         f"DATED|{name}|none" if dd is None
         else f"DATED|{name}|{dd.creator}|{_s(dd.title)}|{_s(dd.character)}|{';'.join(dd.tags)}",
         f"NUM|{name}|{_d(amt.chapter_number_of(name))}|{_d(amt.volume_number_of(name))}|{amt.is_chapter_like(name)}"

@@ -5,10 +5,10 @@ deterministic; it only ever sees a display name, never the filesystem.
 
 Pipeline for :func:`normalize`: NFKC (full-width to ASCII) -> strip a known archive extension -> a site's watermark at
 the end is left out (1.42.0, :func:`without_site_watermark`) -> a dated doujin name (``Creator] [yyyy-mm] Character
-(Tag) (Title)``, 1.34.2, :mod:`dated_doujin`) becomes its title -> ``_`` and ``.`` become spaces when the name has no spaces -> bracketed tags ``[...]``, ``(...)``,
-``{...}`` are removed, EXCEPT a non-leading, trailing ``[English Title]`` of at least two words (a
-second query variant, the MangaList folder convention) and a ``(19xx|20xx)`` year (a year hint) ->
-volume and chapter tokens are removed, edition words and phrases ("Master Edition", "Kanzenban")
+(Tag) (Title)``, 1.34.2, :mod:`dated_doujin`) becomes its title -> ``_`` and ``.`` become spaces when the name has no
+spaces -> bracketed tags ``[...]``, ``(...)``, ``{...}`` are removed, EXCEPT a non-leading, trailing ``[English
+Title]`` of at least two words (a second query variant, the MangaList folder convention) and a ``(19xx|20xx)`` year (a
+year hint) -> volume and chapter tokens are removed, edition words and phrases ("Master Edition", "Kanzenban")
 are removed but kept as hints -> whitespace collapsed, edge punctuation trimmed.
 
 Stage-2 helpers never change :attr:`NormalizedTitle.primary`: derived retrieval variants
@@ -47,10 +47,10 @@ from ._text import (
 
 _I = regex.IGNORECASE
 
-# 1.42.0 (MangaList parity, owner 2026-10-11): a site's watermark at the END of a name - the page title of an online-reading
-# site ("<Title> 001 Read Online", "... - Read Manga Online Free", "... Online Free", "... Free Online") - is not part of
-# the name. A class, not a list of sites: "read" + online / free, or online + free; one of those words alone never is
-# ("Sword Art Online", "Free!"), and some text must come before it.
+# 1.42.0 (MangaList parity, owner 2026-10-11): a site's watermark at the END of a name - the page title of an
+# online-reading site ("<Title> 001 Read Online", "... - Read Manga Online Free", "... Online Free", "... Free
+# Online") - is not part of the name. A class, not a list of sites: "read" + online / free, or online + free; one of
+# those words alone never is ("Sword Art Online", "Free!"), and some text must come before it.
 _SITE_WATERMARK = regex.compile(
     r"(?<=\S)[\s_\-\u2013\u2014|:]+(?:read(?:[\s_]+(?:manga|manhwa|manhua|webtoons?|comics?))?"
     r"(?:[\s_]+(?:online|free|for[\s_]+free)){1,2}|(?:(?:manga|manhwa|manhua|webtoons?|comics?)[\s_]+)?online[\s_]+"
