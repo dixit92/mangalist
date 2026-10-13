@@ -182,6 +182,7 @@ class DownloadTab(QWidget):
     show_in_list = Signal(str)              # a series folder: show it in the List tab
     settings_requested = Signal(str)        # a section of the Settings dialog (SECTION_*)
     library_changed = Signal(list)          # series folders whose files moved (restore / hold / delete): rescan them
+    modes_changed = Signal()                # a series' automatic-download mode was set in Found: the List's chips follow
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
@@ -374,6 +375,8 @@ class DownloadTab(QWidget):
         self.chapters.settings_requested.connect(self.settings_requested)
         self.found = FoundView(self._backend, top, confirm=confirm_send_all)
         self.found.changed.connect(self._on_found_changed)
+        self.found.change_source.connect(self.open_chapters_of)
+        self.found.mode_changed.connect(self.modes_changed)
         self.panels = QStackedWidget()
         self.panels.addWidget(self.releases)
         self.panels.addWidget(self.chapters)
@@ -711,6 +714,27 @@ class DownloadTab(QWidget):
         else:
             self.tree.setCurrentItem(item)
         self.tree.scrollToItem(item)
+
+    def open_chapters_of(self, series_id: int) -> bool:
+        """Open a series in Missing chapters - its chapters panel, where its source is picked (Found's Change source…).
+        False when the series is not in that group (nothing changes)."""
+        folder = next((f for f, sid in self._series_ids.items() if sid == series_id), None)
+        if folder is None or self._chapters_entry(folder) is None:
+            self.found.say("This series has no missing chapters to look up any more.", "warn")
+            return False
+        self.show_group(GROUP_CHAPTERS)
+        if folder not in self._items and self.filter_edit.text():
+            self.filter_edit.clear()                     # the filter hid it
+        item = self._items.get(folder)
+        if item is None:
+            return False
+        self._pending_focus = folder
+        if self.tree.currentItem() is item:
+            self._show_series(folder, now=True)
+        else:
+            self.tree.setCurrentItem(item)
+        self.tree.scrollToItem(item)
+        return True
 
     def current_folder(self) -> Optional[str]:
         return self._current
