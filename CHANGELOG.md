@@ -7,6 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.29] - 2026-10-13
+
+The twenty-eighth MangaList release (testing build): Empty now works after the automatic rename, and the Found view gets Change source, each series' automatic-download mode, queued sends and reasons that say which case a source problem is.
+
+- **Empty now follows renamed volumes.** Replaced chapters' Empty now refused with "<volume> is no longer in the library" once the automatic rename had renamed the volumes that replaced a batch's chapters: the check looked for them only under the names they had when the chapters were set aside. It now follows each volume through the renames MangaList recorded and checks it is the same file (same size, inside a library root). The same holds before a pending batch is moved or its confirmed delete runs.
+- **Change source… in Found.** A chapter finding with nothing to send - its source is gone or lacks the chapters, or it has no source yet - shows Change source… instead of Send: it opens the series in Missing chapters, where your other sources are listed to pick from. Send all leaves such findings out.
+- **The series' mode in Found.** Showing one series, the Found view has its Automatic downloads mode (Off / Notify / Auto / the default), changed in place; on Auto, what waits goes at the next scheduled find pass or Find now (a bulk find sends nothing by itself).
+- **Queued sends.** Send while another send runs queues the finding ("Queued") instead of waiting; the queue runs in order, the status line counts what is left, and Skip and Change source stay usable (skipping a queued finding takes it off the queue).
+- **"Change source?" says which case it is.** Instead of "not on <source> any more": the source cannot open the series; taken down on MangaDex (its chapters there are marked unavailable); MangaDex has never had chapters of the series; the source lists no chapters; or the source lacks the missing chapters (and which it has). MangaDex's cases use MangaPixer's MangaDex chapter count. Waiting findings take the new wording at the next find pass.
+
 ## [2026.10.28] - 2026-10-12
 
 The twenty-seventh MangaList release (testing build): Open folder works in the Docker image - it opens a file manager in the web GUI.
