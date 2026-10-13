@@ -36,7 +36,7 @@ def released_list(*vols):
     return {"source": "merged", "fetchedAt": "2026-10-02T12:00:00.000Z", "items": list(vols)}
 
 
-# --- the gap after the last volume -------------------------------------------------------------------------------------
+# --- the gap after the last volume ---------------------------------------------------------------------------------
 
 
 def test_off_a_volume_folder_is_compared_on_volumes_only():
@@ -156,7 +156,8 @@ def test_no_effect_without_volumes(inv):
 
 def test_no_effect_on_a_folder_without_a_chapter_target_or_restarting_chapter_numbers():
     no_target = k(record__latestChapter=None, record__totalChapters=None)
-    assert state(no_target, held_volumes=["1", "2", "3"]).gaps == state(no_target, False, held_volumes=["1", "2", "3"]).gaps
+    held = ["1", "2", "3"]
+    assert state(no_target, held_volumes=held).gaps == state(no_target, False, held_volumes=held).gaps
     on = compute_state(InventorySnapshot(held_volumes=["1", "2", "3"]), k(), folder_empty=False, today=TODAY,
                        unbundled=True, restarts=("chapter",))
     assert not on.gaps

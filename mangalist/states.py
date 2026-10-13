@@ -44,14 +44,14 @@ list chapters MangaDex no longer serves (the lane note "MangaPixer Export Fields
 
 **Unbundled Chapters** (a per-series setting, :mod:`mangalist.unbundled`; owner, 2026-10-11: "a setting to convert a
 volume-only series to a volumes + unbundled chapters series, with both upgrade and new missing chapter downloads
-applicable"): for a folder that holds volumes, the chapters after the last volume - where the newest volume that is held,
-missing or an upgrade ends by MangaPixer's volume list - up to the chapter target are compared too (*Missing chapters*).
-The volume side is unchanged, and the setting only ever adds gaps. A chapter a held volume collects is never wanted; in a
-folder of volumes only, nor is one a released volume the folder lacks collects (that volume is the gap). When a later
-volume comes out, the chapters it collects become an *Upgrade* (every one held) or it is a *Missing volume* (some not
-held), as in any folder holding chapters, and the unbundled range moves past it. Where the list does not say which
-chapter the newest held volume ends with, the folder is compared as without the setting ("Check for new chapters" cannot
-tell where to start either).
+applicable"): for a folder that holds volumes, the chapters after the last volume - where the newest volume that is
+held, missing or an upgrade ends by MangaPixer's volume list - up to the chapter target are compared too (*Missing
+chapters*). The volume side is unchanged, and the setting only ever adds gaps. A chapter a held volume collects is never
+wanted; in a folder of volumes only, nor is one a released volume the folder lacks collects (that volume is the gap).
+When a later volume comes out, the chapters it collects become an *Upgrade* (every one held) or it is a *Missing
+volume* (some not held), as in any folder holding chapters, and the unbundled range moves past it. Where the list does
+not say which chapter the newest held volume ends with, the folder is compared as without the setting ("Check for new
+chapters" cannot tell where to start either).
 
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
@@ -741,9 +741,9 @@ def _evaluate(
         target = None
     unbundled_missing: Optional[List[Decimal]] = None
     if unbundled and held.has_volumes and target is not None:
-        # Unbundled Chapters (the series' setting): the chapters after the last volume, whatever the folder holds so far
-        # - added to what the rules below compare (the setting never takes a gap away). Where the last volume ends is not
-        # known, the folder is compared as without the setting.
+        # Unbundled Chapters (the series' setting): the chapters after the last volume, whatever the folder holds so
+        # far - added to what the rules below compare (the setting never takes a gap away). Where the last volume ends
+        # is not known, the folder is compared as without the setting.
         after, why = _unbundled_start(k, held, gaps)
         reasons.append(why)
         if after is not None:
@@ -873,11 +873,11 @@ def last_volume_chapter(volumes: Iterable[VolumeInfo], top: Optional[Decimal]) -
 def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap]) -> Tuple[Optional[Decimal], str]:
     """Where a folder's unbundled chapters start (the chapter after it), and the reason line - or ``(None, why not)``.
 
-    The last volume is the newest one the folder holds, or lacks (a missing volume or an upgrade, released): the chapters
-    a held volume collects are held, and those of a released volume the folder lacks come with that volume - so neither
-    is wanted as chapters. Its end comes from MangaPixer's volume list; when the list does not map the newest held volume,
-    where it ends is not known (a guess could ask for chapters that volume holds) and the caller compares the folder as
-    without the setting."""
+    The last volume is the newest one the folder holds, or lacks (a missing volume or an upgrade, released): the
+    chapters a held volume collects are held, and those of a released volume the folder lacks come with that volume - so
+    neither is wanted as chapters. Its end comes from MangaPixer's volume list; when the list does not map the newest
+    held volume, where it ends is not known (a guess could ask for chapters that volume holds) and the caller compares
+    the folder as without the setting."""
     top = max(held.volumes)
     mapped = {to_decimal(v.volume): v for v in k.volumes or () if v.has_chapters}
     if top not in mapped:

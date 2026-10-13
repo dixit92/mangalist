@@ -1,7 +1,7 @@
-"""The find pass for a series with Unbundled Chapters on (mangalist.unbundled): its missing chapters after the last volume
-are searched like any chapter series' - the saved Suwayomi source, the series' group, Auto sends them - next to its
-volumes on nyaa. The real wanted list over a temporary library paired with a synthetic MangaPixer item (volumes 1-3 out,
-chapters 1-24.5, latest chapter 41); a fake Suwayomi and nyaa; made-up names."""
+"""The find pass for a series with Unbundled Chapters on (mangalist.unbundled): its missing chapters after the last
+volume are searched like any chapter series' - the saved Suwayomi source, the series' group, Auto sends them - next to
+its volumes on nyaa. The real wanted list over a temporary library paired with a synthetic MangaPixer item (volumes 1-3
+out, chapters 1-24.5, latest chapter 41); a fake Suwayomi and nyaa; made-up names."""
 
 from __future__ import annotations
 

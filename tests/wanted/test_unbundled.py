@@ -74,7 +74,7 @@ def test_the_lists_view_by_folder(lib):
     assert fresh.is_on(quest) and not fresh.is_on(gaps)
 
 
-# --- the wanted list ---------------------------------------------------------------------------------------------------
+# --- the wanted list -----------------------------------------------------------------------------------------------
 
 
 def test_off_everywhere_nothing_changes(lib):

@@ -1,5 +1,5 @@
-"""Unbundled Chapters in the main window (offscreen Qt, made-up series in a temporary library): the row menu's tick (also
-on a multi-selection), the states and the Download tab's groups that follow it, and the details panel's flag."""
+"""Unbundled Chapters in the main window (offscreen Qt, made-up series in a temporary library): the row menu's tick
+(also on a multi-selection), the states and the Download tab's groups that follow it, and the details panel's flag."""
 
 from __future__ import annotations
 
