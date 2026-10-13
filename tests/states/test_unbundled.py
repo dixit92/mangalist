@@ -119,6 +119,15 @@ def test_where_the_newest_held_volume_ends_is_not_known_nothing_is_compared():
     assert any("does not say which chapter volume 2 ends with" in r for r in on.reasons)
 
 
+def test_a_mixed_folder_whose_newest_volume_is_unmapped_is_compared_as_without_the_setting():
+    vols = released_list(vol("1", "1", "8", "2025-01-01", "released"), vol("2", None, None, "2025-05-01", "released"))
+    held = dict(held_volumes=["1", "2"], held_chapters=chapters(20, 25))
+    off = state(k(volumes=vols), unbundled=False, **held)
+    on = state(k(volumes=vols), **held)
+    assert on.state == off.state and on.gaps == off.gaps and gaps(on, GAP_CHAPTER)        # still counts its chapters
+    assert any("does not say which chapter volume 2 ends with" in r for r in on.reasons)
+
+
 def test_licensed_without_an_english_volume_list_the_held_volumes_list_still_says_where_they_end():
     # the English edition is chapters in an app: no English dates, volume list from the original edition
     vols = released_list(vol("1", "1", "8"), vol("2", "9", "16"))
