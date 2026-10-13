@@ -890,17 +890,6 @@ class MainWindow(QMainWindow):
         self._status_label.setText(f"{len(paths)} duplicate file(s) deleted - rescanning")
         self._scan_paths(paths)
 
-    def _roots_holding(self, paths) -> Optional[List[Root]]:
-        """The library folders that hold *paths* (paths in none of them are left out). None when none holds any - never
-        "every library" (owner, 2026-10-10: discarding duplicates in one library rescanned every library)."""
-        roots = self._roots()
-        found: List[Root] = []
-        for p in paths:
-            root = root_of(str(p), roots)
-            if root is not None and root not in found:
-                found.append(root)
-        return found or None
-
     def _scan_paths(self, paths) -> bool:
         """Rescan only the series folders holding *paths* (files or folders; selective scanning, owner 2026-10-13: "it
         rescans the whole library or ALL libraries sometimes and it's not always necessary"). Paths in no library
