@@ -84,6 +84,7 @@ available:
 ``default_mode()`` / ``set_default_mode`` quick: the default mode (Notify unless changed).
 ``default_for(id)``                       quick (optional): (the mode a series without its own follows, True when it is
                                           its library's) - schema 8; screens fall back to ``default_mode()``.
+``series_defaults(ids)``                  quick (optional): series id -> ``default_for`` of each, in one read.
 ``last_find_run()``                       quick: the last find pass (``FindRun``) or None.
 ``send_chapters(series_id, match, picks,  record and enqueue the picked chapters ->
  target_dir, manga_title, source_name)``  :class:`~mangalist.downloads.chapters.ChapterSendOutcome`.

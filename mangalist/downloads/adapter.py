@@ -690,6 +690,11 @@ class Backend:
 
         return FindingStore(self.db).default_for(series_id)
 
+    def series_defaults(self, series_ids: Sequence[int]) -> Dict[int, Tuple[str, bool]]:
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).defaults(series_ids)
+
     def set_default_mode(self, mode: str) -> None:
         from ..store.findings import FindingStore
 

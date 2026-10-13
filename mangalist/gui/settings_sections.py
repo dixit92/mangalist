@@ -82,8 +82,9 @@ SUWAYOMI_EXPLAIN = ("The sources installed in Suwayomi (from their extensions). 
                     "the order it tries them: MangaDex first - it is found by the MangaDex id MangaPixer links; the "
                     "others by title, and you confirm the match once per series. The scanlation group is chosen per "
                     "series in the Download tab.")
-AUTOMATIC_DOWNLOADS_LEAD = ("Each series is Off, Notify or Auto - set per series in the List's row menu (Automatic "
-                            "downloads). Series you have not set follow this default.")
+AUTOMATIC_DOWNLOADS_LEAD = ("Each series is Off, Notify or Auto - set per series wherever it shows (the List, the To get "
+                            "list, Found: Automatic downloads), or for a whole library in Library > Edit. Series you "
+                            "have not set follow their library's default, else this one.")
 AUTOMATIC_DOWNLOADS_NOTE = ("The find pass runs on the schedule above (and with Find now in the Download tab) and looks "
                             "only at series with gaps - the Download tab's To get list.")
 AUTOMATIC_DOWNLOADS_OFF = "Not available: downloads are switched off in this installation."
@@ -582,7 +583,8 @@ class AutomationPage(SectionPage):
         self._show_schedules()
         self._say_schedule("Back to the container's value.", "ok")
 
-    # Automatic downloads (owner decisions 2026-10-10): the default mode; the per-series mode is in the List's row menu.
+    # Automatic downloads (owner decisions 2026-10-10): the default mode; the per-series mode is in the series menus,
+    # a library's in Library > Edit (2026-10-13).
     def _build_auto_downloads(self) -> None:
         box = card("true")
         bv = QVBoxLayout(box)
