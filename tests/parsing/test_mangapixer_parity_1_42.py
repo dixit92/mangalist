@@ -31,7 +31,7 @@ def _read(name, ctx=None):
     return r.kind, _u(r.volume), _u(r.chapter)
 
 
-# --- 1. a series title that ends in a number ------------------------------------------------------------------------
+# --- 1. a series title that ends in a number --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name, title, vol", [
     ("Some Title 100 v01.cbz", "Some Title 100", "1"),
@@ -99,7 +99,8 @@ def test_parse_names_reads_title_numbers_as_titles_and_varying_numbers_as_chapte
     title = parse_names(["Robo 009 v01.cbz", "Robo 009 v02.cbz", "Robo 009 Vol 3.cbz"])
     assert [(r.kind, _u(r.volume), _u(r.chapter)) for r in title] == [
         (Kind.VOLUME, "1", None), (Kind.VOLUME, "2", None), (Kind.VOLUME, "3", None)]
-    chapters = parse_names(["Some Series 099 Vol 10 A.cbz", "Some Series 100 Vol 11 B.cbz", "Some Series 101 Vol 11.cbz"])
+    chapters = parse_names(["Some Series 099 Vol 10 A.cbz", "Some Series 100 Vol 11 B.cbz",
+                            "Some Series 101 Vol 11.cbz"])
     assert [(r.kind, _u(r.volume), _u(r.chapter)) for r in chapters] == [
         (Kind.CHAPTER, "10", "99"), (Kind.CHAPTER, "11", "100"), (Kind.CHAPTER, "11", "101")]
     copies = parse_names(["Some Series 100 Vol 11 A.cbz", "Some Series 100 Vol 11 A (1).cbz"])
@@ -124,7 +125,7 @@ def test_the_scan_reads_each_folder_with_its_series_head(tmp_path):
     assert sorted((_u(h.parsed.volume), _u(h.parsed.chapter)) for h in hits) == [("1", None), ("2", None), ("3", None)]
 
 
-# --- 2. "[v2]" is a release revision ------------------------------------------------------------------------------------
+# --- 2. "[v2]" is a release revision ----------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name, vol, ch, group", [
     ("[Grp] Some Title - c007 [v2].cbz", None, "7", None),
@@ -139,7 +140,7 @@ def test_a_single_digit_v_tag_is_a_revision(name, vol, ch, group):
     assert (r.kind, _u(r.volume), _u(r.chapter), r.group) == (Kind.CHAPTER, vol, ch, group)
 
 
-# --- 3. comics / BD grammar ---------------------------------------------------------------------------------------------
+# --- 3. comics / BD grammar -------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name, vol", [
     ("Some Comic Tome 3.cbz", "3"),
@@ -191,7 +192,7 @@ def test_not_a_comics_extra(name):
     assert parse_comics_extra(name) is None
 
 
-# --- 4. the site watermark as a class -----------------------------------------------------------------------------------
+# --- 4. the site watermark as a class ---------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", [
     "Some Series 001 Read Online.cbz",

@@ -173,8 +173,8 @@ def _head_number(body: str) -> Optional[Tuple[UnitRange, int]]:
 
 # --- 3. release names ---------------------------------------------------------------------------
 
-# A volume token; also the comics / BD album tokens (MangaPixer 1.32.0 grammar, hand-over 2026-10-12): "Tome 3", "Tomo 3",
-# "Band 3", "Deel 3", "Album 3", "Livre 3" and an upper-case "T" glued to its number ("T03").
+# A volume token; also the comics / BD album tokens (MangaPixer 1.32.0 grammar, hand-over 2026-10-12): "Tome 3",
+# "Tomo 3", "Band 3", "Deel 3", "Album 3", "Livre 3" and an upper-case "T" glued to its number ("T03").
 _VP = r"(?:v|vol\.?\s*|volume\s+|(?:tome|tomo|band|deel|album|livre)\.?\s*|(?-i:T)(?=\d{1,3}(?![\d.])))"
 _CP = r"(?:c|ch\.?\s*|chapter\s+)"
 _RELEASE = re.compile(
@@ -297,8 +297,8 @@ def parse_release(name: str, series_title: Optional[str] = None,
 
 
 # A comics extra (MangaPixer 1.32.0 grammar, hand-over 2026-10-12): "Annual" / "FCBD" / "Free Comic Book Day" with or
-# without a number, "Special #1" / "One-Shot 1" only with their own number ("Special Edition" is an edition). It must end
-# the name's units: only a " - <subtitle>" and tags may follow, so "Annual Report <Title> 05" stays a title.
+# without a number, "Special #1" / "One-Shot 1" only with their own number ("Special Edition" is an edition). It must
+# end the name's units: only a " - <subtitle>" and tags may follow, so "Annual Report <Title> 05" stays a title.
 _COMICS_EXTRA = re.compile(
     r"""^(?:(?P<series>.*?\S)(?:\s+-\s+|[\s_]+))?
     (?P<marker>(?:annual|fcbd|free\s+comic\s+book\s+day)(?:\s*\#?\s*(?P<n>\d{1,4}(?:\.\d{1,3})?))?

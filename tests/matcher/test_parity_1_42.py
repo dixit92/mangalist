@@ -31,7 +31,7 @@ def _u(volume="", chapter="", extra=False, chapter_end=""):
                            D(chapter_end) if chapter_end else None, extra)
 
 
-# --- 1.34.2: dated doujin names --------------------------------------------------------------------------------------
+# --- 1.34.2: dated doujin names ---------------------------------------------------------------------------------------
 
 def test_dated_name_character_tag_title_the_last_group_is_the_title():
     d = dated_doujin.try_parse("Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz")
@@ -84,8 +84,10 @@ def test_other_names_are_not_dated(name):
 
 
 def test_the_cleaned_title_and_the_base_title_are_the_title_not_the_character():
-    assert normalize("Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz").primary == "The Real Title"
-    assert any(x.text == "The Real Title" for x in normalize("Artist] [2023-05] Character (The Real Title) - Part 2.cbz").derived)
+    assert normalize("Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz").primary \
+        == "The Real Title"
+    parted = normalize("Artist] [2023-05] Character (The Real Title) - Part 2.cbz")
+    assert any(x.text == "The Real Title" for x in parted.derived)
     assert archive_base_title("Artist] [2023-06] Character (Tag) (The Real Title 2).cbz") == "The Real Title"
     assert normalize("[Artist Name] Some Title (Some Parody) [English].cbz").primary == "Some Title"   # as before
 
@@ -106,7 +108,8 @@ def test_the_planner_searches_the_title_first_and_the_character_last():
     plan = planner.plan_folder(_ONE_SHOT, detector.classify(_ONE_SHOT))
     assert plan.variants[0].text == "First Story"
     assert (plan.variants[-1].text, plan.variants[-1].kind) == ("Hero Name", QueryVariantKind.CHARACTER_NAME)
-    undated = FolderShape("[Artist Name] Some Title (Some Parody)", 2, ("[Artist Name] Some Title (Some Parody).cbz",), ())
+    undated = FolderShape("[Artist Name] Some Title (Some Parody)", 2,
+                          ("[Artist Name] Some Title (Some Parody).cbz",), ())
     assert all(v.kind != QueryVariantKind.CHARACTER_NAME
                for v in planner.plan_folder(undated, detector.classify(undated)).variants)
 
@@ -124,7 +127,7 @@ def test_a_record_named_after_the_character_is_review_only_and_the_title_still_l
     assert o.ranked[0].candidate.external_id == "1"
 
 
-# --- 1.42.0: the site watermark class --------------------------------------------------------------------------------
+# --- 1.42.0: the site watermark class ---------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name, expected", [
     ("Some Series Read Online", "Some Series"),
