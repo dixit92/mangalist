@@ -1221,6 +1221,7 @@ class Renamer:
         budget = max(0, int(limit))
         started = time.monotonic()
         seen = self._automatic_seen()
+        shared: Optional[str] = None
         for root in roots:
             if root.id not in guided:
                 report.waiting.append(root.name)
@@ -1230,7 +1231,9 @@ class Renamer:
             if budget <= 0 or (should_stop is not None and should_stop()):
                 break
             report.roots.append(root.name)
-            inputs, digests = self._naming_inputs(root), self._series_digests(root)
+            if shared is None:
+                shared = self._shared_inputs()
+            inputs, digests = self._naming_inputs(root, shared), self._series_digests(root)
             before = seen.get(str(root.id)) or {}
             quiet = dict(before.get("series") or {}) if before.get("inputs") == inputs else {}
             quiet = {sid: d for sid, d in quiet.items() if digests.get(int(sid)) == d}      # still as when looked at
@@ -1301,17 +1304,24 @@ class Renamer:
         except Exception:  # noqa: BLE001 - the next pass looks at everything again
             _log.warning("Renamer: could not remember what the automatic pass looked at", exc_info=True)
 
-    def _naming_inputs(self, root) -> str:
-        """A digest of what every name in *root* depends on besides its own files: the root's folder and scheme, the
-        Windows server (the length rule), this build (the parser and the namer), and MangaPixer's synced data (titles
-        and volume lists) with the root's pairing."""
+    def _naming_inputs(self, root, shared: str) -> str:
+        """A digest of what every name in *root* depends on besides its own files: the root's folder and scheme, and
+        *shared* (:meth:`_shared_inputs`)."""
+        import hashlib
+
+        text = repr((shared, root.path, getattr(root, "naming_scheme", None)))
+        return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+    def _shared_inputs(self) -> str:
+        """A digest of what every name in every root depends on: the Windows server (the length rule), this build (the
+        parser and the namer), and MangaPixer's synced data (titles and volume lists) with the roots' pairing."""
         import hashlib
 
         from . import __version__
 
         h = hashlib.sha256()
-        h.update(repr((__version__, type(self.namer).__name__, root.path, getattr(root, "naming_scheme", None),
-                       windows_server(self.db))).encode("utf-8", "surrogatepass"))
+        h.update(repr((__version__, type(self.namer).__name__, windows_server(self.db))).encode("utf-8",
+                                                                                               "surrogatepass"))
         try:
             with self.db.connect() as con:
                 for r in con.execute("SELECT root_id, library_id, prefix, manual FROM mangapixer_mappings"
@@ -1326,26 +1336,23 @@ class Renamer:
 
     def _series_digests(self, root) -> Dict[int, str]:
         """Per present series of *root*: a digest of its folder, its "volumes or chapters?" answer and its recorded
-        files (the names the dry run reads, with their sizes)."""
+        files (the names the dry run reads - its units are read from the same files by the same parser - with their
+        sizes)."""
         import hashlib
 
-        names: Dict[int, List[str]] = defaultdict(list)
-        sizes: Dict[int, List[Tuple[str, int]]] = defaultdict(list)
+        files: Dict[int, List[Tuple[str, int]]] = defaultdict(list)
         series: Dict[int, Tuple[str, Optional[str]]] = {}
         with self.db.connect() as con:
             for r in con.execute("SELECT id, rel_path, kind_hint FROM series WHERE root_id = ? AND status = 'present'",
                                  (root.id,)):
                 series[r["id"]] = (r["rel_path"], r["kind_hint"])
-            for r in con.execute("SELECT u.series_id, u.rel_path FROM units u JOIN series s ON s.id = u.series_id"
-                                 " WHERE s.root_id = ?", (root.id,)):
-                names[r["series_id"]].append(r["rel_path"])
-            for r in con.execute("SELECT series_id, rel_path, size FROM archives WHERE root_id = ? AND status ="
-                                 " 'present'", (root.id,)):
-                if r["series_id"] is not None:
-                    sizes[r["series_id"]].append((r["rel_path"], r["size"]))
+            # by the (root, path) index: "AND status = ..." made SQLite walk every present archive of every root
+            for r in con.execute("SELECT series_id, rel_path, size, status FROM archives WHERE root_id = ?", (root.id,)):
+                if r["series_id"] is not None and r["status"] == "present":
+                    files[r["series_id"]].append((r["rel_path"], r["size"]))
         out: Dict[int, str] = {}
         for sid, (rel, kind) in series.items():
-            text = repr((rel, kind, sorted(set(names.get(sid, ()))), sorted(sizes.get(sid, ()))))
+            text = repr((rel, kind, sorted(files.get(sid, ()))))
             out[sid] = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:32]
         return out
 
