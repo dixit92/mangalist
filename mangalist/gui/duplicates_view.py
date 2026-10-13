@@ -19,8 +19,8 @@ import logging
 import os
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFontMetrics, QPainter
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -51,7 +51,7 @@ from ..duplicates import (
     newest,
 )
 from .background import BackgroundCall, start_call
-from .links import open_link
+from .links import open_folder as open_folder_default, open_link
 from .shell import DuplicateFile, DuplicateGroup, DuplicateSeries
 
 _log = logging.getLogger(__name__)
@@ -272,7 +272,7 @@ class DuplicatesView(QWidget):
         self.setStyleSheet(STYLE)
         self._db = db
         self._confirm = confirm or (lambda files: _ask_confirmation(self, files))
-        self._open_folder = open_folder or (lambda folder: QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
+        self._open_folder = open_folder or open_folder_default
         self._series: List[DuplicateSeries] = []
         self._groups: List[DuplicateGroup] = []
         self._rows: Dict[str, _FileRow] = {}               # path -> its row
