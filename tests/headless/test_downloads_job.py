@@ -150,3 +150,47 @@ def test_only_queued_downloads_still_run_the_pass(tmp_path):
     ledger.save_connection(QbtConnection("http://qbt.example:8080", "admin", SECRET))
     result = job(JobContext())
     assert result.status == "ok" and result.extra["queue_sent"] == 1 and result.extra["checked"] == 0
+
+
+# --- selective scanning: the after-filing scan reads the filed series, not every root (2026-10-13) --------------------
+
+def test_after_filing_only_the_filed_series_folder_is_scanned(tmp_path, monkeypatch):
+    from mangalist import scanner
+
+    ledger, qbt, sid, sdir = _setup(tmp_path)
+    db = ledger.store
+    root = db.list_roots()[0]
+    other = tmp_path / "library" / "Manga" / "Series B"
+    other.mkdir()
+    (other / "Series B v01.cbz").write_bytes(data("b01"))
+    second = tmp_path / "library" / "Completed"
+    (second / "Series C").mkdir(parents=True)
+    (second / "Series C" / "Series C v01.cbz").write_bytes(data("c01"))
+    db.add_root(str(second))
+    scan(db)
+    (other / "Series B v01.cbz").unlink()                       # changed outside MangaList: the periodic scan's job
+    scopes = []
+    real = scanner.scan_and_record_library
+    monkeypatch.setattr(scanner, "scan_and_record_library",
+                        lambda roots, db_, **kw: scopes.append(kw.get("scopes")) or real(roots, db_, **kw))
+    ledger.save_connection(QbtConnection("http://qbt.example:8080", "admin", SECRET))
+    ledger.create(sid, candidate(), ["2"], str(sdir))
+    qbt.put(HASH, "Pack", {"Series A v02.cbz": data("v02")}, state="uploading")
+    result = make_downloads_job(open_ledger=lambda: ledger, client_factory=lambda conn: qbt)(JobContext())
+    assert result.extra["filed"] == 1 and "rescan ok (1 folder)" in result.message
+    assert scopes == [{root.id: {"Series A"}}]                  # the filed series only: not every root, not its root
+    assert {u.vol_from for u in db.list_units(sid) if u.kind == "volume"} == {"1", "2"}
+    assert db.archive_at(root.id, "Series B/Series B v01.cbz").status == "present"     # not read
+
+
+def test_after_filing_a_series_the_database_lost_its_record_folder_is_scanned(tmp_path):
+    from mangalist.headless.downloads_job import _scopes_after
+
+    ledger, qbt, sid, sdir = _setup(tmp_path)
+    db = ledger.store
+    rec = ledger.create(sid, candidate(), ["2"], str(sdir))
+    with db.connect() as con:
+        con.execute("DELETE FROM series WHERE id = ?", (sid,))
+    root = db.list_roots()[0]
+    assert _scopes_after(db, [ledger.get(rec.id)], None) == {root.id: {"Series A"}}
+    assert _scopes_after(db, [], None) == {}                    # nothing filed, nothing moved: nothing scanned

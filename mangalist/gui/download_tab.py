@@ -1194,6 +1194,11 @@ class DownloadTab(QWidget):
         if not landed:
             return
         folders = [f for f, sid in self._series_ids.items() if sid in landed]
+        known = {sid for sid in self._series_ids.values() if sid in landed}
+        # a series this tab does not list: the record's target folder (inside the series folder) names it - an empty
+        # list rescanned every library (selective scanning, 2026-10-13)
+        folders += sorted({r.target_dir for r in records if r.series_id in landed and r.series_id not in known
+                           and r.target_dir})
         for folder in folders:                              # the panel looks the series up again after the rescan
             self._chapter_lookups.pop(folder, None)
             self._results.pop(folder, None)

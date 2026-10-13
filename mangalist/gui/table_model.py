@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+import os
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
@@ -110,6 +112,38 @@ def state_matches(state: Optional[SeriesState], key: Optional[str]) -> bool:
 EXAMINED_ROW_BG = QColor("#e7f3ec")
 WEAK_MATCH_BG = QColor("#fdf0e3")
 MU_PROCESSING_BG = QColor("#dce6fa")
+
+
+def under_any(folder: str, tops: Iterable[str]) -> bool:
+    """Is the absolute *folder* one of *tops* (absolute top-level folders of a folder scan) or inside one?"""
+    f = os.path.normcase(str(folder))
+    for t in tops:
+        t = os.path.normcase(str(t)).rstrip("/\\")
+        if f == t or f.startswith(t + os.sep):
+            return True
+    return False
+
+
+def merge_folder_scan(entries: List[MangaEntry], root_id: Optional[int], root_folder, scope: Iterable[str],
+                      scanned: Iterable[MangaEntry]) -> List[MangaEntry]:
+    """*entries* (the table's rows) with a folder-level scan merged in: the rows of root *root_id* below the scanned
+    top-level folders (*scope*, names of the root's direct children - a subseries is below its franchise parent) are
+    replaced by *scanned*; the root's rows stay in the scan's order (by top-level folder name, as a whole-root scan
+    lists them), the other roots' rows stay as they are (selective scanning, Stage 1)."""
+    names = set(scope)
+    base = Path(root_folder)
+
+    def top(e: MangaEntry) -> str:
+        try:
+            return Path(e.folder).relative_to(base).parts[0]
+        except (ValueError, IndexError):
+            return ""
+
+    others = [e for e in entries if e.root_id != root_id]
+    groups: Dict[str, List[MangaEntry]] = {}
+    for e in [e for e in entries if e.root_id == root_id and top(e) not in names] + list(scanned):
+        groups.setdefault(top(e), []).append(e)
+    return others + [e for name in sorted(groups, key=str.lower) for e in groups[name]]
 
 
 class MangaTableModel(QAbstractTableModel):
@@ -347,6 +381,10 @@ class MangaTableModel(QAbstractTableModel):
             if str(entry.folder) in flipped:
                 idx = self.index(row, COL_TITLE)
                 self.dataChanged.emit(idx, idx, [MODE_CHIP_ROLE])
+
+    def rename_counts(self) -> Dict[str, int]:
+        """The Rename pending counts per series folder (a folder scan's recount is merged into them)."""
+        return dict(self._rename_counts)
 
     def rename_count_at(self, row: int) -> int:
         """How many files of row *row*'s folder the renamer would rename (0: none, or not counted yet)."""

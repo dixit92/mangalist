@@ -5,7 +5,16 @@
 
 1. Every archive a scan saw is upserted by (root, root-relative path); a known path with another size or mtime
    is a change in place: its signature is cleared (re-signed by the backfill). Rows of a scanned root that were
-   not seen become ``missing`` (``missing_since``). Roots that failed to scan are left alone.
+   not seen become ``missing`` (``missing_since``). Roots that failed to scan are left alone. A folder-level scan
+   (*scopes*: the root's direct children it read) judges only the rows below those folders.
+   **Only rows that changed are written** (selective scanning, Stage 0: recording an unchanged library rewrote all
+   22 thousand rows, 8.5 s of write lock on the owner's storage). So ``last_seen_at`` / ``last_seen_scan`` of a
+   present row are NOT bumped by every scan; they matter only once the row is missing (the copy-elsewhere and
+   after-the-fact rules compare them with a live copy's ``first_seen_scan``). They are made exact when the row is
+   marked missing: the scan revision (and time) of the last recorded scan that covered the row's folder - every scan
+   since its own stamp that covered it saw it, or it would be missing already. Which scan covered which folder is
+   kept in ``meta``: ``identity.covered.<root id>`` (the last whole-root record) and
+   ``identity.covered.<root id>:<folder>`` (folder-level records since; dropped by the next whole-root record).
 2. **Moves** - the pool: missing rows (any root) inside the move window (setting ``move_window_days``, default
    30) with a usable signature. A NEW path whose size equals a pool row's is hashed (stamp re-checked after
    hashing, so a file still being written never matches); exactly one pool row and exactly one new path with
@@ -31,17 +40,20 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from ..store.archives import abs_path, archive_of, next_scan_revision
 from ..store.db import utcnow
 from ..store.exclusions import rel_posix
+from ..store.series import in_scope, top_of
 from .carry import CarryResult, carry_moved_series
 from .signature import bytes_read_for, is_usable, signature_if_unchanged
 
 _log = logging.getLogger(__name__)
 
 Signer = Callable[[Path, int, int], Optional[str]]
+
+COVERED_META = "identity.covered."          # + "<root id>" (whole root) or "<root id>:<top folder>": "<scan> <time>"
 
 
 @dataclass
@@ -132,12 +144,59 @@ def _observations(con, root_id: int, folder: Path, entries: Iterable) -> Dict[st
     return out
 
 
+def _covered(con, root_id: int) -> Tuple[Optional[Tuple[int, str]], Dict[str, Tuple[int, str]]]:
+    """(the last whole-root record of *root_id*, {top folder: its last folder-level record since}) as (scan, time)."""
+    whole: Optional[Tuple[int, str]] = None
+    tops: Dict[str, Tuple[int, str]] = {}
+    key = f"{COVERED_META}{root_id}"
+    for r in con.execute("SELECT key, value FROM meta WHERE key = ? OR substr(key, 1, ?) = ?",
+                         (key, len(key) + 1, key + ":")):
+        try:
+            rev_text, _sp, at = str(r["value"]).partition(" ")
+            got = (int(rev_text), at)
+        except (TypeError, ValueError):
+            continue
+        if r["key"] == key:
+            whole = got
+        else:
+            tops[r["key"][len(key) + 1:]] = got
+    return whole, tops
+
+
+def _mark_covered(con, root_id: int, scope: Optional[Iterable[str]], rev: int, stamp: str) -> None:
+    key = f"{COVERED_META}{root_id}"
+    if scope is None:
+        con.execute("DELETE FROM meta WHERE substr(key, 1, ?) = ?", (len(key) + 1, key + ":"))
+        names = [key]
+    else:
+        names = [f"{key}:{top}" for top in sorted(set(scope))]
+    con.executemany("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    [(k, f"{rev} {stamp}") for k in names])
+
+
+def _rows_in_scope(con, root_id: int, scope: Optional[Iterable[str]]) -> Dict[str, sqlite3.Row]:
+    """The archive rows of *root_id* a scan with *scope* may judge, by root-relative path (every row of the root, or
+    those below the named direct children: a range on the (root, path) index per folder)."""
+    if scope is None:
+        return {r["rel_path"]: r for r in con.execute("SELECT * FROM archives WHERE root_id = ?", (root_id,))}
+    rows: Dict[str, sqlite3.Row] = {}
+    for top in sorted(set(scope)):
+        # "top/..." sorts between "top/" and "top0" ('0' follows '/'), byte-wise like SQLite's BINARY collation
+        for r in con.execute("SELECT * FROM archives WHERE root_id = ? AND rel_path > ? AND rel_path < ?",
+                             (root_id, top + "/", top + "0")):
+            if in_scope(r["rel_path"], (top,)):
+                rows[r["rel_path"]] = r
+    return rows
+
+
 def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer: Optional[Signer] = None,
-                    now: Optional[datetime] = None) -> IdentityReport:
+                    now: Optional[datetime] = None,
+                    scopes: Optional[Mapping[int, Optional[Iterable[str]]]] = None) -> IdentityReport:
     """Bring the archive rows in line with a library scan, detect moves, carry series (module docstring).
 
     *scanned*: ``(root id, the folder the scanner walked, its entries)`` for every root that scanned without
-    error (the series rows are already recorded)."""
+    error (the series rows are already recorded). *scopes*: ``{root id: the root's direct children the scan read}``
+    for folder-level scans (a root not in it, or None, was read whole)."""
     signer = signer or _default_signer
     rep = IdentityReport()
     stamp = now.replace(microsecond=0).isoformat() if now else utcnow()
@@ -147,9 +206,12 @@ def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer
     with db.connect() as con:
         rev = rep.scan = next_scan_revision(con)
         for root_id, folder, entries in scanned:
+            scope = (scopes or {}).get(root_id)
+            scope = None if scope is None else set(scope)
             observed = _observations(con, root_id, Path(folder), entries)
             rep.archives_seen += len(observed)
-            rows = {r["rel_path"]: r for r in con.execute("SELECT * FROM archives WHERE root_id = ?", (root_id,))}
+            rows = _rows_in_scope(con, root_id, scope)
+            whole, tops = _covered(con, root_id)
             for rel, ob in observed.items():
                 r = rows.get(rel)
                 if r is None:
@@ -157,14 +219,24 @@ def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer
                     continue
                 changed = r["size"] != ob.size or r["mtime_ns"] != ob.mtime_ns
                 rep.archives_changed += changed
+                if (not changed and r["status"] == "present" and r["missing_since"] is None
+                        and r["series_id"] == ob.series_id):
+                    continue            # exactly as recorded: no write (module docstring, point 1)
                 con.execute("UPDATE archives SET series_id = ?, size = ?, mtime_ns = ?,"
                             " signature = CASE WHEN ? THEN NULL ELSE signature END, status = 'present',"
                             " last_seen_at = ?, last_seen_scan = ?, missing_since = NULL WHERE id = ?",
                             (ob.series_id, ob.size, ob.mtime_ns, 1 if changed else 0, stamp, rev, r["id"]))
             for rel, r in rows.items():
                 if rel not in observed and r["status"] == "present":
-                    con.execute("UPDATE archives SET status = 'missing', missing_since = ? WHERE id = ?", (stamp, r["id"]))
+                    # last seen: the last recorded scan that covered its folder (it saw the row, which was present)
+                    seen_rev, seen_at = r["last_seen_scan"], r["last_seen_at"]
+                    for cover in (whole, tops.get(top_of(rel))):
+                        if cover is not None and cover[0] > seen_rev:
+                            seen_rev, seen_at = cover
+                    con.execute("UPDATE archives SET status = 'missing', missing_since = ?, last_seen_scan = ?,"
+                                " last_seen_at = ? WHERE id = ?", (stamp, seen_rev, seen_at, r["id"]))
                     newly_missing.add(r["id"])
+            _mark_covered(con, root_id, scope, rev, stamp)
             rep.archives_missing = len(newly_missing)
         cutoff = window_cutoff(db.move_window_days(), now)
         pool = [archive_of(r) for r in con.execute(
