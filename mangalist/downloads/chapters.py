@@ -405,6 +405,32 @@ def allowed_sources(installed: Sequence[SuwayomiSource], chosen: Optional[Sequen
     return sorted(mangadex, key=lambda s: (s.lang != "en", s.display_name.casefold()))
 
 
+def mangadex_released_for(db, series_id: int) -> Optional[Tuple[str, int]]:
+    """(language, how many chapters) MangaDex lists for the series in MangaPixer's ``companions.mangadexReleased``
+    (1.42.0), else None. MangaPixer reads MangaDex's aggregate with its unavailable chapters (taken down, usually on a
+    licence): chapters there that Suwayomi does not list were taken down; none at all - MangaDex never had any."""
+    from ..services.mangapixer import open_cache
+    from ..services.mangapixer.resolve import resolve
+    from .placement import locate_series
+
+    try:
+        series, root, _dir = locate_series(db, series_id)
+        res = resolve(open_cache(db), root.id, series.rel_path)
+    except Exception:  # noqa: BLE001 - no MangaPixer data: the reason stays general
+        _log.debug("Chapters: no MangaPixer item for series %s", series_id, exc_info=True)
+        return None
+    if res is None or res.inherited or res.link_state not in ("Confirmed", "Auto"):
+        return None
+    companions = res.item.get("companions") if isinstance(res.item.get("companions"), Mapping) else {}
+    released = companions.get("mangadexReleased")
+    if not isinstance(released, Mapping) or not isinstance(released.get("language"), str):
+        return None
+    chapters = released.get("chapters")
+    if isinstance(chapters, bool) or not isinstance(chapters, int) or chapters < 0:
+        return None
+    return released["language"].strip().casefold(), chapters
+
+
 def mangadex_id_for(db, series_id: int) -> Optional[str]:
     """The MangaDex id MangaPixer links to the series' own folder (its Confirmed / Auto item), else None."""
     from ..services.mangapixer import open_cache

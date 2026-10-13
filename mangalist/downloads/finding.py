@@ -59,7 +59,14 @@ REASON_BULK = "found by a bulk find"
 REASON_PACK_WHOLE = "a pack whose files cannot be narrowed to the missing volumes"
 REASON_UNCERTAIN = "the release may not hold a missing volume (its numbers cannot be compared)"
 REASON_NO_SOURCE = "no Suwayomi source is saved for the series yet"
-REASON_SOURCE_DROPPED = "not on {source} any more - Change source?"
+#: The saved source cannot give the missing chapters - one reason per case (owner, 2026-10-12: "make the 'not on ...'
+#: message say which case it is"). Each ends in "Change source?": the way on is another source.
+REASON_SOURCE_GONE = "{source} cannot open the series any more - Change source?"
+REASON_SOURCE_TAKEN_DOWN = "taken down on {source}: its chapters there are marked unavailable - Change source?"
+REASON_SOURCE_NEVER = "{source} has never had chapters of the series - Change source?"
+REASON_SOURCE_EMPTY = "{source} lists no chapters of the series - Change source?"
+REASON_SOURCE_LACKS = "{source} lacks {missing} (it has {has}) - Change source?"
+CHANGE_SOURCE = " - Change source?"
 
 
 @dataclass
