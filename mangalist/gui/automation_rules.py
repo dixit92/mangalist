@@ -47,16 +47,30 @@ def mode_label(mode: Optional[str]) -> str:
     return MODE_LABELS.get(mode or "", str(mode or ""))
 
 
-def default_entry_label(default: str) -> str:
-    """The row menu's "follow the default" entry: ``Use the default (Notify)``."""
-    return f"Use the default ({mode_label(default)})"
+def default_entry_label(default: str, library: bool = False) -> str:
+    """The row menu's "follow the default" entry: ``Use the default (Notify)``, or ``Use the library's default (Off)``
+    when the series' library sets one."""
+    whose = "the library's default" if library else "the default"
+    return f"Use {whose} ({mode_label(default)})"
 
 
-def mode_text(own: Optional[str], default: str) -> str:
-    """What the details panel says: ``Auto``, or ``Notify (the default)`` for a series that follows the default."""
+def mode_text(own: Optional[str], default: str, library: bool = False) -> str:
+    """What the details panel says: ``Auto``, or ``Notify (the default)`` / ``Off (the library's default)`` for a series
+    that follows a default."""
     if own in MODES:
         return mode_label(own)
-    return f"{mode_label(default)} (the default)"
+    whose = "the library's default" if library else "the default"
+    return f"{mode_label(default)} ({whose})"
+
+
+def default_of(backend, series_id: int) -> Tuple[str, bool]:
+    """(the default a series follows, True when it is its library's): the backend's ``default_for`` when it has one,
+    else the default setting."""
+    fn = getattr(backend, "default_for", None)
+    if callable(fn):
+        mode, library = fn(series_id)
+        return mode, bool(library)
+    return backend.default_mode(), False
 
 
 def common_choice(owns: Iterable[Optional[str]]) -> Optional[str]:

@@ -41,7 +41,7 @@ import threading
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .. import paths
 from ..gui.downloads_backend import BackendError, QbtSettings, SuwayomiCheck, SuwayomiSettingsView
@@ -684,6 +684,11 @@ class Backend:
         from ..store.findings import FindingStore
 
         return FindingStore(self.db).default_mode()
+
+    def default_for(self, series_id: int) -> Tuple[str, bool]:
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).default_for(series_id)
 
     def set_default_mode(self, mode: str) -> None:
         from ..store.findings import FindingStore
