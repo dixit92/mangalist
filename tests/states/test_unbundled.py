@@ -88,18 +88,21 @@ def test_a_later_volume_turns_the_held_chapters_into_an_upgrade():
     assert st.state == State.MISSING_CHAPTERS and st.upgrade_available
 
 
-def test_a_later_volume_partly_held_as_chapters_is_a_missing_volume_and_its_chapters_are_not_asked_for():
+def test_a_later_volume_partly_held_as_chapters_is_a_missing_volume():
     st = state(k(), held_volumes=["1", "2"], held_chapters=chapters(17, 20) + chapters(25, 41))
-    assert gaps(st, GAP_VOLUME) == [("3", None)]                    # the volume fills 21-24.5 (and upgrades 17-20)
-    assert not gaps(st, GAP_CHAPTER)
+    assert gaps(st, GAP_VOLUME) == [("3", None)] and not gaps(st, GAP_UPGRADE)     # the volume fills 21-24.5
+    off = state(k(), unbundled=False, held_volumes=["1", "2"], held_chapters=chapters(17, 20) + chapters(25, 41))
+    assert st.gaps == off.gaps                                      # a folder holding chapters compares them already
 
 
-def test_off_a_mixed_folder_still_asks_for_the_chapters_of_a_missing_volume():
+def test_the_setting_never_takes_a_gap_away():
+    # a mixed folder already asks for the chapters of a missing volume (9-24, in volumes 2-3); the setting keeps them
     held = dict(held_volumes=["1"], held_chapters=chapters(25, 30))
     off = state(k(), unbundled=False, **held)
     on = state(k(), **held)
-    assert gaps(off, GAP_CHAPTER) == [("9", "24"), ("31", "41")]
-    assert gaps(on, GAP_CHAPTER) == [("31", "41")] and gaps(on, GAP_VOLUME) == gaps(off, GAP_VOLUME)
+    assert gaps(off, GAP_CHAPTER) == gaps(on, GAP_CHAPTER) == [("9", "24"), ("31", "41")]
+    assert gaps(on, GAP_VOLUME) == gaps(off, GAP_VOLUME)
+    assert set(off.gaps) <= set(on.gaps)
 
 
 def test_a_newer_unmapped_volume_out_in_a_mixed_folder_stays_an_upgrade():
