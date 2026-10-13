@@ -79,7 +79,8 @@ def _name_order(name: str):
 def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _NO_EXCL,
                        context=None, annotate: bool = True) -> List[FileHit]:
     """Return archive FileHits inside ``folder`` up to ``max_depth`` levels (excluded paths skipped),
-    each parsed with *context* (the series' ParseContext) unless *annotate* is False."""
+    each parsed with *context* (the series' ParseContext, plus the series head of the names in the same folder: a
+    number every sibling shares is part of the title) unless *annotate* is False."""
     hits: List[FileHit] = []
     folder = folder.resolve()
 
@@ -99,6 +100,7 @@ def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _N
         # A fixed order (os.walk lists in the filesystem's order, which differs between ext4, btrfs,
         # NTFS and SMB), so every list built from the files reads the same everywhere.
         dirnames.sort(key=_name_order)
+        here: List[FileHit] = []
         for name in sorted(filenames, key=_name_order):
             p = Path(dirpath) / name
             if not _is_archive(p):
@@ -110,11 +112,20 @@ def _walk_manga_folder(folder: Path, max_depth: int = MAX_DEPTH, _ex: _Excl = _N
                 size, mtime_ns = st.st_size, st.st_mtime_ns
             except OSError:
                 size, mtime_ns = 0, None
-            hit = FileHit(path=p, size=size, depth=rel_depth, mtime_ns=mtime_ns)
-            if annotate:
-                annotate_file(hit, context)
-            hits.append(hit)
+            here.append(FileHit(path=p, size=size, depth=rel_depth, mtime_ns=mtime_ns))
+        if annotate:
+            _annotate_folder(here, context)
+        hits.extend(here)
     return hits
+
+
+def _annotate_folder(hits: Sequence[FileHit], context) -> None:
+    """Parse the archives of ONE folder with *context* and their series head (MangaPixer 1.42.0 parity)."""
+    from .parsing import with_series_head
+
+    ctx = with_series_head(context, [h.path.name for h in hits])
+    for hit in hits:
+        annotate_file(hit, ctx)
 
 
 def _count_subfolders(folder: Path, _ex: _Excl = _NO_EXCL) -> int:
@@ -218,8 +229,11 @@ def apply_kind_hint(entry: MangaEntry, kind_hint: Optional[str], schemes: Sequen
     re-classify it, in place (no disk access)."""
     ctx = _parse_context(entry.title, kind_hint, schemes)
     entry.kind_hint = kind_hint
+    by_folder: Dict[Path, List[FileHit]] = {}
     for hit in entry.files:
-        annotate_file(hit, ctx)
+        by_folder.setdefault(Path(hit.path).parent, []).append(hit)
+    for hits in by_folder.values():
+        _annotate_folder(hits, ctx)
     classify(entry)
     return entry
 
