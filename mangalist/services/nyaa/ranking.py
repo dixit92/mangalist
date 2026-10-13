@@ -114,7 +114,7 @@ def _plain(d: Decimal) -> str:
 
 
 def _uncertain(parsed: ParsedTitle) -> bool:
-    return bool(parsed.renumbered) or (parsed.vol_from is None and parsed.is_pack)
+    return bool(parsed.renumbered) or (parsed.vol_from is None and parsed.is_pack) or parsed.numbers_only
 
 
 def _list(volumes: Sequence[str], limit: int = 6) -> str:
@@ -131,13 +131,19 @@ def build_candidate(item: RssItem, parsed: ParsedTitle, missing: Sequence[str], 
     covers_missing = _covered(missing, parsed) if missing else _not_held(parsed, held)
     covers_held = _covered(held, parsed)
     uncertain = _uncertain(parsed)
-    tier = float(len(covers_missing)) or (_UNCERTAIN_TIER if uncertain else 0.0)
+    # numbers without a volume mark may be chapters: ranked as uncertain, below any release that states its volumes
+    tier = _UNCERTAIN_TIER if parsed.numbers_only else (float(len(covers_missing)) or (_UNCERTAIN_TIER if uncertain
+                                                                                         else 0.0))
 
     rank = (tier * _TIER + (_DIGITAL if parsed.digital else 0.0) + (_TRUSTED if item.trusted else 0.0)
             - (_REMAKE if item.remake else 0.0) + min(item.seeders, _SEEDERS_CAP))
 
     reasons: List[str] = []
-    if covers_missing:
+    if covers_missing and parsed.numbers_only:
+        n = len(covers_missing)
+        reasons.append(f"may hold {n} missing volume{'s' if n != 1 else ''} ({_list(covers_missing)}): its numbers "
+                       "carry no volume mark, so they may be chapters")
+    elif covers_missing:
         n = len(covers_missing)
         what = "missing volume" if missing else "volume you do not have"
         reasons.append(f"covers {n} {what}{'s' if n != 1 else ''} ({_list(covers_missing)})")
@@ -164,7 +170,8 @@ def build_candidate(item: RssItem, parsed: ParsedTitle, missing: Sequence[str], 
         size_bytes=item.size_bytes, seeders=item.seeders, leechers=item.leechers, downloads=item.downloads,
         trusted=item.trusted, remake=item.remake, published=item.published, category=item.category,
         vol_from=parsed.vol_from, vol_to=parsed.vol_to, digital=parsed.digital, group=parsed.group,
-        is_pack=parsed.is_pack, not_comic=parsed.not_comic, covers_missing=covers_missing,
+        is_pack=parsed.is_pack, not_comic=parsed.not_comic, numbers_only=parsed.numbers_only,
+        covers_missing=covers_missing,
         covers_held=covers_held, rank=rank, reasons=tuple(reasons))
 
 

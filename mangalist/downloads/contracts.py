@@ -71,6 +71,7 @@ class NyaaCandidate:
     group: Optional[str] = None
     is_pack: bool = False               # more than one volume
     not_comic: bool = False             # e.g. a light novel / EPUB release; hidden by default
+    numbers_only: bool = False          # its numbers carry no volume mark ("001-051"): they may be chapters
     # Ranking against the series (D4):
     covers_missing: Tuple[str, ...] = ()  # the series' missing volumes this release holds
     covers_held: Tuple[str, ...] = ()     # volumes the owner already holds (labelled, still allowed)
