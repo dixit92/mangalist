@@ -46,11 +46,12 @@ list chapters MangaDex no longer serves (the lane note "MangaPixer Export Fields
 volume-only series to a volumes + unbundled chapters series, with both upgrade and new missing chapter downloads
 applicable"): for a folder that holds volumes, the chapters after the last volume - where the newest volume that is held,
 missing or an upgrade ends by MangaPixer's volume list - up to the chapter target are compared too (*Missing chapters*).
-The volume side is unchanged. A chapter a held volume collects is never wanted, nor one a released volume the folder
-lacks collects (that volume is the gap). When a later volume comes out, the chapters it collects become an *Upgrade*
-(every one held) or stay in *Missing volumes* (some not held), as in any folder holding chapters, and the unbundled range
-moves past it. Where the list does not say which chapter the newest held volume ends with, the folder is compared as
-without the setting ("Check for new chapters" cannot tell where to start either).
+The volume side is unchanged, and the setting only ever adds gaps. A chapter a held volume collects is never wanted; in a
+folder of volumes only, nor is one a released volume the folder lacks collects (that volume is the gap). When a later
+volume comes out, the chapters it collects become an *Upgrade* (every one held) or it is a *Missing volume* (some not
+held), as in any folder holding chapters, and the unbundled range moves past it. Where the list does not say which
+chapter the newest held volume ends with, the folder is compared as without the setting ("Check for new chapters" cannot
+tell where to start either).
 
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
@@ -738,21 +739,19 @@ def _evaluate(
     if "chapter" in restarts:
         reasons.append("Chapter numbers start again in each folder of the series (e.g. each season) - not compared")
         target = None
+    unbundled_missing: Optional[List[Decimal]] = None
     if unbundled and held.has_volumes and target is not None:
-        # Unbundled Chapters (the series' setting): the chapters after the last volume, whatever the folder holds so far.
+        # Unbundled Chapters (the series' setting): the chapters after the last volume, whatever the folder holds so far
+        # - added to what the rules below compare (the setting never takes a gap away). Where the last volume ends is not
+        # known, the folder is compared as without the setting.
         after, why = _unbundled_start(k, held, gaps)
         reasons.append(why)
         if after is not None:
             compared = chapters_checked = True
-            missing = [c for c in _whole_numbers(after, target) if c > after and not held.holds_chapter(c)]
+            unbundled_missing = [c for c in _whole_numbers(after, target) if c > after and not held.holds_chapter(c)]
             if target != target.to_integral_value() and target > after and not held.holds_chapter(target):
-                missing.append(target)
-            missing += [p for p in held.split_missing if after < p <= target and p not in missing]
-            gaps += _chapter_gaps(missing)
-            reasons.append(f"Latest chapter {fmt_num(target)}")
-            target = None               # the rules for other folders below do not compare chapters again
-        # Where the last volume ends is not known: the folder is compared as without the setting (a folder holding
-        # loose chapters still counts them from the first one held).
+                unbundled_missing.append(target)
+            unbundled_missing += [p for p in held.split_missing if after < p <= target and p not in unbundled_missing]
     # A volumes-only folder holding volumes the volume list does not map: which chapters those hold is unknown, so the
     # chapter numbers are not compared (owner, 2026-10-11: every volume of a finished 4-koma held, the list mapped only
     # volumes 1-3, and MangaUpdates' strip count 717 made "missing ch 261-717").
@@ -775,12 +774,18 @@ def _evaluate(
             if target != target.to_integral_value() and not held.holds_chapter(target):
                 missing.append(target)
             missing += [p for p in held.split_missing if p <= target and p not in missing]
+            if unbundled_missing is not None:
+                missing, unbundled_missing = sorted(set(missing) | set(unbundled_missing)), None
             gaps += _chapter_gaps(missing)
             chapters_checked = True
             reasons.append(f"Latest chapter {fmt_num(target)}")
     elif (target is not None and held.has_volumes and k.licensed and not out_vols
           and not _jp_volumes_out(k, extra_target)):
         reasons.append("No English volume list to compare with")
+
+    if unbundled_missing is not None:           # a folder the rules above do not compare on chapters (volumes only)
+        gaps += _chapter_gaps(unbundled_missing)
+        reasons.append(f"Latest chapter {fmt_num(target)}")
 
     # Owner rule (b), 2026-10-03: a chapter-only folder of a licensed series never shows Missing
     # volumes; a released volume is an upgrade - provided every chapter is present.
