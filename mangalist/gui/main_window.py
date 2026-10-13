@@ -10,7 +10,6 @@ from __future__ import annotations
 import datetime
 import logging
 import os
-import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -58,7 +57,7 @@ from .table_model import (
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
-from .links import open_link
+from .links import OPEN_FOLDER_LABEL, open_folder, open_link
 
 
 # ---------------------------------------------------------------------------
@@ -1848,7 +1847,7 @@ class MainWindow(QMainWindow):
                 act_kind = menu.addAction("Volumes or chapters?…")
                 act_kind.setToolTip("Its files are bare numbers: say once whether they are volumes or chapters")
                 menu.addSeparator()
-            act_open = menu.addAction("Open folder in Explorer")
+            act_open = menu.addAction(OPEN_FOLDER_LABEL)
             menu.addSeparator()
             act_copy_path = menu.addAction("Copy folder path")
             act_copy_title = menu.addAction("Copy title")
@@ -2213,15 +2212,11 @@ class MainWindow(QMainWindow):
             self._open_in_explorer(entry.folder)
 
     def _open_in_explorer(self, path: Path) -> None:
-        path = Path(path)
-        try:
-            if path.is_dir():
-                import os
-                os.startfile(str(path))  # noqa: S606  (Windows-only, intentional)
-            else:
-                subprocess.Popen(["explorer", str(path)])
-        except OSError as exc:
-            QMessageBox.warning(self, "Open in Explorer failed", str(exc))
+        """The series folder in a file manager; where none opens, its path is copied instead and the status bar says so."""
+        if open_folder(path):
+            return
+        QGuiApplication.clipboard().setText(str(path))
+        self._status_label.setText(f"No file manager here - folder path copied: {path}")
 
     # --- Lifecycle --------------------------------------------------------
 

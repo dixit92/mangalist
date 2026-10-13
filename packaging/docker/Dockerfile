@@ -24,6 +24,14 @@ RUN add-pkg \
         libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 \
         fonts-dejavu-core
 
+# A file manager for the List's "Open folder" (and the other Open folder buttons): the container has no desktop
+# for Qt to hand a folder to, so MANGALIST_FILE_MANAGER (below) names this one; it opens as a window in the web GUI.
+# Deleting skips the trash, after a confirmation: a trash for /data would be a ".Trash-99" folder at the top of the
+# mount - on Unraid, a new share. Its own settings (Edit > Preferences, kept in /config) can change that.
+RUN add-pkg pcmanfm \
+    && sed -i 's/^use_trash=1$/use_trash=0/' /etc/xdg/libfm/libfm.conf \
+    && grep -qx 'use_trash=0' /etc/xdg/libfm/libfm.conf
+
 # Dependencies first (cached while only the code changes). The GUI uses QtCore / QtGui / QtWidgets
 # only, so the image installs PySide6-Essentials instead of the full PySide6 (saves ~250 MB).
 COPY requirements.txt /opt/mangalist/requirements.txt
@@ -68,6 +76,8 @@ ENV \
     KEEP_APP_RUNNING=1 \
     # MangaList's data folder (mangalist/paths.py) = the /config volume.
     MANGALIST_DATA_DIR=/config \
+    # Started by the GUI's Open folder buttons (mangalist/gui/links.py).
+    MANGALIST_FILE_MANAGER=pcmanfm \
     # Headless runner service: 0 turns it off. Downloads stay off unless MANGALIST_DOWNLOADS=1.
     MANGALIST_HEADLESS=1 \
     MANGALIST_RESCAN_SCHEDULE=daily@03:30 \
