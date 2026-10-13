@@ -293,6 +293,7 @@ class ChapterRow:
     default: Optional[SuwayomiChapter] = None       # None: the source does not have this chapter
     in_hand: Optional[DownloadRecord] = None        # a chapter download already has it (not sent again)
     extra: bool = False                             # an extra (``71.5``) the source has: offered, not counted missing
+    part_of: Optional[str] = None                   # a part (``62.1``) of the missing chapter ``62`` the source splits
 
     @property
     def available(self) -> bool:
@@ -335,19 +336,31 @@ def group_counts(chapters: Iterable[SuwayomiChapter], missing: Sequence[Decimal]
     return {names[k]: n for k, n in counts.items()}
 
 
+def source_splits(chapters: Iterable[SuwayomiChapter]):
+    """MangaPixer's split-chapter rule (:func:`mangalist.split_chapters.splits_of`) on the source's list: the parts the
+    source numbers ``N.1``, ``N.2`` ... are chapter N when they alone would count as chapter N once held (owner,
+    2026-10-13: "We need to bring .1 .2 rules on parity with MangaPixer" - a source that splits chapter 62 into 62.1 and
+    62.2 offered them as extras and called 62 "not on the source"; the folder counts 62.1 + 62.2 as chapter 62)."""
+    from ..split_chapters import splits_of
+
+    return splits_of(n for n in _per_group(chapters) if n != n.to_integral_value())
+
+
 def extra_numbers(chapters: Iterable[SuwayomiChapter], missing: Sequence[str],
                   held: Iterable[Decimal]) -> List[Decimal]:
     """The source's extras worth offering: decimal chapters (``71.5``) between the folder's first and last chapter (held
     or missing) that the folder does not hold and that are not missing already. Chapters inside held volumes are below
-    the first loose chapter, so they are never offered."""
+    the first loose chapter, so they are never offered. Parts of a split chapter (:func:`source_splits`) are not
+    extras: a missing chapter's parts are its own rows, a held chapter's parts are not wanted."""
     wanted = {d for d in (to_decimal(n) for n in missing) if d is not None}
     have = set(held)
     known = wanted | have
     if not known:
         return []
     lo, hi = min(known), max(known)
+    parts = source_splits(chapters).parts
     return sorted({n for n in _per_group(chapters) if n != n.to_integral_value() and lo <= n <= hi
-                   and n not in wanted and n not in have})
+                   and n not in wanted and n not in have and n not in parts})
 
 
 def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], group: Optional[str],
@@ -355,9 +368,18 @@ def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], gr
                  extras: Sequence[Decimal] = ()) -> List[ChapterRow]:
     """One row per missing chapter number and per *extra* (:func:`extra_numbers`), ascending (see the module
     docstring)."""
-    numbers = sorted({d for d in (to_decimal(n) for n in missing) if d is not None} | set(extras))
-    extra = set(extras)
     per = _per_group(chapters)
+    missing_numbers = {d for d in (to_decimal(n) for n in missing) if d is not None}
+    # a missing chapter the source has only in parts: its parts stand in for it (source_splits)
+    splits = source_splits(chapters)
+    part_of: Dict[Decimal, Decimal] = {}
+    for p in splits.parts:
+        whole = Decimal(int(p))
+        if whole in missing_numbers and not per.get(whole):
+            part_of[p] = whole
+    stand_ins = set(part_of.values())
+    numbers = sorted((missing_numbers - stand_ins) | set(part_of) | set(extras))
+    extra = set(extras)
     counts = Counter(key for n in numbers for key in per.get(n, {}))
     want = group_key(group)
     in_hand = in_hand or {}
@@ -367,7 +389,9 @@ def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], gr
         copies = per.get(number, {})
         ordered = sorted(copies.items(), key=lambda kv: (kv[0] != want, -counts[kv[0]], kv[0]))
         options = tuple(ch for _k, ch in ordered)
-        rows.append(ChapterRow(text, options, options[0] if options else None, in_hand.get(text), number in extra))
+        whole = part_of.get(number)
+        rows.append(ChapterRow(text, options, options[0] if options else None, in_hand.get(text), number in extra,
+                               _plain(str(whole)) if whole is not None else None))
     return rows
 
 

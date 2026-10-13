@@ -453,7 +453,10 @@ class ChaptersPanel(QWidget):
             return download_chip(row.in_hand)[0]
         if not row.available:
             return f"not on {self.lookup.source_name}" if self.lookup else "not available"
-        return "extra - not counted as missing" if row.extra else ""
+        if row.extra:
+            return "extra - not counted as missing"
+        part_of = getattr(row, "part_of", None)
+        return f"part of ch {part_of} (the source splits it)" if part_of else ""
 
     def _fill_rows(self, rows: Sequence[ChapterRow]) -> None:
         self._loading = True
