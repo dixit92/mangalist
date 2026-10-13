@@ -10,9 +10,9 @@ when the record was read.
 Two adapters build one:
 
 * :func:`from_mangapixer_item` - an item of MangaPixer's metadata export (``schemaVersion`` 1, the
-  documented shape; unknown fields are ignored): a MangaUpdates record, or (MangaPixer 1.42.0) a MangaDex record for a
-  series MangaUpdates does not list; MangaDex's released chapters (``companions.mangadexReleased``); the edition an admin
-  declared for the folder and "Track completion: off" (MangaPixer 1.39.0);
+  documented shape; unknown fields are ignored): a MangaUpdates record, or (MangaPixer 1.42.0) a MangaDex record for
+  a series MangaUpdates does not list; MangaDex's released chapters (``companions.mangadexReleased``); the edition an
+  admin declared for the folder and "Track completion: off" (MangaPixer 1.39.0);
 * :func:`from_own_matcher` - MangaList's own matcher: a :class:`~mangalist.models.MangaEntry`'s
   MangaUpdates fields (as cached today), optionally the full MangaUpdates series record and the
   AniList answer.
@@ -208,8 +208,8 @@ class MangaDexReleased:
     """What MangaDex lists as released in one language (MangaPixer 1.42.0 ``companions.mangadexReleased``).
 
     MangaPixer reads MangaDex's aggregate WITH its unavailable chapters (taken down, usually on a licence): both numbers
-    can name chapters no source can give (2026-10-13: one licensed series listed 179 English chapters, none readable), so
-    the states use it only where nothing else tells (:func:`mangalist.states.compute_state`)."""
+    can name chapters no source can give (2026-10-13: one licensed series listed 179 English chapters, none readable),
+    so the states use it only where nothing else tells (:func:`mangalist.states.compute_state`)."""
 
     language: str                       # casefolded (``en``)
     latest_chapter: Optional[str]       # the highest chapter listed, exact (``18``, ``12.5``); None when none is listed
@@ -228,8 +228,8 @@ class MangaDexReleased:
 
 
 def mangadex_released_of(item: Any) -> Optional[MangaDexReleased]:
-    """``companions.mangadexReleased`` of a MangaPixer export item, or None (not read yet, MangaPixer before 1.42.0, or a
-    malformed block). The one reader: the states and the Download tab's "Change source?" reasons both use it."""
+    """``companions.mangadexReleased`` of a MangaPixer export item, or None (not read yet, MangaPixer before 1.42.0, or
+    a malformed block). The one reader: the states and the Download tab's "Change source?" reasons both use it."""
     companions = item.get("companions") if isinstance(item, Mapping) else None
     released = companions.get("mangadexReleased") if isinstance(companions, Mapping) else None
     if not isinstance(released, Mapping) or not isinstance(released.get("language"), str):
@@ -263,7 +263,7 @@ class SeriesKnowledge:
     source: str                                 # SOURCE_MANGAPIXER | SOURCE_OWN_MATCHER
     link_state: str = LINK_NOT_LOOKED_UP
     # record identity (a MangaDex record leaves mu_id / mu_url empty: its id is mangadex_id)
-    record_provider: Optional[str] = None       # PROVIDER_MANGAUPDATES | PROVIDER_MANGADEX (MangaPixer); None: own matcher
+    record_provider: Optional[str] = None       # PROVIDER_MANGAUPDATES | PROVIDER_MANGADEX; None: the own matcher
     mu_id: Optional[str] = None
     mu_url: Optional[str] = None
     title: Optional[str] = None
@@ -491,13 +491,14 @@ def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str
     ``record`` is None for Needs review and Don't match (only the link state is known then); a record
     of a provider MangaList does not know (``gcd``) is ignored like a missing one.
 
-    A **MangaDex record** (MangaPixer 1.42.0, ``record.provider = "mangadex"``: a series MangaUpdates does not list, linked
-    by an admin) has no MangaUpdates fields: ``externalId`` is the MangaDex id (:attr:`SeriesKnowledge.mangadex_id`, never
-    ``mu_id``), ``licensedEn`` / ``statusText`` / ``translationComplete`` are null and ``englishPublishers`` empty - so the
-    series reads as not licensed in English. Its ``latestChapter`` is MangaDex's released list's highest (taken-down
-    chapters included), the same value as ``companions.mangadexReleased``: it is kept there, not as MangaUpdates' latest
-    chapter. After MangaPixer's "Switch to MangaUpdates" the same node carries a MangaUpdates record: the next sync
-    replaces the item and this reads it as any other (nothing in MangaList is keyed by the record's id).
+    A **MangaDex record** (MangaPixer 1.42.0, ``record.provider = "mangadex"``: a series MangaUpdates does not list,
+    linked by an admin) has no MangaUpdates fields: ``externalId`` is the MangaDex id
+    (:attr:`SeriesKnowledge.mangadex_id`, never ``mu_id``); ``licensedEn`` / ``statusText`` / ``translationComplete``
+    are null and ``englishPublishers`` is empty, so the series reads as not licensed in English. Its ``latestChapter``
+    is MangaDex's released list's highest (taken-down chapters included), the same value as
+    ``companions.mangadexReleased``: it is kept there, not as MangaUpdates' latest chapter. After MangaPixer's "Switch
+    to MangaUpdates" the same node carries a MangaUpdates record: the next sync replaces the item and this reads it as
+    any other (nothing in MangaList is keyed by the record's id).
 
     The **declared edition** (``completion.volumeTotalOverride``): the regular edition's volume list does not describe
     this folder's volumes, so *volumes* and *estimated_volumes* stay empty (nothing automatic - states, upgrades on

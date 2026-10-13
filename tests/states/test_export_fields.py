@@ -126,7 +126,7 @@ def test_tracking_off_is_read():
     assert not from_mangapixer_item(item()).tracking_off
 
 
-# --- MangaDex's latest chapter: only where nothing else tells ----------------------------------------------------------
+# --- MangaDex's latest chapter: only where nothing else tells ---------------------------------------------------
 
 
 def test_cant_tell_without_a_latest_chapter_is_settled_by_mangadex():
