@@ -56,6 +56,7 @@ _log = logging.getLogger(__name__)
 KEY_WINDOWS_SERVER = "naming.windows_server"     # Settings > Library: the server name of the Windows path (optional)
 KEY_GUIDED_ROOTS = "renamer.guided_roots"         # root ids the owner started converting from the Renamer window
 KEY_AUTOMATIC_OFFERED = "renamer.automatic_offered"  # root ids already asked "Rename automatically from now on?"
+META_AUTOMATIC_SEEN = "renamer.automatic_seen"    # (meta) per root: the naming inputs + the series found unchanged
 PLAN_REASON = "rename to the scheme"
 BATCH_SIZE = 200            # files per journal plan (whole series only: a bigger series is a batch of its own)
 AUTO_LIMIT = 500            # files the automatic pass renames per run at most (the rest waits for the next run)
@@ -345,6 +346,7 @@ class AutoReport:
     waiting: List[str] = field(default_factory=list)      # roots set to automatic that wait for the guided start
     skipped: Optional[str] = None
     after: str = ""
+    unchanged: int = 0                  # series not looked at again: nothing changed since a pass found nothing to do
 
     @property
     def renamed(self) -> int:
@@ -595,17 +597,25 @@ def _no_analysis_info(_db, _series) -> Optional[bool]:
     return None
 
 
-def record_rescan(db, root_ids: Sequence[int]) -> str:
-    """Scan the given roots and record the scan in the database (the series' units follow the new names now, not at the
-    next scheduled rescan). Returns a short summary."""
-    from .scanner import record_library_scan, scan_library
+def record_rescan(db, root_ids: Sequence[int], series_ids: Optional[Sequence[int]] = None) -> str:
+    """Scan and record what a batch renamed (the series' units follow the new names now, not at the next scheduled
+    rescan): the folders of *series_ids* (renames stay inside their folder, so a series' folder holds both sides),
+    or - without series - the given roots whole (selective scanning, 2026-10-13). Returns a short summary."""
+    from .scanner import scan_and_record_library, series_scopes, widen_scopes
 
-    roots = [r for r in db.list_roots() if r.id in set(root_ids)]
+    scopes = series_scopes(db, series_ids) if series_ids else {}
+    for rid in root_ids:
+        if rid not in scopes:
+            scopes[rid] = None              # a root without a known series: read it whole
+    scopes = widen_scopes(db, scopes)
+    roots = [r for r in db.list_roots() if r.id in scopes]
     if not roots:
         return ""
-    result = scan_library(roots, db=db)
-    record_library_scan(db, result)
-    return f"rescan of {len(roots)} root(s) recorded"
+    scan_and_record_library(roots, db, scopes=scopes)
+    folders = sum(len(v) for v in scopes.values() if v is not None)
+    whole = sum(1 for r in roots if scopes.get(r.id) is None)
+    parts = ([f"{folders} folder(s)"] if folders else []) + ([f"{whole} root(s)"] if whole else [])
+    return f"rescan of {' and '.join(parts)} recorded"
 
 
 def request_mangapixer_scans(db, series_ids: Sequence[int]) -> str:
@@ -1047,7 +1057,10 @@ class Renamer:
         notes = []
         if self._rescan is not None and root_ids:
             try:
-                note = self._rescan(self.db, list(root_ids))
+                if self._rescan is record_rescan:       # the default scans the series' folders, not their roots
+                    note = record_rescan(self.db, list(root_ids), list(series_ids))
+                else:
+                    note = self._rescan(self.db, list(root_ids))
             except Exception as exc:  # noqa: BLE001 - the renames are done and recorded
                 _log.warning("Renamer: recording the rescan failed (%s)", type(exc).__name__, exc_info=True)
                 note = f"rescan failed ({type(exc).__name__})"
@@ -1207,6 +1220,8 @@ class Renamer:
         guided = guided_roots(self.db)
         budget = max(0, int(limit))
         started = time.monotonic()
+        seen = self._automatic_seen()
+        shared: Optional[str] = None
         for root in roots:
             if root.id not in guided:
                 report.waiting.append(root.name)
@@ -1216,7 +1231,22 @@ class Renamer:
             if budget <= 0 or (should_stop is not None and should_stop()):
                 break
             report.roots.append(root.name)
-            dry = self.dry_run(root_ids=[root.id], should_stop=should_stop)
+            if shared is None:
+                shared = self._shared_inputs()
+            inputs, digests = self._naming_inputs(root, shared), self._series_digests(root)
+            before = seen.get(str(root.id)) or {}
+            quiet = dict(before.get("series") or {}) if before.get("inputs") == inputs else {}
+            quiet = {sid: d for sid, d in quiet.items() if digests.get(int(sid)) == d}      # still as when looked at
+            todo = sorted(sid for sid in digests if str(sid) not in quiet)
+            report.unchanged += len(digests) - len(todo)
+            seen[str(root.id)] = {"inputs": inputs, "series": quiet}
+            if not todo:
+                _log.info("Renamer: %s: nothing changed since the last automatic pass; dry run skipped", root.name)
+                continue
+            dry = self.dry_run(root_ids=[root.id], series_ids=todo, should_stop=should_stop)
+            for s in dry.series:            # nothing to rename: not looked at again until its files or names change
+                if not s.renames and s.series_id in digests:
+                    quiet[str(s.series_id)] = digests[s.series_id]
             ready = [s for s in dry.series if s.renames and s.analysed is not False]
             for s in dry.series:
                 if s.renames and s.analysed is False:
@@ -1243,10 +1273,89 @@ class Renamer:
                     break
         root_ids = sorted({r for b in report.batches if b.renamed for r in b.root_ids})
         series_ids = sorted({s for b in report.batches if b.renamed for s in b.series_ids})
+        self._save_automatic_seen(seen)
         if series_ids:
             report.after = self._after(root_ids, series_ids)
-        _log.info("Renamer: automatic pass: %s (%.1f s)", report.summary(), time.monotonic() - started)
+        _log.info("Renamer: automatic pass: %s (%.1f s; %d series unchanged since the last pass)", report.summary(),
+                  time.monotonic() - started, report.unchanged)
         return report
+
+    # --- what the automatic pass looked at (selective scanning, Stage 0) -------------------------------------------
+    #
+    # The automatic pass dry-ran every series of every automatic root after every headless scan (about 50 s, renaming
+    # nothing in eight passes in a row, 2026-10-12). A series whose dry run found nothing to rename is remembered with a
+    # digest of everything its names depend on that the database holds; while the digest and the root's naming inputs
+    # stay the same, it is not looked at again.
+
+    def _automatic_seen(self) -> Dict[str, Any]:
+        import json
+
+        try:
+            got = json.loads(self.db.get_meta(META_AUTOMATIC_SEEN) or "{}")
+        except Exception:  # noqa: BLE001 - unreadable: look at everything again
+            got = {}
+        return got if isinstance(got, dict) else {}
+
+    def _save_automatic_seen(self, seen: Dict[str, Any]) -> None:
+        import json
+
+        try:
+            self.db.set_meta(META_AUTOMATIC_SEEN, json.dumps(seen, sort_keys=True, separators=(",", ":")))
+        except Exception:  # noqa: BLE001 - the next pass looks at everything again
+            _log.warning("Renamer: could not remember what the automatic pass looked at", exc_info=True)
+
+    def _naming_inputs(self, root, shared: str) -> str:
+        """A digest of what every name in *root* depends on besides its own files: the root's folder and scheme, and
+        *shared* (:meth:`_shared_inputs`)."""
+        import hashlib
+
+        text = repr((shared, root.path, getattr(root, "naming_scheme", None)))
+        return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+    def _shared_inputs(self) -> str:
+        """A digest of what every name in every root depends on: the Windows server (the length rule), this build (the
+        parser and the namer), and MangaPixer's synced data (titles and volume lists) with the roots' pairing."""
+        import hashlib
+
+        from . import __version__
+
+        h = hashlib.sha256()
+        h.update(repr((__version__, type(self.namer).__name__, windows_server(self.db))).encode("utf-8",
+                                                                                               "surrogatepass"))
+        try:
+            with self.db.connect() as con:
+                for r in con.execute("SELECT root_id, library_id, prefix, manual FROM mangapixer_mappings"
+                                     " ORDER BY root_id"):
+                    h.update(repr(tuple(r)).encode("utf-8", "surrogatepass"))
+                for r in con.execute("SELECT library_id, node_id, updated_at, link_state FROM mangapixer_items"
+                                     " ORDER BY library_id, node_id"):
+                    h.update(repr(tuple(r)).encode("utf-8", "surrogatepass"))
+        except Exception:  # noqa: BLE001 - not readable: a fresh digest each time (everything is looked at)
+            h.update(repr(time.time()).encode("ascii"))
+        return h.hexdigest()
+
+    def _series_digests(self, root) -> Dict[int, str]:
+        """Per present series of *root*: a digest of its folder, its "volumes or chapters?" answer and its recorded
+        files (the names the dry run reads - its units are read from the same files by the same parser - with their
+        sizes)."""
+        import hashlib
+
+        files: Dict[int, List[Tuple[str, int]]] = defaultdict(list)
+        series: Dict[int, Tuple[str, Optional[str]]] = {}
+        with self.db.connect() as con:
+            for r in con.execute("SELECT id, rel_path, kind_hint FROM series WHERE root_id = ? AND status = 'present'",
+                                 (root.id,)):
+                series[r["id"]] = (r["rel_path"], r["kind_hint"])
+            # by the (root, path) index: "AND status = ..." made SQLite walk every present archive of every root
+            for r in con.execute("SELECT series_id, rel_path, size, status FROM archives WHERE root_id = ?",
+                                 (root.id,)):
+                if r["series_id"] is not None and r["status"] == "present":
+                    files[r["series_id"]].append((r["rel_path"], r["size"]))
+        out: Dict[int, str] = {}
+        for sid, (rel, kind) in series.items():
+            text = repr((rel, kind, sorted(files.get(sid, ()))))
+            out[sid] = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:32]
+        return out
 
 
 __all__ = [

@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
@@ -247,6 +248,62 @@ def _as_exclusion_set(exclusions: Exclusions) -> Optional[ExclusionSet]:
     return ExclusionSet(exclusions) or None
 
 
+def _scan_top_folder(folder: Path, ex: _Excl, hint_for: Callable[[Path], Optional[str]],
+                     schemes: Sequence) -> List[MangaEntry]:
+    """The entries of one direct child of a root: a series, a franchise parent split into its subseries, or a parent
+    with its own files plus subseries (both). The same for a whole-root scan and a folder-level one."""
+    entries: List[MangaEntry] = []
+    title, eng = parse_folder_name(folder.name)
+    try:
+        mtime = folder.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+
+    has_direct = _has_direct_archives(folder, ex)
+    subseries = _extract_subseries(folder, title, mtime, ex, hint_for, schemes)
+    # Unit subfolders (Season 1, Part 2, Volumes) with archives make the folder itself a series, like direct files.
+    has_units = bool(subseries) and any(_is_unit_subfolder(d.name) for d in _get_subdirs_with_archives(folder, ex))
+    has_direct = has_direct or has_units
+
+    if not has_direct and subseries:
+        # Parent is a franchise container - only add subseries, not parent
+        entries.extend(subseries)
+    elif has_direct and subseries:
+        # Parent has both direct files AND subseries - add both
+        # Create parent entry normally
+        parent_entry = MangaEntry(
+            folder=folder,
+            title=title,
+            english_title=eng,
+            n_subfolders=_count_subfolders(folder, ex),
+            last_modified=mtime,
+        )
+        # The subseries' archives stay in its file counts (as before) but not in its inventory.
+        parent_entry.nested_series = [s.folder for s in subseries]
+        _fill(parent_entry, ex, hint_for(folder), schemes)
+        entries.append(parent_entry)
+        # Also add subseries
+        entries.extend(subseries)
+    else:
+        # Normal case: no subseries, just the folder itself
+        entry = MangaEntry(
+            folder=folder,
+            title=title,
+            english_title=eng,
+            n_subfolders=_count_subfolders(folder, ex),
+            last_modified=mtime,
+        )
+        _fill(entry, ex, hint_for(folder), schemes)
+        entries.append(entry)
+    return entries
+
+
+def is_top_name(name: str) -> bool:
+    """A usable name of a root's direct child in a scan scope: one path component, not ``.`` / ``..``."""
+    return (bool(name) and name not in (".", "..") and "/" not in name and os.sep not in name
+            and (os.altsep is None or os.altsep not in name))
+
+
 def scan_root(
     root: Path,
     progress: Optional[Callable[[int, int, str], None]] = None,
@@ -256,6 +313,7 @@ def scan_root(
     root_id: Optional[int] = None,
     kind_hints: Optional[Mapping[str, str]] = None,
     schemes: Sequence = (),
+    only: Optional[Iterable[str]] = None,
 ) -> List[MangaEntry]:
     """Scan a Manga Root and return classified MangaEntry objects.
 
@@ -264,7 +322,9 @@ def scan_root(
     *loose* when given ("not in a series folder"); they never become entries. *root_id* is copied onto
     every entry. Every archive is parsed by the layered parser; *kind_hints* (``{root-relative series
     path: "volumes" | "chapters"}``, the stored answers) decide bare numbers, *schemes* are the root's
-    naming template(s).
+    naming template(s). *only* (a folder-level scan): the names of the root's direct children to read - the rest of
+    the root is not even listed and no loose archives are reported; a name that is gone, hidden or excluded gives no
+    entries (its rows are judged by the record, :func:`record_library_scan`).
     """
     root = Path(root).resolve()
     hints = dict(kind_hints or {})
@@ -277,10 +337,18 @@ def scan_root(
     top = _Excl(_as_exclusion_set(exclusions), "")
 
     manga_dirs = []
-    try:
-        children = sorted(root.iterdir(), key=lambda p: p.name.lower())
-    except OSError as exc:
-        raise NotADirectoryError(f"Cannot read {root}: {exc}") from exc
+    if only is None:
+        try:
+            children = sorted(root.iterdir(), key=lambda p: p.name.lower())
+        except OSError as exc:
+            raise NotADirectoryError(f"Cannot read {root}: {exc}") from exc
+    else:
+        try:        # an empty root is an offline share's mountpoint: judging its folders gone would be wrong
+            if next(iter(root.iterdir()), None) is None:
+                raise NotADirectoryError(f"{root} is empty (not mounted?)")
+        except OSError as exc:
+            raise NotADirectoryError(f"Cannot read {root}: {exc}") from exc
+        children = [root / n for n in sorted(set(only), key=str.lower) if is_top_name(n)]
     for p in children:
         try:
             is_dir = p.is_dir()
@@ -289,7 +357,7 @@ def scan_root(
         if is_dir:
             if not p.name.startswith(".") and not top.hides(p.name, True):
                 manga_dirs.append(p)
-        elif loose is not None and _is_archive(p) and not top.hides(p.name, False):
+        elif loose is not None and only is None and _is_archive(p) and not top.hides(p.name, False):
             loose.append(p)
     total = len(manga_dirs)
     entries: List[MangaEntry] = []
@@ -297,50 +365,7 @@ def scan_root(
     for i, folder in enumerate(manga_dirs, start=1):
         if progress:
             progress(i - 1, total, folder.name)
-        ex = top.child(folder.name)
-
-        title, eng = parse_folder_name(folder.name)
-        try:
-            mtime = folder.stat().st_mtime
-        except OSError:
-            mtime = 0.0
-
-        has_direct = _has_direct_archives(folder, ex)
-        subseries = _extract_subseries(folder, title, mtime, ex, hint_for, schemes)
-        # Unit subfolders (Season 1, Part 2, Volumes) with archives make the folder itself a series, like direct files.
-        has_units = bool(subseries) and any(_is_unit_subfolder(d.name) for d in _get_subdirs_with_archives(folder, ex))
-        has_direct = has_direct or has_units
-
-        if not has_direct and subseries:
-            # Parent is a franchise container - only add subseries, not parent
-            entries.extend(subseries)
-        elif has_direct and subseries:
-            # Parent has both direct files AND subseries - add both
-            # Create parent entry normally
-            parent_entry = MangaEntry(
-                folder=folder,
-                title=title,
-                english_title=eng,
-                n_subfolders=_count_subfolders(folder, ex),
-                last_modified=mtime,
-            )
-            # The subseries' archives stay in its file counts (as before) but not in its inventory.
-            parent_entry.nested_series = [s.folder for s in subseries]
-            _fill(parent_entry, ex, hint_for(folder), schemes)
-            entries.append(parent_entry)
-            # Also add subseries
-            entries.extend(subseries)
-        else:
-            # Normal case: no subseries, just the folder itself
-            entry = MangaEntry(
-                folder=folder,
-                title=title,
-                english_title=eng,
-                n_subfolders=_count_subfolders(folder, ex),
-                last_modified=mtime,
-            )
-            _fill(entry, ex, hint_for(folder), schemes)
-            entries.append(entry)
+        entries.extend(_scan_top_folder(folder, top.child(folder.name), hint_for, schemes))
 
     if root_id is not None:
         for e in entries:
@@ -367,6 +392,7 @@ class RootScan:
     entries: List[MangaEntry] = field(default_factory=list)
     error: Optional[str] = None
     loose: List[LooseArchive] = field(default_factory=list)
+    scope: Optional[frozenset] = None             # a folder-level scan: the root's direct children read (None: all)
 
 
 @dataclass
@@ -375,6 +401,12 @@ class LibraryScan:
     loose: List[LooseArchive] = field(default_factory=list)
     identity: Optional[object] = None   # set by record_library_scan: mangalist.identity.moves.IdentityReport
     renamed: List[tuple] = field(default_factory=list)   # (old folder, new folder) recognised while recording
+    series_changed: bool = False        # set by record_library_scan: a series row appeared, went or moved
+
+    @property
+    def folders_only(self) -> bool:
+        """Every root in it was a folder-level scan (no whole root read)."""
+        return bool(self.roots) and all(r.scope is not None for r in self.roots)
 
     @property
     def entries(self) -> List[MangaEntry]:
@@ -406,17 +438,20 @@ def scan_one_root(
     *,
     db=None,
     label: bool = False,
+    only: Optional[Iterable[str]] = None,
 ) -> RootScan:
     """Scan one ``store.Root``-like (``id``, ``name``, ``path``, ``exclusions``, ``naming_scheme``). A root that
     cannot be read comes back with ``error`` set and no entries. *label* puts the root's name before each folder
-    in *progress* (several roots in one scan); *db* supplies the stored "volumes or chapters?" answers."""
+    in *progress* (several roots in one scan); *db* supplies the stored "volumes or chapters?" answers. *only*: read
+    just these direct children of the root (a folder-level scan; ``RootScan.scope``)."""
     name = getattr(root, "name", "") or str(root.path)
     folder = Path(root.path)
     try:
         folder = folder.resolve()
     except OSError:
         pass
-    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder)
+    scope = None if only is None else frozenset(n for n in only if is_top_name(n))
+    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder, scope=scope)
     loose: List[Path] = []
     prog = progress
     if progress and label:
@@ -430,12 +465,16 @@ def scan_one_root(
             _log.warning("Reading the stored series kinds failed", exc_info=True)
     try:
         rs.entries = scan_root(folder, prog, exclusions=list(getattr(root, "exclusions", []) or []),
-                               loose=loose, root_id=rs.root_id, kind_hints=hints, schemes=_root_schemes(root))
+                               loose=loose, root_id=rs.root_id, kind_hints=hints, schemes=_root_schemes(root),
+                               only=scope)
     except (OSError, NotADirectoryError) as exc:
         rs.error = str(exc)
         _log.warning("Scan: cannot read the root %s (%s); its series are left as they were", name, exc)
     rs.loose = [LooseArchive(rs.root_id, name, p) for p in loose]
-    _log.debug("Scan: root %s - %d series folders, %d loose archives", name, len(rs.entries), len(rs.loose))
+    if scope is None:
+        _log.debug("Scan: root %s - %d series folders, %d loose archives", name, len(rs.entries), len(rs.loose))
+    else:
+        _log.debug("Scan: %d folder(s) of root %s - %d series", len(scope), name, len(rs.entries))
     return rs
 
 
@@ -464,47 +503,90 @@ def scan_and_record_library(
     progress: Optional[Callable[[int, int, str], None]] = None,
     on_start: Optional[Callable[[int, int, str], None]] = None,
     on_root: Optional[Callable[[RootScan, List[tuple]], None]] = None,
+    scopes: Optional[Mapping[int, Optional[Iterable[str]]]] = None,
+    on_wait: Optional[Callable[[], None]] = None,
+    pair: bool = True,
 ) -> LibraryScan:
     """Scan *roots* one after another and, with *db*, record each root as soon as it was read; *on_root(root scan,
     renamed)* is called after that, so a window can show the root's series before the next root is read, and
     *on_start(number, how many, root name)* before each root is read (a window names it in its status).
 
+    *scopes* (selective scanning): ``{root id: the root's direct children to read}`` - a root listed there is scanned
+    and recorded folder by folder (:func:`scan_root` ``only``; the rows outside those folders are not judged), a root
+    not listed (or listed with None) is read whole. A folder-level scan records exactly what a whole-root scan records
+    for those folders, provided both sides of a rename or move are named (tests/identity/test_selective_scan.py).
+
+    With *db*, each root is read and recorded under the cross-process scan lock (:mod:`mangalist.scan_lock`: the GUI
+    and the headless runner never scan or record at once; *on_wait* is called when this one has to wait), and a
+    record step that meets ``database is locked`` is tried again.
+
     Recording per root is as good as recording all roots at once because identity never needs the other roots in
     the same call: a series moved from root A to root B is recognised whichever of the two is read first (A first:
     its archives go missing and B's new paths pair with them; B first: the archives of A that vanish later pair
     after the fact with B's live rows, :func:`mangalist.identity.moves.pair_after_the_fact`), with the same carry-over
-    of its link, kind answer and examined mark. MangaPixer's pairing is refreshed once, after the last root. An
-    exception from *progress* (the window closing) abandons the root being read; roots already recorded stay."""
+    of its link, kind answer and examined mark. MangaPixer's pairing is refreshed once, after the last root - and
+    after a scan of folders only when a series row appeared, went or moved (the matched counts change only then). An
+    exception from *progress* (the window closing) abandons the root being read; roots already recorded stay.
+    ``pair=False`` leaves the pairing to the caller."""
+    from .scan_lock import scan_lock
+
     result = LibraryScan()
     many = len(roots) > 1
     recorded = False
     started = time.monotonic()
     for number, root in enumerate(roots, start=1):
+        name = getattr(root, "name", "") or str(root.path)
         if on_start is not None:
-            on_start(number, len(roots), getattr(root, "name", "") or str(root.path))
-        rs = scan_one_root(root, progress, label=many)
-        result.roots.append(rs)
-        result.loose.extend(rs.loose)
-        renamed: List[tuple] = []
-        if db is not None and not rs.error and rs.root_id is not None:
-            try:
-                renamed = record_library_scan(db, LibraryScan(roots=[rs]), pair=False)
-                recorded = True
-            except Exception:  # noqa: BLE001 - the root is still shown
-                _log.warning("Recording %s in the library database failed", rs.root_name, exc_info=True)
+            on_start(number, len(roots), name)
+        rid = getattr(root, "id", None)
+        only = scopes.get(rid) if scopes is not None and rid in scopes else None
+        tick = (lambda: progress(0, 0, "")) if progress is not None else None     # stops a wait like a scan
+        with (scan_lock(db, what=f"the scan of {name}", on_wait=on_wait, tick=tick) if db is not None else _no_lock()):
+            rs = scan_one_root(root, progress, label=many, only=only)
+            result.roots.append(rs)
+            result.loose.extend(rs.loose)
+            renamed: List[tuple] = []
+            if db is not None and not rs.error and rs.root_id is not None:
+                one = LibraryScan(roots=[rs])
+                try:
+                    renamed = record_library_scan(db, one, pair=False)
+                    recorded = True
+                    result.series_changed = result.series_changed or one.series_changed
+                except Exception:  # noqa: BLE001 - the root is still shown
+                    _log.warning("Recording %s in the library database failed", rs.root_name, exc_info=True)
         result.renamed.extend(renamed)
         if on_root is not None:
             on_root(rs, renamed)
-    if recorded:
+    if recorded and pair and (not result.folders_only or result.series_changed or result.renamed):
         try:
             refresh_mangapixer_pairing(db)
         except Exception:  # noqa: BLE001 - the scan is recorded; the daily sync pairs again
             _log.warning("Pairing the roots with MangaPixer's libraries failed", exc_info=True)
-    _log.info("Scan: %d root%s, %d series, %d archives, %d loose, %d renamed or moved, %d unreadable root%s in %.1f s",
-              len(roots), "" if len(roots) == 1 else "s", len(result.entries),
-              sum(len(e.files) for e in result.entries), len(result.loose), len(result.renamed),
-              len(result.errors), "" if len(result.errors) == 1 else "s", time.monotonic() - started)
+    if result.folders_only:
+        n = sum(len(rs.scope or ()) for rs in result.roots)
+        _log.info("Scan: %d folder%s in %d root%s, %d series, %d archives, %d renamed or moved, %d unreadable root%s"
+                  " in %.1f s", n, "" if n == 1 else "s", len(roots), "" if len(roots) == 1 else "s",
+                  len(result.entries), sum(len(e.files) for e in result.entries), len(result.renamed),
+                  len(result.errors), "" if len(result.errors) == 1 else "s", time.monotonic() - started)
+    else:
+        _log.info("Scan: %d root%s, %d series, %d archives, %d loose, %d renamed or moved, %d unreadable root%s in"
+                  " %.1f s", len(roots), "" if len(roots) == 1 else "s", len(result.entries),
+                  sum(len(e.files) for e in result.entries), len(result.loose), len(result.renamed),
+                  len(result.errors), "" if len(result.errors) == 1 else "s", time.monotonic() - started)
     return result
+
+
+@contextmanager
+def _no_lock():
+    yield True
+
+
+def scan_and_record_folders(root, folders: Iterable[str], db, *, pair: bool = True) -> LibraryScan:
+    """Read and record only the direct children *folders* of *root* (a ``store.Root``; each a name: the series folder,
+    or the franchise parent holding a subseries). A name that is gone marks the rows under it missing (or lets them go
+    when the root now excludes it); a new one adds rows; nothing outside them is touched. Name both sides of a rename
+    or move. *pair*: refresh MangaPixer's pairing when a series row appeared, went or moved."""
+    return scan_and_record_library([root], db, scopes={getattr(root, "id", None): list(folders)}, pair=pair)
 
 
 def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[tuple]:
@@ -525,19 +607,29 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
     marked missing just because a share was offline). *result* may hold only some of the roots (a one-root
     rescan, or one root of a progressive scan): the others are not touched, and a series that moved to or from a
     root that is not in it is recognised when that root is scanned (module docstring of
-    :mod:`mangalist.identity.moves`). ``pair=False`` skips the MangaPixer pairing (the caller refreshes it once).
+    :mod:`mangalist.identity.moves`). A root scan with a ``scope`` (a folder-level scan) judges only the rows below
+    those folders. ``pair=False`` skips the MangaPixer pairing (the caller refreshes it once); after a folder-level
+    scan the pairing is refreshed only when a series row appeared, went or moved (``result.series_changed``).
+    Each step is tried again when it meets ``database is locked`` (:func:`mangalist.scan_lock.retry_if_locked`).
     """
     from .identity.mangapixer import apply_pending
     from .identity.moves import record_archives
+    from .scan_lock import retry_if_locked
     from .store.series import seen_from_entries
 
     renamed: List[tuple] = []
     scanned = [rs for rs in result.roots if not rs.error and rs.root_id is not None]
     for rs in scanned:
-        db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries))
+        rec = retry_if_locked(lambda rs=rs: db.record_scan(rs.root_id, rs.folder,
+                                                           seen_from_entries(rs.folder, rs.entries), scope=rs.scope),
+                              what=f"Recording {rs.root_name}")
+        if getattr(rec, "added", None) or getattr(rec, "missing", None) or getattr(rec, "excluded", None):
+            result.series_changed = True
         _log.debug("Scan: recorded %s (%d series)", rs.root_name, len(rs.entries))
     try:
-        report = record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in scanned])
+        scopes = {rs.root_id: rs.scope for rs in scanned if rs.scope is not None}
+        report = retry_if_locked(lambda: record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in scanned],
+                                                         scopes=scopes), what="Recording the archives")
         result.identity = report
         renamed.extend(report.renamed)
     except Exception:  # noqa: BLE001 - the series rows are recorded; identity is tried again next scan
@@ -545,24 +637,34 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
     try:
         from .identity.carry import absorb_unit_folders
 
-        absorbed = absorb_unit_folders(db, [rs.root_id for rs in scanned], {rs.root_id: rs.folder for rs in scanned})
+        absorbed = retry_if_locked(lambda: absorb_unit_folders(db, [rs.root_id for rs in scanned],
+                                                               {rs.root_id: rs.folder for rs in scanned}),
+                                   what="Folding unit folders")
         if result.identity is not None:
             result.identity.carries.extend(absorbed)
+        elif absorbed:
+            result.series_changed = True
     except Exception:  # noqa: BLE001 - the series rows are recorded; tried again next scan
         _log.warning("Folding unit folders into their series failed", exc_info=True)
     try:
-        carried = apply_pending(db)
+        carried = retry_if_locked(lambda: apply_pending(db), what="Applying MangaPixer's carriedFrom pairs")
         renamed.extend((Path(c.old_folder), Path(c.new_folder)) for c in carried if c.carried)
         if result.identity is not None:
             result.identity.carries.extend(carried)
     except Exception:  # noqa: BLE001
         _log.warning("Applying MangaPixer's carriedFrom pairs failed", exc_info=True)
+    if result.identity is not None and any(getattr(c, "carried", False) for c in result.identity.carries):
+        result.series_changed = True
+    if renamed:
+        result.series_changed = True
     for rs in scanned:      # last: a carried kind answer is applied to the units right away
         try:
-            _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None))
+            scheme = getattr(_root_of(db, rs.root_id), "naming_scheme", None)
+            retry_if_locked(lambda rs=rs, scheme=scheme: _record_units(db, rs, scheme),
+                            what=f"Recording the units of {rs.root_name}")
         except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
             _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
-    if scanned and pair:
+    if scanned and pair and (not result.folders_only or result.series_changed):
         try:
             refresh_mangapixer_pairing(db)
         except Exception:  # noqa: BLE001 - the scan is recorded; the daily sync pairs again
@@ -593,6 +695,7 @@ def _root_of(db, root_id: int):
 
 def _record_units(db, rs: RootScan, scheme: Optional[str] = None) -> None:
     from .inventory import units_of_entry
+    from .store.series import in_scope
 
     schemes = _schemes_of(scheme)
     rows = {s.rel_path: s for s in db.list_series(rs.root_id)}
@@ -605,7 +708,7 @@ def _record_units(db, rs: RootScan, scheme: Optional[str] = None) -> None:
             apply_kind_hint(entry, row.kind_hint, schemes)
         by_series[row.id] = units_of_entry(entry)
     for row in rows.values():
-        if row.status == "missing" and row.id not in by_series:
+        if row.status == "missing" and row.id not in by_series and in_scope(row.rel_path, rs.scope):
             by_series[row.id] = {}
     db.sync_units(by_series)
 
@@ -628,3 +731,135 @@ def answer_series_kind(db, entry: MangaEntry, kind: Optional[str]) -> bool:
     db.sync_units({row.id: units_of_entry(entry)})
     _log.info("Series kind answered: %s is %s", Path(entry.folder).name, k or "not set (answer forgotten)")
     return True
+
+
+# --- folder-level scan scopes (selective scanning, Stage 1) ------------------------------------------------------
+#
+# A scope is ``{root id: the root's direct children to read}``; None for a root means the whole root. Callers that know
+# what changed name it (the filed series, the folders files were deleted from, the journal's sources and
+# destinations) instead of widening to their roots or to every root.
+
+Scopes = Dict[int, Optional[set]]
+
+WIDEN_MIN = 20                  # a scope of more folders than this, and over a third of the root's, reads the root
+WIDEN_FRACTION = 1 / 3
+
+
+def _deepest_root(path: str, roots: Sequence) -> Optional[Tuple[object, str]]:
+    """(the root holding *path* - the deepest one when roots nest -, *path* relative to it in '/' form, "" for the
+    root itself), or None outside every root. The root is tried as configured and resolved."""
+    norm = os.path.normcase(os.path.abspath(path))
+    best = None
+    for r in roots:
+        bases = {os.path.abspath(str(r.path))}
+        try:
+            bases.add(str(Path(r.path).resolve()))
+        except OSError:
+            pass
+        for base in bases:
+            nb = os.path.normcase(base).rstrip("/\\")
+            if norm == nb or norm.startswith(nb + os.sep):
+                if best is None or len(nb) > best[2]:
+                    rel = os.path.abspath(path)[len(nb):].lstrip("/\\").replace("\\", "/")
+                    best = (r, rel, len(nb))
+    return (best[0], best[1]) if best is not None else None
+
+
+def folder_scopes(roots: Sequence, paths: Iterable) -> Scopes:
+    """The scope that covers *paths* (absolute files or folders): for each, its root and the root's direct child it
+    lies in; a path that is a root itself scans that root whole. Paths outside every root are left out (logged) - they
+    never mean "every root" (the log showed "files filed for 1 series" followed by a scan of all seven roots)."""
+    out: Scopes = {}
+    for p in paths:
+        hit = _deepest_root(os.fspath(p), roots)
+        if hit is None:
+            _log.info("Scan scope: %s is in no library folder; not scanned", p)
+            continue
+        root, rel = hit
+        rid = getattr(root, "id", None)
+        if not rel:
+            out[rid] = None
+        elif out.get(rid, set()) is not None:
+            out.setdefault(rid, set()).add(rel.split("/", 1)[0])
+    return out
+
+
+def series_scopes(db, series_ids: Iterable[int]) -> Scopes:
+    """The scope of library series *series_ids*: each series row's root and top-level folder (a subseries is read with
+    its franchise parent). Ids the database no longer knows are left out."""
+    from .store.series import top_of
+
+    ids = sorted({int(i) for i in series_ids if i is not None})
+    out: Scopes = {}
+    if not ids:
+        return out
+    with db.connect() as con:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            for r in con.execute(f"SELECT root_id, rel_path FROM series WHERE id IN ({','.join('?' * len(chunk))})",
+                                 chunk):
+                if r["rel_path"]:
+                    out.setdefault(r["root_id"], set()).add(top_of(r["rel_path"]))
+    return out
+
+
+def merge_scopes(*scopes: Optional[Mapping[int, Optional[Iterable[str]]]]) -> Scopes:
+    """The union of *scopes* (queued scans coalesce): a whole root anywhere stays a whole root."""
+    out: Scopes = {}
+    for scope in scopes:
+        for rid, names in (scope or {}).items():
+            if names is None or (rid in out and out[rid] is None):
+                out[rid] = None
+            else:
+                out.setdefault(rid, set()).update(names)
+    return out
+
+
+def widen_scopes(db, scopes: Mapping[int, Optional[Iterable[str]]], *, minimum: int = WIDEN_MIN,
+                 fraction: float = WIDEN_FRACTION) -> Scopes:
+    """*scopes* with each root whose folder list is long (over *minimum* folders and over *fraction* of the root's known
+    top-level folders) widened to the whole root: reading the root then costs little more than the folders."""
+    from .store.series import top_of
+
+    out: Scopes = {}
+    for rid, names in scopes.items():
+        if names is None:
+            out[rid] = None
+            continue
+        names = set(names)
+        if len(names) > minimum:
+            try:
+                known = {top_of(s.rel_path) for s in db.list_series(rid)} if db is not None else set()
+            except Exception:  # noqa: BLE001 - not known: keep the folders
+                known = set()
+            if len(names) > fraction * len(known):
+                _log.info("Scan scope: %d folders of root %s - reading the whole root", len(names), rid)
+                out[rid] = None
+                continue
+        out[rid] = names
+    return out
+
+
+JournalMark = Tuple[int, str]
+
+
+def journal_mark(db) -> JournalMark:
+    """Where the journal stands now: (the newest step id, the newest step change time)."""
+    with db.connect() as con:
+        r = con.execute("SELECT MAX(id) AS i, MAX(updated_at) AS t FROM journal_steps").fetchone()
+    return (int(r["i"] or 0), str(r["t"] or "")) if r is not None else (0, "")
+
+
+def journal_folders_since(db, mark: Optional[JournalMark]) -> Tuple[List[str], JournalMark]:
+    """The sources and destinations of every journal step added or changed since *mark* (:func:`journal_mark`; None:
+    nothing, only the new mark), and the new mark. Everything MangaList moves, links or renames (filing, chapter
+    arrivals, replaced chapters, set aside, restore, the Renamer, undo) is a journal step, so this names both sides of
+    each change: the scope of a scan after it is :func:`folder_scopes` of these paths."""
+    paths: List[str] = []
+    now = journal_mark(db)
+    if mark is not None:
+        with db.connect() as con:
+            for r in con.execute("SELECT src, dst FROM journal_steps WHERE id > ? OR updated_at > ? ORDER BY id",
+                                 (int(mark[0]), str(mark[1]))):
+                paths.extend(p for p in (r["src"], r["dst"]) if p)
+    return paths, now

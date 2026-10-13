@@ -40,7 +40,17 @@ from PySide6.QtWidgets import (
 from .. import config, mu_cache, store, wanted
 from .._version import __version__
 from ..models import MangaEntry
-from ..scanner import LibraryScan, RootScan, apply_kind_hint, scan_and_record_library
+from ..scanner import (
+    LibraryScan,
+    RootScan,
+    apply_kind_hint,
+    folder_scopes,
+    journal_folders_since,
+    journal_mark,
+    merge_scopes,
+    scan_and_record_library,
+    widen_scopes,
+)
 from ..store import Journal, Root, RootError
 from ..unbundled import UnbundledFolders
 from . import lanes
@@ -54,7 +64,7 @@ from .shell import WantedSeries
 from .table_model import (
     COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MTIME,
     COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label,
-    state_matches,
+    merge_folder_scan, state_matches, under_any,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
@@ -86,18 +96,21 @@ class _ScanStopped(Exception):
 
 class ScanWorker(QObject):
     """Scans the roots one after another and records each as soon as it was read (a renamed series folder keeps its
-    link): the window shows a root's series without waiting for the others."""
+    link): the window shows a root's series without waiting for the others. *scopes* (``{root id: folder names}``)
+    reads only those folders of a root (selective scanning)."""
 
     progress = Signal(int, int, str)        # folders done, folders in the root being read, the folder's name
     root_started = Signal(int, int, str)    # which root (1-based), how many, its name
     root_scanned = Signal(object, object)   # RootScan (already recorded), [(old folder, new folder)] it carried
     finished = Signal(object)  # LibraryScan, with .renamed = [(old folder, new folder)]
     failed = Signal(str)
+    waiting = Signal()                      # the headless runner is scanning: this scan waits for it
 
-    def __init__(self, roots: Sequence[Root], db=None):
+    def __init__(self, roots: Sequence[Root], db=None, scopes: Optional[Dict[int, Optional[set]]] = None):
         super().__init__()
         self._roots = list(roots)
         self._db = db
+        self._scopes = scopes
         self._stop = False
 
     def stop(self) -> None:
@@ -117,7 +130,8 @@ class ScanWorker(QObject):
     def run(self) -> None:
         try:
             result = scan_and_record_library(self._roots, self._db, progress=self._progress, on_start=self._started,
-                                             on_root=self.root_scanned.emit)
+                                             on_root=self.root_scanned.emit, scopes=self._scopes,
+                                             on_wait=self.waiting.emit)
         except _ScanStopped:
             return
         except Exception as exc:  # noqa: BLE001
@@ -291,6 +305,10 @@ class MainWindow(QMainWindow):
         self._cfg = config.load()
         self._db = store.get_store()
         self._recover_journal()
+        try:        # the Renamer window's rescans read what it renamed from the journal (both sides) since here
+            self._journal_seen = journal_mark(self._db)
+        except Exception:  # noqa: BLE001 - without it a rename rescans its whole library
+            self._journal_seen = None
         win = self._cfg.get("window") or {}
         self.resize(int(win.get("w", 1440)), int(win.get("h", 900)))
 
@@ -328,7 +346,9 @@ class MainWindow(QMainWindow):
         self._thread: QThread | None = None
         self._scanning_ids: List[int] = []                 # the roots the running scan reads
         self._scan_queued: Optional[List[Root]] = None     # roots asked for while a scan ran: scanned next
+        self._scan_queued_scopes: Dict[int, Optional[set]] = {}   # ... their folders (None: the whole root)
         self._scan_queue_all = False                       # ... or every root
+        self._scan_scopes: Optional[Dict[int, Optional[set]]] = None   # the running scan's folders (None: roots)
         self._worker: ScanWorker | None = None
         self._mu_thread: QThread | None = None
         self._mu_worker: MuWorker | None = None
@@ -340,6 +360,7 @@ class MainWindow(QMainWindow):
         self._renamer_window = None
         self._rename_call = None
         self._rename_again = False
+        self._rename_again_folders: Optional[set] = None   # the queued count's folders (None: every series)
         self._renamer_runner = None                 # the Renamer window's runner (None: its own threads)
         from .background import start_call as _start_call
 
@@ -754,8 +775,7 @@ class MainWindow(QMainWindow):
             moved = len(held.files) if held.status == "held" else 0
             self._status_label.setText(f"{title}: {moved} chapter file(s) set aside - restorable from the Download tab"
                                        + (f" ({held.error})" if held.error else ""))
-            roots = self._roots_holding([folder])
-            self._start_scan(roots if roots else None)
+            self._scan_paths([folder])
             if self._download_tab is not None and hasattr(self._download_tab, "refresh_replaced"):
                 self._download_tab.refresh_replaced()
 
@@ -854,34 +874,34 @@ class MainWindow(QMainWindow):
                 return 0
             _log.info("Excluded from %s: %s", root.name, ", ".join(p for p in new if p not in root.exclusions))
         self._status_label.setText(f"Excluded {len(found)} folder(s) - rescanning")
-        self._start_scan([r for r, _p in by_root.values()])
+        self._scan_paths([e.folder for e, _x in found])     # only those folders: their rows are let go
         return added
 
     def _on_replaced_chapters_moved(self, folders) -> None:
-        """The Download tab filed downloads, or restored, moved or deleted replaced chapter files: rescan so the table,
-        the To get list and the database follow."""
+        """The Download tab filed downloads, or restored, moved or deleted replaced chapter files: rescan those series'
+        folders so the table, the To get list and the database follow."""
         folders = list(folders)
         n = len(folders)
-        self._status_label.setText(f"Files changed in {n} series - rescanning" if n else "Files changed - rescanning")
-        self._start_scan(self._roots_holding(folders))
+        self._status_label.setText(f"Files changed in {n} series - rescanning" if n else "Files changed")
+        self._scan_paths(folders)
 
     def _on_files_deleted(self, paths) -> None:
-        """Lane C's view deleted duplicate files: rescan so the table and the database follow."""
+        """Lane C's view deleted duplicate files: rescan their series' folders so the table and the database follow."""
         self._status_label.setText(f"{len(paths)} duplicate file(s) deleted - rescanning")
-        self._start_scan(self._roots_holding(paths))
+        self._scan_paths(paths)
 
-    def _roots_holding(self, paths) -> Optional[List[Root]]:
-        """The library folders that hold *paths* - only they are rescanned (owner, 2026-10-10: discarding duplicates in
-        one library rescanned every library). None (every library) when a path is in none of them, or none is given."""
-        roots = self._roots()
-        found: List[Root] = []
-        for p in paths:
-            root = root_of(str(p), roots)
-            if root is None:
-                return None
-            if root not in found:
-                found.append(root)
-        return found or None
+    def _scan_paths(self, paths) -> bool:
+        """Rescan only the series folders holding *paths* (files or folders; selective scanning, owner 2026-10-13: "it
+        rescans the whole library or ALL libraries sometimes and it's not always necessary"). Paths in no library
+        folder scan nothing. False when nothing was asked."""
+        roots, paths = self._roots(), list(paths)
+        scopes = folder_scopes(roots, paths)
+        if not scopes:
+            if paths:
+                _log.info("Rescan asked for %d path(s) in no library folder: nothing to scan", len(paths))
+            return False
+        self._start_scan([r for r in roots if r.id in scopes], scopes)
+        return True
 
     def _count_duplicate_files(self) -> None:
         """Lane C's duplicate-numbers finder, off the UI thread, for the Duplicates chip's count."""
@@ -937,26 +957,41 @@ class MainWindow(QMainWindow):
 
         return Renamer(self._db, rescan=None)
 
-    def _count_rename_pending(self) -> None:
-        """"Rename pending" per series (the files the naming scheme would rename), off the UI thread, after a scan."""
+    def _count_rename_pending(self, folders=None) -> None:
+        """"Rename pending" per series (the files the naming scheme would rename), off the UI thread, after a scan.
+        *folders* (the top-level folders a folder scan read): count only the series in them and keep the others'
+        counts - a count over the whole table costs about 35 s for 700 series (selective scanning, 2026-10-13)."""
+        want = None if folders is None else {str(f) for f in folders}
         if self._rename_call is not None:
-            self._rename_again = True           # a scan finished meanwhile: count again once this count is in
+            # a scan finished meanwhile: count again once this count is in (the folders of both, or everything)
+            if not self._rename_again:
+                self._rename_again, self._rename_again_folders = True, want
+            elif self._rename_again_folders is not None:
+                self._rename_again_folders = None if want is None else self._rename_again_folders | want
             return
         entries = self._model.entries()
+        if want is not None:
+            entries = [e for e in entries if under_any(str(e.folder), want)]
         renamer = self._make_renamer()
-        self._rename_again = False
-        self._rename_call = self._background(lambda: renamer.pending_counts(entries), self._on_rename_counted,
+        self._rename_again, self._rename_again_folders = False, None
+        self._rename_call = self._background(lambda: renamer.pending_counts(entries),
+                                             lambda counts: self._on_rename_counted(counts, want),
                                              lambda msg: _log.warning("Counting Rename pending failed: %s", msg),
                                              self._on_rename_count_finished)
 
-    def _on_rename_counted(self, counts) -> None:
-        self._model.set_rename_counts(dict(counts or {}))
+    def _on_rename_counted(self, counts, folders=None) -> None:
+        counts = dict(counts or {})
+        if folders is not None:         # a folder scan's count: the other series keep theirs
+            kept = {k: v for k, v in self._model.rename_counts().items() if not under_any(k, folders)}
+            kept.update(counts)
+            counts = kept
+        self._model.set_rename_counts(counts)
         self._update_counts()
 
     def _on_rename_count_finished(self) -> None:
         self._rename_call = None
         if self._rename_again:
-            self._count_rename_pending()
+            self._count_rename_pending(self._rename_again_folders)
 
     def open_renamer(self, scope):
         """The Renamer window on *scope* (:class:`.renamer_view.Scope`); one window, re-aimed when it is open."""
@@ -1000,13 +1035,26 @@ class MainWindow(QMainWindow):
         self.open_renamer(Scope.root(root.id, root.name) if root is not None else Scope.all())
 
     def _on_library_renamed(self, root_ids) -> None:
-        """The Renamer window renamed (or put back) files: rescan those libraries so the table and Rename pending
-        follow."""
+        """The Renamer window renamed (or put back) files: rescan the folders it renamed in (both sides of each step,
+        from the journal) so the table and Rename pending follow; a library the journal names nothing in is read
+        whole."""
         roots = [r for r in self._roots() if r.id in set(root_ids)]
         self._status_label.setText(f"Files renamed in {len(roots)} librar{'y' if len(roots) == 1 else 'ies'} - "
                                    "rescanning")
-        if roots:
+        if not roots:
+            return
+        scopes: Dict[int, Optional[set]] = {}
+        try:
+            paths, self._journal_seen = journal_folders_since(self._db, self._journal_seen)
+            scopes = {rid: names for rid, names in folder_scopes(roots, paths).items()}
+        except Exception:  # noqa: BLE001 - read the libraries whole
+            _log.warning("Reading the renamed folders from the journal failed", exc_info=True)
+        for r in roots:
+            scopes.setdefault(r.id, None)
+        if all(v is None for v in scopes.values()):
             self._start_scan(roots)
+        else:
+            self._start_scan(roots, scopes)
 
     # --- Slots -----------------------------------------------------------
 
@@ -1181,7 +1229,11 @@ class MainWindow(QMainWindow):
         _log.info("Rescan of one library folder: %s", root.name)
         self._start_scan([root])
 
-    def _start_scan(self, roots: Optional[Sequence[Root]] = None) -> None:
+    def _start_scan(self, roots: Optional[Sequence[Root]] = None,
+                    scopes: Optional[Dict[int, Optional[set]]] = None) -> None:
+        """Scan *roots* (None: every library folder) in the background. *scopes* (``{root id: folder names}``, see
+        :func:`mangalist.scanner.folder_scopes`) reads only those folders of a root; a root not in it is read whole.
+        Asked while a scan runs, it follows that scan (queued scopes are joined; a long folder list reads the root)."""
         if self._thread is not None:
             # a scan is running: this one follows it (a rename's rescan used to be dropped here)
             if roots is None:
@@ -1190,6 +1242,8 @@ class MainWindow(QMainWindow):
                 queued = {r.id: r for r in (self._scan_queued or [])}
                 queued.update({r.id: r for r in roots})
                 self._scan_queued = list(queued.values())
+                self._scan_queued_scopes = merge_scopes(
+                    self._scan_queued_scopes, {r.id: (scopes or {}).get(r.id) for r in roots})
             return
         roots = list(roots) if roots is not None else self._roots()
         if not roots:
@@ -1198,10 +1252,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid folder",
                                 "Not a directory:\n" + "\n".join(r.path for r in roots))
             return
+        if scopes:
+            scopes = widen_scopes(self._db, {r.id: scopes.get(r.id) for r in roots})
+            if all(v is None for v in scopes.values()):
+                scopes = None
+        self._scan_scopes = scopes or None
         self._scanning_ids = [r.id for r in roots]
 
         self._top.set_scanning(True)
         label = roots[0].path if len(roots) == 1 else f"{len(roots)} roots"
+        if self._scan_scopes:
+            n = sum(len(v) for v in self._scan_scopes.values() if v is not None)
+            label = f"{n} folder{'' if n == 1 else 's'} in " + ", ".join(r.name for r in roots)
         _log.info("Scan started: %s", label)
         self._scan_label = label
         self._scan_applied = set()
@@ -1212,12 +1274,13 @@ class MainWindow(QMainWindow):
         self._progress.setRange(0, 0)  # busy until first progress update
 
         thread = QThread(self)
-        worker = ScanWorker(roots, self._db)
+        worker = ScanWorker(roots, self._db, self._scan_scopes)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_progress)
         worker.root_started.connect(self._on_root_started)
         worker.root_scanned.connect(self._on_root_scanned)
+        worker.waiting.connect(self._on_scan_waiting)
         worker.finished.connect(self._on_scan_finished)
         worker.failed.connect(self._on_scan_failed)
         worker.finished.connect(thread.quit)
@@ -1248,11 +1311,16 @@ class MainWindow(QMainWindow):
         self._list.empty_text.setText(name)
         self._show_roots()
 
+    def _on_scan_waiting(self) -> None:
+        self._status_label.setText("Waiting for the container's scan to finish…")
+
     def _on_root_scanned(self, rs: RootScan, renamed) -> None:
         """A library folder was read and recorded: its series replace its old rows now, before the next folder is read."""
         self._apply_root_scan(rs, renamed)
         if rs.error:
             self._status_label.setText(f"{rs.root_name}: not reachable")
+        elif rs.scope is not None:
+            self._status_label.setText(f"{rs.root_name}: {len(rs.scope)} folder{'' if len(rs.scope) == 1 else 's'}")
         else:
             self._status_label.setText(f"{rs.root_name}: {len(rs.entries)} series")
         self._show_roots()
@@ -1307,15 +1375,20 @@ class MainWindow(QMainWindow):
         self._unbundled.reset()
 
     def _apply_root_scan(self, rs: RootScan, renamed=()) -> None:
-        """Show one library folder's scan: its series replace the folder's rows (the other folders' rows stay). A folder
-        that could not be read changes nothing here - the end of the scan drops its rows unless the whole scan failed."""
+        """Show one library folder's scan: its series replace the folder's rows (the other folders' rows stay); a
+        folder-level scan replaces only the rows below the folders it read, keeping the order, the picked series and
+        the subseries. A folder that could not be read changes nothing here - the end of the scan drops its rows
+        unless the whole scan failed."""
         if rs.error:
             return
         self._scan_applied.add(rs.root_id)
         self._prepare_entries(rs.entries, renamed)
         order = {r.id: i for i, r in enumerate(self._roots())}
-        kept = [e for e in self._model.entries() if e.root_id != rs.root_id]
-        self._set_rows(sorted(kept + list(rs.entries), key=lambda e: order.get(e.root_id, len(order))))
+        if rs.scope is not None:            # a folder scan: only those folders' rows change, in the scan's order
+            rows = merge_folder_scan(self._model.entries(), rs.root_id, rs.folder, rs.scope, rs.entries)
+        else:
+            rows = [e for e in self._model.entries() if e.root_id != rs.root_id] + list(rs.entries)
+        self._set_rows(sorted(rows, key=lambda e: order.get(e.root_id, len(order))))
 
     def _on_scan_finished(self, result) -> None:
         if isinstance(result, LibraryScan):
@@ -1338,8 +1411,13 @@ class MainWindow(QMainWindow):
         self._last_scan = datetime.datetime.now()
 
         # The counts are in the footer (_update_counts); the message says what else the scan found.
-        text = f"Scanned {len(entries)} folder(s)"
-        if partial and isinstance(result, LibraryScan):
+        folders_only = isinstance(result, LibraryScan) and result.folders_only
+        if folders_only:
+            n = sum(len(rs.scope) for rs in result.roots)
+            text = f"Scanned {n} folder{'' if n == 1 else 's'} in " + ", ".join(rs.root_name for rs in result.roots)
+        else:
+            text = f"Scanned {len(entries)} folder(s)"
+        if partial and isinstance(result, LibraryScan) and not folders_only:
             text += " in " + ", ".join(rs.root_name for rs in result.roots)
         tips = []
         if loose:
@@ -1364,7 +1442,10 @@ class MainWindow(QMainWindow):
         self._refresh_derived()
         self._show_roots()
         self._count_duplicate_files()
-        self._count_rename_pending()
+        if folders_only:                    # recount only the folders read (the others' counts stand)
+            self._count_rename_pending([str(Path(rs.folder) / n) for rs in result.roots for n in rs.scope])
+        else:
+            self._count_rename_pending()
         if self._duplicates_view is not None and self._list.current_filter() == DUPLICATES:
             self._duplicates_view.refresh()
         self._start_signatures()
@@ -1394,10 +1475,14 @@ class MainWindow(QMainWindow):
         if self._duplicates_view is not None and hasattr(self._duplicates_view, "set_blocked"):
             self._duplicates_view.set_blocked(None)
         scanned, self._scanning_ids = self._scanning_ids, []
-        queued_all, queued = self._scan_queue_all, self._scan_queued
-        self._scan_queue_all, self._scan_queued = False, None
+        self._scan_scopes = None
+        queued_all, queued, scopes = self._scan_queue_all, self._scan_queued, self._scan_queued_scopes
+        self._scan_queue_all, self._scan_queued, self._scan_queued_scopes = False, None, {}
         if queued_all or queued:
-            QTimer.singleShot(0, lambda: self._start_scan(None if queued_all else queued))
+            if not queued_all and queued and any(v is not None for v in scopes.values()):
+                QTimer.singleShot(0, lambda: self._start_scan(queued, scopes))
+            else:
+                QTimer.singleShot(0, lambda: self._start_scan(None if queued_all else queued))
         win = self._renamer_window
         if win is not None and hasattr(win, "library_rescanned"):
             win.library_rescanned(scanned)
@@ -1437,7 +1522,8 @@ class MainWindow(QMainWindow):
         dlg = AddSeriesDialog(LiveBackend(self._db), self._roots(), self, current_root_id=self._library)
         dlg.exec()
         if dlg.outcome is not None and dlg.root is not None:
-            self._start_scan([dlg.root])
+            scopes = folder_scopes([dlg.root], [dlg.outcome.folder]) if getattr(dlg.outcome, "folder", None) else {}
+            self._start_scan([dlg.root], scopes or None)          # the new folder only
 
     def _on_missing(self) -> None:
         dlg = self._make_missing_dialog()
