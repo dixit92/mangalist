@@ -49,8 +49,8 @@ missing or an upgrade ends by MangaPixer's volume list - up to the chapter targe
 The volume side is unchanged. A chapter a held volume collects is never wanted, nor one a released volume the folder
 lacks collects (that volume is the gap). When a later volume comes out, the chapters it collects become an *Upgrade*
 (every one held) or stay in *Missing volumes* (some not held), as in any folder holding chapters, and the unbundled range
-moves past it. Where the list does not say which chapter the newest held volume ends with, nothing is compared (as
-"Check for new chapters" cannot tell either).
+moves past it. Where the list does not say which chapter the newest held volume ends with, the folder is compared as
+without the setting ("Check for new chapters" cannot tell where to start either).
 
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
@@ -741,17 +741,18 @@ def _evaluate(
     if unbundled and held.has_volumes and target is not None:
         # Unbundled Chapters (the series' setting): the chapters after the last volume, whatever the folder holds so far.
         after, why = _unbundled_start(k, held, gaps)
-        if after is None:
-            reasons.append(why)
-        else:
+        reasons.append(why)
+        if after is not None:
             compared = chapters_checked = True
             missing = [c for c in _whole_numbers(after, target) if c > after and not held.holds_chapter(c)]
             if target != target.to_integral_value() and target > after and not held.holds_chapter(target):
                 missing.append(target)
             missing += [p for p in held.split_missing if after < p <= target and p not in missing]
             gaps += _chapter_gaps(missing)
-            reasons += [why, f"Latest chapter {fmt_num(target)}"]
-        target = None                   # the rules for other folders below do not compare chapters again
+            reasons.append(f"Latest chapter {fmt_num(target)}")
+            target = None               # the rules for other folders below do not compare chapters again
+        # Where the last volume ends is not known: the folder is compared as without the setting (a folder holding
+        # loose chapters still counts them from the first one held).
     # A volumes-only folder holding volumes the volume list does not map: which chapters those hold is unknown, so the
     # chapter numbers are not compared (owner, 2026-10-11: every volume of a finished 4-koma held, the list mapped only
     # volumes 1-3, and MangaUpdates' strip count 717 made "missing ch 261-717").
@@ -759,8 +760,9 @@ def _evaluate(
         mapped = {to_decimal(v.volume) for v in (k.volumes or ()) if v.has_chapters}
         unmapped = sorted(v for v in held.volumes if v not in mapped)
         if unmapped and (not mapped or max(unmapped) > max(mapped)):
-            reasons.append(f"The volume list does not say which chapters volume(s) {_span(unmapped)} hold - chapters "
-                           "not compared")
+            if not unbundled:           # the unbundled reason has said so already
+                reasons.append(f"The volume list does not say which chapters volume(s) {_span(unmapped)} hold - "
+                               "chapters not compared")
             target = None
     if target is not None and (held.has_chapters or not k.licensed or not held.has_volumes):
         if held.has_chapters or not held.has_volumes or held.covered:
@@ -869,12 +871,12 @@ def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap]) -> Tu
     The last volume is the newest one the folder holds, or lacks (a missing volume or an upgrade, released): the chapters
     a held volume collects are held, and those of a released volume the folder lacks come with that volume - so neither
     is wanted as chapters. Its end comes from MangaPixer's volume list; when the list does not map the newest held volume,
-    where it ends is not known and nothing is compared (a guess could ask for chapters that volume holds)."""
+    where it ends is not known (a guess could ask for chapters that volume holds) and the caller compares the folder as
+    without the setting."""
     top = max(held.volumes)
     mapped = {to_decimal(v.volume): v for v in k.volumes or () if v.has_chapters}
     if top not in mapped:
-        return None, (f"Unbundled chapters: the volume list does not say which chapter volume {fmt_num(top)} ends with "
-                      "- not compared")
+        return None, f"Unbundled chapters: the volume list does not say which chapter volume {fmt_num(top)} ends with"
     after, last = last_volume_chapter(k.volumes, top), top
     for g in gaps:
         number = to_decimal(g.start)
