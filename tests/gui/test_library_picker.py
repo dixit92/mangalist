@@ -63,14 +63,14 @@ class Lib:
         picker.setCurrentIndex(index)
         picker.activated.emit(index)
 
-    def scan_synchronously(self, win, roots=None):
+    def scan_synchronously(self, win, roots=None, scopes=None):
         """What ``_start_scan`` does, with the worker run on this thread: every signal reaches the window in order."""
         from mangalist.gui import main_window as mw
 
         roots = list(roots) if roots is not None else win._roots()
         win._scan_applied, win._scan_pos = set(), (1, len(roots), roots[0].name)
         win._forget_vanished_roots()
-        worker = mw.ScanWorker(roots, win._db)
+        worker = mw.ScanWorker(roots, win._db, scopes)
         worker.root_started.connect(win._on_root_started)
         worker.root_scanned.connect(win._on_root_scanned)
         worker.finished.connect(win._on_scan_finished)
@@ -566,12 +566,16 @@ def test_deleted_duplicates_and_filed_downloads_rescan_only_their_libraries(lib)
         win._db.add_root(str(lib.dirs[name]), name)
     win._show_roots()
     scans = []
-    win._start_scan = lambda roots=None: scans.append(None if roots is None else [r.name for r in roots])
+    win._start_scan = lambda roots=None, scopes=None: scans.append(
+        (None if roots is None else [r.name for r in roots],
+         {next(r.name for r in win._roots() if r.id == k): v for k, v in (scopes or {}).items()}))
     win._on_files_deleted([str(lib.dirs[MANHWA] / "Series" / "a.cbz"), str(lib.dirs[MANHWA] / "Other" / "b.cbz")])
     win._on_replaced_chapters_moved([str(lib.dirs[MANGA] / "Series"), str(lib.dirs[COMICS] / "Series")])
-    win._on_files_deleted([str(lib.dirs[MANHWA].parent / "elsewhere" / "c.cbz")])     # outside every library: all
-    win._on_replaced_chapters_moved([])
-    assert scans == [[MANHWA], [MANGA, COMICS], None, None]
+    win._on_files_deleted([str(lib.dirs[MANHWA].parent / "elsewhere" / "c.cbz")])     # outside every library: nothing
+    win._on_replaced_chapters_moved([])                                               # nothing named: nothing
+    # owner, 2026-10-13: not even the whole library - only the series folders the files were in
+    assert scans == [([MANHWA], {MANHWA: {"Series", "Other"}}),
+                     ([MANGA, COMICS], {MANGA: {"Series"}, COMICS: {"Series"}})]
 
 
 def test_root_of_takes_the_deepest_library_folder(tmp_path):
@@ -617,3 +621,95 @@ def test_a_rescan_asked_for_during_a_scan_follows_it_and_the_renamer_hears_of_it
         assert scans == [[MANHWA]] and win._scan_queued is None
     finally:
         win._renamer_window = None
+
+
+# --- folder-level scans (selective scanning, 2026-10-13) ----------------------------------------------------------
+
+def test_a_folder_scan_merges_its_rows_keeping_order_selection_and_subseries(lib):
+    _series(lib.dirs[MANGA], "Alpha Quest")
+    _series(lib.dirs[MANGA], "Example Quest", 2)
+    _series(lib.dirs[MANGA], "Zeta Quest")
+    _series(lib.dirs[MANGA] / "Franchise", "Crimson Tale")
+    _series(lib.dirs[MANGA] / "Franchise", "Azure Tale")
+    _series(lib.dirs[MANHWA], "Korean Quest")
+    win = lib.make_window()
+    win._db.add_root(str(lib.dirs[MANGA]), MANGA)
+    win._db.add_root(str(lib.dirs[MANHWA]), MANHWA)
+    win._show_roots()
+    win._start_signatures = win._count_duplicate_files = lambda: None
+    win._count_rename_pending = lambda folders=None: None
+    lib.scan_synchronously(win)
+    before = [Path(e.folder).name for e in win._model.entries()]
+    assert before == ["Alpha Quest", "Example Quest", "Azure Tale", "Crimson Tale", "Zeta Quest", "Korean Quest"]
+    win.show_folder_in_list(str(next(e.folder for e in win._model.entries() if e.title == "Zeta Quest")))
+    manga = lib.root(win, MANGA)
+
+    _series(lib.dirs[MANGA], "Example Quest", 3)                                  # a new volume
+    _series(lib.dirs[MANGA] / "Franchise", "Amber Tale")                      # a new subseries
+    _series(lib.dirs[MANGA], "Beta Quest")                                       # a new series folder
+    import shutil
+
+    shutil.rmtree(lib.dirs[MANGA] / "Alpha Quest")                               # gone
+    _series(lib.dirs[MANGA], "Unnamed Quest")                                    # new, but not named: not read
+    lib.scan_synchronously(win, [manga], {manga.id: {"Example Quest", "Franchise", "Beta Quest", "Alpha Quest"}})
+    after = [Path(e.folder).name for e in win._model.entries()]
+    assert after == ["Beta Quest", "Example Quest", "Amber Tale", "Azure Tale", "Crimson Tale", "Zeta Quest",
+                     "Korean Quest"]                                             # the scan's order, subseries too
+    assert next(e for e in win._model.entries() if e.title == "Example Quest").n_files == 3
+    assert win._current_entry().title == "Zeta Quest"                            # still picked
+    assert win._status_label.text() == "Scanned 4 folders in Manga"
+    assert win._db.get_series(manga.id, "Alpha Quest").status == "missing"
+    assert win._db.get_series(manga.id, "Unnamed Quest") is None
+
+
+def test_rename_pending_is_counted_again_only_for_the_folders_scanned(lib):
+    _series(lib.dirs[MANGA], "Alpha Quest")
+    _series(lib.dirs[MANGA], "Example Quest")
+    win = lib.make_window()
+    win._db.add_root(str(lib.dirs[MANGA]), MANGA)
+    win._show_roots()
+    win._start_signatures = win._count_duplicate_files = lambda: None
+    counted = []
+
+    class Counter:
+        def pending_counts(self, entries):
+            entries = list(entries)
+            counted.append(sorted(Path(e.folder).name for e in entries))
+            return {str(e.folder): 1 for e in entries}
+
+    win._make_renamer = lambda: Counter()
+    win._background = lambda fn, ok, fail, done=None: [ok(fn()), done and done()] and None
+    lib.scan_synchronously(win)
+    assert counted == [["Alpha Quest", "Example Quest"]]
+    alpha = str(next(e.folder for e in win._model.entries() if e.title == "Alpha Quest"))
+    win._model.set_rename_counts({alpha: 5, str(Path(alpha).with_name("Example Quest")): 1})
+    manga = lib.root(win, MANGA)
+    lib.scan_synchronously(win, [manga], {manga.id: {"Example Quest"}})
+    assert counted[-1] == ["Example Quest"]                                      # not the whole table
+    assert win._model.rename_counts()[alpha] == 5                                # the others' counts stand
+
+
+def test_folder_scans_asked_for_during_a_scan_are_joined(lib):
+    win = lib.make_window()
+    for name in (MANGA, MANHWA):
+        win._db.add_root(str(lib.dirs[name]), name)
+    win._show_roots()
+    manga, manhwa = lib.root(win, MANGA), lib.root(win, MANHWA)
+    win._thread = object()                                                       # a scan is running
+    win._scan_paths([lib.dirs[MANGA] / "Series A" / "a.cbz"])
+    win._scan_paths([lib.dirs[MANGA] / "Series B"])
+    win._start_scan([manhwa])                                                    # a whole root
+    assert sorted(r.name for r in win._scan_queued) == [MANGA, MANHWA]
+    assert win._scan_queued_scopes == {manga.id: {"Series A", "Series B"}, manhwa.id: None}
+    scans = []
+    win._start_scan = lambda roots=None, scopes=None: scans.append(([r.name for r in roots], scopes))
+    win._on_thread_finished()
+    wait_until_called = lambda: bool(scans)  # noqa: E731
+    from PySide6.QtCore import QCoreApplication
+
+    for _ in range(50):
+        QCoreApplication.processEvents()
+        if wait_until_called():
+            break
+    assert scans == [([MANGA, MANHWA], {manga.id: {"Series A", "Series B"}, manhwa.id: None})]
+    win._thread = None

@@ -1,4 +1,4 @@
-"""The stage-2 matcher contract (port of MangaPixer 1.32.0 ``AutoMatchContracts.cs``).
+"""The stage-2 matcher contract (port of MangaPixer 1.42.0 ``AutoMatchContracts.cs``).
 
 Rules carried over unchanged (MangaPixer owner decisions, 2026-09-26): only folders the detector
 classes as series-like are matched at folder level; archive-level matching only inside collection
@@ -60,6 +60,10 @@ class QueryVariantKind(IntEnum):
     # "Title - Chapter | Author", "Author - Title"). Retrieval only: it scores at most the review-only cap
     # unless a creator hint names one of the record's authors.
     CREATOR_SPLIT = 7
+    # 1.34.2: the character a dated doujin name is about ("Creator] [yyyy-mm] Character (Title)", dated_doujin),
+    # searched last, after the title. Retrieval only: it scores at most the review-only cap, so a record named after
+    # the character never links on its own.
+    CHARACTER_NAME = 8
 
 
 class MetadataOrigin(IntEnum):

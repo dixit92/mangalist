@@ -226,14 +226,13 @@ def newest_held_chapter(db, series_id: int) -> Tuple[Optional[Decimal], str]:
     if not tops:
         return newest, "" if newest is not None else "no file of this series states a chapter number"
     top = max(tops)
+    from ..states import last_volume_chapter
     from ..upgrades import _knowledge_volumes
 
     listed, why = _knowledge_volumes(db, series)
-    ends = [to_decimal(v.chapters_to) for v in listed or () if v.has_chapters
-            and (to_decimal(v.volume) or Decimal(-1)) <= top]
-    ends = [e for e in ends if e is not None]
-    if ends and (newest is None or max(ends) > newest):
-        newest = max(ends)
+    end = last_volume_chapter(listed or (), top)       # the states' unbundled chapters count from the same chapter
+    if end is not None and (newest is None or end > newest):
+        newest = end
     if newest is None:
         return None, (f"the volume list does not say which chapter volume {top} ends with"
                       if not why else f"{why}, so the chapter volume {top} ends with is not known")
@@ -421,14 +420,10 @@ def mangadex_released_for(db, series_id: int) -> Optional[Tuple[str, int]]:
         return None
     if res is None or res.inherited or res.link_state not in ("Confirmed", "Auto"):
         return None
-    companions = res.item.get("companions") if isinstance(res.item.get("companions"), Mapping) else {}
-    released = companions.get("mangadexReleased")
-    if not isinstance(released, Mapping) or not isinstance(released.get("language"), str):
-        return None
-    chapters = released.get("chapters")
-    if isinstance(chapters, bool) or not isinstance(chapters, int) or chapters < 0:
-        return None
-    return released["language"].strip().casefold(), chapters
+    from ..knowledge import mangadex_released_of
+
+    released = mangadex_released_of(res.item)
+    return (released.language, released.chapters) if released is not None else None
 
 
 def mangadex_id_for(db, series_id: int) -> Optional[str]:

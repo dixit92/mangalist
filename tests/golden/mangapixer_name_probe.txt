@@ -1,0 +1,644 @@
+# MangaPixer 1.42.0 (release commit 4efb3028): AutoMatchText / TitleNormalizer / ArchiveNameAnatomy / DatedDoujinName / WorkDetector / MatchQueryPlanner over synthetic names, printed by a throwaway probe test (never committed) in a throwaway .NET SDK container; tests/golden/test_name_probe.py prints the same lines from MangaList's port and requires them identical.
+UNITS|Some Series 001 Read Online.cbz|||||False
+NORM|Some Series 001 Read Online.cbz|Some Series 001|Some Series
+BASE|Some Series 001 Read Online.cbz|Some Series
+ANAT|Some Series 001 Read Online.cbz|<null>|<null>|<null>|<null>|False|False|Some Series 001|
+DATED|Some Series 001 Read Online.cbz|none
+NUM|Some Series 001 Read Online.cbz|||False|False
+HINTS|Some Series 001 Read Online.cbz|
+PLAN|Some Series 001 Read Online.cbz|OneShot|Some Series 001=Primary;Some Series=SequelNumberSplit
+UNITS|Some Series - Read Manga Online Free|||||False
+NORM|Some Series - Read Manga Online Free|Some Series|
+BASE|Some Series - Read Manga Online Free|Some Series
+ANAT|Some Series - Read Manga Online Free|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series - Read Manga Online Free|none
+NUM|Some Series - Read Manga Online Free|||False|False
+HINTS|Some Series - Read Manga Online Free|Some Series;Read Manga Online Free
+PLAN|Some Series - Read Manga Online Free|OneShot|Some Series=Primary;Read=CreatorSplit
+UNITS|Some Series Online Free|||||False
+NORM|Some Series Online Free|Some Series|
+BASE|Some Series Online Free|Some Series
+ANAT|Some Series Online Free|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Online Free|none
+NUM|Some Series Online Free|||False|False
+HINTS|Some Series Online Free|
+PLAN|Some Series Online Free|OneShot|Some Series=Primary
+UNITS|Some Series Read Free.cbz|||||False
+NORM|Some Series Read Free.cbz|Some Series|
+BASE|Some Series Read Free.cbz|Some Series
+ANAT|Some Series Read Free.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Read Free.cbz|none
+NUM|Some Series Read Free.cbz|||False|False
+HINTS|Some Series Read Free.cbz|
+PLAN|Some Series Read Free.cbz|OneShot|Some Series=Primary
+UNITS|Some Series Read Manhwa Online|||||False
+NORM|Some Series Read Manhwa Online|Some Series|
+BASE|Some Series Read Manhwa Online|Some Series
+ANAT|Some Series Read Manhwa Online|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Read Manhwa Online|none
+NUM|Some Series Read Manhwa Online|||False|False
+HINTS|Some Series Read Manhwa Online|
+PLAN|Some Series Read Manhwa Online|OneShot|Some Series=Primary
+UNITS|Some Series Read Online for Free|||||False
+NORM|Some Series Read Online for Free|Some Series|
+BASE|Some Series Read Online for Free|Some Series
+ANAT|Some Series Read Online for Free|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Read Online for Free|none
+NUM|Some Series Read Online for Free|||False|False
+HINTS|Some Series Read Online for Free|
+PLAN|Some Series Read Online for Free|OneShot|Some Series=Primary
+UNITS|Some Series Free Online|||||False
+NORM|Some Series Free Online|Some Series|
+BASE|Some Series Free Online|Some Series
+ANAT|Some Series Free Online|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Free Online|none
+NUM|Some Series Free Online|||False|False
+HINTS|Some Series Free Online|
+PLAN|Some Series Free Online|OneShot|Some Series=Primary
+UNITS|Some_Series_Read_Online|||||False
+NORM|Some_Series_Read_Online|Some Series|
+BASE|Some_Series_Read_Online|Some Series
+ANAT|Some_Series_Read_Online|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some_Series_Read_Online|none
+NUM|Some_Series_Read_Online|||False|False
+HINTS|Some_Series_Read_Online|
+PLAN|Some_Series_Read_Online|OneShot|Some Series=Primary
+UNITS|Some Series 012 - Read Manga Online Free.cbz|||||False
+NORM|Some Series 012 - Read Manga Online Free.cbz|Some Series 012|Some Series
+BASE|Some Series 012 - Read Manga Online Free.cbz|Some Series
+ANAT|Some Series 012 - Read Manga Online Free.cbz|<null>|<null>|<null>|<null>|False|False|Some Series 012|
+DATED|Some Series 012 - Read Manga Online Free.cbz|none
+NUM|Some Series 012 - Read Manga Online Free.cbz|||False|False
+HINTS|Some Series 012 - Read Manga Online Free.cbz|Read Manga Online Free
+PLAN|Some Series 012 - Read Manga Online Free.cbz|OneShot|Some Series 012=Primary;Some Series=SequelNumberSplit
+UNITS|Some Series 001 | Read Comic Online.cbz|||||False
+NORM|Some Series 001 | Read Comic Online.cbz|Some Series 001|Some Series
+BASE|Some Series 001 | Read Comic Online.cbz|Some Series
+ANAT|Some Series 001 | Read Comic Online.cbz|<null>|<null>|<null>|<null>|False|False|Some Series 001|
+DATED|Some Series 001 | Read Comic Online.cbz|none
+NUM|Some Series 001 | Read Comic Online.cbz|||False|False
+HINTS|Some Series 001 | Read Comic Online.cbz|Read Comic Online
+PLAN|Some Series 001 | Read Comic Online.cbz|OneShot|Some Series 001=Primary;Some Series=SequelNumberSplit
+UNITS|Some Series 001 – Read Webtoon Online Free.cbz|||||False
+NORM|Some Series 001 – Read Webtoon Online Free.cbz|Some Series 001|Some Series
+BASE|Some Series 001 – Read Webtoon Online Free.cbz|Some Series
+ANAT|Some Series 001 – Read Webtoon Online Free.cbz|<null>|<null>|<null>|<null>|False|False|Some Series 001|
+DATED|Some Series 001 – Read Webtoon Online Free.cbz|none
+NUM|Some Series 001 – Read Webtoon Online Free.cbz|||False|False
+HINTS|Some Series 001 – Read Webtoon Online Free.cbz|Read Webtoon Online Free
+PLAN|Some Series 001 – Read Webtoon Online Free.cbz|OneShot|Some Series 001=Primary;Some Series=SequelNumberSplit
+UNITS|Sword Art Online|||||False
+NORM|Sword Art Online|Sword Art Online|
+BASE|Sword Art Online|Sword Art Online
+ANAT|Sword Art Online|<null>|<null>|<null>|<null>|False|False|Sword Art Online|
+DATED|Sword Art Online|none
+NUM|Sword Art Online|||False|False
+HINTS|Sword Art Online|
+PLAN|Sword Art Online|OneShot|Sword Art Online=Primary
+UNITS|Some Series Online|||||False
+NORM|Some Series Online|Some Series Online|
+BASE|Some Series Online|Some Series Online
+ANAT|Some Series Online|<null>|<null>|<null>|<null>|False|False|Some Series Online|
+DATED|Some Series Online|none
+NUM|Some Series Online|||False|False
+HINTS|Some Series Online|
+PLAN|Some Series Online|OneShot|Some Series Online=Primary
+UNITS|Some Series Manga Online|||||False
+NORM|Some Series Manga Online|Some Series Manga Online|
+BASE|Some Series Manga Online|Some Series Manga Online
+ANAT|Some Series Manga Online|<null>|<null>|<null>|<null>|False|False|Some Series Manga Online|
+DATED|Some Series Manga Online|none
+NUM|Some Series Manga Online|||False|False
+HINTS|Some Series Manga Online|
+PLAN|Some Series Manga Online|OneShot|Some Series Manga Online=Primary
+UNITS|Some Series Free|||||False
+NORM|Some Series Free|Some Series Free|
+BASE|Some Series Free|Some Series Free
+ANAT|Some Series Free|<null>|<null>|<null>|<null>|False|False|Some Series Free|
+DATED|Some Series Free|none
+NUM|Some Series Free|||False|False
+HINTS|Some Series Free|
+PLAN|Some Series Free|OneShot|Some Series Free=Primary
+UNITS|Read or Die|||||False
+NORM|Read or Die|Read or Die|
+BASE|Read or Die|Read or Die
+ANAT|Read or Die|<null>|<null>|<null>|<null>|False|False|Read or Die|
+DATED|Read or Die|none
+NUM|Read or Die|||False|False
+HINTS|Read or Die|
+PLAN|Read or Die|OneShot|Read or Die=Primary
+UNITS|Online Free|||||False
+NORM|Online Free|Online Free|
+BASE|Online Free|Online Free
+ANAT|Online Free|<null>|<null>|<null>|<null>|False|False|Online Free|
+DATED|Online Free|none
+NUM|Online Free|||False|False
+HINTS|Online Free|
+PLAN|Online Free|OneShot|Online Free=Primary
+UNITS|Free Online Stories|||||False
+NORM|Free Online Stories|Free Online Stories|
+BASE|Free Online Stories|Free Online Stories
+ANAT|Free Online Stories|<null>|<null>|<null>|<null>|False|False|Free Online Stories|
+DATED|Free Online Stories|none
+NUM|Free Online Stories|||False|False
+HINTS|Free Online Stories|
+PLAN|Free Online Stories|OneShot|Free Online Stories=Primary
+UNITS|001 Read Online.cbz|||1||False
+NORM|001 Read Online.cbz|001|
+BASE|001 Read Online.cbz|
+ANAT|001 Read Online.cbz|<null>|<null>|<null>|<null>|False|False|001|
+DATED|001 Read Online.cbz|none
+NUM|001 Read Online.cbz|1||True|False
+HINTS|001 Read Online.cbz|
+PLAN|001 Read Online.cbz|OneShot|001=Primary
+UNITS|Some Series - Some Series Ch.005 Read Online.cbz|||5||False
+NORM|Some Series - Some Series Ch.005 Read Online.cbz|Some Series - Some Series|Some Series
+BASE|Some Series - Some Series Ch.005 Read Online.cbz|Some Series - Some Series
+ANAT|Some Series - Some Series Ch.005 Read Online.cbz|<null>|<null>|<null>|<null>|False|False|Some Series - Some Series|
+DATED|Some Series - Some Series Ch.005 Read Online.cbz|none
+NUM|Some Series - Some Series Ch.005 Read Online.cbz|5||True|False
+HINTS|Some Series - Some Series Ch.005 Read Online.cbz|Some Series
+PLAN|Some Series - Some Series Ch.005 Read Online.cbz|OneShot|Some Series - Some Series=Primary;Some Series=SubtitleSplit
+UNITS|Some Series Ch.014.005.cbz|||14.5||True
+NORM|Some Series Ch.014.005.cbz|Some Series|
+BASE|Some Series Ch.014.005.cbz|Some Series
+ANAT|Some Series Ch.014.005.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Ch.014.005.cbz|none
+NUM|Some Series Ch.014.005.cbz|14||True|False
+HINTS|Some Series Ch.014.005.cbz|
+PLAN|Some Series Ch.014.005.cbz|OneShot|Some Series=Primary
+UNITS|Some Series - Some Series Ch.021.005 Read Online.cbz|||21.5||True
+NORM|Some Series - Some Series Ch.021.005 Read Online.cbz|Some Series - Some Series|Some Series
+BASE|Some Series - Some Series Ch.021.005 Read Online.cbz|Some Series - Some Series
+ANAT|Some Series - Some Series Ch.021.005 Read Online.cbz|<null>|<null>|<null>|<null>|False|False|Some Series - Some Series|
+DATED|Some Series - Some Series Ch.021.005 Read Online.cbz|none
+NUM|Some Series - Some Series Ch.021.005 Read Online.cbz|21||True|False
+HINTS|Some Series - Some Series Ch.021.005 Read Online.cbz|Some Series
+PLAN|Some Series - Some Series Ch.021.005 Read Online.cbz|OneShot|Some Series - Some Series=Primary;Some Series=SubtitleSplit
+UNITS|Some Series Ch.021.010.cbz|||21.10||True
+NORM|Some Series Ch.021.010.cbz|Some Series|
+BASE|Some Series Ch.021.010.cbz|Some Series
+ANAT|Some Series Ch.021.010.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Ch.021.010.cbz|none
+NUM|Some Series Ch.021.010.cbz|21||True|False
+HINTS|Some Series Ch.021.010.cbz|
+PLAN|Some Series Ch.021.010.cbz|OneShot|Some Series=Primary
+UNITS|Some Series Ch.014.125.cbz|||14.125||True
+NORM|Some Series Ch.014.125.cbz|Some Series|
+BASE|Some Series Ch.014.125.cbz|Some Series
+ANAT|Some Series Ch.014.125.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Ch.014.125.cbz|none
+NUM|Some Series Ch.014.125.cbz|14||True|False
+HINTS|Some Series Ch.014.125.cbz|
+PLAN|Some Series Ch.014.125.cbz|OneShot|Some Series=Primary
+UNITS|Some Series c014.25.cbz|||14.25||True
+NORM|Some Series c014.25.cbz|Some Series|
+BASE|Some Series c014.25.cbz|Some Series
+ANAT|Some Series c014.25.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series c014.25.cbz|none
+NUM|Some Series c014.25.cbz|14||True|False
+HINTS|Some Series c014.25.cbz|
+PLAN|Some Series c014.25.cbz|OneShot|Some Series=Primary
+UNITS|Some Series Ch.014.5.cbz|||14.5||True
+NORM|Some Series Ch.014.5.cbz|Some Series|
+BASE|Some Series Ch.014.5.cbz|Some Series
+ANAT|Some Series Ch.014.5.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Ch.014.5.cbz|none
+NUM|Some Series Ch.014.5.cbz|14||True|False
+HINTS|Some Series Ch.014.5.cbz|
+PLAN|Some Series Ch.014.5.cbz|OneShot|Some Series=Primary
+UNITS|Some Series Ch.014.000.cbz|||14.000||False
+NORM|Some Series Ch.014.000.cbz|Some Series|
+BASE|Some Series Ch.014.000.cbz|Some Series
+ANAT|Some Series Ch.014.000.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series Ch.014.000.cbz|none
+NUM|Some Series Ch.014.000.cbz|14||True|False
+HINTS|Some Series Ch.014.000.cbz|
+PLAN|Some Series Ch.014.000.cbz|OneShot|Some Series=Primary
+UNITS|Some Series v02.005.cbz|2.5||||True
+NORM|Some Series v02.005.cbz|Some Series|
+BASE|Some Series v02.005.cbz|Some Series
+ANAT|Some Series v02.005.cbz|<null>|<null>|<null>|<null>|False|False|Some Series|
+DATED|Some Series v02.005.cbz|none
+NUM|Some Series v02.005.cbz||2|False|True
+HINTS|Some Series v02.005.cbz|
+PLAN|Some Series v02.005.cbz|OneShot|Some Series=Primary
+UNITS|0015 [0014.005 - A Title].cbz|||14.5||True
+NORM|0015 [0014.005 - A Title].cbz|0015|
+BASE|0015 [0014.005 - A Title].cbz|
+ANAT|0015 [0014.005 - A Title].cbz|<null>|<null>|<null>|<null>|False|False|0015|
+DATED|0015 [0014.005 - A Title].cbz|none
+NUM|0015 [0014.005 - A Title].cbz|15||True|False
+HINTS|0015 [0014.005 - A Title].cbz|
+PLAN|0015 [0014.005 - A Title].cbz|UnitSub|0015=Primary;0014.005 - A Title=EnglishTitle
+UNITS|Some Series No. 12.125.cbz|||12.125||True
+NORM|Some Series No. 12.125.cbz|Some Series No. 12.125|Some Series No. 12
+BASE|Some Series No. 12.125.cbz|Some Series No
+ANAT|Some Series No. 12.125.cbz|<null>|<null>|<null>|<null>|False|False|Some Series No. 12.125|
+DATED|Some Series No. 12.125.cbz|none
+NUM|Some Series No. 12.125.cbz|12||True|False
+HINTS|Some Series No. 12.125.cbz|
+PLAN|Some Series No. 12.125.cbz|OneShot|Some Series No. 12.125=Primary;Some Series No. 12=SequelNumberSplit;Some Series No=ArchiveDerivedTitle
+UNITS|Some Comic Annual 2.005.cbz|||2.5||True
+NORM|Some Comic Annual 2.005.cbz|Some Comic Annual 2.005|Some Comic Annual 2
+BASE|Some Comic Annual 2.005.cbz|Some Comic Annual
+ANAT|Some Comic Annual 2.005.cbz|<null>|<null>|<null>|<null>|False|False|Some Comic Annual 2.005|
+DATED|Some Comic Annual 2.005.cbz|none
+NUM|Some Comic Annual 2.005.cbz|||False|False
+HINTS|Some Comic Annual 2.005.cbz|
+PLAN|Some Comic Annual 2.005.cbz|OneShot|Some Comic Annual 2.005=Primary;Some Comic Annual 2=SequelNumberSplit;Some Comic Annual=ArchiveDerivedTitle
+UNITS|0002 [0000.5].cbz|||0.5||True
+NORM|0002 [0000.5].cbz|0002|
+BASE|0002 [0000.5].cbz|
+ANAT|0002 [0000.5].cbz|<null>|<null>|<null>|<null>|False|False|0002|
+DATED|0002 [0000.5].cbz|none
+NUM|0002 [0000.5].cbz|2||True|False
+HINTS|0002 [0000.5].cbz|
+PLAN|0002 [0000.5].cbz|UnitSub|0002=Primary
+UNITS|0003 [0001 - Some Title].cbz|||1||False
+NORM|0003 [0001 - Some Title].cbz|0003|
+BASE|0003 [0001 - Some Title].cbz|
+ANAT|0003 [0001 - Some Title].cbz|<null>|<null>|<null>|<null>|False|False|0003|
+DATED|0003 [0001 - Some Title].cbz|none
+NUM|0003 [0001 - Some Title].cbz|3||True|False
+HINTS|0003 [0001 - Some Title].cbz|
+PLAN|0003 [0001 - Some Title].cbz|UnitSub|0003=Primary;0001 - Some Title=EnglishTitle
+UNITS|0004 [0002 - Some Title].cbz|||2||False
+NORM|0004 [0002 - Some Title].cbz|0004|
+BASE|0004 [0002 - Some Title].cbz|
+ANAT|0004 [0002 - Some Title].cbz|<null>|<null>|<null>|<null>|False|False|0004|
+DATED|0004 [0002 - Some Title].cbz|none
+NUM|0004 [0002 - Some Title].cbz|4||True|False
+HINTS|0004 [0002 - Some Title].cbz|
+PLAN|0004 [0002 - Some Title].cbz|UnitSub|0004=Primary;0002 - Some Title=EnglishTitle
+UNITS|0168 [0166 - Some Title (Part 2)].cbz|||166||False
+NORM|0168 [0166 - Some Title (Part 2)].cbz|0168|
+BASE|0168 [0166 - Some Title (Part 2)].cbz|
+ANAT|0168 [0166 - Some Title (Part 2)].cbz|<null>|<null>|<null>|Part 2|False|False|0168|
+DATED|0168 [0166 - Some Title (Part 2)].cbz|none
+NUM|0168 [0166 - Some Title (Part 2)].cbz|168||True|False
+HINTS|0168 [0166 - Some Title (Part 2)].cbz|
+PLAN|0168 [0166 - Some Title (Part 2)].cbz|UnitSub|0168=Primary;0166 - Some Title (Part 2)=EnglishTitle
+UNITS|0001 [0000].cbz|||0||False
+NORM|0001 [0000].cbz|0001|
+BASE|0001 [0000].cbz|
+ANAT|0001 [0000].cbz|<null>|<null>|<null>|<null>|False|False|0001|
+DATED|0001 [0000].cbz|none
+NUM|0001 [0000].cbz|1||True|False
+HINTS|0001 [0000].cbz|
+PLAN|0001 [0000].cbz|UnitSub|0001=Primary
+UNITS|12 [10 – Some Title] [Group].cbz|||10||False
+NORM|12 [10 – Some Title] [Group].cbz|12|
+BASE|12 [10 – Some Title] [Group].cbz|
+ANAT|12 [10 – Some Title] [Group].cbz|<null>|<null>|<null>|<null>|False|False|12|
+DATED|12 [10 – Some Title] [Group].cbz|none
+NUM|12 [10 – Some Title] [Group].cbz|12||True|False
+HINTS|12 [10 – Some Title] [Group].cbz|
+PLAN|12 [10 – Some Title] [Group].cbz|UnitSub|12=Primary
+UNITS|0005 [0003 - Some Title Vol. 2].cbz|||3||False
+NORM|0005 [0003 - Some Title Vol. 2].cbz|0005|
+BASE|0005 [0003 - Some Title Vol. 2].cbz|
+ANAT|0005 [0003 - Some Title Vol. 2].cbz|<null>|<null>|<null>|<null>|False|False|0005|
+DATED|0005 [0003 - Some Title Vol. 2].cbz|none
+NUM|0005 [0003 - Some Title Vol. 2].cbz||2|False|True
+HINTS|0005 [0003 - Some Title Vol. 2].cbz|
+PLAN|0005 [0003 - Some Title Vol. 2].cbz|UnitSub|0005=Primary;0003 - Some Title=EnglishTitle
+UNITS|0150 [Chapter Title].cbz|||150||False
+NORM|0150 [Chapter Title].cbz|0150|
+BASE|0150 [Chapter Title].cbz|
+ANAT|0150 [Chapter Title].cbz|<null>|<null>|<null>|<null>|False|False|0150|
+DATED|0150 [Chapter Title].cbz|none
+NUM|0150 [Chapter Title].cbz|150||True|False
+HINTS|0150 [Chapter Title].cbz|
+PLAN|0150 [Chapter Title].cbz|UnitSub|0150=Primary;Title=EnglishTitle
+UNITS|001 [2019].cbz|||1||False
+NORM|001 [2019].cbz|001|
+BASE|001 [2019].cbz|
+ANAT|001 [2019].cbz|<null>|<null>|<null>|<null>|False|False|001|
+DATED|001 [2019].cbz|none
+NUM|001 [2019].cbz|1||True|False
+HINTS|001 [2019].cbz|
+PLAN|001 [2019].cbz|UnitSub|001=Primary
+UNITS|001 [1 Punch].cbz|||1||False
+NORM|001 [1 Punch].cbz|001|
+BASE|001 [1 Punch].cbz|
+ANAT|001 [1 Punch].cbz|<null>|<null>|<null>|<null>|False|False|001|
+DATED|001 [1 Punch].cbz|none
+NUM|001 [1 Punch].cbz|1||True|False
+HINTS|001 [1 Punch].cbz|
+PLAN|001 [1 Punch].cbz|UnitSub|001=Primary;1 Punch=EnglishTitle
+UNITS|Some Title [no group].cbz|||||False
+NORM|Some Title [no group].cbz|Some Title|
+BASE|Some Title [no group].cbz|Some Title
+ANAT|Some Title [no group].cbz|<null>|<null>|<null>|<null>|False|False|Some Title|
+DATED|Some Title [no group].cbz|none
+NUM|Some Title [no group].cbz|||False|False
+HINTS|Some Title [no group].cbz|
+PLAN|Some Title [no group].cbz|OneShot|Some Title=Primary;no group=EnglishTitle
+UNITS|Some Title (Unofficial).cbz|||||False
+NORM|Some Title (Unofficial).cbz|Some Title|
+BASE|Some Title (Unofficial).cbz|Some Title
+ANAT|Some Title (Unofficial).cbz|<null>|<null>|<null>|<null>|False|False|Some Title|
+DATED|Some Title (Unofficial).cbz|none
+NUM|Some Title (Unofficial).cbz|||False|False
+HINTS|Some Title (Unofficial).cbz|
+PLAN|Some Title (Unofficial).cbz|OneShot|Some Title=Primary
+UNITS|[Some Circle] Some Title (Unofficial).cbz|||||False
+NORM|[Some Circle] Some Title (Unofficial).cbz|Some Title|
+BASE|[Some Circle] Some Title (Unofficial).cbz|Some Title
+ANAT|[Some Circle] Some Title (Unofficial).cbz|Some Circle|<null>|<null>|<null>|False|False|Some Title|Some Circle
+DATED|[Some Circle] Some Title (Unofficial).cbz|none
+NUM|[Some Circle] Some Title (Unofficial).cbz|||False|False
+HINTS|[Some Circle] Some Title (Unofficial).cbz|Some Circle
+PLAN|[Some Circle] Some Title (Unofficial).cbz|OneShot|Some Title=Primary
+UNITS|[Some Circle] Some Title (No Group Scans).cbz|||||False
+NORM|[Some Circle] Some Title (No Group Scans).cbz|Some Title|
+BASE|[Some Circle] Some Title (No Group Scans).cbz|Some Title
+ANAT|[Some Circle] Some Title (No Group Scans).cbz|Some Circle|<null>|<null>|No Group Scans|False|True|Some Title|Some Circle
+DATED|[Some Circle] Some Title (No Group Scans).cbz|none
+NUM|[Some Circle] Some Title (No Group Scans).cbz|||False|False
+HINTS|[Some Circle] Some Title (No Group Scans).cbz|Some Circle;No Group Scans
+PLAN|[Some Circle] Some Title (No Group Scans).cbz|OneShot|Some Title=Primary
+UNITS|[Some Circle] Some Title (Some Parody).cbz|||||False
+NORM|[Some Circle] Some Title (Some Parody).cbz|Some Title|
+BASE|[Some Circle] Some Title (Some Parody).cbz|Some Title
+ANAT|[Some Circle] Some Title (Some Parody).cbz|Some Circle|<null>|<null>|Some Parody|False|True|Some Title|Some Circle
+DATED|[Some Circle] Some Title (Some Parody).cbz|none
+NUM|[Some Circle] Some Title (Some Parody).cbz|||False|False
+HINTS|[Some Circle] Some Title (Some Parody).cbz|Some Circle;Some Parody
+PLAN|[Some Circle] Some Title (Some Parody).cbz|OneShot|Some Title=Primary
+UNITS|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|||||False
+NORM|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|The Real Title|
+BASE|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|The Real Title
+ANAT|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|Artist Name|<null>|<null>|<null>|True|True|The Real Title|Artist Name
+DATED|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|Artist Name|The Real Title|Character Name|Some Tag
+NUM|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|||False|False
+HINTS|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|Some Tag;The Real Title;Artist Name
+PLAN|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title).cbz|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|Artist Name] [2023-05] Character Name (The Real Title).zip|||||False
+NORM|Artist Name] [2023-05] Character Name (The Real Title).zip|The Real Title|
+BASE|Artist Name] [2023-05] Character Name (The Real Title).zip|The Real Title
+ANAT|Artist Name] [2023-05] Character Name (The Real Title).zip|Artist Name|<null>|<null>|<null>|True|True|The Real Title|Artist Name
+DATED|Artist Name] [2023-05] Character Name (The Real Title).zip|Artist Name|The Real Title|Character Name|
+NUM|Artist Name] [2023-05] Character Name (The Real Title).zip|||False|False
+HINTS|Artist Name] [2023-05] Character Name (The Real Title).zip|The Real Title;Artist Name
+PLAN|Artist Name] [2023-05] Character Name (The Real Title).zip|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|[Artist Name] [2023-05] Character Name (The Real Title).cbz|||||False
+NORM|[Artist Name] [2023-05] Character Name (The Real Title).cbz|The Real Title|
+BASE|[Artist Name] [2023-05] Character Name (The Real Title).cbz|The Real Title
+ANAT|[Artist Name] [2023-05] Character Name (The Real Title).cbz|Artist Name|<null>|<null>|<null>|True|True|The Real Title|Artist Name
+DATED|[Artist Name] [2023-05] Character Name (The Real Title).cbz|Artist Name|The Real Title|Character Name|
+NUM|[Artist Name] [2023-05] Character Name (The Real Title).cbz|||False|False
+HINTS|[Artist Name] [2023-05] Character Name (The Real Title).cbz|Artist Name;The Real Title
+PLAN|[Artist Name] [2023-05] Character Name (The Real Title).cbz|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|||||False
+NORM|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|The Real Title|
+BASE|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|The Real Title
+ANAT|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|Artist Name|<null>|<null>|<null>|True|True|The Real Title|Artist Name
+DATED|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|Artist Name|The Real Title|Character Name|
+NUM|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|||False|False
+HINTS|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|The Real Title;Artist Name
+PLAN|Artist Name] [2023-05-17] Character Name (The Real Title).cbz|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|Artist Name] [2019] Character Name (The Real Title).cbz|||||False
+NORM|Artist Name] [2019] Character Name (The Real Title).cbz|The Real Title|
+BASE|Artist Name] [2019] Character Name (The Real Title).cbz|The Real Title
+ANAT|Artist Name] [2019] Character Name (The Real Title).cbz|Artist Name|<null>|<null>|<null>|True|True|The Real Title|Artist Name
+DATED|Artist Name] [2019] Character Name (The Real Title).cbz|Artist Name|The Real Title|Character Name|
+NUM|Artist Name] [2019] Character Name (The Real Title).cbz|||False|False
+HINTS|Artist Name] [2019] Character Name (The Real Title).cbz|The Real Title;Artist Name
+PLAN|Artist Name] [2019] Character Name (The Real Title).cbz|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|||||False
+NORM|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|The Real Title|
+BASE|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|The Real Title
+ANAT|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|Artist Name|<null>|<null>|<null>|True|True|The Real Title|Artist Name
+DATED|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|Artist Name|The Real Title|Character Name|
+NUM|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|||False|False
+HINTS|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|Event 5;Artist Name;The Real Title
+PLAN|(Event 5) [Artist Name] [2023-05] Character Name (The Real Title).cbz|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|||||False
+NORM|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|The Real Title|
+BASE|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|The Real Title
+ANAT|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|Artist Name|<null>|<null>|<null>|True|True|The Real Title|Artist Name
+DATED|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|Artist Name|The Real Title|Character Name|Some Tag
+NUM|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|||False|False
+HINTS|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|Some Tag;The Real Title;Artist Name
+PLAN|Artist Name] [2023-05] Character Name (Some Tag) (The Real Title) (x1600) [Decensored] [English].cbz|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|Artist Name] [2023-05] Character Name (x1600).cbz|||||False
+NORM|Artist Name] [2023-05] Character Name (x1600).cbz|Character Name|
+BASE|Artist Name] [2023-05] Character Name (x1600).cbz|Character Name
+ANAT|Artist Name] [2023-05] Character Name (x1600).cbz|Artist Name|<null>|<null>|<null>|True|True|Character Name|Artist Name
+DATED|Artist Name] [2023-05] Character Name (x1600).cbz|Artist Name|<null>|Character Name|
+NUM|Artist Name] [2023-05] Character Name (x1600).cbz|||False|False
+HINTS|Artist Name] [2023-05] Character Name (x1600).cbz|Artist Name
+PLAN|Artist Name] [2023-05] Character Name (x1600).cbz|OneShot|Character Name=Primary
+UNITS|Artist Name] [2023-05] Character Name.cbz|||||False
+NORM|Artist Name] [2023-05] Character Name.cbz|Character Name|
+BASE|Artist Name] [2023-05] Character Name.cbz|Character Name
+ANAT|Artist Name] [2023-05] Character Name.cbz|Artist Name|<null>|<null>|<null>|True|True|Character Name|Artist Name
+DATED|Artist Name] [2023-05] Character Name.cbz|Artist Name|<null>|Character Name|
+NUM|Artist Name] [2023-05] Character Name.cbz|||False|False
+HINTS|Artist Name] [2023-05] Character Name.cbz|Artist Name
+PLAN|Artist Name] [2023-05] Character Name.cbz|OneShot|Character Name=Primary
+UNITS|[Artist Name] [2023-05] Character Name [Decensored].cbz|||||False
+NORM|[Artist Name] [2023-05] Character Name [Decensored].cbz|Character Name|
+BASE|[Artist Name] [2023-05] Character Name [Decensored].cbz|Character Name
+ANAT|[Artist Name] [2023-05] Character Name [Decensored].cbz|Artist Name|<null>|<null>|<null>|True|True|Character Name|Artist Name
+DATED|[Artist Name] [2023-05] Character Name [Decensored].cbz|Artist Name|<null>|Character Name|
+NUM|[Artist Name] [2023-05] Character Name [Decensored].cbz|||False|False
+HINTS|[Artist Name] [2023-05] Character Name [Decensored].cbz|Artist Name
+PLAN|[Artist Name] [2023-05] Character Name [Decensored].cbz|OneShot|Character Name=Primary
+UNITS|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|||||False
+NORM|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|The Real Title - Part 2|The Real Title
+BASE|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|The Real Title - Part
+ANAT|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|Artist|<null>|<null>|<null>|True|True|The Real Title - Part 2|Artist
+DATED|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|Artist|The Real Title - Part 2|Character|Tag
+NUM|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|||False|False
+HINTS|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|Tag;The Real Title;Artist;Character
+PLAN|Artist] [2023-05] Character (Tag) (The Real Title) - Part 2.cbz|OneShot|The Real Title - Part 2=Primary;The Real Title=SubtitleSplit;The Real Title - Part=ArchiveDerivedTitle;Part 2=CreatorSplit;Character=CharacterName
+UNITS|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|||||False
+NORM|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|The Real Title 2|The Real Title
+BASE|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|The Real Title
+ANAT|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|Artist|<null>|<null>|<null>|True|True|The Real Title 2|Artist
+DATED|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|Artist|The Real Title 2|Character|
+NUM|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|||False|False
+HINTS|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|The Real Title;Artist
+PLAN|Artist] [2023-05] Character (The Real Title) 2 (x1600).cbz|OneShot|The Real Title 2=Primary;The Real Title=SequelNumberSplit;Character=CharacterName
+UNITS|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|||||False
+NORM|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|The Real Title Part 2|The Real Title
+BASE|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|The Real Title Part
+ANAT|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|Artist|<null>|<null>|<null>|True|True|The Real Title Part 2|Artist
+DATED|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|Artist|The Real Title Part 2|Character|
+NUM|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|||False|False
+HINTS|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|Part 2;The Real Title;Artist
+PLAN|Artist] [2023-05] Character (The Real Title (Part 2)).cbz|OneShot|The Real Title Part 2=Primary;The Real Title=SequelNumberSplit;The Real Title Part=ArchiveDerivedTitle;Character=CharacterName
+UNITS|Artist] [2023-05] (The Real Title).cbz|||||False
+NORM|Artist] [2023-05] (The Real Title).cbz|The Real Title|
+BASE|Artist] [2023-05] (The Real Title).cbz|The Real Title
+ANAT|Artist] [2023-05] (The Real Title).cbz|Artist|<null>|<null>|<null>|True|True|The Real Title|Artist
+DATED|Artist] [2023-05] (The Real Title).cbz|Artist|The Real Title|<null>|
+NUM|Artist] [2023-05] (The Real Title).cbz|||False|False
+HINTS|Artist] [2023-05] (The Real Title).cbz|The Real Title
+PLAN|Artist] [2023-05] (The Real Title).cbz|OneShot|The Real Title=Primary
+UNITS|[Artist Name] Some Title (Some Parody) [2023-05].cbz|||||False
+NORM|[Artist Name] Some Title (Some Parody) [2023-05].cbz|Some Title|
+BASE|[Artist Name] Some Title (Some Parody) [2023-05].cbz|Some Title
+ANAT|[Artist Name] Some Title (Some Parody) [2023-05].cbz|Artist Name|<null>|<null>|Some Parody|False|True|Some Title|Artist Name
+DATED|[Artist Name] Some Title (Some Parody) [2023-05].cbz|none
+NUM|[Artist Name] Some Title (Some Parody) [2023-05].cbz|||False|False
+HINTS|[Artist Name] Some Title (Some Parody) [2023-05].cbz|Artist Name;Some Parody
+PLAN|[Artist Name] Some Title (Some Parody) [2023-05].cbz|OneShot|Some Title=Primary
+UNITS|[Artist Name] (2023) Some Title (Some Parody).cbz|||||False
+NORM|[Artist Name] (2023) Some Title (Some Parody).cbz|Some Title|
+BASE|[Artist Name] (2023) Some Title (Some Parody).cbz|Some Title
+ANAT|[Artist Name] (2023) Some Title (Some Parody).cbz|Artist Name|<null>|<null>|Some Parody|False|True|Some Title|Artist Name
+DATED|[Artist Name] (2023) Some Title (Some Parody).cbz|none
+NUM|[Artist Name] (2023) Some Title (Some Parody).cbz|||False|False
+HINTS|[Artist Name] (2023) Some Title (Some Parody).cbz|Artist Name;Some Parody
+PLAN|[Artist Name] (2023) Some Title (Some Parody).cbz|OneShot|Some Title=Primary
+UNITS|[Artist Name] [2023-13] Character (Title).cbz|||||False
+NORM|[Artist Name] [2023-13] Character (Title).cbz|Character|
+BASE|[Artist Name] [2023-13] Character (Title).cbz|Character
+ANAT|[Artist Name] [2023-13] Character (Title).cbz|Artist Name|<null>|<null>|Title|False|True|Character|Artist Name
+DATED|[Artist Name] [2023-13] Character (Title).cbz|none
+NUM|[Artist Name] [2023-13] Character (Title).cbz|||False|False
+HINTS|[Artist Name] [2023-13] Character (Title).cbz|Artist Name;Title
+PLAN|[Artist Name] [2023-13] Character (Title).cbz|OneShot|Character=Primary
+UNITS|[Artist Name] [23-05] Character (Title).cbz|||||False
+NORM|[Artist Name] [23-05] Character (Title).cbz|Character|
+BASE|[Artist Name] [23-05] Character (Title).cbz|Character
+ANAT|[Artist Name] [23-05] Character (Title).cbz|Artist Name|<null>|<null>|Title|False|True|Character|Artist Name
+DATED|[Artist Name] [23-05] Character (Title).cbz|none
+NUM|[Artist Name] [23-05] Character (Title).cbz|||False|False
+HINTS|[Artist Name] [23-05] Character (Title).cbz|Artist Name;Title
+PLAN|[Artist Name] [23-05] Character (Title).cbz|OneShot|Character=Primary
+UNITS|[123] [2023-05] Character (Title).cbz|||||False
+NORM|[123] [2023-05] Character (Title).cbz|Character|
+BASE|[123] [2023-05] Character (Title).cbz|Character
+ANAT|[123] [2023-05] Character (Title).cbz|123|<null>|<null>|Title|False|True|Character|123
+DATED|[123] [2023-05] Character (Title).cbz|none
+NUM|[123] [2023-05] Character (Title).cbz|||False|False
+HINTS|[123] [2023-05] Character (Title).cbz|Title
+PLAN|[123] [2023-05] Character (Title).cbz|OneShot|Character=Primary
+UNITS|Some Series v01 [2023-05] (Title).cbz|1||||False
+NORM|Some Series v01 [2023-05] (Title).cbz|Some Series|
+BASE|Some Series v01 [2023-05] (Title).cbz|Some Series
+ANAT|Some Series v01 [2023-05] (Title).cbz|<null>|<null>|<null>|Title|False|False|Some Series|
+DATED|Some Series v01 [2023-05] (Title).cbz|none
+NUM|Some Series v01 [2023-05] (Title).cbz||1|False|True
+HINTS|Some Series v01 [2023-05] (Title).cbz|Title
+PLAN|Some Series v01 [2023-05] (Title).cbz|OneShot|Some Series=Primary
+UNITS|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|||||False
+NORM|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|The Real Title|
+BASE|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|The Real Title
+ANAT|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|Circle Name (Artist Name)|Circle Name|Artist Name|<null>|True|True|The Real Title|Circle Name;Artist Name
+DATED|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|Circle Name (Artist Name)|The Real Title|Character Name|Some Tag
+NUM|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|||False|False
+HINTS|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|Artist Name;Some Tag;The Real Title;Circle Name
+PLAN|Circle Name (Artist Name)] [2023-05] Character Name (Some Tag) (The Real Title).cbz|OneShot|The Real Title=Primary;Character Name=CharacterName
+UNITS|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|||12||False
+NORM|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|Some Title|
+BASE|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|Some Title
+ANAT|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|Group Name|<null>|<null>|<null>|True|False|Some Title|Group Name
+DATED|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|Group Name|Some Title|Some Series Ch. 12|
+NUM|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|12||True|False
+HINTS|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|Some Title;Group Name
+PLAN|Group Name] [2023-05] Some Series Ch. 12 (Some Title).cbz|OneShot|Some Title=Primary;Some Series=CharacterName
+UNITS|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|||||False
+NORM|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|The Real Title 2|The Real Title
+BASE|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|The Real Title
+ANAT|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|Artist|<null>|<null>|<null>|True|True|The Real Title 2|Artist
+DATED|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|Artist|The Real Title 2|Character|Tag
+NUM|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|||False|False
+HINTS|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|Tag;The Real Title 2;Artist
+PLAN|Artist] [2023-06] Character (Tag) (The Real Title 2).cbz|OneShot|The Real Title 2=Primary;The Real Title=SequelNumberSplit;Character=CharacterName
+UNITS|Some Series 099 Vol 10 A Title.cbz|10||||False
+NORM|Some Series 099 Vol 10 A Title.cbz|Some Series 099 A Title|
+BASE|Some Series 099 Vol 10 A Title.cbz|Some Series
+ANAT|Some Series 099 Vol 10 A Title.cbz|<null>|<null>|<null>|<null>|False|False|Some Series 099 A Title|
+DATED|Some Series 099 Vol 10 A Title.cbz|none
+NUM|Some Series 099 Vol 10 A Title.cbz||10|False|True
+HINTS|Some Series 099 Vol 10 A Title.cbz|
+PLAN|Some Series 099 Vol 10 A Title.cbz|OneShot|Some Series 099 A Title=Primary;Some Series=ArchiveDerivedTitle
+UNITS|Some Title 100 v01 (2018) (Digital) (Grp).cbz|1||||False
+NORM|Some Title 100 v01 (2018) (Digital) (Grp).cbz|Some Title 100|Some Title
+BASE|Some Title 100 v01 (2018) (Digital) (Grp).cbz|Some Title
+ANAT|Some Title 100 v01 (2018) (Digital) (Grp).cbz|<null>|<null>|<null>|Grp|False|False|Some Title 100|
+DATED|Some Title 100 v01 (2018) (Digital) (Grp).cbz|none
+NUM|Some Title 100 v01 (2018) (Digital) (Grp).cbz||1|False|True
+HINTS|Some Title 100 v01 (2018) (Digital) (Grp).cbz|Grp
+PLAN|Some Title 100 v01 (2018) (Digital) (Grp).cbz|OneShot|Some Title 100=Primary;Some Title=SequelNumberSplit
+UNITS|[Group] Some Title - c007 [v2].cbz|||7||False
+NORM|[Group] Some Title - c007 [v2].cbz|Some Title|
+BASE|[Group] Some Title - c007 [v2].cbz|Some Title
+ANAT|[Group] Some Title - c007 [v2].cbz|Group|<null>|<null>|<null>|False|False|Some Title|Group
+DATED|[Group] Some Title - c007 [v2].cbz|none
+NUM|[Group] Some Title - c007 [v2].cbz|7||True|False
+HINTS|[Group] Some Title - c007 [v2].cbz|Group;Some Title
+PLAN|[Group] Some Title - c007 [v2].cbz|OneShot|Some Title=Primary
+UNITS|Some Comic Tome 3.cbz|3||||False
+NORM|Some Comic Tome 3.cbz|Some Comic|
+BASE|Some Comic Tome 3.cbz|Some Comic
+ANAT|Some Comic Tome 3.cbz|<null>|<null>|<null>|<null>|False|False|Some Comic|
+DATED|Some Comic Tome 3.cbz|none
+NUM|Some Comic Tome 3.cbz||3|False|True
+HINTS|Some Comic Tome 3.cbz|
+PLAN|Some Comic Tome 3.cbz|OneShot|Some Comic=Primary
+UNITS|Some Comic T03.cbz|3||||False
+NORM|Some Comic T03.cbz|Some Comic|
+BASE|Some Comic T03.cbz|Some Comic
+ANAT|Some Comic T03.cbz|<null>|<null>|<null>|<null>|False|False|Some Comic|
+DATED|Some Comic T03.cbz|none
+NUM|Some Comic T03.cbz||3|False|True
+HINTS|Some Comic T03.cbz|
+PLAN|Some Comic T03.cbz|OneShot|Some Comic=Primary
+UNITS|Some Comic Annual 2.cbz|||2||True
+NORM|Some Comic Annual 2.cbz|Some Comic Annual 2|Some Comic Annual
+BASE|Some Comic Annual 2.cbz|Some Comic Annual
+ANAT|Some Comic Annual 2.cbz|<null>|<null>|<null>|<null>|False|False|Some Comic Annual 2|
+DATED|Some Comic Annual 2.cbz|none
+NUM|Some Comic Annual 2.cbz|||False|False
+HINTS|Some Comic Annual 2.cbz|
+PLAN|Some Comic Annual 2.cbz|OneShot|Some Comic Annual 2=Primary;Some Comic Annual=SequelNumberSplit
+UNITS|Some Comic Special #1.cbz|||1||True
+NORM|Some Comic Special #1.cbz|Some Comic Special|
+BASE|Some Comic Special #1.cbz|Some Comic Special
+ANAT|Some Comic Special #1.cbz|<null>|<null>|<null>|<null>|False|False|Some Comic Special|
+DATED|Some Comic Special #1.cbz|none
+NUM|Some Comic Special #1.cbz|1||True|False
+HINTS|Some Comic Special #1.cbz|
+PLAN|Some Comic Special #1.cbz|OneShot|Some Comic Special=Primary
+UNITS|Some Comic FCBD 2019.cbz|||||False
+NORM|Some Comic FCBD 2019.cbz|Some Comic FCBD 2019|
+BASE|Some Comic FCBD 2019.cbz|Some Comic FCBD
+ANAT|Some Comic FCBD 2019.cbz|<null>|<null>|<null>|<null>|False|False|Some Comic FCBD 2019|
+DATED|Some Comic FCBD 2019.cbz|none
+NUM|Some Comic FCBD 2019.cbz|||False|False
+HINTS|Some Comic FCBD 2019.cbz|
+PLAN|Some Comic FCBD 2019.cbz|OneShot|Some Comic FCBD 2019=Primary;Some Comic FCBD=ArchiveDerivedTitle
+AUTHOR|Main Pen (Second Pen)|Main Pen (Second Pen);Main Pen;Second Pen
+AUTHOR|Main Pen [Second Pen]|Main Pen [Second Pen];Main Pen;Second Pen
+AUTHOR|Main Pen (2019)|Main Pen (2019);Main Pen
+AUTHOR|Plain Name|Plain Name
+AUTHOR|Main Pen (Digital)|Main Pen (Digital);Main Pen
+AUTHOR|Main Pen (Second Pen) (Third Pen)|Main Pen (Second Pen) (Third Pen);Main Pen;Second Pen;Third Pen
+AUTHOR|Main Pen (Main Pen)|Main Pen (Main Pen);Main Pen
+TAG|no group|True
+TAG|No Group|True
+TAG|no-group|True
+TAG|No Groups|True
+TAG|no scanlator|True
+TAG|no scanlation group|True
+TAG|Unknown|True
+TAG|unknown group|True
+TAG|N/A|True
+TAG|na|True
+TAG|none|True
+TAG|null|True
+TAG|tbd|True
+TAG|unofficial|True
+TAG|Unofficial|True
+TAG|No Group Scans|False
+TAG|Unofficial Scans|False
+TAG|Nobody|False
+TAG|The None Team|False
+TAG|Official|False

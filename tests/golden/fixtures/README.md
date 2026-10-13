@@ -24,8 +24,13 @@ API's acceptable use policy asks. The tests replay these files; no test ever con
 - A missing fixture fails the case with the exact request it would need, so the set stays
   reproducible.
 - `../mangapixer_report.txt` is MangaPixer's own result for the cases MangaList runs: MangaPixer's
-  golden harness (production detector, planner, retrieval loop, provider mapping and scorer) run at
-  `858c7df` over these recordings, printing per case the detector class, the band, chosen id, title /
+  golden harness (production detector, planner, retrieval loop, provider mapping and scorer) run over
+  these recordings (last at `v1.42.0`, release commit `4efb3028`, by a throwaway dump test - never
+  committed - in a throwaway .NET SDK container; MangaPixer's fixtures are unchanged since 1.31.1), printing per case the detector class, the band, chosen id, title /
   adjusted score and reasons, and the searches and GETs it sent, plus the aggregate lines at the
   default, loosest and strictest thresholds. The MangaList golden test compares its results with it
   line by line.
+- `../mangapixer_name_probe.txt` is MangaPixer 1.42.0's own reading of synthetic archive names (units,
+  cleaned and base title, anatomy, dated doujin parse, matcher integers, creator hints, the one-archive
+  folder plan, author name forms, release tags) - names the golden cases do not carry. Printed by a
+  throwaway probe test in the same container; `../test_name_probe.py` compares MangaList's port with it.

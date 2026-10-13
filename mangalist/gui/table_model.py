@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+import os
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
@@ -112,6 +114,38 @@ WEAK_MATCH_BG = QColor("#fdf0e3")
 MU_PROCESSING_BG = QColor("#dce6fa")
 
 
+def under_any(folder: str, tops: Iterable[str]) -> bool:
+    """Is the absolute *folder* one of *tops* (absolute top-level folders of a folder scan) or inside one?"""
+    f = os.path.normcase(str(folder))
+    for t in tops:
+        t = os.path.normcase(str(t)).rstrip("/\\")
+        if f == t or f.startswith(t + os.sep):
+            return True
+    return False
+
+
+def merge_folder_scan(entries: List[MangaEntry], root_id: Optional[int], root_folder, scope: Iterable[str],
+                      scanned: Iterable[MangaEntry]) -> List[MangaEntry]:
+    """*entries* (the table's rows) with a folder-level scan merged in: the rows of root *root_id* below the scanned
+    top-level folders (*scope*, names of the root's direct children - a subseries is below its franchise parent) are
+    replaced by *scanned*; the root's rows stay in the scan's order (by top-level folder name, as a whole-root scan
+    lists them), the other roots' rows stay as they are (selective scanning, Stage 1)."""
+    names = set(scope)
+    base = Path(root_folder)
+
+    def top(e: MangaEntry) -> str:
+        try:
+            return Path(e.folder).relative_to(base).parts[0]
+        except (ValueError, IndexError):
+            return ""
+
+    others = [e for e in entries if e.root_id != root_id]
+    groups: Dict[str, List[MangaEntry]] = {}
+    for e in [e for e in entries if e.root_id == root_id and top(e) not in names] + list(scanned):
+        groups.setdefault(top(e), []).append(e)
+    return others + [e for name in sorted(groups, key=str.lower) for e in groups[name]]
+
+
 class MangaTableModel(QAbstractTableModel):
     def __init__(self, entries: Optional[List[MangaEntry]] = None, parent=None):
         super().__init__(parent)
@@ -139,6 +173,7 @@ class MangaTableModel(QAbstractTableModel):
         self._inventory_for: Callable[[MangaEntry], Any] = fallback_inventory_from_entry
         self._knowledge_for: Callable[[MangaEntry], Optional[SeriesKnowledge]] = from_own_matcher
         self._needs_kind_for: Callable[[MangaEntry], bool] = lambda e: False
+        self._unbundled_for: Callable[[MangaEntry], bool] = lambda e: False     # mangalist.unbundled
         self.dataChanged.connect(self._on_data_changed)
         self.modelReset.connect(self._state_cache.clear)
         # Build initial dupe map if entries provided
@@ -159,10 +194,12 @@ class MangaTableModel(QAbstractTableModel):
     def set_state_providers(self, *, inventory_for: Optional[Callable[[MangaEntry], Any]] = None,
                             knowledge_for: Optional[Callable[[MangaEntry], Optional[SeriesKnowledge]]] = None,
                             needs_kind_for: Optional[Callable[[MangaEntry], bool]] = None,
-                            today: Optional[datetime.date] = None) -> None:
+                            today: Optional[datetime.date] = None,
+                            unbundled_for: Optional[Callable[[MangaEntry], bool]] = None) -> None:
         """Swap where the State / Gaps / Official source columns read from (None keeps the current
         provider). *inventory_for(entry)* returns an InventoryLike (or None for the fallback),
-        *knowledge_for(entry)* a SeriesKnowledge (or None for the own matcher's)."""
+        *knowledge_for(entry)* a SeriesKnowledge (or None for the own matcher's), *unbundled_for(entry)* the series'
+        Unbundled Chapters setting."""
         if inventory_for is not None:
             self._inventory_for = inventory_for
         if knowledge_for is not None:
@@ -171,6 +208,8 @@ class MangaTableModel(QAbstractTableModel):
             self._needs_kind_for = needs_kind_for
         if today is not None:
             self._today = today
+        if unbundled_for is not None:
+            self._unbundled_for = unbundled_for
         self.refresh_states()
 
     def refresh_states(self) -> None:
@@ -200,7 +239,8 @@ class MangaTableModel(QAbstractTableModel):
             return None
         st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
                                  needs_kind=self._needs_kind_for(e),
-                                 rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today)
+                                 rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today,
+                                 unbundled=self._unbundled_for(e))
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
         self._state_cache[row] = (st, links, knowledge)
         return st, links, knowledge
@@ -341,6 +381,10 @@ class MangaTableModel(QAbstractTableModel):
             if str(entry.folder) in flipped:
                 idx = self.index(row, COL_TITLE)
                 self.dataChanged.emit(idx, idx, [MODE_CHIP_ROLE])
+
+    def rename_counts(self) -> Dict[str, int]:
+        """The Rename pending counts per series folder (a folder scan's recount is merged into them)."""
+        return dict(self._rename_counts)
 
     def rename_count_at(self, row: int) -> int:
         """How many files of row *row*'s folder the renamer would rename (0: none, or not counted yet)."""
