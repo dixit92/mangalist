@@ -7,7 +7,8 @@ import pytest
 
 from mangalist.downloads.contracts import DownloadStatus, QueuedChapter
 from mangalist.downloads.finder import run_find
-from mangalist.downloads.finding import REASON_NO_SOURCE, REASON_NOTIFY, REASON_SOURCE_DROPPED, TRIGGER_NOW
+from mangalist.downloads import chapters as chm
+from mangalist.downloads.finding import REASON_NO_SOURCE, REASON_NOTIFY, TRIGGER_NOW
 from mangalist.store.findings import FindingStore
 
 from .finder_fakes import wanted, wire
@@ -100,7 +101,7 @@ def test_a_saved_manga_that_cannot_be_fetched_is_a_dropped_source(db, w, monkeyp
     w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
     report = run(db, w)
     (f,) = findings(db)
-    assert f.reason == REASON_SOURCE_DROPPED.format(source=MANGADEX.display_name) and report.errors == 0
+    assert f.reason == "MangaDex (EN) cannot open the series any more - Change source?" and report.errors == 0
     assert f.pick_key == f"chapters:{MANGADEX.id}:dropped" and enqueued(w) == []
 
 
@@ -110,7 +111,7 @@ def test_a_source_listing_none_of_the_missing_chapters_within_its_numbers_is_dro
     w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
     run(db, w)
     (f,) = findings(db)
-    assert f.reason == "not on MangaDex (EN) any more - Change source?"
+    assert f.reason == "MangaDex (EN) lacks ch. 5-6 (it has ch. 4-8) - Change source?"
 
 
 def test_a_saved_source_listing_no_chapters_at_all_is_dropped(db, w):
@@ -120,7 +121,39 @@ def test_a_saved_source_listing_no_chapters_at_all_is_dropped(db, w):
     w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
     run(db, w)
     (f,) = findings(db)
-    assert f.reason == "not on MangaDex (EN) any more - Change source?" and enqueued(w) == []
+    assert f.reason == "MangaDex (EN) lists no chapters of the series - Change source?" and enqueued(w) == []
+
+
+@pytest.mark.parametrize("released, reason", [
+    (("en", 152), "taken down on MangaDex (EN): its chapters there are marked unavailable - Change source?"),
+    (("en", 0), "MangaDex (EN) has never had chapters of the series - Change source?"),
+    (("fr", 40), "MangaDex (EN) lists no chapters of the series - Change source?"),     # another language: not known
+])
+def test_mangapixers_mangadex_count_tells_taken_down_from_never_had(db, w, monkeypatch, released, reason):
+    # owner, 2026-10-12: "make the 'not on ...' message say which case it is" - MangaPixer counts MangaDex's chapters
+    # with the unavailable (taken-down) ones; Suwayomi lists only readable ones
+    monkeypatch.setattr(chm, "mangadex_released_for", lambda db, sid: released)
+    saved(w)
+    w.suwayomi.chapter_list = []
+    w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
+    run(db, w)
+    (f,) = findings(db)
+    assert f.reason == reason
+
+
+def test_a_dropped_finding_is_reworded_when_found_again_and_sending_it_says_why(db, w):
+    from mangalist.downloads.finder import send_finding
+
+    saved(w)
+    w.suwayomi.chapter_list = []
+    w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
+    run(db, w)
+    w.suwayomi.chapter_list = [chapter(101, "4"), chapter(107, "8")]
+    run(db, w)
+    (f,) = findings(db)                                                             # the same finding, its reason now
+    assert f.reason == "MangaDex (EN) lacks ch. 5-6 (it has ch. 4-8) - Change source?"
+    assert send_finding(db, f.id, backend=w.backend) == ("Not sent: MangaDex (EN) lacks ch. 5-6 (it has ch. 4-8); use "
+                                                         "Change source... in its chapters.")
 
 
 def test_a_source_that_is_only_behind_says_nothing(db, w):
