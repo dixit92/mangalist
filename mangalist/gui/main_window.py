@@ -367,6 +367,7 @@ class MainWindow(QMainWindow):
         self._top.rescan_root_clicked.connect(self._on_rescan_root)
         self._top.settings_clicked.connect(self._on_settings)
         self._top.missing_clicked.connect(self._on_missing)
+        self._top.add_series_clicked.connect(self._on_add_series)
         col.addWidget(self._top)
         self._pages = QStackedWidget()
         col.addWidget(self._pages, 1)
@@ -1424,6 +1425,15 @@ class MainWindow(QMainWindow):
         from .missing_series_dialog import MissingSeriesDialog
 
         return MissingSeriesDialog(self._db, self, button_style=self._BUTTON_STYLE)
+
+    def _on_add_series(self) -> None:
+        """The top bar's Add series...: paste a link, make the empty folder, rescan its library (add_series_dialog.py)."""
+        from .add_series_dialog import AddSeriesDialog, LiveBackend
+
+        dlg = AddSeriesDialog(LiveBackend(self._db), self._roots(), self, current_root_id=self._library)
+        dlg.exec()
+        if dlg.outcome is not None and dlg.root is not None:
+            self._start_scan([dlg.root])
 
     def _on_missing(self) -> None:
         dlg = self._make_missing_dialog()
