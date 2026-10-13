@@ -35,8 +35,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .gui.list_text import wanted_series
 from .gui.shell import WantedSeries
-from .gui.volumes_target import find_volumes_availability
-from .knowledge import SeriesKnowledge, fmt_num, from_mangapixer_item, from_own_matcher, to_decimal
+from .gui.volumes_target import Availability, find_volumes_availability
+from .knowledge import SeriesKnowledge, declared_edition_of, fmt_num, from_mangapixer_item, from_own_matcher, to_decimal
 from .models import FileHit, MangaEntry
 from .states import SeriesState, compute_state, fallback_inventory_from_entry
 
@@ -126,10 +126,13 @@ def knowledge_of_item(item: Optional[Mapping[str, Any]]) -> Optional[SeriesKnowl
 
 def inventory_of(entry: MangaEntry, item: Optional[Mapping[str, Any]]):
     """The series' held units in the state's shape, merged with MangaPixer's volume list (which chapters each volume
-    collects) when MangaPixer knows the series."""
+    collects) when MangaPixer knows the series - not for a folder of a declared edition (an omnibus / master edition):
+    the list is the regular edition's, and its chapter ranges are not what the edition's volumes hold."""
     from .inventory import as_state_inventory
 
     item = item or {}
+    if declared_edition_of(item)[1] is not None:
+        return as_state_inventory(entry.inventory(None))
     volumes = item.get("volumes") if isinstance(item.get("volumes"), dict) else None
     volume_list = volumes.get("items") if volumes else None
     return as_state_inventory(entry.inventory(volume_list or None))
@@ -162,7 +165,12 @@ def series_wanted(entry: MangaEntry, state: Optional[SeriesState], knowledge: Op
     if entry is None or state is None or not state.gaps:
         return []
     volumes = None
-    if downloads and (state.missing_volumes or state.upgrade_volumes):
+    if knowledge is not None and knowledge.edition_label and state.missing_volumes:
+        # A declared edition's volumes are numbered by that edition, nyaa's releases mostly by the regular one: a search
+        # would take regular volume 3 for the edition's volume 3. Shown in To get, never searched (nor by the find pass).
+        volumes = Availability(False, f"{knowledge.edition_label}: nyaa releases are matched by volume number, and this "
+                                      "edition numbers its volumes its own way - not searched")
+    elif downloads and (state.missing_volumes or state.upgrade_volumes):
         volumes = find_volumes_availability(series_id=series_id, folder=str(entry.folder), title=entry.title,
                                             english_title=entry.english_title, knowledge=knowledge, state=state,
                                             held=held)

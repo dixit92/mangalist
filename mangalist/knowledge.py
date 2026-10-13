@@ -10,7 +10,9 @@ when the record was read.
 Two adapters build one:
 
 * :func:`from_mangapixer_item` - an item of MangaPixer's metadata export (``schemaVersion`` 1, the
-  documented shape; unknown fields are ignored);
+  documented shape; unknown fields are ignored): a MangaUpdates record, or (MangaPixer 1.42.0) a MangaDex record for a
+  series MangaUpdates does not list; MangaDex's released chapters (``companions.mangadexReleased``); the edition an admin
+  declared for the folder and "Track completion: off" (MangaPixer 1.39.0);
 * :func:`from_own_matcher` - MangaList's own matcher: a :class:`~mangalist.models.MangaEntry`'s
   MangaUpdates fields (as cached today), optionally the full MangaUpdates series record and the
   AniList answer.
@@ -29,6 +31,15 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 SOURCE_MANGAPIXER = "mangapixer"
 SOURCE_OWN_MATCHER = "own-matcher"
+
+# Record providers MangaList reads from MangaPixer's export (``record.provider``); any other (``gcd``) is ignored.
+PROVIDER_MANGAUPDATES = "mangaupdates"
+PROVIDER_MANGADEX = "mangadex"          # MangaPixer 1.42.0: a series MangaUpdates does not list, linked by an admin
+RECORD_PROVIDERS = frozenset({PROVIDER_MANGAUPDATES, PROVIDER_MANGADEX})
+
+# MangaPixer 1.39.0 declared editions (``completion.edition``) and how a state names them.
+EDITION_LABELS = {"regular": "Regular edition", "omnibus": "Omnibus edition", "master": "Master edition",
+                  "deluxe": "Deluxe edition"}
 
 # Link states, as MangaPixer names them; the own matcher's bands map onto them (see from_own_matcher).
 LINK_CONFIRMED = "Confirmed"
@@ -193,6 +204,47 @@ class Completion:
 
 
 @dataclass(frozen=True)
+class MangaDexReleased:
+    """What MangaDex lists as released in one language (MangaPixer 1.42.0 ``companions.mangadexReleased``).
+
+    MangaPixer reads MangaDex's aggregate WITH its unavailable chapters (taken down, usually on a licence): both numbers
+    can name chapters no source can give (2026-10-13: one licensed series listed 179 English chapters, none readable), so
+    the states use it only where nothing else tells (:func:`mangalist.states.compute_state`)."""
+
+    language: str                       # casefolded (``en``)
+    latest_chapter: Optional[str]       # the highest chapter listed, exact (``18``, ``12.5``); None when none is listed
+    chapters: int                       # whole chapters listed (parts such as 4.1 and 4.2 count once)
+    fetched_at: Optional[str] = None
+
+    @property
+    def latest_whole(self) -> Optional[Decimal]:
+        """The highest WHOLE chapter listed, as MangaPixer's own comparison takes it (``ReleasedChapter``): a part or an
+        extra after the last chapter (``30.5``, ``22.3``) is not a chapter of its own; None for none / 0."""
+        d = to_decimal(self.latest_chapter)
+        if d is None:
+            return None
+        whole = d.to_integral_value(rounding="ROUND_FLOOR")
+        return whole if whole > 0 else None
+
+
+def mangadex_released_of(item: Any) -> Optional[MangaDexReleased]:
+    """``companions.mangadexReleased`` of a MangaPixer export item, or None (not read yet, MangaPixer before 1.42.0, or a
+    malformed block). The one reader: the states and the Download tab's "Change source?" reasons both use it."""
+    companions = item.get("companions") if isinstance(item, Mapping) else None
+    released = companions.get("mangadexReleased") if isinstance(companions, Mapping) else None
+    if not isinstance(released, Mapping) or not isinstance(released.get("language"), str):
+        return None
+    chapters = released.get("chapters")
+    if isinstance(chapters, bool) or not isinstance(chapters, int) or chapters < 0:
+        return None
+    language = released["language"].strip().casefold()
+    if not language:
+        return None
+    return MangaDexReleased(language=language, latest_chapter=exact_str(released.get("latestChapter")),
+                            chapters=chapters, fetched_at=_s(released.get("fetchedAt")))
+
+
+@dataclass(frozen=True)
 class OfficialLink:
     """An official source: ``kind`` publisher | reader | store | search. ``url`` is None for a name
     MangaList knows without a page (a MangaUpdates English publisher)."""
@@ -210,7 +262,8 @@ class OfficialLink:
 class SeriesKnowledge:
     source: str                                 # SOURCE_MANGAPIXER | SOURCE_OWN_MATCHER
     link_state: str = LINK_NOT_LOOKED_UP
-    # record identity
+    # record identity (a MangaDex record leaves mu_id / mu_url empty: its id is mangadex_id)
+    record_provider: Optional[str] = None       # PROVIDER_MANGAUPDATES | PROVIDER_MANGADEX (MangaPixer); None: own matcher
     mu_id: Optional[str] = None
     mu_url: Optional[str] = None
     title: Optional[str] = None
@@ -233,6 +286,14 @@ class SeriesKnowledge:
     # MangaPixer
     completion: Optional[Completion] = None
     official_links: Tuple[OfficialLink, ...] = ()
+    # MangaDex (through MangaPixer): the companion record's id and its released chapters
+    mangadex_id: Optional[str] = None
+    mangadex_released: Optional[MangaDexReleased] = None
+    # What an admin declared on the folder in MangaPixer (1.39.0): the edition it holds and its volume count, and
+    # "Track completion: off" (no Completion block then)
+    edition: Optional[str] = None               # "regular" | "omnibus" | "master" | "deluxe" (as MangaPixer sends it)
+    edition_volumes: Optional[Decimal] = None   # completion.volumeTotalOverride
+    tracking_off: bool = False
     # AniList companion
     anilist_id: Optional[int] = None
     anilist_chapters: Optional[Decimal] = None
@@ -308,8 +369,29 @@ class SeriesKnowledge:
     def search_title(self) -> Optional[str]:
         return self.english_title or self.title
 
+    @property
+    def mangadex_record(self) -> bool:
+        """The linked record is MangaDex's (a series MangaUpdates does not list)."""
+        return self.record_provider == PROVIDER_MANGADEX
 
-_DECIMAL_FIELDS = ("origin_volumes", "total_chapters", "scan_latest_volume", "anilist_chapters", "anilist_volumes")
+    @property
+    def mangadex_latest(self) -> Optional[Decimal]:
+        """MangaDex's highest whole English chapter (:attr:`MangaDexReleased.latest_whole`), or None. Only English: the
+        states compare with English editions, and MangaPixer reads the list in its preferred language."""
+        r = self.mangadex_released
+        return r.latest_whole if r is not None and r.language == "en" else None
+
+    @property
+    def edition_label(self) -> Optional[str]:
+        """``Master edition`` for a declared edition with its own volume count; None without one (a label alone - e.g.
+        ``regular`` - changes nothing, as in MangaPixer)."""
+        if self.edition_volumes is None:
+            return None
+        return EDITION_LABELS.get((self.edition or "").strip().lower(), "Declared edition")
+
+
+_DECIMAL_FIELDS = ("origin_volumes", "total_chapters", "scan_latest_volume", "anilist_chapters", "anilist_volumes",
+                   "edition_volumes")
 
 
 # --- MangaPixer export item -> knowledge -------------------------------------------------------
@@ -390,32 +472,63 @@ def _links_from_mangapixer(rows: Any) -> Tuple[OfficialLink, ...]:
     return tuple(out)
 
 
+def declared_edition_of(item: Any) -> Tuple[Optional[str], Optional[Decimal]]:
+    """(edition slug, its volume count) an admin declared for the item's folder in MangaPixer (1.39.0
+    ``completion.edition`` / ``volumeTotalOverride``); a count of 0 or less (or not whole) is no count."""
+    block = item.get("completion") if isinstance(item, Mapping) else None
+    if not isinstance(block, Mapping):
+        return None, None
+    total = to_decimal(block.get("volumeTotalOverride"))
+    if total is not None and (total <= 0 or total != total.to_integral_value()):
+        total = None
+    edition = _s(block.get("edition"))
+    return (edition.lower() if edition else None), total
+
+
 def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str] = None) -> SeriesKnowledge:
     """Knowledge from one item of MangaPixer's metadata export (the documented v1 item shape).
 
     ``record`` is None for Needs review and Don't match (only the link state is known then); a record
-    of a provider MangaList does not know (``gcd``) is ignored like a missing one."""
+    of a provider MangaList does not know (``gcd``) is ignored like a missing one.
+
+    A **MangaDex record** (MangaPixer 1.42.0, ``record.provider = "mangadex"``: a series MangaUpdates does not list, linked
+    by an admin) has no MangaUpdates fields: ``externalId`` is the MangaDex id (:attr:`SeriesKnowledge.mangadex_id`, never
+    ``mu_id``), ``licensedEn`` / ``statusText`` / ``translationComplete`` are null and ``englishPublishers`` empty - so the
+    series reads as not licensed in English. Its ``latestChapter`` is MangaDex's released list's highest (taken-down
+    chapters included), the same value as ``companions.mangadexReleased``: it is kept there, not as MangaUpdates' latest
+    chapter. After MangaPixer's "Switch to MangaUpdates" the same node carries a MangaUpdates record: the next sync
+    replaces the item and this reads it as any other (nothing in MangaList is keyed by the record's id).
+
+    The **declared edition** (``completion.volumeTotalOverride``): the regular edition's volume list does not describe
+    this folder's volumes, so *volumes* and *estimated_volumes* stay empty (nothing automatic - states, upgrades on
+    filing, set-aside estimates - maps the folder's volumes through it). ``"tracking": "off"``: *tracking_off*."""
     link = item.get("link") if isinstance(item.get("link"), Mapping) else {}
     state = _s(link.get("state")) or LINK_NOT_LOOKED_UP
     record = item.get("record") if isinstance(item.get("record"), Mapping) else None
-    if record is not None and (_s(record.get("provider")) or "mangaupdates") != "mangaupdates":
-        record = None
+    provider = (_s(record.get("provider")) or PROVIDER_MANGAUPDATES) if record is not None else None
+    if provider not in RECORD_PROVIDERS:
+        record, provider = None, None
+    mangadex = provider == PROVIDER_MANGADEX
     companions = item.get("companions") if isinstance(item.get("companions"), Mapping) else {}
     anilist = companions.get("anilist") if isinstance(companions.get("anilist"), Mapping) else None
     refresh = item.get("refresh") if isinstance(item.get("refresh"), Mapping) else {}
     if state not in MANGAPIXER_SERIES_STATES:
         # Not a series: keep only the label (CollectionAbout's record names the series it is about) - never a
         # number, volume list, completion or link from it.
-        return SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=state,
-                               mu_id=_s(record.get("externalId")) if record else None,
-                               mu_url=_s(record.get("siteUrl")) if record else None,
+        return SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=state, record_provider=provider,
+                               mu_id=_s(record.get("externalId")) if record and not mangadex else None,
+                               mu_url=_s(record.get("siteUrl")) if record and not mangadex else None,
+                               mangadex_id=_s(record.get("externalId")) if record and mangadex else None,
                                title=_s(record.get("title")) if record else None)
     rec = record or {}
+    edition, edition_volumes = declared_edition_of(item)
+    mangadex_id = _s(rec.get("externalId")) if mangadex else _s(companions.get("mangadex"))
     return SeriesKnowledge(
         source=SOURCE_MANGAPIXER,
         link_state=state,
-        mu_id=_s(rec.get("externalId")),
-        mu_url=_s(rec.get("siteUrl")),
+        record_provider=provider,
+        mu_id=None if mangadex else _s(rec.get("externalId")),
+        mu_url=None if mangadex else _s(rec.get("siteUrl")),
         title=_s(rec.get("title")),
         english_title=english_title,
         alt_titles=tuple(t for t in (_s(a) for a in rec.get("altTitles") or ()) if t),
@@ -423,19 +536,25 @@ def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str
         origin_status=_s(rec.get("originStatus")),
         origin_volumes=to_decimal(rec.get("originVolumes")),
         completed_in_origin=rec.get("completedInOrigin") if isinstance(rec.get("completedInOrigin"), bool) else None,
-        latest_chapter=exact_str(rec.get("latestChapter")),
+        latest_chapter=None if mangadex else exact_str(rec.get("latestChapter")),
         total_chapters=to_decimal(rec.get("totalChapters")),
         licensed_en=rec.get("licensedEn") if isinstance(rec.get("licensedEn"), bool) else None,
         english_publishers=_publishers_from_mangapixer(rec.get("englishPublishers")),
         translation_complete=(rec.get("translationComplete")
                               if isinstance(rec.get("translationComplete"), bool) else None),
-        volumes=_volumes_from_mangapixer(item.get("volumes")),
-        estimated_volumes=_volumes_from_mangapixer(item.get("volumes"), estimated=True),
+        volumes=() if edition_volumes is not None else _volumes_from_mangapixer(item.get("volumes")),
+        estimated_volumes=(() if edition_volumes is not None
+                           else _volumes_from_mangapixer(item.get("volumes"), estimated=True)),
         completion=_completion_from_mangapixer(item.get("completion")),
         official_links=_links_from_mangapixer(item.get("officialLinks")),
         anilist_id=anilist.get("id") if anilist else None,
         anilist_chapters=to_decimal(anilist.get("chapters")) if anilist else None,
         anilist_volumes=to_decimal(anilist.get("volumes")) if anilist else None,
+        mangadex_id=mangadex_id,
+        mangadex_released=mangadex_released_of(item),
+        edition=edition,
+        edition_volumes=edition_volumes,
+        tracking_off=_s(item.get("tracking")) == "off",
         fetched_at=_s(rec.get("fetchedAt")) or _s(refresh.get("lastFetchedAt")),
         next_due_at=_s(refresh.get("nextDueAt")),
     )
