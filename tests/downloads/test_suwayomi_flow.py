@@ -72,12 +72,14 @@ def world(db, tmp_path):
             "backend": backend, "conns": conns, "namer": namer}
 
 
-def link_mangadex(db, root_id, mangadex_id=MD_ID, volumes=()):
+def link_mangadex(db, root_id, mangadex_id=MD_ID, volumes=(), released=None):
     """MangaPixer's export item for the series (Confirmed) with its MangaDex companion id (and *volumes*: its volume
-    list, ``(volume, first chapter, last chapter)``)."""
+    list, ``(volume, first chapter, last chapter)``; *released*: its ``mangadexReleased`` companion)."""
     cache = MangaPixerCache(db)
     item = mp_item("n01", [SERIES])
     item["companions"]["mangadex"] = mangadex_id
+    if released is not None:
+        item["companions"]["mangadexReleased"] = released
     item["volumes"]["items"] = [{"volume": v, "title": None, "chapters": {"from": f, "to": t}, "englishDate": None,
                                  "englishDateKind": None, "isbn": None, "sources": []} for v, f, t in volumes]
     cache.save_libraries([Lib()])
@@ -474,3 +476,16 @@ def test_newer_numbers_keeps_each_newer_chapter_once_in_the_sources_spelling():
     chs = [ch(1, "137"), ch(2, "138"), ch(3, "138"), ch(4, "138.5"), ch(5, "-1"), ch(6, "136")]
     assert chm.newer_numbers(chs, Decimal("137")) == ["138", "138.5"]
     assert chm.newer_numbers(chs, None) == ["136", "137", "138", "138.5"]        # nothing held: all of them
+
+
+def test_mangapixers_mangadex_released_count_is_read_for_the_series(world):
+    db, sid = world["db"], world["sid"]
+    assert chm.mangadex_released_for(db, sid) is None                               # no MangaPixer item
+    link_mangadex(db, world["root"].id, released={"language": "EN", "latestChapter": "151", "chapters": 152,
+                                                  "fetchedAt": "2026-10-12T20:00:00Z"})
+    assert chm.mangadex_released_for(db, sid) == ("en", 152)
+
+
+def test_a_malformed_mangadex_released_companion_is_ignored(world):
+    link_mangadex(world["db"], world["root"].id, released={"language": "en", "chapters": "many"})
+    assert chm.mangadex_released_for(world["db"], world["sid"]) is None

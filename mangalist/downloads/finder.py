@@ -21,8 +21,10 @@ a finding without a pick (:data:`REASON_NO_SOURCE`). The missing chapters the so
 (the chapters panel's default rule); extras never; chapters already in hand or in Suwayomi's queue are left out.
 **Source dropped** (owner: "If a series appears removed from the saved source, notify."): the saved manga cannot be
 fetched while Suwayomi answers, or it lists chapters but none of the missing ones although some of them lie within its
-numbers, or it lists no chapters at all -> :data:`REASON_SOURCE_DROPPED`. Missing chapters past the source's last chapter only mean the source is
-behind: nothing is said (steady state stays quiet).
+numbers, or it lists no chapters at all -> a finding whose reason says which (``REASON_SOURCE_*``: cannot open the
+series; taken down / never had any, for MangaDex by MangaPixer's ``mangadexReleased``; lists none; lacks the missing ones
+and which it has). Missing chapters past the source's last chapter only mean the source is behind: nothing is said
+(steady state stays quiet).
 
 **Not searched**: a series on Off, one with a download in flight (queued, sent, downloaded), and - except in a bulk
 find of explicitly selected series - one the owner marked up to date (the List's Behind override "done", which the
@@ -56,7 +58,12 @@ from .finding import (
     REASON_NO_SOURCE,
     REASON_NOTIFY,
     REASON_PACK_WHOLE,
-    REASON_SOURCE_DROPPED,
+    CHANGE_SOURCE,
+    REASON_SOURCE_EMPTY,
+    REASON_SOURCE_GONE,
+    REASON_SOURCE_LACKS,
+    REASON_SOURCE_NEVER,
+    REASON_SOURCE_TAKEN_DOWN,
     REASON_UNCERTAIN,
     TRIGGER_BULK,
     TRIGGER_NOW,
@@ -646,13 +653,15 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
             return False
         _log.info("Find pass %d: %s: %s manga %s cannot be fetched: %s: %s", ctx.run_id, name, source_name,
                   match.manga.id, type(exc).__name__, exc)
-        _dropped(ctx, sid, name, match, missing, existing, keep)
+        _dropped(ctx, sid, name, match, missing, existing, keep,
+                 reason=REASON_SOURCE_GONE.format(source=match.source.display_name))
         ctx.store.retire(sid, KIND_CHAPTERS, keep)
         return True
     source_name = fetched.source_name or source_name
     if not fetched.chapters:
-        # the saved manga lists no chapters at all now (Suwayomi's "No chapters found"): taken down there
-        _dropped(ctx, sid, name, match, missing, existing, keep, source_name)
+        # the saved manga lists no chapters at all now (Suwayomi's "No chapters found"): taken down there, or never had any
+        _dropped(ctx, sid, name, match, missing, existing, keep, source_name,
+                 reason=_empty_reason(ctx, sid, match.source, source_name))
         ctx.store.retire(sid, KIND_CHAPTERS, keep)
         return True
     numbers = [d for d in (to_decimal(n) for n in missing) if d is not None]
@@ -669,7 +678,12 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
         listed = [d for d in (to_decimal(c.number) for c in fetched.chapters) if d is not None]
         within = listed and any(to_decimal(r.number) <= max(listed) for r in pending)
         if pending and within and not any(r.available for r in pending):
-            _dropped(ctx, sid, name, match, missing, existing, keep, source_name)
+            from ..parsing.model import plain
+
+            has = f"ch. {plain(min(listed))}" + (f"-{plain(max(listed))}" if max(listed) != min(listed) else "")
+            lacks = _text([r.number for r in pending], volumes=False)
+            _dropped(ctx, sid, name, match, missing, existing, keep, source_name,
+                     reason=REASON_SOURCE_LACKS.format(source=source_name, missing=lacks, has=has))
         ctx.store.retire(sid, KIND_CHAPTERS, keep)
         return True
     chosen = tuple(_numbers(p.number for p in picks))
@@ -707,10 +721,20 @@ def _queued_numbers(ctx: _Context, client, chapters: Sequence[SuwayomiChapter], 
         return set()
 
 
+def _empty_reason(ctx: _Context, sid: int, source, source_name: str) -> str:
+    """Why a saved source lists no chapters: for MangaDex, MangaPixer's count (it includes unavailable chapters) tells
+    taken down (it lists some) from never had any (none) - in the source's language only; else it just lists none."""
+    from .chapters import mangadex_released_for
+
+    released = mangadex_released_for(ctx.db, sid) if getattr(source, "is_mangadex", False) else None
+    if released is not None and released[0] == (source.lang or "").strip().casefold():
+        return (REASON_SOURCE_TAKEN_DOWN if released[1] > 0 else REASON_SOURCE_NEVER).format(source=source_name)
+    return REASON_SOURCE_EMPTY.format(source=source_name)
+
+
 def _dropped(ctx: _Context, sid: int, name: str, match, missing: Tuple[str, ...], existing, keep: Set[str],
-             source_name: Optional[str] = None) -> None:
+             source_name: Optional[str] = None, *, reason: str) -> None:
     source = source_name or match.source.display_name
-    reason = REASON_SOURCE_DROPPED.format(source=source)
     pick = _Pick(KIND_CHAPTERS, f"chapters:{match.source.id}:dropped",
                  f"{_text(missing, volumes=False)} (not on {source})", missing, None,
                  {"type": PAYLOAD_DROPPED, "source_id": match.source.id, "source_name": source,
@@ -791,8 +815,9 @@ def send_finding(db, finding_id: int, *, backend: Any = None, wanted: Wanted = N
         return ("Not sent: no Suwayomi source is saved for the series yet; open its chapters in the Download tab to "
                 "choose one.")
     if kind == PAYLOAD_DROPPED:
-        return (f"Not sent: the series is not on {f.payload.get('source_name') or 'its source'} any more; use Change "
-                "source... in its chapters.")
+        why = (f.reason or "").removesuffix(CHANGE_SOURCE) or f"{f.payload.get('source_name') or 'its source'} " \
+                                                                 "has none of these chapters"
+        return f"Not sent: {why}; use Change source... in its chapters."
     if kind not in (PAYLOAD_NYAA, PAYLOAD_SUWAYOMI):
         return "Not sent: this finding holds nothing that can be sent."
     if backend is None:
