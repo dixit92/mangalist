@@ -14,7 +14,10 @@ D = Path(sys.argv[2]) / "probe" if len(sys.argv) > 2 else None
 
 
 def ns(p):
-    return os.stat(p).st_mtime_ns
+    try:
+        return os.stat(p).st_mtime_ns
+    except FileNotFoundError:
+        return None
 
 
 def snap(*ps):
@@ -51,6 +54,7 @@ def step(label, fn):
 
 def main():
     print("filesystem:", os.popen(f"stat -f -c %T {S.parent}").read().strip(), flush=True)
+    print("(Season 2x does not exist before/after in the watched list; a missing folder shows as None)", flush=True)
     reset()
     ser = S / "Series"
     print("mtime resolution of the series folder (ns):", ns(ser), flush=True)

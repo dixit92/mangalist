@@ -284,12 +284,12 @@ def cmd_equiv(second_scope="both"):
     tops = tops_of(db, big, 8, seed=11)
     base_db = base / "mangalist.db"
     results = {}
-    for tag in ("A", "B", "C"):
+    for tag in ("A", "B", "C", "D"):
         d = base.parent / f"copy{tag}"
         d.mkdir(exist_ok=True)
         shutil.copy(base_db, d / "mangalist.db")
     done = None
-    for tag in ("A", "B", "C"):
+    for tag in ("A", "B", "C", "D"):
         done = perturb(base.parent / f"copy{tag}" / "mangalist.db", big.id, tops)
     print("perturbed:", {k: ("<names>" if isinstance(v, str) else "<names>") for k, v in done.items()}, flush=True)
     scope_names = {done["new_files"], done["changed"], done["removed_file"], done["new_folder"], *done["renamed_folder"],
@@ -330,7 +330,16 @@ rs=scanner.scan_and_record_folders(root, names, db)
 print('C selective scan, rename source NOT named:', len(names), 'folders')
 """
     subprocess.run([sys.executable, "-c", code], check=True, env=env)
-    A, B, C = (dump(base.parent / f"copy{t}" / "mangalist.db") for t in "ABC")
+    code = f"""
+import os, sys, time, json
+os.environ['MANGALIST_DATA_DIR']='{base.parent}/copyD'
+from mangalist import store, scanner
+db=store.get_store(); t=time.monotonic()
+changed=scanner.scan_changed(db, db.list_roots())
+print('D diff pass + selective scan of what it found:', {{k: len(v) for k, v in changed.items() if v}}, round(time.monotonic()-t,1),'s')
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, env=env)
+    A, B, C, D = (dump(base.parent / f"copy{t}" / "mangalist.db") for t in "ABCD")
     P = dump(base_db)
 
     def compare(x, y, label):
@@ -346,6 +355,7 @@ print('C selective scan, rename source NOT named:', len(names), 'folders')
 
     compare(A, B, "full scan (A) vs selective scan naming both folder names (B)")
     compare(A, C, "full scan (A) vs selective scan missing the rename source (C)")
+    compare(A, D, "full scan (A) vs diff pass + selective scan of the folders it found (D)")
 
 
 def cmd_equiv_plain():
