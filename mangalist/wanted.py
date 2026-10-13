@@ -166,10 +166,11 @@ def series_wanted(entry: MangaEntry, state: Optional[SeriesState], knowledge: Op
         return []
     volumes = None
     if knowledge is not None and knowledge.edition_label and state.missing_volumes:
-        # A declared edition's volumes are numbered by that edition, nyaa's releases mostly by the regular one: a search
-        # would take regular volume 3 for the edition's volume 3. Shown in To get, never searched (nor by the find pass).
-        volumes = Availability(False, f"{knowledge.edition_label}: nyaa releases are matched by volume number, and this "
-                                      "edition numbers its volumes its own way - not searched")
+        # A declared edition's volumes are numbered by that edition, nyaa's releases mostly by the regular one: a
+        # search would take regular volume 3 for the edition's volume 3. Shown in To get, never searched (nor by the
+        # find pass).
+        volumes = Availability(False, f"{knowledge.edition_label}: nyaa releases are matched by volume number, and "
+                                      "this edition numbers its volumes its own way - not searched")
     elif downloads and (state.missing_volumes or state.upgrade_volumes):
         volumes = find_volumes_availability(series_id=series_id, folder=str(entry.folder), title=entry.title,
                                             english_title=entry.english_title, knowledge=knowledge, state=state,

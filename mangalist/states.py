@@ -30,10 +30,11 @@ The rules, in order (the full table is in the lane note):
 4. State by priority: *Missing volumes* > *Missing chapters* > *Upgrade available* > *Complete*
    (finished and held whole in the edition the folder collects) > *Up to date*.
 
-What MangaPixer declares for the folder comes first (MangaPixer 1.39.0, the backlog's "Honour MangaPixer's declared edition
-and tracking off"): **Track completion off** -> *Not tracked* (no gap, no Complete; out of To get and the find pass); a
-**declared edition** with its own volume count (an omnibus / master / deluxe edition) -> its volumes 1..N are counted by
-the volume files the folder holds, no upgrade is offered and the state names the edition (:attr:`SeriesState.edition`).
+What MangaPixer declares for the folder comes first (MangaPixer 1.39.0, the backlog's "Honour MangaPixer's declared
+edition and tracking off"): **Track completion off** -> *Not tracked* (no gap, no Complete; out of To get and the find
+pass); a **declared edition** with its own volume count (an omnibus / master / deluxe edition) -> its volumes 1..N are
+counted by the volume files the folder holds, no upgrade is offered and the state names the edition
+(:attr:`SeriesState.edition`).
 
 **MangaDex's released chapters** (MangaPixer 1.42.0 ``companions.mangadexReleased``, its highest whole chapter) fill in
 only where nothing else tells: when MangaUpdates, the English edition and a finished total give no chapter target, or
@@ -533,8 +534,8 @@ def compute_state(
         return st
     if alt.state == st.state and alt.gaps == st.gaps:
         return st
-    why = (f"MangaDex lists English chapters up to {fmt_num(extra)} (nothing else gives a latest chapter)" if base is None
-           else f"MangaDex lists English chapters up to {fmt_num(extra)} (MangaUpdates says {fmt_num(base)})")
+    told = "nothing else gives a latest chapter" if base is None else f"MangaUpdates says {fmt_num(base)}"
+    why = f"MangaDex lists English chapters up to {fmt_num(extra)} ({told})"
     return replace(alt, reasons=alt.reasons + (why,))
 
 
@@ -587,9 +588,9 @@ def _evaluate(
         edition=k.edition_label if k is not None else None,
     )
     if k is not None and k.tracking_off:
-        # MangaPixer 1.39.0 "Track completion: off": the folder is a series (named, renamed, matched) but has no answer -
-        # nothing missing, no upgrade, not Complete, not wanted even when empty (the backlog's "Honour MangaPixer's
-        # declared edition and tracking off"; MangaPixer answers Can't tell / NotTracked).
+        # MangaPixer 1.39.0 "Track completion: off": the folder is a series (named, renamed, matched) but has no
+        # answer - nothing missing, no upgrade, not Complete, not wanted even when empty (the backlog's "Honour
+        # MangaPixer's declared edition and tracking off"; MangaPixer answers Can't tell / NotTracked).
         return SeriesState(state=State.NOT_TRACKED, reasons=("Track completion is off for this folder in MangaPixer",),
                            needs_attention=common["needs_attention"], rename_pending=rename_pending,
                            rename_count=rename_count, source=k.source)
@@ -741,7 +742,8 @@ def _evaluate(
             gaps += _chapter_gaps(missing)
             chapters_checked = True
             reasons.append(f"Latest chapter {fmt_num(target)}")
-    elif target is not None and held.has_volumes and k.licensed and not out_vols and not _jp_volumes_out(k, extra_target):
+    elif (target is not None and held.has_volumes and k.licensed and not out_vols
+          and not _jp_volumes_out(k, extra_target)):
         reasons.append("No English volume list to compare with")
 
     # Owner rule (b), 2026-10-03: a chapter-only folder of a licensed series never shows Missing
@@ -853,7 +855,8 @@ def _edition_state(k: SeriesKnowledge, held: _Held, *, folder_empty: bool, behin
         reasons.append("Chapter files are not compared with an edition's volumes")
     complete = not gaps and k.finished_in_origin
     if behind_override == "done":
-        return finish(State.COMPLETE if complete else State.UP_TO_DATE, gaps, reasons + ["Marked up to date by the owner"])
+        reasons.append("Marked up to date by the owner")
+        return finish(State.COMPLETE if complete else State.UP_TO_DATE, gaps, reasons)
     if gaps:
         return finish(State.MISSING_VOLUMES, gaps, reasons)
     if complete:
