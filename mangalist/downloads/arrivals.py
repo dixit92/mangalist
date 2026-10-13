@@ -105,10 +105,6 @@ def held_volumes(db, series, series_dir: str) -> Set[Decimal]:
     return held
 
 
-def _key(path: str) -> str:
-    return os.path.normcase(os.path.normpath(path))
-
-
 def _ident(path: str) -> Optional[str]:
     """``'<dev>:<ino>'`` of *path* (the journal's record of a hard link), None when it cannot be read."""
     try:
@@ -430,27 +426,12 @@ class _Pass:
 
     def _current_path(self, path: str, after_plan: int) -> str:
         """Where a file filed at *path* is now: followed through the moves the journal applied after plan *after_plan*
-        (the renamer's renames to the scheme, their undos), each once (owner, 2026-10-12: completed torrents were not
-        removed - the automatic rename had renamed their filed files)."""
+        (the renamer's renames to the scheme, their undos) - see :class:`~mangalist.store.journal.MoveFollower`."""
         if self._moves is None:
-            moves: Dict[str, List[Tuple[int, str]]] = {}
-            try:
-                for plan in self.journal.list_plans():
-                    for step in plan.steps:
-                        if step.op == "move" and step.state == "done" and not step.is_dir:
-                            moves.setdefault(_key(step.src), []).append((plan.id, step.dst))
-            except Exception:  # noqa: BLE001 - no journal: the filed path is all that is known
-                _log.debug("Arrivals: the journal's moves could not be read", exc_info=True)
-            self._moves = moves
-        seen = set()
-        current, since = path, after_plan
-        while _key(current) not in seen:
-            seen.add(_key(current))
-            later = [(pid, dst) for pid, dst in self._moves.get(_key(current), ()) if pid > since]
-            if not later:
-                break
-            since, current = min(later)
-        return current
+            from ..store.journal import MoveFollower
+
+            self._moves = MoveFollower(self.journal)
+        return self._moves.current_path(path, after_plan)
 
     def _library_problem(self, rec: DownloadRecord, t: TorrentInfo) -> Optional[str]:
         """Why the torrent may not be deleted yet (None: every filed file verified, its data outside the library)."""
