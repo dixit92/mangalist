@@ -163,4 +163,7 @@ def test_the_rename_source_must_be_named(tmp_path):
     assert dump(full.db) != dump(part.db)
     assert part.db.get_series(part.manga.id, "Alpha").status == "present"      # stale: still believed to be there
     scan_and_record_library(part.db.list_roots(), part.db)
-    assert dump(full.db) == dump(part.db)                                         # the next full scan puts it right
+    a, b = dump(full.db), dump(part.db)
+    for d in (a, b):                    # recognised later it is "pairing", not "scan": the same move, the same rows
+        d["moves"] = sorted(json.dumps(json.loads(m)[:4]) for m in d["moves"])
+    assert a == b                                                                 # the next full scan puts it right
