@@ -1,10 +1,11 @@
-"""Title normalization (port of MangaPixer 1.32.0 ``TitleNormalizer.cs``).
+"""Title normalization (port of MangaPixer 1.42.0 ``TitleNormalizer.cs``).
 
 Turns a folder or archive display name into clean title query variants plus hints. Pure and
 deterministic; it only ever sees a display name, never the filesystem.
 
-Pipeline for :func:`normalize`: NFKC (full-width to ASCII) -> strip a known archive extension ->
-``_`` and ``.`` become spaces when the name has no spaces -> bracketed tags ``[...]``, ``(...)``,
+Pipeline for :func:`normalize`: NFKC (full-width to ASCII) -> strip a known archive extension -> a site's watermark at
+the end is left out (1.42.0, :func:`without_site_watermark`) -> a dated doujin name (``Creator] [yyyy-mm] Character
+(Tag) (Title)``, 1.34.2, :mod:`dated_doujin`) becomes its title -> ``_`` and ``.`` become spaces when the name has no spaces -> bracketed tags ``[...]``, ``(...)``,
 ``{...}`` are removed, EXCEPT a non-leading, trailing ``[English Title]`` of at least two words (a
 second query variant, the MangaList folder convention) and a ``(19xx|20xx)`` year (a year hint) ->
 volume and chapter tokens are removed, edition words and phrases ("Master Edition", "Kanzenban")
@@ -30,6 +31,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 import regex
 
+from . import dated_doujin
 from ._text import (
     any_letter,
     any_letter_or_digit,
@@ -44,6 +46,15 @@ from ._text import (
 )
 
 _I = regex.IGNORECASE
+
+# 1.42.0 (MangaList parity, owner 2026-10-11): a site's watermark at the END of a name - the page title of an online-reading
+# site ("<Title> 001 Read Online", "... - Read Manga Online Free", "... Online Free", "... Free Online") - is not part of
+# the name. A class, not a list of sites: "read" + online / free, or online + free; one of those words alone never is
+# ("Sword Art Online", "Free!"), and some text must come before it.
+_SITE_WATERMARK = regex.compile(
+    r"(?<=\S)[\s_\-\u2013\u2014|:]+(?:read(?:[\s_]+(?:manga|manhwa|manhua|webtoons?|comics?))?"
+    r"(?:[\s_]+(?:online|free|for[\s_]+free)){1,2}|(?:(?:manga|manhwa|manhua|webtoons?|comics?)[\s_]+)?online[\s_]+"
+    r"(?:for[\s_]+)?free|free[\s_]+online)[\s_]*$", _I)
 
 _ARCHIVE_EXTENSIONS = (".cbz", ".zip", ".cbr", ".rar", ".cb7", ".7z", ".cbt", ".tar", ".pdf", ".epub")
 
@@ -166,7 +177,7 @@ def normalize(display_name: Optional[str]) -> NormalizedTitle:
 @lru_cache(maxsize=8192)
 def _normalize_cached(display_name: str) -> NormalizedTitle:
     s = nfkc(display_name).strip()
-    s = _strip_archive_extension(s)
+    s = _dated_title_or(without_site_watermark(_strip_archive_extension(s)))
 
     if " " not in s:
         s = s.replace("_", " ").replace(".", " ")
@@ -337,7 +348,7 @@ def archive_base_title(archive_name: Optional[str]) -> str:
 @lru_cache(maxsize=16384)
 def _archive_base_title_cached(archive_name: str) -> str:
     s = nfkc(archive_name).strip()
-    s = _strip_archive_extension(s)
+    s = _dated_title_or(without_site_watermark(_strip_archive_extension(s)))
     if " " not in s:
         s = s.replace("_", " ").replace(".", " ")
     s = _WHITESPACE.sub(" ", _remove_bracket_groups(s)).strip()
@@ -366,7 +377,7 @@ def numbered_series_head(archive_names: Sequence[str], min_share: float) -> Opti
     heads: dict = {}  # key -> [spellings, numbers seen, archives carrying it]
     for name in archive_names:
         s = nfkc(name or "").strip()
-        s = _strip_archive_extension(s)
+        s = _dated_title_or(_strip_archive_extension(s))
         if " " not in s:
             s = s.replace("_", " ").replace(".", " ")
         s = _WHITESPACE.sub(" ", _remove_bracket_groups(s)).strip()
@@ -522,6 +533,23 @@ def _normalize_number(raw: str) -> Optional[str]:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text
+
+
+def without_site_watermark(name: str) -> str:
+    """The name without a site's watermark at its end (1.42.0: ``Title 001 Read Online`` -> ``Title 001``; see
+    ``_SITE_WATERMARK``); unchanged when it has none. Call after the extension is removed."""
+    if name is None:
+        raise TypeError("name")
+    cut = _SITE_WATERMARK.sub("", name)
+    return cut if cut else name
+
+
+def _dated_title_or(s: str) -> str:
+    """The title of a dated doujin name (1.34.2: ``Creator] [yyyy-mm] Character (Tag) (Title)`` -> ``Title``), else the
+    name unchanged. Its creator, character and tags are not title text: left in, the cleanup removed the title with the
+    other groups and kept the character."""
+    dated = dated_doujin.try_parse(s)
+    return dated.title if dated is not None and dated.title is not None else s
 
 
 def _strip_archive_extension(s: str) -> str:

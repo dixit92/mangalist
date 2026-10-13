@@ -1,5 +1,6 @@
-"""Stage-2 matcher: a Python port of MangaPixer 1.32.0's metadata auto-match core (the manga path; 1.32.0's
-comics routing, Grand Comics Database evidence and comics candidate fields are not ported).
+"""Stage-2 matcher: a Python port of MangaPixer 1.42.0's metadata auto-match core (the manga path; 1.32.0's
+comics routing, Grand Comics Database evidence and comics candidate fields, 1.34.0 / 1.37.0's "Collection about" and
+marked artist folders and 1.42.0's MangaDex step are not ported).
 
 Pure (no Qt, no IO): the work detector decides what a folder is, the planner builds the query
 variants and local evidence, the scorer ranks provider candidates and bands the result
