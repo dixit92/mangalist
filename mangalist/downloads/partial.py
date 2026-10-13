@@ -58,6 +58,7 @@ class PackSelection:
     wanted: Tuple[str, ...] = ()
     problem: Optional[str] = None
     whole_reason: Optional[str] = None
+    chapters_only: bool = False         # every archive is a chapter file: not a volume release - never sent for volumes
 
     @property
     def readable(self) -> bool:
@@ -137,9 +138,14 @@ def file_lines(selection: PackSelection, limit: int = 12) -> str:
     return "\n".join(out)
 
 
+CHAPTERS_ONLY = "its files are chapters, not volumes"
+
+
 def hint_for(candidate: NyaaCandidate) -> Optional[str]:
-    """The kind hint arrivals reads the torrent's names with: a release whose title states volumes holds volumes."""
-    return "volumes" if candidate.vol_from else None
+    """The kind hint arrivals reads the torrent's names with: a release whose title states volumes holds volumes. Bare
+    numbers ("001-051") state nothing: read with that hint, chapter 3 of a chapter pack passed for volume 3 (owner,
+    2026-10-13)."""
+    return "volumes" if candidate.vol_from and not getattr(candidate, "numbers_only", False) else None
 
 
 def _fmt(values: Sequence[Decimal]) -> str:
@@ -177,6 +183,9 @@ def choose_files(files: Sequence[Tuple[str, int]], wanted_volumes: Sequence[str]
     choices = tuple(_classify(name, size, wanted_set, hint) for name, size in files)
     if not choices:
         return PackSelection((), wanted, problem="the torrent lists no files")
+    archives = [c for c in choices if c.reason != "not a volume archive"]
+    if archives and all(c.reason == "chapter files, not a volume" for c in archives):
+        return PackSelection(choices, wanted, problem=CHAPTERS_ONLY, chapters_only=True)
     if not any(c.keep and c.volumes for c in choices):
         reason = ("none of the files names a missing volume, so the whole pack is kept" if wanted
                   else "the missing volumes are not known, so the whole pack is kept")
