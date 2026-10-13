@@ -158,6 +158,77 @@ def cmd_timing():
     print(f"stat of every directory ({n} dirs): {time.monotonic() - t:.2f} s", flush=True)
 
 
+def cmd_recordcost():
+    """How long the database part of a scan takes (series, archives, units written in one go) with the entries already
+    read: the write-lock time. Run with and without MANGALIST_PROTO_SKIP_UNCHANGED=1."""
+    db = db_open()
+    roots = db.list_roots()
+    res = scan_library(roots, db=db)
+    record_library_scan(db, res)
+    for rep in (1, 2, 3):
+        t = time.monotonic()
+        record_library_scan(db, res, pair=False)
+        print(f"[{rep}] record_library_scan (all roots, nothing changed, skip-unchanged="
+              f"{bool(os.environ.get('MANGALIST_PROTO_SKIP_UNCHANGED'))}): {time.monotonic() - t:.1f} s "
+              f"(archives {TIMES.get('record_archives', 0):.1f} s)", flush=True)
+        reset()
+
+
+def cmd_pendingfix():
+    """Same count with one shared Resolver (the cache's items read once instead of once per series)."""
+    from mangalist.renamer import Renamer
+    from mangalist.services.mangapixer import open_cache
+    import importlib
+    rmod = importlib.import_module("mangalist.services.mangapixer.resolve")
+
+    db = db_open()
+    res = scan_library(db.list_roots(), db=db)
+    rn = Renamer(db)
+    shared = rmod.Resolver(open_cache(db))
+    rmod.resolve = lambda cache, root_id, rel_path: shared.resolve(root_id, rel_path)
+    import cProfile
+    import pstats
+    pr = cProfile.Profile()
+    pr.enable()
+    rn.pending_counts(res.entries[:200])
+    pr.disable()
+    pstats.Stats(pr).sort_stats("tottime").print_stats(12)
+    for rep in (1, 2):
+        t = time.monotonic()
+        out = rn.pending_counts(res.entries)
+        print(f"[{rep}] pending_counts over {len(res.entries)} entries with one shared Resolver: "
+              f"{time.monotonic() - t:.1f} s ({len(out)} pending)", flush=True)
+
+
+def cmd_folders():
+    db = db_open()
+    roots = db.list_roots()
+    scan_and_record_library(roots, db)
+    big, _c = largest_root(db)
+    tops = tops_of(db, big, 12, seed=3)
+    for rep in (1, 2):
+        for k in (1, 1, 1, 5, 12):
+            t = time.monotonic()
+            rs = scan_and_record_folders(big, tops[:k] if k > 1 else [tops[rep + k]], db, pair=False)
+            n = sum(len(e.files) for e in rs.entries)
+            show(f"[{rep}] folder scan, no pairing refresh: {k} folder(s), {len(rs.entries)} entries, {n} archives", t)
+
+
+def cmd_profile():
+    import cProfile
+    import pstats
+    from mangalist.renamer import Renamer
+
+    db = db_open()
+    res = scan_library(db.list_roots(), db=db)
+    rn = Renamer(db)
+    pr = cProfile.Profile()
+    pr.enable()
+    rn.pending_counts(res.entries[:200])
+    pr.disable()
+    pstats.Stats(pr).sort_stats("cumulative").print_stats(14)
+
+
 def cmd_diffpass():
     """The cheap detection: walk + stat every archive, parse nothing, compare with the database's archive rows."""
     from mangalist.scanner import changed_top_folders, scan_changed
@@ -380,4 +451,4 @@ def cmd_equiv_plain():
 
 
 if __name__ == "__main__":
-    {"timing": cmd_timing, "pending": cmd_pending, "equiv": cmd_equiv, "diffpass": cmd_diffpass}[sys.argv[1]]()
+    {"timing": cmd_timing, "pending": cmd_pending, "equiv": cmd_equiv, "diffpass": cmd_diffpass, "recordcost": cmd_recordcost, "profile": cmd_profile, "folders": cmd_folders, "pendingfix": cmd_pendingfix}[sys.argv[1]]()

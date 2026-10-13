@@ -42,6 +42,8 @@ from .signature import bytes_read_for, is_usable, signature_if_unchanged
 
 _log = logging.getLogger(__name__)
 
+_PROTO_SKIP_UNCHANGED = bool(__import__('os').environ.get('MANGALIST_PROTO_SKIP_UNCHANGED'))
+
 Signer = Callable[[Path, int, int], Optional[str]]
 
 
@@ -160,6 +162,8 @@ def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer
                     continue
                 changed = r["size"] != ob.size or r["mtime_ns"] != ob.mtime_ns
                 rep.archives_changed += changed
+                if _PROTO_SKIP_UNCHANGED and not changed and r["status"] == "present" and r["series_id"] == ob.series_id:
+                    continue        # PROTOTYPE: no write for a row that is exactly as recorded (measurement only)
                 con.execute("UPDATE archives SET series_id = ?, size = ?, mtime_ns = ?,"
                             " signature = CASE WHEN ? THEN NULL ELSE signature END, status = 'present',"
                             " last_seen_at = ?, last_seen_scan = ?, missing_since = NULL WHERE id = ?",
