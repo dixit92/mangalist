@@ -86,6 +86,9 @@ class ParsedTitle:
     chapters_only: bool = False          # chapter releases hold no volume
     renumbered: Optional[str] = None     # an edition whose volume numbers are not the series' ('Omnibus', ...)
     year_range: bool = False
+    # The numbers carry no volume mark ("Title 001-051", "Title 12"): they may be chapters (owner, 2026-10-13: a
+    # chapter pack "001-051" was read as volumes 1-51 and chapter 3 was filed as volume 3). Never certain.
+    numbers_only: bool = False
 
     @property
     def has_volumes(self) -> bool:
@@ -163,6 +166,7 @@ def parse_title(title: str) -> ParsedTitle:
     rel = parse_release(norm)
     if rel is not None:
         units = rel.volume or rel.number
+        numbers_only = rel.volume is None and rel.number is not None
         vol_from, vol_to = _range(plain(units.start), plain(units.end)) if units is not None else (None, None)
         chapters_only = vol_from is None and rel.kind is Kind.CHAPTER
         group = _group_of(list(rel.tags), rel.group) or lead_group
@@ -171,7 +175,7 @@ def parse_title(title: str) -> ParsedTitle:
         return ParsedTitle(series=series, vol_from=vol_from, vol_to=vol_to,
                            digital=digital or bool(rel.edition), group=group, is_pack=is_pack,
                            not_comic=not_comic, chapters_only=chapters_only, renumbered=renumbered,
-                           year_range=year_range)
+                           year_range=year_range, numbers_only=numbers_only)
     return _scan(norm, lead_group, digital, not_comic, renumbered, year_range)
 
 
