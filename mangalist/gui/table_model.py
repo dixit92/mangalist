@@ -139,6 +139,7 @@ class MangaTableModel(QAbstractTableModel):
         self._inventory_for: Callable[[MangaEntry], Any] = fallback_inventory_from_entry
         self._knowledge_for: Callable[[MangaEntry], Optional[SeriesKnowledge]] = from_own_matcher
         self._needs_kind_for: Callable[[MangaEntry], bool] = lambda e: False
+        self._unbundled_for: Callable[[MangaEntry], bool] = lambda e: False     # mangalist.unbundled
         self.dataChanged.connect(self._on_data_changed)
         self.modelReset.connect(self._state_cache.clear)
         # Build initial dupe map if entries provided
@@ -159,10 +160,12 @@ class MangaTableModel(QAbstractTableModel):
     def set_state_providers(self, *, inventory_for: Optional[Callable[[MangaEntry], Any]] = None,
                             knowledge_for: Optional[Callable[[MangaEntry], Optional[SeriesKnowledge]]] = None,
                             needs_kind_for: Optional[Callable[[MangaEntry], bool]] = None,
-                            today: Optional[datetime.date] = None) -> None:
+                            today: Optional[datetime.date] = None,
+                            unbundled_for: Optional[Callable[[MangaEntry], bool]] = None) -> None:
         """Swap where the State / Gaps / Official source columns read from (None keeps the current
         provider). *inventory_for(entry)* returns an InventoryLike (or None for the fallback),
-        *knowledge_for(entry)* a SeriesKnowledge (or None for the own matcher's)."""
+        *knowledge_for(entry)* a SeriesKnowledge (or None for the own matcher's), *unbundled_for(entry)* the series'
+        Unbundled Chapters setting."""
         if inventory_for is not None:
             self._inventory_for = inventory_for
         if knowledge_for is not None:
@@ -171,6 +174,8 @@ class MangaTableModel(QAbstractTableModel):
             self._needs_kind_for = needs_kind_for
         if today is not None:
             self._today = today
+        if unbundled_for is not None:
+            self._unbundled_for = unbundled_for
         self.refresh_states()
 
     def refresh_states(self) -> None:
@@ -200,7 +205,8 @@ class MangaTableModel(QAbstractTableModel):
             return None
         st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
                                  needs_kind=self._needs_kind_for(e),
-                                 rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today)
+                                 rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today,
+                                 unbundled=self._unbundled_for(e))
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
         self._state_cache[row] = (st, links, knowledge)
         return st, links, knowledge
