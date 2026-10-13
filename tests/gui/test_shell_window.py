@@ -436,3 +436,13 @@ def test_set_aside_lists_then_moves_only_after_a_yes(make_window, monkeypatch):
     win.set_aside_volume_chapters(str(LIB / QUEST))
     assert calls == [(7, ["c51.cbz", "c52.cbz", "c62.cbz"])]
     assert "3 chapter file(s) set aside" in win._status_label.text()
+
+
+def test_open_folder_without_a_file_manager_copies_the_path(make_window, monkeypatch):
+    from mangalist.gui import main_window
+
+    monkeypatch.setattr(main_window, "open_folder", lambda folder: False)
+    win = make_window()
+    win._open_in_explorer(LIB / QUEST)
+    assert QApplication.clipboard().text() == str(LIB / QUEST)
+    assert "folder path copied" in win._status_label.text()
