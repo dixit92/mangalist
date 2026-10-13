@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.28] - 2026-10-12
+
+The twenty-seventh MangaList release (testing build): Open folder works in the Docker image - it opens a file manager in the web GUI.
+
+- **Open folder in the container.** The List's "Open folder in Explorer" (and double-clicking a row) worked only on Windows; in the Docker image, and on Linux and macOS, it did nothing. The other Open folder buttons (Duplicates, log viewer, Settings > Logging) did nothing in the container either. The image now includes the PCManFM file manager, which opens as a window in the web GUI on the series' folder (File > Close returns to MangaList). Off Windows the menu item reads "Open folder". Where no file manager opens, the folder path is copied and the status bar says so.
+- **Deleting in the container's file manager skips the trash**, after a confirmation: a trash for the library would be a `.Trash-99` folder at the top of the `/data` mount, which on Unraid is a new share. PCManFM's Edit > Preferences (kept in `/config`) can turn the trash back on.
+
 ## [2026.10.27] - 2026-10-12
 
 The twenty-sixth MangaList release (testing build): set aside the chapter files that held volumes contain, by MangaPixer's estimated volume ranges.
