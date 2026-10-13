@@ -36,6 +36,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from ..store.archives import abs_path, archive_of, next_scan_revision
 from ..store.db import utcnow
 from ..store.exclusions import rel_posix
+from ..store.series import in_scope
 from .carry import CarryResult, carry_moved_series
 from .signature import bytes_read_for, is_usable, signature_if_unchanged
 
@@ -133,7 +134,7 @@ def _observations(con, root_id: int, folder: Path, entries: Iterable) -> Dict[st
 
 
 def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer: Optional[Signer] = None,
-                    now: Optional[datetime] = None) -> IdentityReport:
+                    now: Optional[datetime] = None, scopes: Optional[dict] = None) -> IdentityReport:
     """Bring the archive rows in line with a library scan, detect moves, carry series (module docstring).
 
     *scanned*: ``(root id, the folder the scanner walked, its entries)`` for every root that scanned without
@@ -149,7 +150,9 @@ def record_archives(db, scanned: Sequence[Tuple[int, Path, Iterable]], *, signer
         for root_id, folder, entries in scanned:
             observed = _observations(con, root_id, Path(folder), entries)
             rep.archives_seen += len(observed)
-            rows = {r["rel_path"]: r for r in con.execute("SELECT * FROM archives WHERE root_id = ?", (root_id,))}
+            scope = (scopes or {}).get(root_id)
+            rows = {r["rel_path"]: r for r in con.execute("SELECT * FROM archives WHERE root_id = ?", (root_id,))
+                    if in_scope(r["rel_path"], scope)}
             for rel, ob in observed.items():
                 r = rows.get(rel)
                 if r is None:

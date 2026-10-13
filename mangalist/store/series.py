@@ -87,6 +87,11 @@ def normalize_kind_hint(kind: Optional[str]) -> Optional[str]:
     return k
 
 
+def in_scope(rel_path: str, scope) -> bool:
+    """PROTOTYPE: is the root-relative path inside the scan's scope (the root's direct children it read; None = all)."""
+    return scope is None or rel_path.split("/", 1)[0] in scope
+
+
 def link_key(root_dir: Path, rel_path: str) -> str:
     """The links-cache key of a series: the absolute folder as the scanner builds it."""
     return str(Path(root_dir).joinpath(*rel_path.split("/")))
@@ -108,7 +113,7 @@ class SeriesMixin:
                             (root_id, rel_path)).fetchone()
         return _row(r) if r else None
 
-    def record_scan(self, root_id: int, root_dir: Path, seen: Iterable[SeriesSeen]) -> ScanRecord:
+    def record_scan(self, root_id: int, root_dir: Path, seen: Iterable[SeriesSeen], scope=None) -> ScanRecord:
         """Bring the root's series rows in line with a scan of *root_dir* (the folder the scanner
         walked, resolved).
 
@@ -131,7 +136,7 @@ class SeriesMixin:
         with self.connect() as con:
             rows = {r["rel_path"]: _row(r) for r in
                     con.execute("SELECT * FROM series WHERE root_id = ?", (root_id,))}
-            gone = [s for rel, s in rows.items() if rel not in seen]
+            gone = [s for rel, s in rows.items() if rel not in seen and in_scope(rel, scope)]
 
             for s in seen.values():
                 if s.rel_path in rows:

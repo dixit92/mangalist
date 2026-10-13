@@ -233,6 +233,53 @@ def _as_exclusion_set(exclusions: Exclusions) -> Optional[ExclusionSet]:
     return ExclusionSet(exclusions) or None
 
 
+def _scan_top_folder(folder: Path, ex: _Excl, hint_for: Callable[[Path], Optional[str]],
+                     schemes: Sequence) -> List[MangaEntry]:
+    """The entries of one direct child of a root (a series, or a franchise parent split into its subseries)."""
+    entries: List[MangaEntry] = []
+    title, eng = parse_folder_name(folder.name)
+    try:
+        mtime = folder.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+
+    has_direct = _has_direct_archives(folder, ex)
+    subseries = _extract_subseries(folder, title, mtime, ex, hint_for, schemes)
+    # Unit subfolders (Season 1, Part 2, Volumes) with archives make the folder itself a series, like direct files.
+    has_units = bool(subseries) and any(_is_unit_subfolder(d.name) for d in _get_subdirs_with_archives(folder, ex))
+    has_direct = has_direct or has_units
+
+    if not has_direct and subseries:
+        # Parent is a franchise container - only add subseries, not parent
+        entries.extend(subseries)
+    elif has_direct and subseries:
+        # Parent has both direct files AND subseries - add both
+        parent_entry = MangaEntry(
+            folder=folder,
+            title=title,
+            english_title=eng,
+            n_subfolders=_count_subfolders(folder, ex),
+            last_modified=mtime,
+        )
+        # The subseries' archives stay in its file counts (as before) but not in its inventory.
+        parent_entry.nested_series = [s.folder for s in subseries]
+        _fill(parent_entry, ex, hint_for(folder), schemes)
+        entries.append(parent_entry)
+        entries.extend(subseries)
+    else:
+        # Normal case: no subseries, just the folder itself
+        entry = MangaEntry(
+            folder=folder,
+            title=title,
+            english_title=eng,
+            n_subfolders=_count_subfolders(folder, ex),
+            last_modified=mtime,
+        )
+        _fill(entry, ex, hint_for(folder), schemes)
+        entries.append(entry)
+    return entries
+
+
 def scan_root(
     root: Path,
     progress: Optional[Callable[[int, int, str], None]] = None,
@@ -242,8 +289,12 @@ def scan_root(
     root_id: Optional[int] = None,
     kind_hints: Optional[Mapping[str, str]] = None,
     schemes: Sequence = (),
+    only: Optional[Iterable[str]] = None,
 ) -> List[MangaEntry]:
     """Scan a Manga Root and return classified MangaEntry objects.
+
+    *only* (PROTOTYPE, research lane): the names of direct children of the root to read; the rest of the root is not
+    listed, and no loose archives are reported.
 
     ``progress(done, total, current_name)`` is called as folders are processed. *exclusions* (patterns
     relative to the root) are never scanned. Archives lying directly in the root are appended to
@@ -264,7 +315,8 @@ def scan_root(
 
     manga_dirs = []
     try:
-        children = sorted(root.iterdir(), key=lambda p: p.name.lower())
+        children = sorted(root.iterdir(), key=lambda p: p.name.lower()) if only is None else [
+            root / n for n in sorted(set(only), key=str.lower)]
     except OSError as exc:
         raise NotADirectoryError(f"Cannot read {root}: {exc}") from exc
     for p in children:
@@ -283,50 +335,7 @@ def scan_root(
     for i, folder in enumerate(manga_dirs, start=1):
         if progress:
             progress(i - 1, total, folder.name)
-        ex = top.child(folder.name)
-
-        title, eng = parse_folder_name(folder.name)
-        try:
-            mtime = folder.stat().st_mtime
-        except OSError:
-            mtime = 0.0
-
-        has_direct = _has_direct_archives(folder, ex)
-        subseries = _extract_subseries(folder, title, mtime, ex, hint_for, schemes)
-        # Unit subfolders (Season 1, Part 2, Volumes) with archives make the folder itself a series, like direct files.
-        has_units = bool(subseries) and any(_is_unit_subfolder(d.name) for d in _get_subdirs_with_archives(folder, ex))
-        has_direct = has_direct or has_units
-
-        if not has_direct and subseries:
-            # Parent is a franchise container - only add subseries, not parent
-            entries.extend(subseries)
-        elif has_direct and subseries:
-            # Parent has both direct files AND subseries - add both
-            # Create parent entry normally
-            parent_entry = MangaEntry(
-                folder=folder,
-                title=title,
-                english_title=eng,
-                n_subfolders=_count_subfolders(folder, ex),
-                last_modified=mtime,
-            )
-            # The subseries' archives stay in its file counts (as before) but not in its inventory.
-            parent_entry.nested_series = [s.folder for s in subseries]
-            _fill(parent_entry, ex, hint_for(folder), schemes)
-            entries.append(parent_entry)
-            # Also add subseries
-            entries.extend(subseries)
-        else:
-            # Normal case: no subseries, just the folder itself
-            entry = MangaEntry(
-                folder=folder,
-                title=title,
-                english_title=eng,
-                n_subfolders=_count_subfolders(folder, ex),
-                last_modified=mtime,
-            )
-            _fill(entry, ex, hint_for(folder), schemes)
-            entries.append(entry)
+        entries.extend(_scan_top_folder(folder, top.child(folder.name), hint_for, schemes))
 
     if root_id is not None:
         for e in entries:
@@ -353,6 +362,7 @@ class RootScan:
     entries: List[MangaEntry] = field(default_factory=list)
     error: Optional[str] = None
     loose: List[LooseArchive] = field(default_factory=list)
+    scope: Optional[frozenset] = None             # PROTOTYPE: the root's direct children that were read; None = all
 
 
 @dataclass
@@ -392,6 +402,7 @@ def scan_one_root(
     *,
     db=None,
     label: bool = False,
+    only: Optional[Iterable[str]] = None,
 ) -> RootScan:
     """Scan one ``store.Root``-like (``id``, ``name``, ``path``, ``exclusions``, ``naming_scheme``). A root that
     cannot be read comes back with ``error`` set and no entries. *label* puts the root's name before each folder
@@ -402,7 +413,8 @@ def scan_one_root(
         folder = folder.resolve()
     except OSError:
         pass
-    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder)
+    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder,
+                  scope=frozenset(only) if only is not None else None)
     loose: List[Path] = []
     prog = progress
     if progress and label:
@@ -416,7 +428,8 @@ def scan_one_root(
             _log.warning("Reading the stored series kinds failed", exc_info=True)
     try:
         rs.entries = scan_root(folder, prog, exclusions=list(getattr(root, "exclusions", []) or []),
-                               loose=loose, root_id=rs.root_id, kind_hints=hints, schemes=_root_schemes(root))
+                               loose=loose, root_id=rs.root_id, kind_hints=hints, schemes=_root_schemes(root),
+                               only=only)
     except (OSError, NotADirectoryError) as exc:
         rs.error = str(exc)
         _log.warning("Scan: cannot read the root %s (%s); its series are left as they were", name, exc)
@@ -520,10 +533,11 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
     renamed: List[tuple] = []
     scanned = [rs for rs in result.roots if not rs.error and rs.root_id is not None]
     for rs in scanned:
-        db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries))
+        db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries), scope=rs.scope)
         _log.debug("Scan: recorded %s (%d series)", rs.root_name, len(rs.entries))
     try:
-        report = record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in scanned])
+        report = record_archives(db, [(rs.root_id, rs.folder, rs.entries) for rs in scanned],
+                                 scopes={rs.root_id: rs.scope for rs in scanned if rs.scope is not None})
         result.identity = report
         renamed.extend(report.renamed)
     except Exception:  # noqa: BLE001 - the series rows are recorded; identity is tried again next scan
@@ -614,3 +628,13 @@ def answer_series_kind(db, entry: MangaEntry, kind: Optional[str]) -> bool:
     db.sync_units({row.id: units_of_entry(entry)})
     _log.info("Series kind answered: %s is %s", Path(entry.folder).name, k or "not set (answer forgotten)")
     return True
+
+
+def scan_and_record_folders(root, folders: Iterable[str], db, *, pair: bool = True) -> RootScan:
+    """PROTOTYPE (research lane, selective scanning): read and record only the direct children *folders* of *root* (a
+    root-relative name each: the series folder, or the franchise parent holding a subseries). A name that no longer
+    exists marks the rows under it missing; a new one adds rows. Everything outside them is left as it was."""
+    rs = scan_one_root(root, db=db, only=list(folders))
+    if not rs.error and rs.root_id is not None:
+        record_library_scan(db, LibraryScan(roots=[rs]), pair=pair)
+    return rs
