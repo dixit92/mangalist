@@ -30,6 +30,18 @@ The rules, in order (the full table is in the lane note):
 4. State by priority: *Missing volumes* > *Missing chapters* > *Upgrade available* > *Complete*
    (finished and held whole in the edition the folder collects) > *Up to date*.
 
+What MangaPixer declares for the folder comes first (MangaPixer 1.39.0, the backlog's "Honour MangaPixer's declared
+edition and tracking off"): **Track completion off** -> *Not tracked* (no gap, no Complete; out of To get and the find
+pass); a **declared edition** with its own volume count (an omnibus / master / deluxe edition) -> its volumes 1..N are
+counted by the volume files the folder holds, no upgrade is offered and the state names the edition
+(:attr:`SeriesState.edition`).
+
+**MangaDex's released chapters** (MangaPixer 1.42.0 ``companions.mangadexReleased``, its highest whole chapter) fill in
+only where nothing else tells: when MangaUpdates, the English edition and a finished total give no chapter target, or
+when without it the state would be *Can't tell*. Not "the highest wins" everywhere: MangaPixer reads MangaDex's list
+with its unavailable (taken-down) chapters, and on the owner's library (2026-10-13) 19 of the 95 series it would raise
+list chapters MangaDex no longer serves (the lane note "MangaPixer Export Fields" has the measurement).
+
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
 a :class:`~mangalist.models.MangaEntry` already has (FALLBACK until the real inventory is wired).
@@ -39,7 +51,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Collection, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, runtime_checkable
@@ -75,6 +87,7 @@ class State(str, Enum):
     UP_TO_DATE = "Up to date"
     COMPLETE = "Complete"
     CANT_TELL = "Can't tell"               # a folder with files, nothing to compare them with
+    NOT_TRACKED = "Not tracked"            # MangaPixer: "Track completion" is off for the folder (1.39.0)
     NOT_A_SERIES = "Not a series"          # MangaPixer: DontMatch, CollectionAbout or an unknown link state
 
     @property
@@ -88,7 +101,7 @@ MISSING_STATES = frozenset({State.MISSING_VOLUMES, State.MISSING_CHAPTERS})
 STATE_ORDER: Tuple[State, ...] = (
     State.WANTED_OFFICIAL, State.WANTED_AWAITING, State.WANTED_SCANLATION, State.WANTED,
     State.MISSING_VOLUMES, State.MISSING_CHAPTERS, State.UPGRADE,
-    State.UP_TO_DATE, State.COMPLETE, State.CANT_TELL, State.NOT_A_SERIES,
+    State.UP_TO_DATE, State.COMPLETE, State.CANT_TELL, State.NOT_TRACKED, State.NOT_A_SERIES,
 )
 
 # Needs-attention reasons.
@@ -280,6 +293,7 @@ class SeriesState:
     mangapixer_answer: Optional[str] = None
     mangapixer_reason: Optional[str] = None
     mangapixer_disagrees: bool = False
+    edition: Optional[str] = None                # the edition declared in MangaPixer, e.g. "Master edition"
 
     # -- convenience -----------------------------------------------------------------------------
 
@@ -320,6 +334,8 @@ class SeriesState:
     @property
     def flags(self) -> Tuple[str, ...]:
         out = []
+        if self.edition:
+            out.append(self.edition)
         if self.complete_with_upgrade:
             out.append("Upgrade available")
         if self.upcoming:
@@ -497,8 +513,47 @@ def compute_state(
     *restarts*: ``"chapter"`` / ``"volume"`` when those numbers start again in another folder of the series (``Season 1``
     and ``Season 2`` both from 1 - :attr:`mangalist.models.MangaEntry.restarting_units`): they are not compared with one
     total, so no gap of that kind is invented (MangaPixer gives no verdict either).
+
+    MangaDex's highest whole English chapter (:attr:`~mangalist.knowledge.SeriesKnowledge.mangadex_latest`) is a chapter
+    target only where nothing else tells (see the module docstring): the state is computed without it first, and again
+    with it when there is no other target or the first answer is *Can't tell*.
     """
-    today = today or _dt.date.today()
+    args = dict(folder_empty=folder_empty, needs_kind=needs_kind, requested=requested, rename_pending=rename_pending,
+                rename_count=rename_count, behind_override=behind_override, today=today or _dt.date.today(),
+                restarts=restarts)
+    st = _evaluate(inventory, knowledge, **args)
+    k = knowledge
+    extra = k.mangadex_latest if k is not None and k.matched and not k.tracking_off and not k.edition_label else None
+    if extra is None or st.state in (State.NOT_A_SERIES, State.NOT_TRACKED):
+        return st
+    base = _chapter_target(k)
+    if base is not None and not (extra > base and st.state == State.CANT_TELL):
+        return st
+    alt = _evaluate(inventory, knowledge, extra_target=extra, **args)
+    if base is not None and alt.state == State.CANT_TELL:
+        return st
+    if alt.state == st.state and alt.gaps == st.gaps:
+        return st
+    told = "nothing else gives a latest chapter" if base is None else f"MangaUpdates says {fmt_num(base)}"
+    why = f"MangaDex lists English chapters up to {fmt_num(extra)} ({told})"
+    return replace(alt, reasons=alt.reasons + (why,))
+
+
+def _evaluate(
+    inventory: Any,
+    knowledge: Optional[SeriesKnowledge],
+    *,
+    folder_empty: bool,
+    needs_kind: bool,
+    requested: bool,
+    rename_pending: bool,
+    rename_count: int,
+    behind_override: Optional[str],
+    today: _dt.date,
+    restarts: Collection[str],
+    extra_target: Optional[Decimal] = None,
+) -> SeriesState:
+    """:func:`compute_state`'s rules; *extra_target* joins the chapter target's candidates (MangaDex's latest)."""
     rename_count = max(0, int(rename_count or 0))
     rename_pending = bool(rename_pending or rename_count)
     k = knowledge
@@ -530,7 +585,15 @@ def compute_state(
         rename_pending=rename_pending,
         rename_count=rename_count,
         source=k.source if k is not None else None,
+        edition=k.edition_label if k is not None else None,
     )
+    if k is not None and k.tracking_off:
+        # MangaPixer 1.39.0 "Track completion: off": the folder is a series (named, renamed, matched) but has no
+        # answer - nothing missing, no upgrade, not Complete, not wanted even when empty (the backlog's "Honour
+        # MangaPixer's declared edition and tracking off"; MangaPixer answers Can't tell / NotTracked).
+        return SeriesState(state=State.NOT_TRACKED, reasons=("Track completion is off for this folder in MangaPixer",),
+                           needs_attention=common["needs_attention"], rename_pending=rename_pending,
+                           rename_count=rename_count, source=k.source)
     completion = k.completion if k is not None else None
 
     def finish(state: State, gaps: Sequence[Gap] = (), reasons: Sequence[str] = ()) -> SeriesState:
@@ -550,6 +613,9 @@ def compute_state(
     if known and k.licensed and k.publisher_volumes and not any(v.english_date for v in k.volumes):
         out_vols = [VolumeInfo(volume=fmt_num(n)) for n in range(1, int(k.publisher_volumes) + 1)]
 
+    if known and k.edition_label is not None:
+        return _edition_state(k, held, folder_empty=folder_empty, behind_override=behind_override, finish=finish)
+
     # 1. Empty folder = wanted.
     if folder_empty:
         if not known:
@@ -560,7 +626,7 @@ def compute_state(
                               [f"Empty folder; {len(out_vols)} English volume(s) out"])
             # No English volume (a webtoon never gets one): the chapters up to the latest known one, which the
             # Download tab offers from Suwayomi (owner, 2026-10-11: an empty licensed webtoon offered nothing)
-            target = _chapter_target(k)
+            target = _chapter_target(k, extra_target)
             gaps = _chapter_gaps(_empty_folder_chapters(target)) if target is not None else []
             latest = f"; latest chapter {fmt_num(target)}" if target is not None else ""
             if (k.publisher_chapters or 0) > 0:
@@ -573,7 +639,7 @@ def compute_state(
                           [f"Empty folder; licensed, no English volume out yet{when}{latest}"])
         # Scanlation only: every chapter up to the latest known one is missing - the Download tab's Missing chapters
         # group offers them from Suwayomi (owner, 2026-10-10: "should be fixed now that we have a scanlation provider").
-        target = _chapter_target(k)
+        target = _chapter_target(k, extra_target)
         if target is None:
             return finish(State.WANTED_SCANLATION, reasons=["Empty folder; not licensed in English"])
         return finish(State.WANTED_SCANLATION, _chapter_gaps(_empty_folder_chapters(target)),
@@ -614,12 +680,12 @@ def compute_state(
             elif not v.has_chapters:
                 unmapped_for_chapters.append(v)
         reasons.append(f"{len(out_vols)} English volume(s) out")
-    elif k.licensed and held.has_volumes and not out_vols and _jp_volumes_out(k):
+    elif k.licensed and held.has_volumes and not out_vols and _jp_volumes_out(k, extra_target):
         # No English volume list (the English edition is chapters in an app): the original edition's volumes whose
         # chapters are all out in English - nyaa often has the English chapters compiled into them (owner, 2026-10-11:
         # "if English volume list is not available but JP is, compare with JP").
         compared = True
-        jp_out = _jp_volumes_out(k)
+        jp_out = _jp_volumes_out(k, extra_target)
         for v in jp_out:
             vd = to_decimal(v.volume)
             if vd is None or vd in held.volumes:
@@ -648,7 +714,7 @@ def compute_state(
 
     # 3. Chapters.
     chapters_checked = False
-    target = _chapter_target(k)
+    target = _chapter_target(k, extra_target)
     if "chapter" in restarts:
         reasons.append("Chapter numbers start again in each folder of the series (e.g. each season) - not compared")
         target = None
@@ -676,7 +742,8 @@ def compute_state(
             gaps += _chapter_gaps(missing)
             chapters_checked = True
             reasons.append(f"Latest chapter {fmt_num(target)}")
-    elif target is not None and held.has_volumes and k.licensed and not out_vols and not _jp_volumes_out(k):
+    elif (target is not None and held.has_volumes and k.licensed and not out_vols
+          and not _jp_volumes_out(k, extra_target)):
         reasons.append("No English volume list to compare with")
 
     # Owner rule (b), 2026-10-03: a chapter-only folder of a licensed series never shows Missing
@@ -734,11 +801,11 @@ def _span(numbers: Sequence[Decimal]) -> str:
     return fmt_num(numbers[0]) if len(numbers) == 1 else f"{fmt_num(numbers[0])}-{fmt_num(numbers[-1])}"
 
 
-def _jp_volumes_out(k: SeriesKnowledge) -> List[VolumeInfo]:
+def _jp_volumes_out(k: SeriesKnowledge, extra_target: Optional[Decimal] = None) -> List[VolumeInfo]:
     """The volume list's (original edition) volumes whose last chapter is out in English - the English chapter count
     or the latest scanlated chapter, whichever is higher. A volume without a chapter range, a volume 0 (a special)
     and every volume of a series with an English omnibus edition (numbered its own way) are not counted."""
-    target = _chapter_target(k)
+    target = _chapter_target(k, extra_target)
     if target is None or any(p.omnibus for p in k.english_publishers):
         return []                               # an omnibus edition numbers its volumes its own way
     out = []
@@ -758,12 +825,43 @@ def _empty_folder_chapters(target: Decimal) -> List[Decimal]:
     return missing
 
 
-def _chapter_target(k: SeriesKnowledge) -> Optional[Decimal]:
+def _chapter_target(k: SeriesKnowledge, extra: Optional[Decimal] = None) -> Optional[Decimal]:
     """The last chapter that exists anywhere: the largest of MangaUpdates' latest chapter, the English
-    chapter count and the finished total."""
+    chapter count and the finished total (and *extra*: MangaDex's latest, where :func:`compute_state` lets it count)."""
     cands = [d for d in (k.latest_chapter_decimal, k.publisher_chapters,
-                         k.total_chapters if k.finished_in_origin else None) if d is not None and d > 0]
+                         k.total_chapters if k.finished_in_origin else None, extra) if d is not None and d > 0]
     return max(cands) if cands else None
+
+
+def _edition_state(k: SeriesKnowledge, held: _Held, *, folder_empty: bool, behind_override: Optional[str],
+                   finish) -> SeriesState:
+    """A folder of a declared edition (MangaPixer 1.39.0 ``completion.volumeTotalOverride``, e.g. a master edition of 6
+    volumes): its volumes 1..N counted by the volume FILES held - the regular edition's list says nothing about which
+    chapters an edition volume holds, so loose chapters are not compared and no volume is an upgrade (MangaPixer's rule:
+    "the edition's volume count replaces the regular edition's volumes in every volume answer"). Complete once every
+    volume is held and the series has ended in its origin. Owner, 2026-10-12, on a master edition folder whose missing
+    volumes came from the regular edition: "Is this a MangaPixer job?" - MangaPixer declares, MangaList counts."""
+    label, total = k.edition_label, int(k.edition_volumes)
+    declared = f"{label}: {total} volume{'s' if total != 1 else ''} (declared in MangaPixer)"
+    numbers = [Decimal(n) for n in range(1, total + 1)]
+    if folder_empty:
+        state = State.WANTED_OFFICIAL if k.licensed else State.WANTED
+        return finish(state, [Gap(GAP_VOLUME, fmt_num(n), note=label) for n in numbers], [f"Empty folder; {declared}"])
+    if not held.has_volumes:
+        return finish(State.CANT_TELL, reasons=[f"{declared}; the folder holds no volume file to count"])
+    gaps = [Gap(GAP_VOLUME, fmt_num(n), note=label) for n in numbers if n not in held.volumes]
+    reasons = [declared]
+    if held.has_chapters:
+        reasons.append("Chapter files are not compared with an edition's volumes")
+    complete = not gaps and k.finished_in_origin
+    if behind_override == "done":
+        reasons.append("Marked up to date by the owner")
+        return finish(State.COMPLETE if complete else State.UP_TO_DATE, gaps, reasons)
+    if gaps:
+        return finish(State.MISSING_VOLUMES, gaps, reasons)
+    if complete:
+        return finish(State.COMPLETE, (), reasons + ["Finished, and held whole"])
+    return finish(State.UP_TO_DATE, (), reasons)
 
 
 def _is_complete(k: SeriesKnowledge, held: _Held, missing: bool) -> bool:
