@@ -6,6 +6,7 @@ series; nothing touches a network or a library."""
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 import pytest
 
@@ -206,3 +207,66 @@ def test_the_found_group_is_remembered(qapp):
     tab.show_group(GROUP_FOUND)
     tab2, _b, _c, _a = make(qapp)
     assert tab2.current_group() == GROUP_FOUND and tab2.panels.currentIndex() == PANEL_FOUND
+
+
+# --- Change source, the series' mode, queued sends (owner, 2026-10-12) -----------------------------------------------
+
+DROPPED = replace(finding(4, series_id=3, kind="chapters", fills=("43",), size_bytes=None,
+                          title="ch. 43 (not on MangaDex (EN))", reason="not on MangaDex (EN) any more - Change source?"),
+                  payload={"type": "dropped", "source_id": "1", "source_name": "MangaDex (EN)", "manga_id": 7})
+
+
+def test_a_finding_without_a_source_offers_change_source_which_opens_missing_chapters(qapp):
+    tab, backend, confirm, answers = make(qapp, FakeFindingBackend(found=FOUND + [DROPPED], last_run=find_run()))
+    tab.show_group(GROUP_FOUND)
+    row = tab.found.rows[4]
+    assert row.btn_send.isHidden() and not row.btn_source.isHidden() and row.btn_source.text() == "Change source…"
+    assert not tab.found.rows[3].btn_send.isHidden() and tab.found.rows[3].btn_source.isHidden()
+    # Send all leaves it out: there is nothing to send until the series has a source.
+    assert tab.found.btn_send_all.text() == "Send all 3…"
+    row.btn_source.click()
+    assert tab._group == GROUP_CHAPTERS and tab.current_folder() == "/lib/Gamma Webcomic"
+    assert backend.sent_findings == []
+
+
+def test_change_source_for_a_series_no_longer_missing_chapters_says_so(qapp):
+    tab, _b, _c, _a = make(qapp, FakeFindingBackend(found=[replace(DROPPED, series_id=1)], last_run=find_run()))
+    tab.show_group(GROUP_FOUND)
+    assert not tab.open_chapters_of(1) and tab._group == GROUP_FOUND
+    assert "no missing chapters" in tab.found.status_label.text()
+
+
+def test_one_series_shown_has_its_mode_and_switching_to_auto_is_stored(qapp):
+    tab, backend, _c, _a = make(qapp)
+    changed = []
+    tab.modes_changed.connect(lambda: changed.append(True))
+    tab.show_group(GROUP_FOUND)
+    assert tab.found.mode_row.isHidden()                                 # every series shown: no mode
+    tab.found.set_series_filter(1)
+    combo = tab.found.mode_combo
+    assert not tab.found.mode_row.isHidden() and combo.currentText() == "Use the default (Notify)"
+    combo.activated.emit(combo.findData("auto"))
+    assert backend.mode_calls == [((1,), "auto")] and changed == [True]
+    assert combo.currentText() == "Auto" and "next scheduled find pass or Find now" in tab.found.mode_help.text()
+    assert tab.found.status_label.text() == "Automatic downloads for Alpha Saga: Auto."
+    combo.activated.emit(combo.count() - 1)                               # back to the default
+    assert backend.mode_calls[-1] == ((1,), None) and combo.currentText() == "Use the default (Notify)"
+
+
+def test_send_while_one_is_sending_queues_it_and_the_queue_runs_in_order(qapp):
+    backend = FakeFindingBackend(found=FOUND, last_run=find_run())
+    backend.send_gate = threading.Event()
+    tab, _b, _c, _a = make(qapp, backend)
+    tab.show_group(GROUP_FOUND)
+    found = tab.found
+    assert found.send(1)
+    assert found.send(3) and found.send(2) and found.queued() == [3, 2]
+    assert not found.send(3)                                              # already queued
+    assert found.rows[1].btn_send.text() == "Sending…" and found.rows[3].btn_send.text() == "Queued"
+    assert not found.rows[3].btn_send.isEnabled() and found.rows[3].btn_skip.isEnabled()
+    assert not found.rows[1].btn_skip.isEnabled() and "(2 more queued)" in found.status_label.text()
+    found.rows[2].btn_skip.click()                                        # skipping a queued one unqueues it
+    assert backend.skipped_findings == [2] and found.queued() == [3] and found.rows[3].btn_send.text() == "Queued"
+    backend.send_gate.set()
+    settle(qapp, tab)
+    assert backend.sent_findings == [1, 3] and found.queued() == [] and found.rows == {}
