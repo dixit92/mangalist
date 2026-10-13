@@ -14,6 +14,7 @@ from ._common import (
     CHAPTER_LABELS, EXTRA_WORDS, NOT_CHAPTER_LABELS, UNIT, clean_title, encloses_whole, split_extension,
     trailing_bracket,
 )
+from .heads import SeriesHead, name_key
 from .model import Kind, Layer, ParsedName, UnitRange
 from .template import Template, compile_template
 
@@ -172,7 +173,9 @@ def _head_number(body: str) -> Optional[Tuple[UnitRange, int]]:
 
 # --- 3. release names ---------------------------------------------------------------------------
 
-_VP = r"(?:v|vol\.?\s*|volume\s+)"
+# A volume token; also the comics / BD album tokens (MangaPixer 1.32.0 grammar, hand-over 2026-10-12): "Tome 3", "Tomo 3",
+# "Band 3", "Deel 3", "Album 3", "Livre 3" and an upper-case "T" glued to its number ("T03").
+_VP = r"(?:v|vol\.?\s*|volume\s+|(?:tome|tomo|band|deel|album|livre)\.?\s*|(?-i:T)(?=\d{1,3}(?![\d.])))"
 _CP = r"(?:c|ch\.?\s*|chapter\s+)"
 _RELEASE = re.compile(
     rf"""^(?P<series>.+?)\s+
@@ -208,24 +211,50 @@ _SERIES_ENDS_IN_LABEL = re.compile(rf"(?<![A-Za-z]){CHAPTER_LABELS}\.?\s*[#-]?$"
 _CHAPTER_NUMBER = r"(?:0\d+(?:\.\d+)?|[1-9]\d{2}(?:\.\d+)?|(?!19|20)[1-9]\d{3}(?:\.\d+)?|\d+\.\d+)"
 # Not after a word that the number belongs to: "<Series> Season 02 v03" is volume 3 of season 2.
 _SERIES_ENDS_IN_CHAPTER = re.compile(
-    rf"\S(?<!season)(?<!part)(?<!book)(?<!tome)(?<!arc)\s+(?:-\s+)?{_CHAPTER_NUMBER}$", re.IGNORECASE)
+    rf"\S(?<!season)(?<!part)(?<!book)(?<!tome)(?<!arc)\s+(?:-\s+)?(?P<cn>{_CHAPTER_NUMBER})$", re.IGNORECASE)
 
 _TAG = re.compile(r"\(([^()]*)\)|\[([^\[\]]*)\]")
 _YEAR = re.compile(r"^((?:19|20)\d{2})(?:\s*-\s*(?:19|20)?\d{2})?$")
 _EDITION = re.compile(r"^digital(?:\b.*)?$", re.IGNORECASE)
 _FIX = re.compile(r"^f\d*$", re.IGNORECASE)
-_VOL_TAG = re.compile(rf"^{_VP}(?P<v>{UNIT})$", re.IGNORECASE)    # "(v01)" after a chapter
+# A volume tag after a chapter: "(v01)" zero-padded (or two digits and more), "(Vol. 3)", "(Volume 3)". A single-digit
+# "[v2]" is a release revision (a re-release of the same chapter), not a volume (MangaPixer hand-over, 2026-10-12:
+# "[Group] <Title> - c007 [v2]" was read as volume 2).
+_VOL_TAG = re.compile(rf"^(?:v(?P<v>0\d+(?:\.\d+)?|[1-9]\d+(?:\.\d+)?)|(?:vol\.?\s*|volume\s+)(?P<w>{UNIT}))$",
+                      re.IGNORECASE)
+_REVISION = re.compile(r"^v[1-9]$", re.IGNORECASE)
 # The series part must not itself end in a unit token ("Title Vol. 1 Ch 3" is not a release name).
 _SERIES_ENDS_IN_UNIT = re.compile(r"(?<![A-Za-z])(?:v|vol(?:ume)?\.?|ch(?:apter)?\.?|c)\s*\d+(?:\.\d+)?\s*$",
                                   re.IGNORECASE)
 
 
-def parse_release(name: str) -> Optional[ParsedName]:
+def title_owns_number(stem: str, start: int, end: int, series_title: Optional[str] = None,
+                      series_head: Optional[SeriesHead] = None) -> bool:
+    """The number at ``stem[start:end]`` belongs to the series title, not to the units (MangaPixer hand-over,
+    2026-10-12: ``<Title 100> v01`` was chapter 100 of volume 1, ``<Title 009> v01`` chapter 9):
+
+    - ``series_title`` ends with that number and the name up to it IS the title (comparison form: case, punctuation,
+      bracket groups and zero padding aside) - a number the title ends with is never read;
+    - ``series_head`` (the folder's siblings) is the text before it and the number does not vary between them."""
+    if series_title and series_title.strip():
+        title = _unpadded_numbers(name_key(series_title))
+        if title[-1:].isdigit() and _unpadded_numbers(name_key(stem[:end])) == title:
+            return True
+    return series_head is not None and not series_head.varies and name_key(stem[:start]) == series_head.key
+
+
+def _unpadded_numbers(key: str) -> str:
+    return " ".join(w.lstrip("0") or "0" if w.isdigit() else w for w in key.split())
+
+
+def parse_release(name: str, series_title: Optional[str] = None,
+                  series_head: Optional[SeriesHead] = None) -> Optional[ParsedName]:
     """Layer 3: ``Title vNN(-MM) (+ chapters) (Year) (Digital|Digital-Compilation) (Group) (fN)`` and the
     older ``Title vol NN`` / ``Title Vol. NN`` / ``Title cNNN (...)`` / ``Title NNN (Year) (Digital)``
     forms. A bare number is accepted only with a year or edition tag; its kind stays unknown. The volume is the
     LAST volume token before the tags, so "Part 5" in ``<Series> - Part 5 - <Subtitle> v05 (2022)`` stays in the
-    series title."""
+    series title. A number right before the volume token is that volume's chapter (layer 3b) unless it belongs to the
+    title (:func:`title_owns_number`: ``series_title`` / ``series_head``)."""
     stem, _ = split_extension(name)
     m = _RELEASE.match(stem)
     if m is None:
@@ -239,7 +268,8 @@ def parse_release(name: str) -> Optional[ParsedName]:
     series = m.group("series").rstrip(" -_")
     if not series or _SERIES_ENDS_IN_UNIT.search(series):
         return None
-    if m.group("vp") is not None and _SERIES_ENDS_IN_CHAPTER.search(series):
+    ends = _SERIES_ENDS_IN_CHAPTER.search(series) if m.group("vp") is not None else None
+    if ends is not None and not title_owns_number(stem, ends.start("cn"), ends.end("cn"), series_title, series_head):
         return None                                     # "<Series> 001 Vol 01": chapter 1 of volume 1 (layer 3b)
     group, year, edition, fix, tag_volume, tags = _read_tags(m.group("tags"))
 
@@ -266,6 +296,40 @@ def parse_release(name: str) -> Optional[ParsedName]:
         tags=tuple(tags), notes=("release name",))
 
 
+# A comics extra (MangaPixer 1.32.0 grammar, hand-over 2026-10-12): "Annual" / "FCBD" / "Free Comic Book Day" with or
+# without a number, "Special #1" / "One-Shot 1" only with their own number ("Special Edition" is an edition). It must end
+# the name's units: only a " - <subtitle>" and tags may follow, so "Annual Report <Title> 05" stays a title.
+_COMICS_EXTRA = re.compile(
+    r"""^(?:(?P<series>.*?\S)(?:\s+-\s+|[\s_]+))?
+    (?P<marker>(?:annual|fcbd|free\s+comic\s+book\s+day)(?:\s*\#?\s*(?P<n>\d{1,4}(?:\.\d{1,3})?))?
+      | (?:specials?|one-?shots?)\s*\#?\s*\d{1,4}(?:\.\d{1,3})?)
+    (?:\s+-\s+(?P<sub>[^()\[\]]*?[^\s()\[\]]))?
+    (?P<tags>(?:\s*(?:\([^()]*\)|\[[^\[\]]*\]))*)
+    \s*$""",
+    re.IGNORECASE | re.VERBOSE)
+_HAS_VOLUME_TOKEN = re.compile(rf"(?<![^\W\d_]){_VP}\d", re.IGNORECASE)
+
+
+def parse_comics_extra(name: str) -> Optional[ParsedName]:
+    """Layer 3 (comics): ``<Title> Annual 2``, ``<Title> Special #1``, ``<Title> One-Shot 1``, ``<Title> FCBD 2019``
+    - an extra outside the issue numbering, so a chapter without a chapter number (``is_extra``; the marker is the
+    title): before, the bare number was guessed to be chapter 2 / 1 and collided with the real chapter. A name with a
+    volume or chapter token is left to the other layers."""
+    stem, _ = split_extension(name)
+    m = _COMICS_EXTRA.match(stem)
+    if m is None or any(detect_tokens(name)):
+        return None
+    series = (m.group("series") or "").strip(" -_") or None
+    if series is not None and _HAS_VOLUME_TOKEN.search(series):
+        return None
+    group, year, edition, fix, _tag_volume, tags = _read_tags(m.group("tags"))
+    marker = " ".join(m.group("marker").split())
+    title = f"{marker} - {m.group('sub')}" if m.group("sub") else marker
+    return ParsedName(
+        name=name, kind=Kind.CHAPTER, layer=Layer.RELEASE, is_extra=True, title=title, group=group, series=series,
+        year=year, edition=edition, fix=fix, tags=tuple(tags), notes=(f"a comics extra {marker!r}: no chapter number",))
+
+
 def _read_tags(text: str):
     """``(group, year, edition, fix, volume tag, every tag)`` of a name's trailing ``(...)`` / ``[...]`` tags: the
     group is the first other tag after the edition, else the last other tag."""
@@ -286,7 +350,10 @@ def _read_tags(text: str):
         elif _FIX.match(tag) and fix is None:
             fix = tag
         elif _VOL_TAG.match(tag) and tag_volume is None:
-            tag_volume = UnitRange.of(_VOL_TAG.match(tag).group("v"))
+            vt = _VOL_TAG.match(tag)
+            tag_volume = UnitRange.of(vt.group("v") or vt.group("w"))
+        elif _REVISION.match(tag):
+            continue                                    # "[v2]": a revision - neither a volume nor the group
         else:
             candidates.append((i, tag))
     after_edition = [c for c in candidates if c[0] > edition_pos] if edition_pos >= 0 else []
@@ -304,7 +371,8 @@ _VOLUME_BEFORE = re.compile(rf"(?<![A-Za-z])(?:vol(?:ume)?\.?|v)\s*(?P<v>{UNIT})
 _CLOSER = {"[": "]", "(": ")"}
 
 
-def parse_labelled(name: str, series_title: Optional[str] = None) -> Optional[ParsedName]:
+def parse_labelled(name: str, series_title: Optional[str] = None,
+                   series_head: Optional[SeriesHead] = None) -> Optional[ParsedName]:
     """Layer 3b: a chapter written with a site's own label instead of "Ch." (owner's library, 2026-10-10: ~380 such
     files read as extras or unknown): ``<Title> - Episode 35``, ``<Title> Contact. 0001 - <title> [Group]``,
     ``<Title> [Pact 0015]``, ``<Title> Vol. 2 Lesson 5``. The label must be followed by its number and then by
@@ -320,7 +388,7 @@ def parse_labelled(name: str, series_title: Optional[str] = None) -> Optional[Pa
         parsed = _labelled_at(name, stem, m)
         if parsed is not None:
             return parsed
-    return _number_then_volume(name, stem)
+    return _number_then_volume(name, stem, series_title, series_head)
 
 
 # "<Series> 001 Vol 01 <chapter title>": a chapter number followed by its volume (renamer dry run, 2026-10-10: read
@@ -334,10 +402,13 @@ _NUMBER_THEN_VOLUME = re.compile(
 _NUMBER_WORD = re.compile(r"(?<![A-Za-z])(?:season|part|book|tome|arc)$", re.IGNORECASE)
 
 
-def _number_then_volume(name: str, stem: str) -> Optional[ParsedName]:
+def _number_then_volume(name: str, stem: str, series_title: Optional[str] = None,
+                        series_head: Optional[SeriesHead] = None) -> Optional[ParsedName]:
     m = _NUMBER_THEN_VOLUME.match(stem)
     if m is None or _SERIES_ENDS_IN_UNIT.search(m.group("series")) or _NUMBER_WORD.search(m.group("series")):
         return None
+    if title_owns_number(stem, m.start("n"), m.end("n"), series_title, series_head):
+        return None                                     # "<Title 100> v01": volume 1 (layers 3 / 4)
     n = m.group("n")
     rest = m.group("rest")
     tags_m = _TRAILING_TAGS.search(rest)
