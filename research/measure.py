@@ -76,6 +76,17 @@ def tops_of(db, root, n, seed=7):
     return rows[:n]
 
 
+def pick_tops(db, root, seed):
+    """Seven folders: six plain series folders (>= 3 archives) and one franchise parent (series rows below it)."""
+    rows = [s for s in db.list_series(root.id) if s.status == "present"]
+    plain = sorted(s.rel_path for s in rows if "/" not in s.rel_path and s.n_archives >= 3)
+    franchise = sorted({s.rel_path.split("/", 1)[0] for s in rows if "/" in s.rel_path})
+    random.Random(seed).shuffle(plain)
+    random.Random(seed).shuffle(franchise)
+    print(f"plain series folders: {len(plain)}, franchise parents: {len(franchise)}", flush=True)
+    return plain[:6] + franchise[:1]
+
+
 def cmd_timing():
     db = db_open()
     roots = db.list_roots()
@@ -262,6 +273,12 @@ def perturb(path: Path, root_id: int, tops: list) -> dict:
                 " last_seen_at, first_seen_scan, last_seen_scan) VALUES (?,?,?,?,?,NULL,'present','x','x',1,1)",
                 (root_id, s, f"{gone}/v01.cbz", 999, 1))
     done["vanished_folder"] = gone
+    if len(tops) > 6:                                            # a franchise parent: a subseries' archives forgotten
+        fr = tops[6]
+        ids = [r["id"] for r in con.execute("SELECT id FROM archives WHERE root_id=? AND rel_path LIKE ? ESCAPE '\\'",
+                                            (root_id, fr.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%"))][:3]
+        con.executemany("DELETE FROM archives WHERE id=?", [(i,) for i in ids])
+        done["franchise_parent"] = fr
     con.commit()
     con.close()
     return done
@@ -281,7 +298,7 @@ def cmd_equiv(second_scope="both"):
     roots = db.list_roots()
     print("settling: one full scan so the database matches the disk now", flush=True)
     scan_and_record_library(roots, db)
-    tops = tops_of(db, big, 8, seed=11)
+    tops = pick_tops(db, big, 11)
     base_db = base / "mangalist.db"
     results = {}
     for tag in ("A", "B", "C", "D"):
@@ -293,7 +310,7 @@ def cmd_equiv(second_scope="both"):
         done = perturb(base.parent / f"copy{tag}" / "mangalist.db", big.id, tops)
     print("perturbed:", {k: ("<names>" if isinstance(v, str) else "<names>") for k, v in done.items()}, flush=True)
     scope_names = {done["new_files"], done["changed"], done["removed_file"], done["new_folder"], *done["renamed_folder"],
-                   done["vanished_folder"]}
+                   done["vanished_folder"], *( [done["franchise_parent"]] if "franchise_parent" in done else [])}
     # A: full scan of every root
     t = time.monotonic()
     code = f"""
