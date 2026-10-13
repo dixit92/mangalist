@@ -104,3 +104,27 @@ def test_database_is_locked_is_tried_again():
                         sleep=lambda s: pytest.fail("retried"))
     assert is_locked_error(sqlite3.OperationalError("database table is locked"))
     assert not is_locked_error(ValueError("locked"))
+
+
+def test_a_wait_ends_when_the_scan_is_stopped(tmp_path):
+    lock = tmp_path / "scan.lock"
+    proc = _holder(lock, 3.0, tmp_path / "ready")
+
+    class Stopped(Exception):
+        pass
+
+    ticks = []
+
+    def tick():
+        ticks.append(1)
+        if len(ticks) >= 3:
+            raise Stopped()                     # the window closes / the runner shuts down while it waits
+
+    try:
+        with pytest.raises(Stopped):
+            with scan_lock(path=lock, tick=tick, poll=0.02):
+                pytest.fail("the block must not run")
+        with scan_lock(path=lock, wait=0.1, poll=0.02) as held:      # nothing left behind in this process
+            assert held is False
+    finally:
+        proc.wait(30)
