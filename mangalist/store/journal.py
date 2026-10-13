@@ -880,6 +880,56 @@ _COPY_INSTEAD = {e for e in (errno.EXDEV, errno.EPERM, errno.ENOTSUP, getattr(er
                              errno.EMLINK, errno.ENOSYS, errno.EACCES) if e is not None}
 
 
+class MoveFollower:
+    """Where a file the library had at some path is now: followed through the moves the journal applied after a given
+    plan (the renamer's renames to the scheme; an undone move is not followed). The journal's moves are read once.
+
+    Checks that a filed volume is still in the library use it (owner, 2026-10-12: completed torrents were not removed
+    and the holding folder could not be emptied - the automatic rename had renamed the filed volumes)."""
+
+    def __init__(self, journal: "Journal"):
+        self.journal = journal
+        self._moves: Optional[Dict[str, List[Tuple[int, str]]]] = None
+        self._plans: List[Tuple[int, str]] = []                 # (id, created_at) of every plan
+
+    def _read(self) -> Dict[str, List[Tuple[int, str]]]:
+        if self._moves is None:
+            moves: Dict[str, List[Tuple[int, str]]] = {}
+            try:
+                for plan in self.journal.list_plans():
+                    self._plans.append((plan.id, plan.created_at))
+                    for step in plan.steps:
+                        if step.op == "move" and step.state == "done" and not step.is_dir:
+                            moves.setdefault(_key(step.src), []).append((plan.id, step.dst))
+            except Exception:  # noqa: BLE001 - no journal: the recorded path is all that is known
+                _log.debug("Journal: the applied moves could not be read", exc_info=True)
+            self._moves = moves
+        return self._moves
+
+    def last_plan_before(self, when: str) -> int:
+        """The newest plan created before *when* (an ISO timestamp with seconds, as the stores write them); 0 when
+        none. Strictly before: a plan made in the same second may have come after, so its moves are followed."""
+        self._read()
+        return max((pid for pid, created in self._plans if created < when), default=0)
+
+    def current_path(self, path: str, after_plan: int) -> str:
+        """*path* followed through the moves applied by plans after *after_plan*, each once, in plan order."""
+        moves = self._read()
+        seen = set()
+        current, since = str(path), after_plan
+        while _key(current) not in seen:
+            seen.add(_key(current))
+            later = [(pid, dst) for pid, dst in moves.get(_key(current), ()) if pid > since]
+            if not later:
+                break
+            since, current = min(later)
+        return current
+
+
+def _key(p) -> str:
+    return os.path.normcase(_norm(p))
+
+
 def _ident(path: str) -> Optional[str]:
     try:
         st = os.stat(path)

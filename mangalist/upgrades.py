@@ -329,11 +329,22 @@ def _root_configured(db, root: str) -> bool:
                               for r in db.list_roots())
 
 
-def _volumes_problem(batch: Batch) -> Optional[str]:
+def _volume_files_now(db, batch: Batch) -> List[Tuple[str, int]]:
+    """The batch's filed volumes as (where each is now, filed size): followed through the journal's moves after the
+    batch's own plan - or, before it has one, after the last plan made before it was recorded (owner, 2026-10-12: the
+    holding folder could not be emptied once the automatic rename had renamed the volumes)."""
+    from .store.journal import Journal, MoveFollower
+
+    follower = MoveFollower(Journal(db))
+    since = batch.plan_id if batch.plan_id is not None else follower.last_plan_before(batch.created_at)
+    return [(follower.current_path(path, since), size) for path, size in batch.volume_files]
+
+
+def _volumes_problem(db, batch: Batch) -> Optional[str]:
     """Why the filed volumes no longer stand in for the chapters (None: every one is in the library at its size)."""
     if not batch.volume_files:
         return "no filed volume is recorded"
-    for path, size in batch.volume_files:
+    for path, size in _volume_files_now(db, batch):
         try:
             st = os.lstat(path)
         except OSError:
@@ -625,7 +636,7 @@ def hold_batch(db, batch_id: int, *, journal=None, now: Optional[datetime] = Non
         problem = holding_problem(db, settings.holding_folder)
         if problem:
             return wait(problem)
-        problem = _volumes_problem(batch)
+        problem = _volumes_problem(db, batch)
         if problem:
             return fail(problem)
         root = batch.root_path or ""
@@ -782,7 +793,7 @@ def volumes_in_library_problem(db, batch: Batch) -> Optional[str]:
     if not batch.volume_files:
         return "it does not record which volume files replaced the chapters"
     roots = [os.path.normpath(r.path) for r in db.list_roots()]
-    for path, size in batch.volume_files:
+    for path, size in _volume_files_now(db, batch):
         top = next((r for r in roots if os.path.normcase(os.path.normpath(path)).startswith(
             os.path.normcase(r.rstrip(os.sep)) + os.sep)), None)
         name = os.path.basename(path)
@@ -861,7 +872,7 @@ def delete_confirmed(db, batch_id: int, confirmed: Sequence[str]) -> List[Delete
     listed = {os.path.normpath(f.path) for f in batch.files}
     if {os.path.normpath(p) for p in confirmed} != listed or len(confirmed) != len(listed):
         return refuse_all("the confirmed list is not the batch's list of files")
-    problem = _volumes_problem(batch)
+    problem = _volumes_problem(db, batch)
     if problem:
         return refuse_all(problem)
     root = batch.root_path or ""
