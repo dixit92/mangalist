@@ -57,6 +57,24 @@ def encloses_whole(body: str) -> bool:
 _LEADING_SEPARATOR = re.compile(r"^\s*(?:-|\u2013|\u2014|:|\uff1a|_)?\s*")
 
 
+# A site's watermark at the end of a downloaded file's name ("<Series> 001 Read Online.cbz" - owner, 2026-10-11: such a
+# bare number was not read at all, so the "volumes or chapters?" answer could not help). A class, not a list of sites
+# (MangaPixer 1.42.0 ``TitleNormalizer.SiteWatermark``): "read" (+ manga / manhwa / manhua / webtoon / comic) + online /
+# free / for free, or (manga ...) online (for) free, or free online. One of those words alone never is ("Sword Art
+# Online", "Free!", "Read or Die"), and some text must come before it.
+WATERMARK = re.compile(
+    r"(?<=\S)[\s_\-\u2013\u2014|:]+(?:read(?:[\s_]+(?:manga|manhwa|manhua|webtoons?|comics?))?"
+    r"(?:[\s_]+(?:online|free|for[\s_]+free)){1,2}|(?:(?:manga|manhwa|manhua|webtoons?|comics?)[\s_]+)?online[\s_]+"
+    r"(?:for[\s_]+)?free|free[\s_]+online)[\s_]*$", re.IGNORECASE)
+
+
+def without_watermark(name: str) -> str:
+    """``name`` without a site's watermark at the end of its stem (the extension is kept); unchanged without one."""
+    stem, ext = split_extension(name)
+    cut = WATERMARK.sub("", stem)
+    return cut + ext if cut and cut != stem else name
+
+
 def clean_title(text: str) -> Optional[str]:
     """A chapter title without its leading separator (`` - ``, ``:``, ``_``); None when empty."""
     t = _LEADING_SEPARATOR.sub("", text, count=1).strip()

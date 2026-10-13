@@ -54,6 +54,8 @@ CHANGES = [
     # MangaList's own scheme: the title in parentheses is never read for numbers.
     ("Ch. 0010.00 (The Vol 2 Begins) [G].cbz", ("chapter", 2.0, 10.0), ("chapter", None, D("10"), False)),
     ("Ch. 0010.00 (Chapter 5 of the Ch. 3 Arc) [G].cbz", ("chapter", None, 10.0), ("chapter", None, D("10"), False)),
+    # MangaPixer 1.42 parity (hand-over 2026-10-12): a single-digit "[v2]" is a release revision, not volume 2.
+    ("[Group] Title - c001 [v2].cbz", ("chapter", 2.0, 1.0), ("chapter", None, D("1"), False)),
 ]
 
 
@@ -68,7 +70,7 @@ UNCHANGED = [
     "0003 [Chapter 3].cbz", "0003 [Vol.1 Ch.3].cbz", "0003 [Vol. 01 Ch. 003 - Title [Grp]].cbz",
     "Title - 0012 [Ch. 12].cbz", "0005 [Ch. 5 - Episode 30].cbz", "0012 [Vol. 3].cbz", "0012 [Ch. 10-12].cbz",
     "Title v01 (2019) (Digital) (G).cbz", "Title c012 (v03) (G).cbz", "Title Vol. 3 Ch. 12.cbz",
-    "Title_ch_007.zip", "[Group] Title - c001 [v2].cbz", "Title Volume 1 Chapter 2.cbz", "Ch.12.5.cbz",
+    "Title_ch_007.zip", "Title Volume 1 Chapter 2.cbz", "Ch.12.5.cbz",
     "01.cbz",
 ]
 

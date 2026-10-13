@@ -6,8 +6,11 @@ Public API
 ``parse_name(name, context=None, *, file_size=0) -> ParsedName``
     Units of one archive file name. ``context`` is an optional :class:`ParseContext`:
     ``schemes`` (the root's naming template(s), layer 1), ``kind_hint`` (``"volumes"`` / ``"chapters"``,
-    the stored per-series answer for bare numbers) and ``series_title`` (the folder's title).
-    ``parse_names(names, context)`` maps it over many names.
+    the stored per-series answer for bare numbers), ``series_title`` (the folder's title; a number the title ends
+    with is never a unit) and ``series_head`` (the folder's :class:`SeriesHead`: a number every sibling shares is
+    part of the title). ``parse_names(names, context)`` maps it over one folder's names and works out their
+    ``series_head`` (``series_head_of``); ``with_series_head(context, names)`` adds it for callers that parse a
+    folder's names one by one.
 
 ``ParsedName`` (frozen dataclass)
     ``kind`` (:class:`Kind`: volume / chapter / both / unknown), ``volume`` / ``chapter`` / ``number``
@@ -33,7 +36,10 @@ Layers (first match wins)
    ``[...]`` are never read for numbers.
 3. **release** - ``Title vNN(-MM) (+ chapters) (Year) (Digital|Digital-Compilation) (Group) (fN)`` and the
    older ``Title vol NN`` / ``Title Vol. NN`` / ``Title cNNN (...)`` / ``Title NNN (Year) (Digital)`` forms
-   (the LAST volume token is the unit: ``Title - Part 5 - Sub v05`` is volume 5).
+   (the LAST volume token is the unit: ``Title - Part 5 - Sub v05`` is volume 5); the comics / BD album tokens
+   ``Tome 3`` / ``Tomo`` / ``Band`` / ``Deel`` / ``Album`` / ``Livre`` / ``T03`` are volumes, and ``Annual 2`` /
+   ``Special #1`` / ``One-Shot 1`` / ``FCBD`` an extra (``parse_comics_extra``, first). A single-digit ``[v2]`` tag
+   is a release revision, not a volume.
 3b. **labelled** - a site's own chapter label: ``Title - Episode 35``, ``Title Contact. 0001 - <title>``,
    ``Title [Pact 0015]`` (contact / episode / report / pact / act / lesson / stage / round / night / ...).
 4. **generic** - today's classifier (``classifier.detect_tokens`` + the ``models`` number regexes),
@@ -43,12 +49,19 @@ Layers (first match wins)
    a chapter by guess (``guessed``), ``01.cbz`` alone stays unknown.
 
 Each layer is also callable on its own: ``parse_scheme``, ``parse_fmd2``, ``parse_release``,
-``parse_labelled``, ``parse_generic``, ``parse_bare`` (None when the name is not that layer's shape).
+``parse_labelled``, ``parse_generic``, ``parse_bare`` (None when the name is not that layer's shape), and
+``parse_comics_extra``.
+
+A site's watermark at the end of a name (``Read Online``, ``Read Manhwa Online Free``, ``Free Online``; a class,
+MangaPixer 1.42.0) is left out before any layer reads it.
 """
 
-from .layers import parse_bare, parse_fmd2, parse_generic, parse_labelled, parse_release, parse_scheme
+from .layers import (
+    parse_bare, parse_comics_extra, parse_fmd2, parse_generic, parse_labelled, parse_release, parse_scheme,
+)
 from .model import Kind, Layer, ParsedName, UnitRange, to_decimal
-from .parser import KindHint, ParseContext, parse_name, parse_names
+from .heads import SeriesHead, series_head_of
+from .parser import KindHint, ParseContext, parse_name, parse_names, with_series_head
 from .template import (
     FMD2_CHAPTER_SCHEME,
     FMD2_VOLUME_SCHEME,
@@ -67,7 +80,7 @@ from .template import (
 __all__ = [
     "FMD2_CHAPTER_SCHEME", "FMD2_VOLUME_SCHEME", "Kind", "KindHint", "Layer", "MANGALIST_CHAPTER_SCHEME",
     "MANGALIST_VOLUME_SCHEME", "ParseContext", "ParsedName", "TOKENS", "Template", "TemplateError", "TokenSpec",
-    "UnitRange", "compile_template", "parse_bare", "parse_fmd2", "parse_generic", "parse_labelled", "parse_name",
-    "parse_names", "parse_release", "parse_scheme",
-    "register_token", "to_decimal", "values_of", "windows_safe",
+    "SeriesHead", "UnitRange", "compile_template", "parse_bare", "parse_comics_extra", "parse_fmd2", "parse_generic",
+    "parse_labelled", "parse_name", "parse_names", "parse_release", "parse_scheme",
+    "register_token", "series_head_of", "to_decimal", "values_of", "windows_safe", "with_series_head",
 ]

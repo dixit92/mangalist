@@ -643,3 +643,15 @@ def test_a_folder_subtitle_the_main_record_carries_itself_is_not_capped():
 
     assert o.ranked[0].candidate.external_id == "1"
     assert o.ranked[0].title_score > 0.95
+
+
+def test_archive_level_a_tag_naming_the_authors_alias_in_brackets_agrees():
+    # MangaUpdates writes an author's alias in brackets: "Main Pen (Second Pen)" is both names (1.39.0, rules 4).
+    record = rec("1", "Short Story", authors=["Main Pen (Second Pen)"])
+
+    for tag in ("Second Pen", "PEN Main"):
+        outcome = score(query(["Short Story"], cls=WorkClass.COLLECTION_LEAF, archives=1, authors=[tag]), record)
+        assert outcome.band == MatchBand.AUTO
+        assert not outcome.ranked[0].reasons & MatchReason.AUTHOR_CONFLICT
+    other = score(query(["Short Story"], cls=WorkClass.COLLECTION_LEAF, archives=1, authors=["Someone Else"]), record)
+    assert other.ranked[0].reasons & MatchReason.AUTHOR_CONFLICT
