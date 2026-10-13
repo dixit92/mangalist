@@ -3,11 +3,11 @@ volume (backlog, decided 2026-10-11; owner: "there should be a setting to conver
 unbundled chapters series, with both upgrade and new missing chapter downloads applicable", "Auto mode should be
 allowed"). No Qt here: the List, the wanted list and the headless find pass read it alike.
 
-**What it does** is the states' business (:func:`mangalist.states.compute_state`, ``unbundled=``): the chapters after the
-newest held (or released) volume's last chapter up to the chapter target become Missing chapters; the volume side is
-unchanged. The wanted list then lists the series under Missing chapters as well, and the find pass and the Download tab
-treat those chapters like any chapter series' (the saved Suwayomi source, the series' group, its automatic-downloads
-mode - Auto included).
+**What it does** is the states' business (:func:`mangalist.states.compute_state`, ``unbundled=``): the chapters after
+the newest held (or released) volume's last chapter up to the chapter target become Missing chapters (added to what
+the folder already wants: the setting never takes a gap away); the volume side is unchanged. The wanted list then
+lists the series under Missing chapters as well, and the find pass and the Download tab treat those chapters like any
+chapter series' (the saved Suwayomi source, the series' group, its automatic-downloads mode - Auto included).
 
 **Storage: no schema change.** One ``meta`` row per series that has it on - ``series.unbundled.<series id>`` - like the
 Suwayomi choices of a series (``suwayomi.series.<id>``, :class:`mangalist.store.downloads.SuwayomiSettings`): keyed by

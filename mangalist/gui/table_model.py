@@ -139,7 +139,7 @@ class MangaTableModel(QAbstractTableModel):
         self._inventory_for: Callable[[MangaEntry], Any] = fallback_inventory_from_entry
         self._knowledge_for: Callable[[MangaEntry], Optional[SeriesKnowledge]] = from_own_matcher
         self._needs_kind_for: Callable[[MangaEntry], bool] = lambda e: False
-        self._unbundled_for: Callable[[MangaEntry], bool] = lambda e: False     # Unbundled Chapters (mangalist.unbundled)
+        self._unbundled_for: Callable[[MangaEntry], bool] = lambda e: False     # mangalist.unbundled
         self.dataChanged.connect(self._on_data_changed)
         self.modelReset.connect(self._state_cache.clear)
         # Build initial dupe map if entries provided
