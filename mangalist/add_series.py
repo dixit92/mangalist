@@ -14,9 +14,9 @@ MangaList then
    under a name the library excludes, under the library's ``.mangalist.lock``, owned by the user MangaList runs as;
 4. records what the owner chose, so nothing is searched or confirmed again (:func:`add_series`): the series row (made
    now, so its id exists before any scan), the MangaUpdates match as CONFIRMED (the same record "Fix MangaUpdates
-   match..." writes), and for a MangaDex link the series' Suwayomi source (:func:`find_mangadex_source` asks Suwayomi for
-   ``id:<uuid>`` on the allowed MangaDex sources, the way the chapters panel does, and the choice is stored with the
-   same ``mangadex-id`` mark, so the panel lists the chapters without asking);
+   match..." writes), and for a MangaDex link the series' Suwayomi source (:func:`find_mangadex_source` asks
+   Suwayomi for ``id:<uuid>`` on the allowed MangaDex sources, the way the chapters panel does, and the choice is
+   stored with the same ``mangadex-id`` mark, so the panel lists the chapters without asking);
 5. optionally asks MangaPixer to scan the library (the after-filing request, off when the owner switched it off).
 
 The caller rescans the library afterwards; the empty folder is a normal series then (state Wanted: "Missing volumes /
@@ -95,8 +95,9 @@ def base36_from_mu_id(mu_id: int) -> str:
 
 
 def parse_link(text: str) -> Optional[ParsedLink]:
-    """What a pasted text points at: a :class:`ParsedLink`; None when it is not a link at all (the text is then a title to
-    search); :class:`LinkError` when it is a link MangaList cannot use (another site, the old MangaUpdates address)."""
+    """What a pasted text points at: a :class:`ParsedLink`; None when it is not a link at all (the text is then a
+    title to search); :class:`LinkError` when it is a link MangaList cannot use (another site, the old MangaUpdates
+    address)."""
     raw = (text or "").strip().strip("<>").strip()
     if not raw:
         return None
@@ -124,7 +125,8 @@ def parse_link(text: str) -> Optional[ParsedLink]:
             raise LinkError("This is MangaUpdates' old address form (series.html?id=...), which MangaUpdates' API does "
                             "not know. Open the series page and paste the address from the browser (it looks like "
                             "https://www.mangaupdates.com/series/<id>/<name>).")
-        raise LinkError("This MangaUpdates link is not a series page (https://www.mangaupdates.com/series/<id>/<name>).")
+        raise LinkError("This MangaUpdates link is not a series page "
+                        "(https://www.mangaupdates.com/series/<id>/<name>).")
     raise LinkError("Only MangaUpdates and MangaDex links work here. Paste one of those, or type a title.")
 
 
@@ -231,7 +233,8 @@ class SeriesInfo:
     def summary(self) -> List[str]:
         """The lines the dialog shows under the title."""
         lines = []
-        what = " ".join(p for p in (self.kind, f"({self.year})" if self.year else None) if p)
+        year = (f"({self.year})" if self.kind else self.year) if self.year else None
+        what = " ".join(p for p in (self.kind, year) if p)
         if what:
             lines.append(what)
         if self.matched:
@@ -280,7 +283,7 @@ class Lookup:
     """The outcome of :func:`lookup`: the series (``info``), or MangaUpdates candidates for the owner to pick from."""
 
     info: Optional[SeriesInfo] = None
-    candidates: List[Dict[str, Any]] = field(default_factory=list)    # MangaUpdates search records (series_id, title, ...)
+    candidates: List[Dict[str, Any]] = field(default_factory=list)    # MangaUpdates search records
     mangadex: Optional[MangaDexSeries] = None
     notes: List[str] = field(default_factory=list)
 
@@ -295,7 +298,8 @@ def _get_mu(mu_id: int, get: Callable[[int], Dict[str, Any]]) -> Dict[str, Any]:
         raise AddSeriesError("MangaUpdates could not be reached or did not answer.") from None
 
 
-def search_mu(query: str, search: Callable[..., List[Dict[str, Any]]] = mu_client.search_series) -> List[Dict[str, Any]]:
+def search_mu(query: str,
+              search: Callable[..., List[Dict[str, Any]]] = mu_client.search_series) -> List[Dict[str, Any]]:
     """MangaUpdates' search records for *query* (no type filter: the owner picks)."""
     try:
         return [item["record"] for item in search(query, page_size=MAX_SEARCH_RESULTS) if "record" in item]
@@ -307,9 +311,9 @@ def search_mu(query: str, search: Callable[..., List[Dict[str, Any]]] = mu_clien
 def lookup(text: str, *, mu_get: Callable[[int], Dict[str, Any]] = mu_client.get_series,
            mu_search: Callable[..., List[Dict[str, Any]]] = mu_client.search_series,
            mangadex_get: Callable[[str], Dict[str, Any]] = _http_get_json) -> Lookup:
-    """Read what the owner pasted. A MangaUpdates link: its record. A MangaDex link: MangaDex's record and, when MangaDex
-    lists the series' MangaUpdates page, that record too; else MangaUpdates' search results for MangaDex's title
-    (``candidates``) and ``info`` as a series without a match. A title: the search results only."""
+    """Read what the owner pasted. A MangaUpdates link: its record. A MangaDex link: MangaDex's record and, when
+    MangaDex lists the series' MangaUpdates page, that record too; else MangaUpdates' search results for MangaDex's
+    title (``candidates``) and ``info`` as a series without a match. A title: the search results only."""
     link = parse_link(text)
     if link is None:
         query = (text or "").strip()
@@ -355,8 +359,8 @@ _WS = re.compile(r"\s+")
 
 
 def clean_folder_name(text: str) -> str:
-    """*text* as a folder name every platform of the library takes: ``:`` becomes `` - `` (before a space) or ``-``, ``/ \\ |``
-    become ``-``, ``"`` becomes ``'``, ``< > ? *`` and control characters are dropped, white space is collapsed and
+    """*text* as a folder name every platform of the library takes: ``:`` becomes `` - `` (before a space) or ``-``,
+    ``/ \\ |`` become ``-``, ``"`` becomes ``'``, ``< > ? *`` and control characters are dropped, white space is collapsed and
     a trailing dot or space goes; whatever still breaks a Windows rule is replaced (:func:`windows_safe_name`)."""
     s = unicodedata.normalize("NFC", text or "")
     s = re.sub(r":(?=\s)", " -", s).replace(":", "-")
@@ -376,8 +380,8 @@ def _latin(text: str) -> bool:
 
 
 def propose_names(info: SeriesInfo) -> List[str]:
-    """Folder names for the series, best first, each cleaned: the English title (MangaDex's), MangaUpdates' title, MangaDex's
-    main title, the library's ``<title> [<English title>]`` form when the two differ, then other Latin-script titles
+    """Folder names for the series, best first, each cleaned: the English title (MangaDex's), MangaUpdates' title,
+    MangaDex's main title, the library's ``<title> [<English title>]`` form when the two differ, then other Latin-script titles
     MangaUpdates knows. The owner may edit the choice."""
     english = info.english_title
     main = info.mu_title or info.title
@@ -432,9 +436,9 @@ def folder_problem(root, name: str) -> Optional[str]:
 
 
 def create_series_folder(root, name: str) -> Path:
-    """Make the empty folder *name* in library folder *root* and return it as the scanner will key it (under the resolved
-    root). Refuses (:class:`AddSeriesError`) on :func:`folder_problem`, on a library another MangaList is writing, and when
-    the path appears meanwhile (``mkdir`` never replaces). The folder belongs to the user MangaList runs as."""
+    """Make the empty folder *name* in library folder *root* and return it as the scanner will key it (under the
+    resolved root). Refuses (:class:`AddSeriesError`) on :func:`folder_problem`, on a library another MangaList is
+    writing, and when the path appears meanwhile (``mkdir`` never replaces). The folder belongs to the user MangaList runs as."""
     problem = folder_problem(root, name)
     if problem:
         raise AddSeriesError(problem)

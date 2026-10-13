@@ -1,5 +1,5 @@
-"""Add a series by link, as a dialog (owner, 2026-10-11). Paste a MangaUpdates or MangaDex link (or type a title), pick the
-library and the folder name; MangaList makes the empty folder and records the match and the source
+"""Add a series by link, as a dialog (owner, 2026-10-11). Paste a MangaUpdates or MangaDex link (or type a title),
+pick the library and the folder name; MangaList makes the empty folder and records the match and the source
 (:mod:`mangalist.add_series` does the work; this file only asks and shows). Everything that touches a network or the
 disk runs off the UI thread (:func:`~mangalist.gui.background.start_call`).
 
@@ -93,7 +93,8 @@ class AddSeriesDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("addSeriesDialog")
         self.setWindowTitle("Add a series")
-        self.resize(640, 640)
+        self.resize(660, 780)
+        self.setMinimumSize(560, 520)
         self.backend = backend
         self.roots = list(roots)
         self.outcome: Optional[core.AddResult] = None
@@ -118,7 +119,7 @@ class AddSeriesDialog(QDialog):
             "missing and can be found and downloaded.", "lead", wrap=True))
 
         self.input = QLineEdit()
-        self.input.setPlaceholderText("https://www.mangaupdates.com/series/...   or   https://mangadex.org/title/...   or a title")
+        self.input.setPlaceholderText("A MangaUpdates link, a MangaDex link, or a title")
         self.input.setAccessibleName("Link or title")
         self.input.returnPressed.connect(self.look_up)
         self.btn_lookup = button("Look up", primary=True)
@@ -177,7 +178,7 @@ class AddSeriesDialog(QDialog):
             label("Library", "h3"), self.library,
             label("Folder name", "h3"), self.folder,
             label("The English title first; edit it if the library names this series differently.", "muted", wrap=True),
-            self.folder_problem, spacing=6, margins=(14, 12, 14, 12)))
+            self.folder_problem, spacing=8, margins=(14, 12, 14, 14)))
         self.form_box.setVisible(False)
         outer.addWidget(self.form_box)
         outer.addStretch(1)
