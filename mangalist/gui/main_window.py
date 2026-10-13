@@ -905,10 +905,11 @@ class MainWindow(QMainWindow):
         """Rescan only the series folders holding *paths* (files or folders; selective scanning, owner 2026-10-13: "it
         rescans the whole library or ALL libraries sometimes and it's not always necessary"). Paths in no library
         folder scan nothing. False when nothing was asked."""
-        roots = self._roots()
+        roots, paths = self._roots(), list(paths)
         scopes = folder_scopes(roots, paths)
         if not scopes:
-            _log.info("Rescan asked for %d path(s) in no library folder: nothing to scan", len(list(paths)))
+            if paths:
+                _log.info("Rescan asked for %d path(s) in no library folder: nothing to scan", len(paths))
             return False
         self._start_scan([r for r in roots if r.id in scopes], scopes)
         return True
