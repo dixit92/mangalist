@@ -510,10 +510,14 @@ _BARE_TITLED = re.compile(
     r"(?P<tags>(?:\s*(?:\([^()]*\)|\[[^\[\]]*\]))*)\s*$")
 
 
-def parse_bare(name: str, series_title: Optional[str] = None) -> Optional[ParsedName]:
+def parse_bare(name: str, series_title: Optional[str] = None,
+               series_head: Optional[SeriesHead] = None) -> Optional[ParsedName]:
     """Layer 5: ``01.cbz``, ``Title 01.cbz``, ``Title - 01.cbz``: a number whose kind the name does not
     state (``kind`` UNKNOWN, ``number`` set). With ``series_title``, a name that is just the series title
-    (``42.cbz`` in the folder ``42``) has no number."""
+    (``42.cbz`` in the folder ``42``) has no number. A VARYING ``series_head`` (the text the folder's names carry in
+    front of a number that changes) counts as the series' own title too: ``<English title> 001 <chapter title>`` in a
+    folder named by the romaji title (owner, 2026-10-13: such names were left alone, so the "chapters" answer could not
+    apply)."""
     stem, _ = split_extension(name)
     text = stem.strip()
     if series_title and series_title.strip():
@@ -521,14 +525,15 @@ def parse_bare(name: str, series_title: Optional[str] = None) -> Optional[Parsed
         if text.casefold() == st.casefold():
             return None
         if text.casefold().startswith(st.casefold()):
-            rest = text[len(st):]
-            if rest[:1] in (" ", "_", "-", "#"):
-                rm = _BARE.match(rest.lstrip(" _-#"))
-                if rm is not None and rm.group("series") is None:
-                    return _bare_result(name, rm, st)
-                titled = _after_series_titled(name, rest.lstrip(" _-#"), st)
-                if titled is not None:
-                    return titled
+            after = _after_known_title(name, text[len(st):], st)
+            if after is not None:
+                return after
+    if series_head is not None and series_head.varies:
+        hm = _head_prefix(series_head.key).match(text)
+        if hm is not None:
+            after = _after_known_title(name, text[hm.end():], hm.group(0).strip())
+            if after is not None:
+                return after
     # A number with a chapter title after it first: a title ending in a number ("..., Part 2") must not give its "2"
     # (owner, 2026-10-11: "<Series> 014.5  <title>, Part 2" read as chapter 2, so three chapters collided).
     titled = _bare_titled(name, text)
@@ -558,6 +563,24 @@ def _after_series_titled(name: str, rest: str, series: str) -> Optional[ParsedNa
     r = _bare_result(name, m, series)
     return replace(r, title=clean_title(m.group("title")), group=_read_tags(m.group("tags"))[0],
                    notes=("bare number with a chapter title after the series title: volumes or chapters?",))
+
+
+def _after_known_title(name: str, rest: str, title: str) -> Optional[ParsedName]:
+    """What follows the series' own title (or its varying series head): a bare number, or one with a chapter title."""
+    if rest[:1] not in (" ", "_", "-", "#"):
+        return None
+    rm = _BARE.match(rest.lstrip(" _-#"))
+    if rm is not None and rm.group("series") is None:
+        return _bare_result(name, rm, title)
+    return _after_series_titled(name, rest.lstrip(" _-#"), title)
+
+
+def _head_prefix(key: str) -> "re.Pattern[str]":
+    """The start of a name that reads as the head *key* (``name_key`` form: words separated by one space) - any case,
+    any separators and bracket groups between its words."""
+    words = [re.escape(w) for w in key.split()]
+    gap = r"(?:[\W_]|\[[^\[\]]*\]|\([^()]*\))+"
+    return re.compile(r"^(?:\[[^\[\]]*\]\s*)*" + gap.join(words) + r"(?=[\s_\-#])", re.IGNORECASE)
 
 
 def _bare_titled(name: str, text: str) -> Optional[ParsedName]:
