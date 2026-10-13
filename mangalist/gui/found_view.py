@@ -3,6 +3,16 @@ for the owner - one row per finding with its series, what it would get, its size
 per row and **Send all** (asks first, with the count and the total size). Empty, it says "Nothing found waiting for you"
 and when the last pass ran.
 
+A chapter finding with nothing to send - the series' source is gone or lacks the chapters, or it has none yet - shows
+**Change source…** instead of Send: it opens the series in Missing chapters, where its source is picked (owner,
+2026-10-12: "there's no option here to change the source"); Send all leaves such findings out. Showing one series, the
+header has its **Automatic downloads** mode (Off / Notify / Auto / the default; owner, 2026-10-12: "I should also be able
+to switch a series from notify to auto here").
+
+Sends run one at a time (a pack may take a while: its file list is read to narrow it). **Send** while one runs queues the
+finding - its button says "Queued" - and the queue is worked through in order (owner, 2026-10-12: "Am I not able to
+queue sends?"); Skip and Change source stay usable meanwhile, and skipping a queued finding takes it off the queue.
+
 The rows are the backend's findings (:class:`~mangalist.store.findings.Finding`, ``findings()``); sending runs off the
 UI thread (``send_finding`` may add a torrent to qBittorrent or queue it under the download budget, or enqueue chapters
 in Suwayomi) and says what happened, as the backend words it; skipping is quick and the pick is never offered again.
@@ -17,13 +27,29 @@ import logging
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QMessageBox, QProgressBar, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QMessageBox,
+    QProgressBar,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .automation_rules import (
     EMPTY_TITLE,
+    MODE_AUTO,
+    MODE_HELP,
+    MODE_LABELS,
+    MODES,
+    default_entry_label,
     gets_text,
     kind_text,
     last_run_text,
+    needs_source,
+    sendable,
     send_all_question,
     send_all_summary,
     size_text,
@@ -56,9 +82,17 @@ class FoundRow(QFrame):
         self.btn_send = button("Send", primary=True, tip="Send it now: a torrent goes to qBittorrent (or waits in the "
                                                          "queue past the download budget), chapters to Suwayomi")
         self.btn_skip = button("Skip", tip="Do not get it: it leaves the list and is not offered again")
+        # Nothing to send until the series has a (another) source: picking one is the way on.
+        self.btn_source = button("Change source…", primary=True,
+                                 tip="Open the series in Missing chapters to pick where its chapters come from: "
+                                     "MangaDex or your other Suwayomi sources. Remembered for the series")
+        self.needs_source = needs_source(finding)
+        first = self.btn_source if self.needs_source else self.btn_send
+        (self.btn_send if self.needs_source else self.btn_source).setVisible(False)
+        self.size_label.setVisible(not self.needs_source)          # nothing to download yet: no size to tell
         # The series' name alone on the first line with the actions; the kind and the numbers under it (owner: title
         # and counts clearly apart).
-        top = hbox(self.name_label, self.size_label, self.btn_send, self.btn_skip, spacing=10)
+        top = hbox(self.name_label, self.size_label, first, self.btn_skip, spacing=10)
         top.setStretchFactor(self.name_label, 1)
         lay.addLayout(top)
         self.gets_label = label(f"Gets {gets_text(finding)}", "lead")
@@ -69,13 +103,18 @@ class FoundRow(QFrame):
         for widget in (self.release_label, self.reason_label):
             lay.addWidget(widget)
 
-    def set_enabled_actions(self, enabled: bool) -> None:
-        self.btn_send.setEnabled(enabled)
-        self.btn_skip.setEnabled(enabled)
+    def set_enabled_actions(self, enabled: bool, state: str = "") -> None:
+        """*state*: ``sending`` / ``queued`` (Send says so and waits; a queued one can still be skipped) or ''."""
+        self.btn_send.setText({"sending": "Sending…", "queued": "Queued"}.get(state, "Send"))
+        self.btn_send.setEnabled(enabled and not state)
+        self.btn_source.setEnabled(enabled)
+        self.btn_skip.setEnabled(enabled and state != "sending")
 
 
 class FoundView(QWidget):
     changed = Signal()              # findings were sent or skipped: the host reloads them (and the downloads)
+    change_source = Signal(int)     # a series id: open it in Missing chapters to pick its source
+    mode_changed = Signal()         # a series' automatic-download mode was set here: the List's chips follow
 
     def __init__(self, backend, parent: Optional[QWidget] = None, confirm: Optional[ConfirmFn] = None):
         super().__init__(parent)
@@ -87,6 +126,10 @@ class FoundView(QWidget):
         self._run = None
         self._series: Optional[int] = None          # show only this series' findings (the list on the left)
         self._call: Optional[BackgroundCall] = None
+        self._sending: Optional[int] = None         # the finding being sent now
+        self._queue: List[int] = []                 # findings waiting to be sent, in order
+        self._sending_text = ""
+        self._last_outcome = ("", "")
         self._busy_text = ""
         self.rows: Dict[int, FoundRow] = {}
 
@@ -100,6 +143,18 @@ class FoundView(QWidget):
         self.btn_send_all = button("Send all…", tip="Send every finding listed here (asks first)")
         self.btn_send_all.clicked.connect(self.send_all)
         outer.addLayout(hbox(self.title_label, self.count_label, None, self.btn_show_all, self.btn_send_all, spacing=12))
+        # One series shown: its automatic-download mode, changed in place.
+        self.mode_combo = QComboBox()
+        self.mode_combo.setObjectName("foundMode")
+        self.mode_combo.setToolTip("This series' automatic downloads; the default is set in Settings > Automation")
+        self.mode_combo.activated.connect(self._mode_chosen)
+        self.mode_help = label("", "muted", wrap=True)
+        self.mode_row = QWidget()
+        mode_line = hbox(label("Automatic downloads", "muted"), self.mode_combo, self.mode_help, spacing=8)
+        mode_line.setStretchFactor(self.mode_help, 1)
+        self.mode_row.setLayout(mode_line)
+        self.mode_row.setVisible(False)
+        outer.addWidget(self.mode_row)
         self.run_label = label("", "muted", wrap=True)
         outer.addWidget(self.run_label)
         self.progress = QProgressBar()
@@ -184,7 +239,11 @@ class FoundView(QWidget):
         self._enable()
 
     def busy(self) -> bool:
-        return bool(self._busy_text) or self._call is not None
+        return bool(self._busy_text) or self._call is not None or bool(self._queue)
+
+    def queued(self) -> List[int]:
+        """The findings waiting to be sent, in order (not the one being sent)."""
+        return list(self._queue)
 
     def say(self, text: str, tone: str = "") -> None:
         set_tone(self.status_label, tone if text else "")
@@ -203,6 +262,7 @@ class FoundView(QWidget):
         for finding in shown:
             row = FoundRow(finding, self.name_of(finding.series_id))
             row.btn_send.clicked.connect(lambda _=False, fid=finding.id: self.send(fid))
+            row.btn_source.clicked.connect(lambda _=False, sid=finding.series_id: self.change_source.emit(sid))
             row.btn_skip.clicked.connect(lambda _=False, fid=finding.id: self.skip(fid))
             self._list.insertWidget(self._list.count() - 1, row)
             row.show()                          # shown with the list (a reparented widget starts hidden)
@@ -214,22 +274,73 @@ class FoundView(QWidget):
         self.count_label.setVisible(bool(shown))
         self.btn_show_all.setText(f"Show all ({len(self._findings)})")
         self.btn_show_all.setVisible(filtered)
-        self.btn_send_all.setText(f"Send all {len(shown)}…" if len(shown) > 1 else "Send all…")
+        n_send = len(sendable(shown))
+        self.btn_send_all.setText(f"Send all {n_send}…" if n_send > 1 else "Send all…")
         run = last_run_text(self._run)
         self.run_label.setText(run)
         self.run_label.setVisible(bool(shown))
         self.empty_text.setText(run)
         self.empty.setVisible(not shown)
         self.scroll.setVisible(bool(shown))
+        self._show_mode()
         self._enable()
+
+    # --- the series' mode ----------------------------------------------------------------------------
+
+    def _show_mode(self) -> None:
+        """One series shown: its own mode ticked (or "Use the default (…)"), and what the mode in force does."""
+        sid = self._series
+        modes = callable(getattr(self._backend, "own_series_mode", None))
+        self.mode_row.setVisible(sid is not None and modes)
+        if sid is None or not modes:
+            return
+        try:
+            own = self._backend.own_series_mode(sid)
+            default = self._backend.default_mode()
+        except Exception as exc:  # noqa: BLE001 - the line says why; nothing else depends on it
+            self.mode_row.setVisible(False)
+            _log.warning("Found: the mode of series %s could not be read: %s", sid, describe_error(exc))
+            return
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.clear()
+        for mode in MODES:
+            self.mode_combo.addItem(MODE_LABELS[mode], mode)
+        self.mode_combo.addItem(default_entry_label(default), None)
+        self.mode_combo.setCurrentIndex(MODES.index(own) if own in MODES else len(MODES))
+        self.mode_combo.blockSignals(False)
+        in_force = own if own in MODES else default
+        help_text = MODE_HELP.get(in_force, "")
+        if in_force == MODE_AUTO:
+            help_text += " What waits here goes at the next scheduled find pass or Find now (a bulk find sends nothing)."
+        self.mode_help.setText(help_text)
+
+    def _mode_chosen(self, index: int) -> None:
+        sid = self._series
+        if sid is None:
+            return
+        mode = self.mode_combo.itemData(index)
+        try:
+            self._backend.set_series_mode([sid], mode)
+        except Exception as exc:  # noqa: BLE001 - shown; the combo shows the stored mode again
+            self.say(f"Could not change the automatic downloads: {describe_error(exc)}", "bad")
+            self._show_mode()
+            return
+        _log.info("Found: automatic downloads %s for series %s", mode or "the default", sid)
+        name = self.name_of(sid)
+        self.say(f"Automatic downloads for {name}: {MODE_LABELS[mode]}." if mode else
+                 f"Automatic downloads for {name}: the default again.", "ok")
+        self._show_mode()
+        self.mode_changed.emit()
 
     def _enable(self) -> None:
         free = not self.busy()
-        several = len(self.shown()) > 1
+        several = len(sendable(self.shown())) > 1
         self.btn_send_all.setVisible(several)
         self.btn_send_all.setEnabled(free and several)
-        for row in self.rows.values():
-            row.set_enabled_actions(free)
+        passing = bool(self._busy_text)             # a find pass runs: every action waits for it
+        for fid, row in self.rows.items():
+            state = "sending" if fid == self._sending else "queued" if fid in self._queue else ""
+            row.set_enabled_actions(not passing, state)
 
     # --- actions -------------------------------------------------------------------------------------
 
@@ -237,28 +348,65 @@ class FoundView(QWidget):
         return next((f for f in self._findings if f.id == finding_id), None)
 
     def send(self, finding_id: int) -> bool:
-        """Send one finding (off the UI thread); the line under the header says what happened."""
+        """Send one finding (off the UI thread); the line under the header says what happened. While another send runs
+        it is queued and sent after the ones before it."""
         finding = self._finding(finding_id)
-        if finding is None or self.busy():
+        if finding is None or self._busy_text or finding_id == self._sending or finding_id in self._queue:
             return False
-        name = self.name_of(finding.series_id)
+        if self._call is not None:
+            self._queue.append(finding_id)
+            _log.info("Found: finding %s queued (%d waiting)", finding_id, len(self._queue))
+            self._say_sending()
+            self._enable()
+            return True
+        self._start_send(finding)
+        return True
+
+    def _start_send(self, finding) -> None:
+        finding_id, name = finding.id, self.name_of(finding.series_id)
         _log.info("Found: sending finding %s (%s, %s)", finding.id, finding.kind, gets_text(finding))
-        self.say(f"Sending {gets_text(finding)} of {name}...")
+        self._sending = finding_id
+        self._sending_text = f"Sending {gets_text(finding)} of {name}..."
+        self._say_sending()
         backend = self._backend
         self._call = start_call(lambda: backend.send_finding(finding_id),
-                                lambda outcome: self.say(f"{name} {gets_text(finding)} - {outcome}", "ok"),
-                                lambda message: self.say(f"Could not send {gets_text(finding)} of {name}: {message}",
-                                                         "bad"),
-                                self._call_finished)
+                                lambda outcome: self._sent(f"{name} {gets_text(finding)} - {outcome}", "ok"),
+                                lambda message: self._sent(f"Could not send {gets_text(finding)} of {name}: {message}",
+                                                           "bad"),
+                                self._send_finished)
         self._enable()
-        return True
+
+    def _say_sending(self) -> None:
+        more = len(self._queue)
+        self.say(self._sending_text + (f" ({more} more queued)" if more else ""))
+
+    def _sent(self, text: str, tone: str) -> None:
+        self._last_outcome = (text, tone)
+        self.say(text, tone)
+
+    def _send_finished(self) -> None:
+        """One send is done: the next queued finding (still waiting) goes; the host reloads either way (the queue is
+        kept here, so the reload does not lose it)."""
+        self._call, self._sending = None, None
+        while self._queue:
+            finding = self._finding(self._queue.pop(0))
+            if finding is not None and finding.status == "waiting":
+                text, tone = self._last_outcome
+                self._start_send(finding)
+                if text:                            # the last outcome stays readable beside the next "Sending"
+                    self.say(f"{text}  ·  {self.status_label.text()}", tone)
+                break
+        self._enable()
+        self.changed.emit()
 
     def skip(self, finding_id: int) -> bool:
         """Skip one finding: it leaves the list and is never offered again (quick)."""
         finding = self._finding(finding_id)
-        if finding is None or self.busy():
+        if finding is None or self._busy_text or finding_id == self._sending:
             return False
         name = self.name_of(finding.series_id)
+        if finding_id in self._queue:
+            self._queue.remove(finding_id)
         try:
             self._backend.skip_finding(finding_id)
         except Exception as exc:  # noqa: BLE001 - shown to the owner
@@ -278,8 +426,9 @@ class FoundView(QWidget):
         return box.clickedButton() is yes
 
     def send_all(self) -> bool:
-        """Send every finding listed (after the owner's yes), one after another off the UI thread."""
-        shown = self.shown()
+        """Send every finding listed that has something to send (after the owner's yes), one after another off the UI
+        thread."""
+        shown = sendable(self.shown())
         if not shown or self.busy():
             return False
         title, text = send_all_question(shown)
@@ -312,6 +461,8 @@ class FoundView(QWidget):
         self.changed.emit()
 
     def stop(self) -> None:
+        self._queue.clear()
         if self._call is not None:
             self._call.abandon()
             self._call = None
+        self._sending = None

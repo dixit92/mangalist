@@ -425,6 +425,8 @@ class MainWindow(QMainWindow):
             tab.show_in_list.connect(self.show_folder_in_list)
             if hasattr(tab, "library_changed"):         # Restore / Move / Delete of replaced chapters moved files
                 tab.library_changed.connect(self._on_replaced_chapters_moved)
+            if hasattr(tab, "modes_changed"):           # a series' mode set in Found: the List's Auto chips follow
+                tab.modes_changed.connect(lambda: self._refresh_auto_modes(force=True))
             self._download_tab = tab
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
