@@ -134,17 +134,32 @@ class FindingStore:
         """The mode in force for the series: its own, else the default."""
         return self.own_mode(series_id) or self.default_mode()
 
+    _MODES_SQL = ("SELECT s.id, s.auto_mode, r.auto_mode AS root_mode FROM series s"
+                  " LEFT JOIN roots r ON r.id = s.root_id")
+
     def modes(self, series_ids: Optional[Iterable[int]] = None) -> Dict[int, str]:
-        """series id -> the mode in force (every series when *series_ids* is None)."""
+        """series id -> the mode in force (every series when *series_ids* is None): the series' own mode, else its
+        library's (schema 8), else the default setting."""
         default = self.default_mode()
         with self.store.connect() as con:
             if series_ids is None:
-                rows = con.execute("SELECT id, auto_mode FROM series").fetchall()
+                rows = con.execute(self._MODES_SQL).fetchall()
             else:
                 ids = sorted(set(int(i) for i in series_ids))
                 rows = [r for chunk in _chunks(ids) for r in con.execute(
-                    f"SELECT id, auto_mode FROM series WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall()]
-        return {r["id"]: (r["auto_mode"] if r["auto_mode"] in AUTO_MODES else default) for r in rows}
+                    f"{self._MODES_SQL} WHERE s.id IN ({','.join('?' * len(chunk))})", chunk).fetchall()]
+        return {r["id"]: (r["auto_mode"] if r["auto_mode"] in AUTO_MODES
+                          else r["root_mode"] if r["root_mode"] in AUTO_MODES else default) for r in rows}
+
+    def default_for(self, series_id: int) -> Tuple[str, bool]:
+        """(the mode the series follows when it has none of its own, True when that is its library's - else the
+        default setting)."""
+        with self.store.connect() as con:
+            row = con.execute("SELECT r.auto_mode FROM series s JOIN roots r ON r.id = s.root_id WHERE s.id = ?",
+                              (int(series_id),)).fetchone()
+        if row is not None and row[0] in AUTO_MODES:
+            return row[0], True
+        return self.default_mode(), False
 
     def set_mode(self, series_ids: Iterable[int], mode: Optional[str]) -> int:
         """Set the series' own mode (None: follow the default). Returns how many series rows changed."""
