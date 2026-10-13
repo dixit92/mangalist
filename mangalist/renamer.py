@@ -744,12 +744,13 @@ class Renamer:
         """The scheme's name for an archive called *name* about to be filed into *series* (read like the series' own
         files: the root's scheme, the "volumes or chapters?" answer, the series title, its volume list, the length
         rule) - None when the name cannot be read with certainty or the naming scheme is not in this build."""
-        from .parsing import parse_name
+        from .parsing import parse_name, with_series_head
 
         try:
             folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
             ctx = _parse_context(os.path.basename(folder), series.kind_hint, getattr(root, "naming_scheme", None))
-            parsed = parse_name(name, ctx, file_size=size)
+            siblings = [u.rel_path for u in self.db.list_units(series.id) if "/" not in u.rel_path]
+            parsed = parse_name(name, with_series_head(ctx, siblings + [name]), file_size=size)
             title = self._title(root, series) or os.path.basename(folder)
             target = self.namer.target_name(parsed, ext=os.path.splitext(name)[1], series_title=title,
                                             volume_of=self._volume_of(series.id), folder=folder,
@@ -803,11 +804,15 @@ class Renamer:
     def files_of(self, root, series) -> List[Tuple[str, Any]]:
         """``(absolute path, ParsedName)`` of the series' own archives as the last scan recorded them, parsed again
         from their names (the root's scheme and the series' "volumes or chapters?" answer)."""
-        from .parsing import parse_name
+        from .parsing import parse_name, with_series_head
 
         folder = os.path.join(root.path, *series.rel_path.split("/"))
         ctx = _parse_context(os.path.basename(folder), series.kind_hint, getattr(root, "naming_scheme", None))
         rels = sorted({u.rel_path for u in self.db.list_units(series.id)}, key=lambda r: (r.casefold(), r))
+        by_folder: Dict[str, List[str]] = defaultdict(list)     # the series head of each folder, as the scan reads it
+        for rel in rels:
+            by_folder[rel.rpartition("/")[0]].append(rel.rpartition("/")[2])
+        heads = {d: with_series_head(ctx, names) for d, names in by_folder.items()}
         out = []
         for rel in rels:
             path = os.path.join(folder, *rel.split("/"))
@@ -815,7 +820,7 @@ class Renamer:
                 size = os.path.getsize(path)
             except OSError:
                 size = 0
-            parsed = parse_name(os.path.basename(path), ctx, file_size=size)
+            parsed = parse_name(os.path.basename(path), heads[rel.rpartition("/")[0]], file_size=size)
             units = self._manual.get(os.path.normpath(path))
             if units is not None:
                 parsed = with_units(parsed, units, os.path.basename(path))

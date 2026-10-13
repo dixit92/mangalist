@@ -1,4 +1,4 @@
-"""Candidate scoring and banding (port of MangaPixer 1.31.1 ``MatchScorer.cs``). Pure, deterministic.
+"""Candidate scoring and banding (port of MangaPixer 1.42.0 ``MatchScorer.cs``). Pure, deterministic.
 
 - **Title**: :func:`similarity.score` over every (variant, record title / alt title) pair - the MAIN title's
   trailing ``(disambiguator)`` also counts stripped - minus :data:`NUMBER_PENALTY` when the pair disagrees
@@ -316,7 +316,8 @@ def _score_one(c: MatchCandidate, variants: List[_PreparedVariant], ctx: MatchCo
     title_numbers.extend(number_tokens(h) for h in heads)
 
     # Creator hints that name this record (its authors, or its "(AUTHOR Name)" disambiguator).
-    authors = [a for a in (c.authors or ()) if not is_null_or_whitespace(a)]
+    # 1.39.0 (rules 4): a record author written "Main (Alias)" is known by each of those names.
+    authors = amt.author_names(c.authors)
     hints = [h for h in (ctx.creator_hints or ()) if not is_null_or_whitespace(h)]
     hint_names_record = bool(hints) and any(
         amt.names_equal(h, n) for h in hints
@@ -339,6 +340,7 @@ def _score_one(c: MatchCandidate, variants: List[_PreparedVariant], ctx: MatchCo
     best_via_subtitle_split = False
     for v in variants:
         review_only = ((v.kind == QueryVariantKind.CREATOR_SPLIT and not hint_names_record)
+                       or v.kind == QueryVariantKind.CHARACTER_NAME
                        or (v.kind == QueryVariantKind.ENGLISH_TITLE
                            and any(amt.names_equal(h, v.text) for h in hints) and not own_name_resembles()))
         for i, t in enumerate(titles):
