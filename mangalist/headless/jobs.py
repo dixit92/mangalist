@@ -276,7 +276,7 @@ def make_rescan(provider: RootsProvider,
                     from ..scan_lock import scan_lock
                     from ..scanner import LibraryScan, scan_library
 
-                    with scan_lock(db, what=f"the rescan of {getattr(spec, 'name', '') or root}"):
+                    with scan_lock(db, what=f"the rescan of {getattr(spec, 'name', '') or root}", tick=ctx.check):
                         one = scan_library([spec], progress=progress, db=db)
                         if one.roots and one.roots[0].error:
                             raise OSError(one.roots[0].error)

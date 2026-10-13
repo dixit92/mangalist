@@ -540,7 +540,8 @@ def scan_and_record_library(
             on_start(number, len(roots), name)
         rid = getattr(root, "id", None)
         only = scopes.get(rid) if scopes is not None and rid in scopes else None
-        with (scan_lock(db, what=f"the scan of {name}", on_wait=on_wait) if db is not None else _no_lock()):
+        tick = (lambda: progress(0, 0, "")) if progress is not None else None     # stops a wait like a scan
+        with (scan_lock(db, what=f"the scan of {name}", on_wait=on_wait, tick=tick) if db is not None else _no_lock()):
             rs = scan_one_root(root, progress, label=many, only=only)
             result.roots.append(rs)
             result.loose.extend(rs.loose)

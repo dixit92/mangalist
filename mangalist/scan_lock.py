@@ -100,11 +100,13 @@ def _os_unlock(fh) -> None:
 
 @contextmanager
 def scan_lock(db=None, *, path: Optional[Path] = None, wait: float = DEFAULT_WAIT, what: str = "scan",
-              on_wait: Optional[Callable[[], None]] = None, poll: float = POLL_SECONDS,
-              clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep) -> Iterator[bool]:
+              on_wait: Optional[Callable[[], None]] = None, tick: Optional[Callable[[], None]] = None,
+              poll: float = POLL_SECONDS, clock: Callable[[], float] = time.monotonic,
+              sleep: Callable[[float], None] = time.sleep) -> Iterator[bool]:
     """Hold the scan lock of *db*'s data folder (or of *path*) for the block. Yields True when it is held, False when
     the wait ran out (the block runs anyway). *on_wait* is called once when another process holds it (a window says
-    "waiting for the other scan")."""
+    "waiting for the other scan"); *tick* on every poll while waiting - an exception from it (the window closing, the
+    runner shutting down) ends the wait and is raised."""
     target = Path(path) if path is not None else lock_path_for(db)
     if target is None:
         yield True
@@ -112,15 +114,18 @@ def scan_lock(db=None, *, path: Optional[Path] = None, wait: float = DEFAULT_WAI
     key = os.path.normcase(str(target))
     guard = _guard(key)
     started = clock()
-    if not guard.acquire(timeout=max(0.0, wait)):
-        _log.warning("Scan lock: another scan of this process still runs after %.0f s; %s goes ahead", wait, what)
-        yield False
-        return
+    while not guard.acquire(timeout=min(poll, max(0.0, wait - (clock() - started))) if wait > 0 else 0):
+        if clock() - started >= wait:
+            _log.warning("Scan lock: another scan of this process still runs after %.0f s; %s goes ahead", wait, what)
+            yield False
+            return
+        if tick is not None:
+            tick()
     held = True
     try:
         depth = _depth.get(key, 0)
         if depth == 0:
-            held = _acquire_file(key, target, started, wait, what, on_wait, poll, clock, sleep)
+            held = _acquire_file(key, target, started, wait, what, on_wait, tick, poll, clock, sleep)
         _depth[key] = depth + 1
         try:
             yield held
@@ -136,7 +141,8 @@ def scan_lock(db=None, *, path: Optional[Path] = None, wait: float = DEFAULT_WAI
 
 
 def _acquire_file(key: str, target: Path, started: float, wait: float, what: str,
-                  on_wait: Optional[Callable[[], None]], poll: float, clock, sleep) -> bool:
+                  on_wait: Optional[Callable[[], None]], tick: Optional[Callable[[], None]], poll: float, clock,
+                  sleep) -> bool:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         fh = open(target, "a+b")
@@ -162,6 +168,12 @@ def _acquire_file(key: str, target: Path, started: float, wait: float, what: str
             fh.close()
             _log.warning("Scan lock: still held by another process after %.0f s; %s goes ahead", wait, what)
             return False
+        if tick is not None:
+            try:
+                tick()
+            except BaseException:
+                fh.close()
+                raise
         sleep(poll)
 
 
