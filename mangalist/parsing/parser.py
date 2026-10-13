@@ -140,7 +140,7 @@ def _first(name: str, ctx: ParseContext, file_size: int) -> Optional[ParsedName]
             return r
     return (parse_fmd2(name) or parse_comics_extra(name) or parse_release(name, ctx.series_title, ctx.series_head)
             or parse_labelled(name, ctx.series_title, ctx.series_head) or parse_generic(name, file_size)
-            or parse_bare(name, ctx.series_title))
+            or parse_bare(name, ctx.series_title, ctx.series_head))
 
 
 def _apply_hint(result: ParsedName, hint: Optional[Kind]) -> ParsedName:
