@@ -423,6 +423,57 @@ def test_empty_now_refuses_when_a_volume_left_or_changed_and_deletes_nothing(db,
     assert emptied == [] and refused == [(batch.id, "not emptied: " + os.path.basename(volume) + " is no longer in the library")]
 
 
+def _rename(db, path, new_name, root):
+    journal = Journal(db)
+    new = os.path.join(os.path.dirname(path), new_name)
+    plan = journal.plan("rename to the scheme", [(path, new)], root_path=str(root))
+    journal.apply(plan.id)
+    assert os.path.isfile(new) and not os.path.exists(path)
+    return new, plan.id
+
+
+def test_empty_now_follows_volumes_renamed_to_the_scheme(db, ledger, library, holding, known, tmp_path):
+    # owner, 2026-10-12: "I am blocked from emptying the holding folder" - the automatic rename had renamed the filed
+    # volumes, and Empty now looked for them under their filed names
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    renamed, _ = _rename(db, batch.volume_files[0][0], f"{SERIES} - Vol. 001.cbz", library)
+    assert upgrades.empty_now(db, batch.id).status == "purged"
+    assert not os.path.exists(batch.holding_dir) and os.path.isfile(renamed)     # the renamed volume survives
+
+
+def test_empty_now_follows_an_undone_rename_back_and_refuses_a_renamed_volume_that_changed(db, ledger, library,
+                                                                                           holding, known, tmp_path):
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    filed = batch.volume_files[0][0]
+    renamed, plan_id = _rename(db, filed, f"{SERIES} - Vol. 001.cbz", library)
+    Journal(db).undo(plan_id)                                         # back under its filed name: not followed
+    assert os.path.isfile(filed) and upgrades.volumes_in_library_problem(db, batch) is None
+    renamed, _ = _rename(db, filed, f"{SERIES} - Vol. 001.cbz", library)
+    with open(renamed, "ab") as f:                                    # renamed, then changed
+        f.write(b"more")
+    with pytest.raises(ReplacementConflict, match="changed since it was filed"):
+        upgrades.empty_now(db, batch.id)
+    assert ReplacementStore(db).get(batch.id).status == "held"
+
+
+def test_a_confirmed_delete_follows_a_volume_renamed_while_it_waited(db, ledger, library, holding, known, tmp_path):
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    upgrades.set_mode(db, upgrades.MODE_DELETE)
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    assert batch.status == "pending" and batch.plan_id is None
+    _rename(db, batch.volume_files[0][0], f"{SERIES} - Vol. 001.cbz", library)
+    out = upgrades.delete_confirmed(db, batch.id, [f.path for f in batch.files])
+    assert all(o.deleted for o in out) and ReplacementStore(db).get(batch.id).status == "deleted"
+
+
 def test_a_series_held_as_volumes_only_has_nothing_to_replace_and_says_so(db, ledger, library, holding, known,
                                                                           tmp_path):
     # Missing volumes filed into a volumes-only series: no chapter can be replaced - the reason says that, not
