@@ -7,6 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.31] - 2026-10-13
+
+The thirtieth MangaList release (testing build): a chapter pack is never taken for volumes, chapters a source splits into parts (62.1 + 62.2) are found and sent, and titled chapter files after the series' English title are read.
+
+- **Bare-number releases are not volumes for certain.** A nyaa release whose numbers carry no volume mark (`<Series> 001-051 (2024) (Digital)`) was read as volumes 1-51: the find pass offered it for a missing volume as certain, and the files were read as volumes too, so chapter 3 (`<Series> 003 (2024) ...cbz`) was downloaded and filed as volume 3. Such a release now ranks below any release that states its volumes, says "its numbers carry no volume mark, so they may be chapters", is never sent by itself, and its files are not read as volumes because of it.
+- **Chapter packs are never sent for volumes.** A pack whose files are all chapter files is passed over by the find pass and refused by Send ("its files are chapters, not volumes") before the torrent starts.
+- **Split chapters from a source, as MangaPixer counts them.** A source that numbers a chapter's parts `62.1`, `62.2` offered them as extras and called chapter 62 "not on the source", so it stayed missing; the parts now stand in for the missing chapter (counted as missing, picked, sent by the find pass - "part of ch 62"), and the parts of chapters you hold are no longer listed as extras. Real extras (`71.5`) stay extras.
+- **Titled chapter files after the series' other title are read.** `<English title> 001 <chapter title>.cbz` in a folder named by the romaji title was left alone, so its "volumes or chapters?" answer could not apply and the Renamer could not rename it; the title every file in the folder starts with (before a number that changes) now counts as the series' title. Across the owner's library this reads 23 files of one series, nothing else.
+
 ## [2026.10.30] - 2026-10-13
 
 The twenty-ninth MangaList release (testing build): the cycle "MangaPixer 1.42 parity and MangaDex data" - the parser and matcher level with MangaPixer 1.42.0, MangaDex data and MangaPixer's declared editions / tracking off, Add a series by link, Unbundled Chapters, and selective scanning of changed folders.
