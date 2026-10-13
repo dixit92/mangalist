@@ -44,6 +44,7 @@ class FakeFindingBackend(FakeChapterBackend):
         self.find_gate: Optional[threading.Event] = None    # set to hold a find pass until released
         self.find_error: Optional[str] = None
         self.send_finding_error: Dict[int, str] = {}
+        self.send_gate: Optional[threading.Event] = None    # set to hold every send until released
         self.new_on_find: List[Finding] = []                 # what the next pass "finds"
 
     # --- the find pass
@@ -72,6 +73,8 @@ class FakeFindingBackend(FakeChapterBackend):
 
     def send_finding(self, finding_id):
         self.threads.append(threading.get_ident())
+        if self.send_gate is not None:
+            self.send_gate.wait(10)
         if finding_id in self.send_finding_error:
             raise BackendError(self.send_finding_error[finding_id])
         self.sent_findings.append(finding_id)

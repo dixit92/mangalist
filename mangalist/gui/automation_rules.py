@@ -100,6 +100,22 @@ def gets_text(finding) -> str:
     return numbers_text(finding.fills, pad=True) or "volumes"
 
 
+#: Chapter findings with nothing to send (``Finding.payload["type"]``, mangalist.downloads.finder): the series' saved
+#: source is gone or lacks the chapters, or it has none yet - the way on is picking a source in its chapters.
+NO_PICK_PAYLOADS = ("dropped", "no-source")
+
+
+def needs_source(finding) -> bool:
+    """The finding has nothing to send until the series has a (another) chapter source."""
+    payload = finding.payload if isinstance(finding.payload, Mapping) else {}
+    return payload.get("type") in NO_PICK_PAYLOADS
+
+
+def sendable(findings: Sequence) -> List:
+    """The findings Send all sends: all but those waiting for a source."""
+    return [f for f in findings if not needs_source(f)]
+
+
 def kind_text(finding) -> str:
     return KIND_TEXT.get(finding.kind, finding.kind)
 
