@@ -206,3 +206,17 @@ class TestScanRootFranchise:
         # The entry should have parent_folder set
         assert entries[0].parent_folder.name == "Fate"
         assert entries[0].title == "Zero"
+
+
+def test_sub_series_come_in_a_fixed_order_whatever_the_filesystem_lists(tmp_path: Path, monkeypatch):
+    # ext4 and APFS list a folder in their own order, NTFS alphabetically: the List's sub-series order must not follow
+    # it (a GUI test failed on Linux / macOS CI only, 2026-10-13)
+    from mangalist import scanner
+
+    franchise = tmp_path / "Franchise"
+    for name in ("crimson Tale", "Azure Tale", "Beryl Tale"):
+        (franchise / name).mkdir(parents=True)
+        _create_fake_archive(franchise / name, f"{name} v01.cbz")
+    real = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda self: iter(sorted(real(self), key=lambda p: p.name, reverse=True)))
+    assert [p.name for p in scanner._get_subdirs_with_archives(franchise)] == ["Azure Tale", "Beryl Tale", "crimson Tale"]
