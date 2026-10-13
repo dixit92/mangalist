@@ -42,11 +42,12 @@ from .._version import __version__
 from ..models import MangaEntry
 from ..scanner import LibraryScan, RootScan, apply_kind_hint, scan_and_record_library
 from ..store import Journal, Root, RootError
+from ..unbundled import UnbundledFolders
 from . import lanes
 from .app_icon import build_app_icon
 from .downloads_backend import create_backend as create_downloads_backend
 from .list_tab import DUPLICATES, PAGE_DUPLICATES, PAGE_EMPTY, PAGE_TABLE, ListTab, all_filter_keys, chip_label
-from .list_text import wanted_label
+from .list_text import UNBUNDLED_HELP, UNBUNDLED_MENU, unbundled_status, wanted_label
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
@@ -300,8 +301,10 @@ class MainWindow(QMainWindow):
         # fall back to the own matcher (knowledge_for returns None).
         self._mp_resolver = None
         self._mp_items: dict = {}   # folder -> the resolved MangaPixer item (or None), per scan
+        self._unbundled = UnbundledFolders(self._db)     # the per-series Unbundled Chapters setting
         self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
-                                        needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)))
+                                        needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)),
+                                        unbundled_for=lambda e: self._unbundled.is_on(e.folder))
 
         # Downloads: only with downloads switched on and a backend (the Download tab and the volumes controller are
         # built in _build_ui).
@@ -1301,6 +1304,7 @@ class MainWindow(QMainWindow):
                 _apply_cache(e, cached)
         self._mp_resolver = None  # folders may have been renamed or added
         self._mp_items = {}
+        self._unbundled.reset()
 
     def _apply_root_scan(self, rs: RootScan, renamed=()) -> None:
         """Show one library folder's scan: its series replace the folder's rows (the other folders' rows stay). A folder
@@ -1917,6 +1921,11 @@ class MainWindow(QMainWindow):
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
             menu.addSeparator()
 
+        act_unbundled = menu.addAction(UNBUNDLED_MENU)
+        act_unbundled.setCheckable(True)
+        act_unbundled.setChecked(self._unbundled.all_on(e.folder for e in entries))
+        act_unbundled.setToolTip(UNBUNDLED_HELP)
+        menu.setToolTipsVisible(True)
         auto_actions, act_bulk_find = self._add_automation_menu(menu, entries)
 
         act_confirm_mu = menu.addAction(
@@ -1958,7 +1967,9 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if chosen in auto_actions:
+        if chosen is act_unbundled:
+            self.set_unbundled(entries, act_unbundled.isChecked())
+        elif chosen in auto_actions:
             self._status_label.setText(self._auto_modes.apply([str(e.folder) for e in entries], auto_actions[chosen]))
         elif act_bulk_find is not None and chosen is act_bulk_find:
             self.bulk_find(entries)
@@ -2045,6 +2056,19 @@ class MainWindow(QMainWindow):
                 if e is not None:
                     self._model.set_examined(r, not e.examined)
             self._persist_examined()
+
+    def set_unbundled(self, entries, on: bool) -> int:
+        """The row menu's Unbundled Chapters tick for *entries*' series (mangalist.unbundled); the states follow."""
+        try:
+            n = self._unbundled.set([e.folder for e in entries], on)
+        except Exception as exc:  # noqa: BLE001 - shown, nothing assumed changed
+            self._status_label.setText(f"Could not change Unbundled chapters: {type(exc).__name__}: {exc}")
+            return 0
+        self._status_label.setText(unbundled_status(on, n))
+        if n:
+            self._model.refresh_states()
+            self._on_row_changed()
+        return n
 
     # --- Automatic downloads: the per-series mode, the mode chip, the bulk find ---------------------------
 

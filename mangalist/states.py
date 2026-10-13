@@ -42,6 +42,16 @@ when without it the state would be *Can't tell*. Not "the highest wins" everywhe
 with its unavailable (taken-down) chapters, and on the owner's library (2026-10-13) 19 of the 95 series it would raise
 list chapters MangaDex no longer serves (the lane note "MangaPixer Export Fields" has the measurement).
 
+**Unbundled Chapters** (a per-series setting, :mod:`mangalist.unbundled`; owner, 2026-10-11: "a setting to convert a
+volume-only series to a volumes + unbundled chapters series, with both upgrade and new missing chapter downloads
+applicable"): for a folder that holds volumes, the chapters after the last volume - where the newest volume that is held,
+missing or an upgrade ends by MangaPixer's volume list - up to the chapter target are compared too (*Missing chapters*).
+The volume side is unchanged. A chapter a held volume collects is never wanted, nor one a released volume the folder
+lacks collects (that volume is the gap). When a later volume comes out, the chapters it collects become an *Upgrade*
+(every one held) or stay in *Missing volumes* (some not held), as in any folder holding chapters, and the unbundled range
+moves past it. Where the list does not say which chapter the newest held volume ends with, nothing is compared (as
+"Check for new chapters" cannot tell either).
+
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
 a :class:`~mangalist.models.MangaEntry` already has (FALLBACK until the real inventory is wired).
@@ -254,6 +264,8 @@ GAP_VOLUME = "volume"
 GAP_CHAPTER = "chapter"
 GAP_UPGRADE = "upgrade"
 
+UNBUNDLED_FLAG = "Unbundled chapters"   # the flag a series with the Unbundled Chapters setting on carries
+
 
 @dataclass(frozen=True)
 class Gap:
@@ -294,6 +306,7 @@ class SeriesState:
     mangapixer_reason: Optional[str] = None
     mangapixer_disagrees: bool = False
     edition: Optional[str] = None                # the edition declared in MangaPixer, e.g. "Master edition"
+    unbundled: bool = False                      # the series' Unbundled Chapters setting is on (mangalist.unbundled)
 
     # -- convenience -----------------------------------------------------------------------------
 
@@ -338,6 +351,8 @@ class SeriesState:
             out.append(self.edition)
         if self.complete_with_upgrade:
             out.append("Upgrade available")
+        if self.unbundled:
+            out.append(UNBUNDLED_FLAG)
         if self.upcoming:
             out.append("Upcoming")
         if self.requested:
@@ -500,6 +515,7 @@ def compute_state(
     behind_override: Optional[str] = None,
     today: Optional[_dt.date] = None,
     restarts: Collection[str] = (),
+    unbundled: bool = False,
 ) -> SeriesState:
     """The state of one series folder.
 
@@ -513,6 +529,8 @@ def compute_state(
     *restarts*: ``"chapter"`` / ``"volume"`` when those numbers start again in another folder of the series (``Season 1``
     and ``Season 2`` both from 1 - :attr:`mangalist.models.MangaEntry.restarting_units`): they are not compared with one
     total, so no gap of that kind is invented (MangaPixer gives no verdict either).
+    *unbundled*: the series' Unbundled Chapters setting (:mod:`mangalist.unbundled`) - a folder holding volumes also
+    wants the chapters after its last volume (see the module docstring); off (the default) changes nothing.
 
     MangaDex's highest whole English chapter (:attr:`~mangalist.knowledge.SeriesKnowledge.mangadex_latest`) is a chapter
     target only where nothing else tells (see the module docstring): the state is computed without it first, and again
@@ -520,7 +538,7 @@ def compute_state(
     """
     args = dict(folder_empty=folder_empty, needs_kind=needs_kind, requested=requested, rename_pending=rename_pending,
                 rename_count=rename_count, behind_override=behind_override, today=today or _dt.date.today(),
-                restarts=restarts)
+                restarts=restarts, unbundled=unbundled)
     st = _evaluate(inventory, knowledge, **args)
     k = knowledge
     extra = k.mangadex_latest if k is not None and k.matched and not k.tracking_off and not k.edition_label else None
@@ -551,6 +569,7 @@ def _evaluate(
     behind_override: Optional[str],
     today: _dt.date,
     restarts: Collection[str],
+    unbundled: bool = False,
     extra_target: Optional[Decimal] = None,
 ) -> SeriesState:
     """:func:`compute_state`'s rules; *extra_target* joins the chapter target's candidates (MangaDex's latest)."""
@@ -586,6 +605,7 @@ def _evaluate(
         rename_count=rename_count,
         source=k.source if k is not None else None,
         edition=k.edition_label if k is not None else None,
+        unbundled=bool(unbundled),
     )
     if k is not None and k.tracking_off:
         # MangaPixer 1.39.0 "Track completion: off": the folder is a series (named, renamed, matched) but has no
@@ -718,6 +738,20 @@ def _evaluate(
     if "chapter" in restarts:
         reasons.append("Chapter numbers start again in each folder of the series (e.g. each season) - not compared")
         target = None
+    if unbundled and held.has_volumes and target is not None:
+        # Unbundled Chapters (the series' setting): the chapters after the last volume, whatever the folder holds so far.
+        after, why = _unbundled_start(k, held, gaps)
+        if after is None:
+            reasons.append(why)
+        else:
+            compared = chapters_checked = True
+            missing = [c for c in _whole_numbers(after, target) if c > after and not held.holds_chapter(c)]
+            if target != target.to_integral_value() and target > after and not held.holds_chapter(target):
+                missing.append(target)
+            missing += [p for p in held.split_missing if after < p <= target and p not in missing]
+            gaps += _chapter_gaps(missing)
+            reasons += [why, f"Latest chapter {fmt_num(target)}"]
+        target = None                   # the rules for other folders below do not compare chapters again
     # A volumes-only folder holding volumes the volume list does not map: which chapters those hold is unknown, so the
     # chapter numbers are not compared (owner, 2026-10-11: every volume of a finished 4-koma held, the list mapped only
     # volumes 1-3, and MangaUpdates' strip count 717 made "missing ch 261-717").
@@ -815,6 +849,42 @@ def _jp_volumes_out(k: SeriesKnowledge, extra_target: Optional[Decimal] = None) 
         if number is not None and number >= 1 and last is not None and last <= target:     # volume 0: a special
             out.append(v)
     return out
+
+
+def last_volume_chapter(volumes: Iterable[VolumeInfo], top: Optional[Decimal]) -> Optional[Decimal]:
+    """The chapter the volumes up to *top* end with by the volume list: the largest ``chapters_to`` of a listed volume
+    numbered *top* or lower (None: the list maps none of them). "Check for new chapters" counts from it
+    (:func:`mangalist.downloads.chapters.newest_held_chapter`), and so do unbundled chapters."""
+    if top is None:
+        return None
+    ends = [to_decimal(v.chapters_to) for v in volumes or () if v.has_chapters
+            and (to_decimal(v.volume) or Decimal(-1)) <= top]
+    ends = [e for e in ends if e is not None]
+    return max(ends) if ends else None
+
+
+def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap]) -> Tuple[Optional[Decimal], str]:
+    """Where a folder's unbundled chapters start (the chapter after it), and the reason line - or ``(None, why not)``.
+
+    The last volume is the newest one the folder holds, or lacks (a missing volume or an upgrade, released): the chapters
+    a held volume collects are held, and those of a released volume the folder lacks come with that volume - so neither
+    is wanted as chapters. Its end comes from MangaPixer's volume list; when the list does not map the newest held volume,
+    where it ends is not known and nothing is compared (a guess could ask for chapters that volume holds)."""
+    top = max(held.volumes)
+    mapped = {to_decimal(v.volume): v for v in k.volumes or () if v.has_chapters}
+    if top not in mapped:
+        return None, (f"Unbundled chapters: the volume list does not say which chapter volume {fmt_num(top)} ends with "
+                      "- not compared")
+    after, last = last_volume_chapter(k.volumes, top), top
+    for g in gaps:
+        number = to_decimal(g.start)
+        v = mapped.get(number) if g.kind in (GAP_VOLUME, GAP_UPGRADE) else None
+        end = to_decimal(v.chapters_to) if v is not None else None
+        if end is not None and (after is None or end > after):
+            after, last = end, number
+    if after is None:
+        return None, f"Unbundled chapters: the volume list does not say which chapter volume {fmt_num(top)} ends with"
+    return after, f"Unbundled chapters after chapter {fmt_num(after)} (the end of volume {fmt_num(last)})"
 
 
 def _empty_folder_chapters(target: Decimal) -> List[Decimal]:
