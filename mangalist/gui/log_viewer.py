@@ -25,8 +25,8 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QPersistentModelIndex, Qt, QTimer, QUrl
-from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeySequence
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QPersistentModelIndex, Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -50,6 +50,7 @@ from .download_style import ACCENT, ACCENT_SOFT, BADGES, FIELD_LINE, GROUND, INK
 from .download_style import set_prop
 from .download_widgets import button, hbox, label
 from .downloads_backend import BackendError
+from .links import open_folder as open_folder_default
 
 _log = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ class LogViewer(QWidget):
         self._dir = Path(log_dir) if log_dir is not None else paths.log_dir()
         self._run = run or start_call
         self._chunk = chunk_bytes
-        self._open_folder = open_folder or (lambda folder: QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
+        self._open_folder = open_folder or open_folder_default
         self._copy_text = copy_text or (lambda text: QApplication.clipboard().setText(text))
         self._log_key = log if log in log_tail.LOG_FILE else "app"
         self._call: Any = None

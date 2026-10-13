@@ -16,8 +16,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Dict, Mapping, Optional
 
-from PySide6.QtCore import QTime, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QTime
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -64,6 +63,7 @@ from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
 from .spin_arrows import pad_spin
 from .downloads_backend import BackendError, DownloadsBackend
+from .links import open_folder as open_folder_default
 from .settings_common import SectionPage
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
 from ..headless.settings import SOURCE_STORED
@@ -860,7 +860,7 @@ class LoggingPage(SectionPage):
         self._db = db
         self._env = env
         self._loading = True
-        self._open_folder = open_folder or (lambda folder: QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
+        self._open_folder = open_folder or open_folder_default
         self._copy_text = copy_text or (lambda text: QApplication.clipboard().setText(text))
         self._view_logs = view_logs
         self.viewer = None
