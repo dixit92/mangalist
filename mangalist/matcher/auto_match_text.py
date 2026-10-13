@@ -1,5 +1,6 @@
-"""Small name helpers shared by the detector, planner and scorer (port of MangaPixer 1.32.0
-``AutoMatchText.cs``)."""
+"""Small name helpers shared by the detector, planner and scorer (port of MangaPixer 1.42.0
+``AutoMatchText.cs``; its 1.42.0 series-head readers ``SeriesHeadOf`` / ``UnitsOf(name, head)`` feed no matching and
+live in :mod:`mangalist.parsing.heads`, where MangaList reads units)."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from ._text import (
     any_letter,
     any_letter_or_digit,
     contains_ignore_case,
+    distinct_ignore_case,
     eq_ignore_case,
     is_digit,
     is_letter,
@@ -23,7 +25,7 @@ from ._text import (
 )
 from .anatomy import is_release_tag
 from .contracts import MetadataOrigin
-from .normalizer import archive_base_title, scoring_form, split_unmatched_bracket_tags
+from .normalizer import archive_base_title, scoring_form, split_unmatched_bracket_tags, without_site_watermark
 from . import similarity
 
 _I = regex.IGNORECASE
@@ -54,7 +56,7 @@ _CHAPTER_TOKEN = regex.compile(
 
 # "No. 12" / "N°12" after some title text ("No. 6" alone is a title) - an issue number only per issue_number_of.
 _ISSUE_NO = regex.compile(
-    r"(?<![\p{L}\p{N}])(?<=[\p{L}\p{N}][\s\-_.,]*)(?:no\.|n°)\s*(?P<n>\d{1,4}(?:\.\d{1,2})?)(?![\p{N}])", _I)
+    r"(?<![\p{L}\p{N}])(?<=[\p{L}\p{N}][\s\-_.,]*)(?:no\.|n°)\s*(?P<n>\d{1,4}(?:\.\d{1,3})?)(?![\p{N}])", _I)
 
 # "No. N" anywhere in a name (the folder rule: a folder's own "No. N" is part of its title).
 _ANY_NO = regex.compile(r"(?<![\p{L}\p{N}])(?:no\.|n°)\s*(?P<n>\d{1,4})(?![\p{N}])", _I)
@@ -152,6 +154,38 @@ def names_equal(a: Optional[str], b: Optional[str]) -> bool:
         return True
     return (sorted(split_nonempty(x)) == sorted(split_nonempty(y))
             or x.replace(" ", "") == y.replace(" ", ""))
+
+
+_AUTHOR_BRACKET = regex.compile(r"[(\[](?P<inner>[^()\[\]]+)[)\]]")
+
+
+def author_name_forms(name: Optional[str]) -> List[str]:
+    """The names a record's AUTHOR is known by (1.39.0, owner): MangaUpdates writes an author's other name in brackets
+    after the main name (``Main Name (Other Name)``), so the whole name, the name before the brackets and each bracketed
+    part that is a name (letters; not a year or a release tag) all count. A name without brackets is just itself. Used
+    on the record side only."""
+    if is_null_or_whitespace(name):
+        return []
+    forms = [name.strip()]
+    groups = list(_AUTHOR_BRACKET.finditer(name))
+    if not groups:
+        return forms
+
+    def add(text: str) -> None:
+        text = text.strip()
+        if (text and any_letter(text) and not _YEAR_ONLY.search(text) and not is_release_tag(text)
+                and not contains_ignore_case(forms, text)):
+            forms.append(text)
+
+    add(_AUTHOR_BRACKET.sub(" ", name))
+    for g in groups:
+        add(g.group("inner"))
+    return forms
+
+
+def author_names(authors: Optional[Iterable[Optional[str]]]) -> List[str]:
+    """Every :func:`author_name_forms` of a record's authors, in order, each once (1.39.0)."""
+    return distinct_ignore_case(f for a in (authors or ()) for f in author_name_forms(a))
 
 
 def contains_tokens(text: Optional[str], part: Optional[str]) -> bool:
@@ -325,7 +359,7 @@ def disambiguated_aliases(other_titles: Iterable[Optional[str]],
     carry a trailing ``(disambiguator)``, each with its score factor (1.29.0): 1 when the tag names one of
     the record's ``authors``, else :data:`DISAMBIGUATED_ALIAS_FACTOR` - a tag that names someone else, or
     authors not known yet (a search hit), never makes a clean 1.00."""
-    known = [a for a in (authors or ()) if not is_null_or_whitespace(a)]
+    known = author_names(authors)  # 1.39.0: "Main (Alias)" names both
     result: List[Tuple[str, float]] = []
     for title in other_titles:
         bare = without_disambiguator(title)
@@ -466,24 +500,30 @@ class UnitNumbers:
         return self.volume is None and self.chapter is None
 
 
-# Unit numbers v2 (1.29.0): decimals kept, a range as start / end (the end may repeat the token: "v01-v05").
+# Unit numbers v2 (1.29.0; 1.42.0: up to three decimals, unit_number): decimals kept, a range as start / end (the end
+# may repeat the token: "v01-v05").
 # <t> is the token, so a bracketed single-letter token ("[v2]", a release revision) can be told apart.
 _VOLUME_UNIT = regex.compile(
     r"(?<![\p{L}\p{N}])(?:(?P<t>volumes|volume|vols|vol|v|tome|tomo|band|deel|album|livre)\.?\s*"
-    r"|(?P<t>(?-i:T))(?=\d{1,3}(?![\p{N}])))(?P<n>\d{1,4}(?:\.\d{1,2})?)"
+    r"|(?P<t>(?-i:T))(?=\d{1,3}(?![\p{N}])))(?P<n>\d{1,4}(?:\.\d{1,3})?)"
     r"(?:\s*-\s*(?:(?:volumes|volume|vols|vol|v|tome|tomo|band|deel|album|livre)\.?\s*|(?-i:T))?"
-    r"(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])", _I)
+    r"(?P<m>\d{1,4}(?:\.\d{1,3})?))?(?![\p{N}])", _I)
 _CHAPTER_UNIT = regex.compile(
     r"(?<![\p{L}\p{N}])(?:(?P<t>chapters|chapter|chap|ch|episode|ep)\.?\s*|(?P<t>c)|(?P<t>#)\s*|(?P<t>issue)\s*#?\s*)"
-    r"(?P<n>\d{1,4}(?:\.\d{1,2})?)(?:\s*-\s*(?:(?:chapters|chapter|chap|ch|episode|ep)\.?\s*|c|#\s*)?"
-    r"(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])", _I)
-_LEADING_UNIT = regex.compile(r"^\s*(?P<n>\d{1,4}(?:\.\d{1,2})?)(?:\s*-\s*(?P<m>\d{1,4}(?:\.\d{1,2})?))?(?![\p{N}])")
+    r"(?P<n>\d{1,4}(?:\.\d{1,3})?)(?:\s*-\s*(?:(?:chapters|chapter|chap|ch|episode|ep)\.?\s*|c|#\s*)?"
+    r"(?P<m>\d{1,4}(?:\.\d{1,3})?))?(?![\p{N}])", _I)
+_LEADING_UNIT = regex.compile(r"^\s*(?P<n>\d{1,4}(?:\.\d{1,3})?)(?:\s*-\s*(?P<m>\d{1,4}(?:\.\d{1,3})?))?(?![\p{N}])")
+
+# 1.34.0: "<running index> [<chapter>]" / "<running index> [<chapter> - <title>]" - a bare leading number, then a FIRST
+# bracket group that is a number, alone or followed by " - " and a title.
+_INDEXED_CHAPTER = regex.compile(
+    r"^\s*\d{1,4}\s*\[\s*(?P<n>\d{1,4}(?:\.\d{1,3})?)(?:\s+[-\u2013\u2014]\s+[^\]]*)?\s*\]")
 
 # Comics extras (1.32.0): Annual / FCBD (Free Comic Book Day) with or without a number, Special / One-Shot only with
 # their own number ("Special #1"; "Special Edition" is an edition, a bare "Special" a title word).
 _EXTRA_MARKER = regex.compile(
-    r"(?<![\p{L}\p{N}])(?:(?:annual|fcbd|free\s+comic\s+book\s+day)(?:\s*#?\s*(?P<n>\d{1,4}(?:\.\d{1,2})?))?"
-    r"|(?:specials?|one-?shots?)\s*#?\s*(?P<n>\d{1,4}(?:\.\d{1,2})?))(?![\p{L}\p{N}])", _I)
+    r"(?<![\p{L}\p{N}])(?:(?:annual|fcbd|free\s+comic\s+book\s+day)(?:\s*#?\s*(?P<n>\d{1,4}(?:\.\d{1,3})?))?"
+    r"|(?:specials?|one-?shots?)\s*#?\s*(?P<n>\d{1,4}(?:\.\d{1,3})?))(?![\p{L}\p{N}])", _I)
 
 
 def units_of(archive_name: Optional[str]) -> UnitNumbers:
@@ -494,10 +534,20 @@ def units_of(archive_name: Optional[str]) -> UnitNumbers:
     token (``[v2]`` is a release revision). A range whose end is a year is one number. 1.32.0 comics grammar:
     BD / European album tokens (``Tome 3``, ``T03``, ``Band 3``, ``Deel 3``) are volumes, ``Issue 12`` /
     ``No. 12`` chapters (like ``#12``), and an ``Annual`` / ``FCBD`` / ``Special #N`` / ``One-Shot N`` issue is
-    an extra (``Saga Annual 2`` -> chapter 2, an extra)."""
+    an extra (``Saga Annual 2`` -> chapter 2, an extra). 1.34.0: ``0003 [0001 - Chapter Title]`` -> chapter 1 (a running
+    index, then the chapter in the first bracket - :func:`chapter_number_of` keeps the index). 1.42.0: a site's
+    watermark at the end is not part of the name; up to three decimals, a padded sub-number (:func:`unit_number`)."""
     if is_null_or_whitespace(archive_name):
         return UnitNumbers()
-    name = _ARCHIVE_EXTENSION.sub("", nfkc(archive_name).strip())
+    # 1.42.0: a site's watermark at the end ("<Title> 001 Read Online") is not part of the name.
+    name = without_site_watermark(_ARCHIVE_EXTENSION.sub("", nfkc(archive_name).strip()))
+    # 1.34.0 (owner): "0003 [0001 - Title]" numbers its files with a running index; the bracketed number is the chapter
+    # ("0002 [0000.5]" -> 0.5, an extra). The title in the bracket is free text: nothing is read from it ("(Part 2)" is
+    # an arc title - that file has its own chapter number). A bracketed year ("001 [2019]") is not a chapter.
+    indexed = _INDEXED_CHAPTER.search(name)
+    if indexed is not None and not _YEAR_ONLY.search(indexed.group("n")):
+        n = unit_number(indexed.group("n"))
+        return UnitNumbers(None, None, n, None, n != n.to_integral_value(rounding="ROUND_DOWN"))
     outside = _bare(name)
 
     volume = _range_of(_VOLUME_UNIT.finditer(outside), allow_short_token=True)
@@ -526,7 +576,7 @@ def units_of(archive_name: Optional[str]) -> UnitNumbers:
     if marker is not None:
         own = marker.group("n")
         if chapter is None and own is not None and not _YEAR_ONLY.search(own):
-            chapter = (Decimal(own), None)
+            chapter = (unit_number(own), None)
         extra = extra or chapter is not None
     return UnitNumbers(volume[0] if volume else None, volume[1] if volume else None,
                        chapter[0] if chapter else None, chapter[1] if chapter else None, extra)
@@ -548,10 +598,10 @@ def _range_of(matches: Iterable, allow_short_token: bool) -> Optional[Tuple[Deci
         token = m.groupdict().get("t")
         if not allow_short_token and token is not None and len(token) == 1:
             continue
-        n = Decimal(m.group("n"))
+        n = unit_number(m.group("n"))
         high = n
         if m.group("m") is not None:
-            e = Decimal(m.group("m"))
+            e = unit_number(m.group("m"))
             # "Title v03 - 2019": a year, not the end of a range.
             if e > n and not (n < 1900 and _YEAR_ONLY.search(m.group("m"))):
                 high = e
@@ -574,7 +624,18 @@ def issue_number_of(archive_name: Optional[str]) -> Optional[Decimal]:
     m = _ISSUE_NO.search(outside)
     if m is None or _UNIT_LIKE_AFTER.search(outside[m.end():]) is not None:
         return None
-    return Decimal(m.group("n"))
+    return unit_number(m.group("n"))
+
+
+def unit_number(text: str) -> Decimal:
+    """A unit number as written (1.42.0: up to three decimals): ``014.5`` -> 14.5, ``014.125`` -> 14.125. A three-digit
+    fraction with a leading zero is a sub-number padded like the number before it (MangaList, owner 2026-10-11: "It is
+    .5"): ``014.005`` -> 14.5, ``021.010`` -> 21.10 (= 21.1). No literal chapter number has such a fraction;
+    ``014.000`` stays 14."""
+    whole, dot, frac = text.partition(".")
+    if dot and len(frac) == 3 and frac[0] == "0" and frac[1:] != "00":
+        text = f"{whole}.{int(frac)}"
+    return Decimal(text)
 
 
 def mask_folder_title_number(archive_name: str, folder_name: Optional[str]) -> str:

@@ -35,10 +35,11 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .gui.list_text import wanted_series
 from .gui.shell import WantedSeries
-from .gui.volumes_target import find_volumes_availability
-from .knowledge import SeriesKnowledge, fmt_num, from_mangapixer_item, from_own_matcher, to_decimal
+from .gui.volumes_target import Availability, find_volumes_availability
+from .knowledge import SeriesKnowledge, declared_edition_of, fmt_num, from_mangapixer_item, from_own_matcher, to_decimal
 from .models import FileHit, MangaEntry
 from .states import SeriesState, compute_state, fallback_inventory_from_entry
+from .unbundled import unbundled_ids
 
 _log = logging.getLogger(__name__)
 
@@ -126,25 +127,30 @@ def knowledge_of_item(item: Optional[Mapping[str, Any]]) -> Optional[SeriesKnowl
 
 def inventory_of(entry: MangaEntry, item: Optional[Mapping[str, Any]]):
     """The series' held units in the state's shape, merged with MangaPixer's volume list (which chapters each volume
-    collects) when MangaPixer knows the series."""
+    collects) when MangaPixer knows the series - not for a folder of a declared edition (an omnibus / master edition):
+    the list is the regular edition's, and its chapter ranges are not what the edition's volumes hold."""
     from .inventory import as_state_inventory
 
     item = item or {}
+    if declared_edition_of(item)[1] is not None:
+        return as_state_inventory(entry.inventory(None))
     volumes = item.get("volumes") if isinstance(item.get("volumes"), dict) else None
     volume_list = volumes.get("items") if volumes else None
     return as_state_inventory(entry.inventory(volume_list or None))
 
 
 def evaluate(entry: MangaEntry, *, knowledge: Optional[SeriesKnowledge], inventory: Any, needs_kind: bool,
-             rename_count: int = 0, today: Optional[_dt.date] = None) -> Tuple[SeriesState, SeriesKnowledge]:
+             rename_count: int = 0, today: Optional[_dt.date] = None,
+             unbundled: bool = False) -> Tuple[SeriesState, SeriesKnowledge]:
     """The series' state as the List shows it, and the knowledge behind it (*knowledge* None: the own matcher's;
-    *inventory* None: read from the entry's file names)."""
+    *inventory* None: read from the entry's file names; *unbundled*: the series' Unbundled Chapters setting,
+    :mod:`mangalist.unbundled`)."""
     knowledge = knowledge or from_own_matcher(entry)
     if inventory is None:
         inventory = fallback_inventory_from_entry(entry)
     st = compute_state(inventory, knowledge, folder_empty=entry.n_files == 0, needs_kind=needs_kind,
                        rename_count=rename_count, behind_override=entry.behind_override, today=today,
-                       restarts=entry.restarting_units)
+                       restarts=entry.restarting_units, unbundled=unbundled)
     return st, knowledge
 
 
@@ -162,7 +168,13 @@ def series_wanted(entry: MangaEntry, state: Optional[SeriesState], knowledge: Op
     if entry is None or state is None or not state.gaps:
         return []
     volumes = None
-    if downloads and (state.missing_volumes or state.upgrade_volumes):
+    if knowledge is not None and knowledge.edition_label and state.missing_volumes:
+        # A declared edition's volumes are numbered by that edition, nyaa's releases mostly by the regular one: a
+        # search would take regular volume 3 for the edition's volume 3. Shown in To get, never searched (nor by the
+        # find pass).
+        volumes = Availability(False, f"{knowledge.edition_label}: nyaa releases are matched by volume number, and "
+                                      "this edition numbers its volumes its own way - not searched")
+    elif downloads and (state.missing_volumes or state.upgrade_volumes):
         volumes = find_volumes_availability(series_id=series_id, folder=str(entry.folder), title=entry.title,
                                             english_title=entry.english_title, knowledge=knowledge, state=state,
                                             held=held)
@@ -257,7 +269,8 @@ def library_states(db, *, root_ids: Optional[Iterable[int]] = None,
                    today: Optional[_dt.date] = None) -> List[SeriesView]:
     """Every present series of *root_ids* (all roots when None) with its state, in the List's order (root by root,
     series folders by name). A broken MangaPixer cache leaves every series on the own matcher's knowledge, as in the
-    window; a root whose records cannot be read is left out (both logged)."""
+    window; a root whose records cannot be read is left out (both logged). The series with Unbundled Chapters on
+    (:mod:`mangalist.unbundled`, read once) also want the chapters after their last volume."""
     wanted_ids = None if root_ids is None else set(root_ids)
     roots = [r for r in db.list_roots() if wanted_ids is None or r.id in wanted_ids]
     try:
@@ -270,6 +283,7 @@ def library_states(db, *, root_ids: Optional[Iterable[int]] = None,
     except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not stop the list
         _log.warning("Wanted list: MangaPixer's data unavailable; the own matcher's knowledge is used", exc_info=True)
         resolver = None
+    unbundled = unbundled_ids(db)
     out: List[SeriesView] = []
     for root in roots:
         try:
@@ -285,7 +299,7 @@ def library_states(db, *, root_ids: Optional[Iterable[int]] = None,
             item = _safe_item(resolver, root, entry)
             inventory = inventory_of(entry, item)
             state, knowledge = evaluate(entry, knowledge=knowledge_of_item(item), inventory=inventory,
-                                        needs_kind=entry.needs_kind, today=today)
+                                        needs_kind=entry.needs_kind, today=today, unbundled=row.id in unbundled)
             out.append(SeriesView(row, entry, state, knowledge, held_volumes(inventory)))
     return out
 

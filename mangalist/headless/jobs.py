@@ -2,8 +2,10 @@
 
 - ``rescan``: re-scans every configured library root with the existing scanner (read-only; the
   owner and other tools keep adding files, so whatever is on disk is simply the new truth) and records it in
-  the library database like the GUI (series, units, kind answers, archive rows, moves, series carry-over),
-  then signs new archives in the background order (series identity). Last, the renamer's automatic pass
+  the library database like the GUI (series, units, kind answers, archive rows, moves, series carry-over), root by
+  root under the cross-process scan lock (:mod:`mangalist.scan_lock`; one transaction for all roots held the write
+  lock for 15-26 s and the GUI's record failed with ``database is locked``, 2026-10-12), then signs new archives in
+  the background order (series identity). Last, the renamer's automatic pass
   (:meth:`mangalist.renamer.Renamer.automatic_pass`): roots set to "Rename automatically" whose conversion the
   owner started in the GUI get their pending renames through the journal (every batch logged; the touched roots are
   scanned again and MangaPixer is asked to scan). The downloads job's rescan after filing runs it too.
@@ -271,14 +273,15 @@ def make_rescan(provider: RootsProvider,
                 "exclusions": list(getattr(spec, "exclusions", None) or [])}
             try:
                 if record:
-                    from ..scanner import LibraryScan, scan_library
+                    from ..scan_lock import scan_lock
+                    from ..scanner import scan_library
 
-                    one = scan_library([spec], progress=progress, db=db)
-                    if one.roots and one.roots[0].error:
-                        raise OSError(one.roots[0].error)
-                    recorded = recorded or LibraryScan()
-                    recorded.roots.extend(one.roots)
-                    recorded.loose.extend(one.loose)
+                    with scan_lock(db, what=f"the rescan of {getattr(spec, 'name', '') or root}", tick=ctx.check):
+                        one = scan_library([spec], progress=progress, db=db)
+                        if one.roots and one.roots[0].error:
+                            raise OSError(one.roots[0].error)
+                        recorded = recorded or _Recorded()
+                        recorded.add(db, one)
                     entries = one.entries
                 else:
                     entries = scan_root(root, progress=progress, **extra)
@@ -303,7 +306,7 @@ def make_rescan(provider: RootsProvider,
         extra_out: Dict[str, Any] = {"roots": per_root}
         message = f"{ok} of {len(roots)} roots scanned"
         if recorded is not None and db is not None:
-            extra_out["identity"] = _record(db, recorded, ctx, backfill, backfill_delay)
+            extra_out["identity"] = recorded.finish(db, ctx, backfill, backfill_delay)
             if renames is not None:
                 ctx.check()
                 try:
@@ -340,37 +343,80 @@ def _known_root_ids(db: Any) -> set:
         return set()
 
 
-def _record(db: Any, result: Any, ctx: JobContext, backfill: bool, delay: Optional[float]) -> Dict[str, Any]:
-    """Record the scan like the GUI does, then sign archives in the background order (counts for the log)."""
-    from ..scanner import record_library_scan
+class _Recorded:
+    """The rescan's record, root by root (each right after its walk, under the scan lock), summed for the log."""
 
-    out: Dict[str, Any] = {}
-    try:
-        renamed = record_library_scan(db, result)
-    except Exception as exc:  # noqa: BLE001 - the scan itself succeeded
-        _log.exception("Rescan: recording the scan failed")
-        return {"error": str(exc) or type(exc).__name__}
-    rep = getattr(result, "identity", None)
-    out["renamed"] = len(renamed)
-    if rep is not None:
-        out.update({"archives": rep.archives_seen, "new": rep.archives_new, "missing": rep.archives_missing,
-                    "changed": rep.archives_changed, "moves": len(rep.moves), "ambiguous": rep.ambiguous,
-                    "carried": sum(1 for c in rep.carries if c.carried)})
-    if backfill:
-        ctx.check()
-        from ..identity.backfill import DEFAULT_DELAY, backfill_signatures
+    def __init__(self) -> None:
+        self.out: Dict[str, Any] = {"renamed": 0}
+        self.errors: List[str] = []
+        self.any = False
+
+    def add(self, db: Any, one: Any) -> None:
+        from ..scanner import record_library_scan
 
         try:
-            bf = backfill_signatures(db, per_file_delay=DEFAULT_DELAY if delay is None else delay,
-                                     should_stop=lambda: ctx.stop_requested)
-            out["signatures"] = {"signed": bf.signed, "skipped": bf.skipped, "remaining": bf.remaining,
-                                 "kib_read": bf.bytes_read // 1024, "seconds": bf.seconds,
-                                 "paired": bf.paired, "carried": sum(1 for c in bf.carries if c.carried)}
-        except Exception as exc:  # noqa: BLE001
-            _log.exception("Rescan: the signature backfill failed")
-            out["signatures"] = {"error": str(exc) or type(exc).__name__}
-    _log.info("Rescan recorded: %s", out)
-    return out
+            renamed = record_library_scan(db, one, pair=False)
+        except Exception as exc:  # noqa: BLE001 - the scan itself succeeded; the next rescan records it
+            _log.exception("Rescan: recording %s failed", one.roots[0].root_name if one.roots else "a root")
+            self.errors.append(str(exc) or type(exc).__name__)
+            return
+        self.any = True
+        self.out["renamed"] += len(renamed)
+        rep = getattr(one, "identity", None)
+        if rep is not None:
+            for key, value in (("archives", rep.archives_seen), ("new", rep.archives_new),
+                               ("missing", rep.archives_missing), ("changed", rep.archives_changed),
+                               ("moves", len(rep.moves)), ("ambiguous", rep.ambiguous),
+                               ("carried", sum(1 for c in rep.carries if c.carried))):
+                self.out[key] = self.out.get(key, 0) + value
+
+    def finish(self, db: Any, ctx: JobContext, backfill: bool, delay: Optional[float]) -> Dict[str, Any]:
+        """MangaPixer's pairing once, then the signature backfill (counts for the log)."""
+        if not self.any:
+            return {"error": "; ".join(self.errors) or "nothing recorded"}
+        out = dict(self.out)
+        if self.errors:
+            out["errors"] = list(self.errors)
+        from ..scanner import refresh_mangapixer_pairing
+
+        try:
+            refresh_mangapixer_pairing(db)
+        except Exception:  # noqa: BLE001 - the scan is recorded; the daily sync pairs again
+            _log.warning("Rescan: pairing the roots with MangaPixer's libraries failed", exc_info=True)
+        if backfill:
+            ctx.check()
+            from ..identity.backfill import DEFAULT_DELAY, backfill_signatures
+
+            try:
+                bf = backfill_signatures(db, per_file_delay=DEFAULT_DELAY if delay is None else delay,
+                                         should_stop=lambda: ctx.stop_requested)
+                out["signatures"] = {"signed": bf.signed, "skipped": bf.skipped, "remaining": bf.remaining,
+                                     "kib_read": bf.bytes_read // 1024, "seconds": bf.seconds,
+                                     "paired": bf.paired, "carried": sum(1 for c in bf.carries if c.carried)}
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("Rescan: the signature backfill failed")
+                out["signatures"] = {"error": str(exc) or type(exc).__name__}
+        _log.info("Rescan recorded: %s", out)
+        return out
+
+
+def record_folders(db: Any, scopes: Dict[int, Any], ctx: Optional[JobContext] = None) -> Any:
+    """Scan and record only the folders in *scopes* (``{root id: the root's direct children}``; None: the whole root)
+    - the headless job's selective scan after a filing (:func:`mangalist.scanner.scan_and_record_library`; under the
+    scan lock, the MangaPixer pairing refreshed only when a series row appeared, went or moved). A long folder list
+    reads its root whole. Returns the :class:`~mangalist.scanner.LibraryScan` (None: nothing to scan)."""
+    from ..scanner import scan_and_record_library, widen_scopes
+
+    scopes = widen_scopes(db, scopes)
+    roots = [r for r in db.list_roots() if r.id in scopes]
+    if not roots:
+        return None
+
+    def progress(done: int, total: int, name: str) -> None:  # noqa: ARG001
+        if ctx is not None:
+            ctx.check()
+
+    return scan_and_record_library(roots, db, progress=progress, scopes=scopes)
 
 
 DISPATCH_DESCRIPTION = "Find and send missing volumes and chapters (opt-in)"

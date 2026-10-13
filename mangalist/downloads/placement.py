@@ -67,18 +67,20 @@ def _entries(folder: str):
         return []
 
 
-def _volume_named(name: str) -> bool:
-    from ..parsing import Kind, parse_name
+def _volume_named(name: str, series_title: Optional[str] = None) -> bool:
+    """*name* (a folder of images) reads as a volume - with the series' title, so a number it ends with is not one."""
+    from ..parsing import Kind, ParseContext, parse_name
 
-    parsed = parse_name(name)
+    parsed = parse_name(name, ParseContext(series_title=series_title) if series_title else None)
     return parsed.kind == Kind.VOLUME or (parsed.kind == Kind.UNKNOWN and parsed.number is not None)
 
 
 def _image_volume_folders(series_dir: str, subdirs: Iterable[str]) -> List[str]:
     out = []
+    title = os.path.basename(os.path.normpath(series_dir))
     for name in subdirs:
         files = [n for n, is_dir, is_file in _entries(os.path.join(series_dir, name)) if is_file]
-        if any(_is_image(n) for n in files) and not any(_is_archive(n) for n in files) and _volume_named(name):
+        if any(_is_image(n) for n in files) and not any(_is_archive(n) for n in files) and _volume_named(name, title):
             out.append(name)
     return out
 

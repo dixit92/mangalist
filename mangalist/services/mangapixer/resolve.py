@@ -19,9 +19,9 @@ the folder nor any ancestor has an item. Otherwise a :class:`Resolution`:
                    ``docs/metadata-export.md``: ``nodeId, nodeKind, carriedFrom, trail, updatedAt, link{state,
                    method, score, updatedAt}, record, companions, officialLinks, volumes, completion, refresh``).
                    Optional blocks may be ``null``; unknown fields may appear - ignore them.
-``record``         ``item["record"]`` when its provider is ``mangaupdates``, else ``None`` (other providers, e.g.
-                   ``gcd``, are ignored). Always ``None`` for NeedsReview / DontMatch. Use this, not
-                   ``item["record"]``.
+``record``         ``item["record"]`` when its provider is ``mangaupdates`` or (MangaPixer 1.42.0) ``mangadex``, else
+                   ``None`` (other providers, e.g. ``gcd``, are ignored). Always ``None`` for NeedsReview / DontMatch.
+                   Use this, not ``item["record"]``.
 ``link_state``     ``Confirmed`` | ``Auto`` | ``NeedsReview`` | ``DontMatch`` | ``CollectionAbout`` (MangaPixer 1.34.0)
                    or a state this build does not know (the effective state of the folder).
 ``inherited``      ``False``: the folder's own item. ``True``: the nearest ancestor's item (franchise subfolders).

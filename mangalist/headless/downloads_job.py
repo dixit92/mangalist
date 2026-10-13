@@ -44,25 +44,45 @@ class _NoReport:
 
     filed: tuple = ()
 
+    def __init__(self, journal_since=None) -> None:
+        self.journal_since = journal_since
+
+
+def _journal_mark(ledger):
+    """Where the journal stands before the pass (the after-filing scan reads what the pass moved since)."""
+    store = getattr(ledger, "store", None)
+    if store is None:
+        return None
+    try:
+        from ..scanner import journal_mark
+
+        return journal_mark(store)
+    except Exception:  # noqa: BLE001 - without the mark only the filed series are scanned
+        _log.debug("Downloads: the journal could not be read", exc_info=True)
+        return None
+
 
 def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
-    """After a pass: when it filed volumes, record a rescan (the series' state catches up now, not at the nightly
-    rescan) and ask MangaPixer to scan the libraries filed into (MangaPixer 1.36.0, the token's ``library:scan``
-    scope); scan requests MangaPixer could not start yet are retried whenever they are due - unless the owner switched
-    the requests off (Settings > Automation). Returns a summary."""
+    """After a pass: when it filed volumes or moved files, scan and record the folders it touched (the series' state
+    catches up now, not at the next periodic rescan): the filed series' folders and both sides of every journal step
+    the pass wrote (the replaced chapters it set aside), never every root - one filed volume used to cost a walk of all
+    roots, an all-root record and the Renamer's dry runs, about 90 s (selective scanning, 2026-10-13). Then the
+    Renamer's automatic pass (it looks again only at series that changed). Then MangaPixer is asked to scan the
+    libraries filed into (MangaPixer 1.36.0, the token's ``library:scan`` scope); scan requests MangaPixer could not
+    start yet are retried whenever they are due - unless the owner switched the requests off (Settings > Automation).
+    Returns a summary."""
     from ..downloads.options import KEY_SCAN_AFTER_FILING, get_flag
     from ..services.mangapixer import open_cache
     from ..services.mangapixer.scans import libraries_for_series, request_scans
 
     store = ledger.store
     every = ledger.for_tool(None) if callable(getattr(ledger, "for_tool", None)) else ledger    # chapters filed too
-    series_ids = [rec.series_id for rec in (every.get(i) for i in report.filed) if rec is not None]
+    records = [rec for rec in (every.get(i) for i in report.filed) if rec is not None]
+    series_ids = [rec.series_id for rec in records]
     notes = []
-    if series_ids:
-        from .jobs import StoreRootsProvider, make_rescan
-
-        res = make_rescan(StoreRootsProvider(db=store), backfill=False)(ctx)   # the nightly rescan signs archives
-        notes.append(f"rescan {res.status}")
+    scopes = _scopes_after(store, records, getattr(report, "journal_since", None))
+    if scopes:
+        notes.append(_scan_after(ctx, store, scopes))
     if not get_flag(store, KEY_SCAN_AFTER_FILING):
         return "; ".join(notes) or None
     cache = open_cache(store)
@@ -70,6 +90,57 @@ def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
     if libraries or cache.pending_scans():
         notes.append(request_scans(cache, libraries).summary())
     return "; ".join(notes) or None
+
+
+def _scopes_after(store, records, journal_since) -> dict:
+    """The folders a pass touched: each filed record's series (its row; the record's target folder when the row is
+    gone) and both sides of the journal steps written since *journal_since*."""
+    from ..scanner import folder_scopes, journal_folders_since, merge_scopes, series_scopes
+
+    roots = store.list_roots()
+    known = series_scopes(store, [r.series_id for r in records if r.series_id is not None])
+    located = {r.series_id for r in records if r.series_id is not None and _series_known(store, r.series_id)}
+    loose = folder_scopes(roots, [r.target_dir for r in records if r.target_dir and r.series_id not in located])
+    moved: dict = {}
+    if journal_since is not None:
+        try:
+            paths, _mark = journal_folders_since(store, journal_since)
+            moved = folder_scopes(roots, paths)
+        except Exception:  # noqa: BLE001 - the filed series are still scanned
+            _log.warning("Downloads: reading the journal for the after-filing scan failed", exc_info=True)
+    return merge_scopes(known, loose, moved)
+
+
+def _series_known(store, series_id) -> bool:
+    with store.connect() as con:
+        return con.execute("SELECT 1 FROM series WHERE id = ?", (int(series_id),)).fetchone() is not None
+
+
+def _scan_after(ctx: JobContext, store, scopes: dict) -> str:
+    """Scan and record *scopes*, then the Renamer's automatic pass; ``rescan ok (2 folders)``."""
+    from .jobs import automatic_renames, record_folders
+
+    try:
+        result = record_folders(store, scopes, ctx)
+    except Cancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the filing is done; the periodic rescan records it
+        _log.warning("Downloads: the after-filing scan failed (%s)", type(exc).__name__, exc_info=True)
+        return f"rescan error ({type(exc).__name__})"
+    if result is None:
+        return "rescan skipped (no library folder)"
+    status = "error" if result.errors else "ok"
+    n = sum(len(rs.scope) if rs.scope is not None else 0 for rs in result.roots)
+    whole = [rs.root_name for rs in result.roots if rs.scope is None]
+    what = ", ".join(([f"{n} folder{'' if n == 1 else 's'}"] if n else []) + whole)
+    try:
+        ctx.check()
+        _log.info("Downloads: after filing: %s", automatic_renames(store, ctx))
+    except Cancelled:
+        raise
+    except Exception:  # noqa: BLE001 - the scan is recorded; renames are tried next time
+        _log.exception("Downloads: the automatic renames after filing failed")
+    return f"rescan {status} ({what})"
 
 
 def replaced_chapters_step(ledger) -> Optional[str]:
@@ -99,10 +170,11 @@ def _default_chapter_client_factory(conn):
 
 
 class _Merged:
-    """The filed records of both passes, for the after-filing step."""
+    """The filed records of both passes, for the after-filing step, and where the journal stood before them."""
 
-    def __init__(self, *reports) -> None:
+    def __init__(self, *reports, journal_since=None) -> None:
         self.filed = tuple(i for r in reports if r is not None for i in r.filed)
+        self.journal_since = journal_since
 
 
 def chapters_pass(ctx: JobContext, ledger, chapter_client_factory=None, namer=None):
@@ -192,27 +264,30 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
             from ..store import get_store
 
             ledger = DownloadLedger(get_store())
+        mark = _journal_mark(ledger)
         chapter_report, chapter_note = chapters_pass(ctx, ledger, chapter_client_factory, namer)
         chapter_line = chapters_text(chapter_report, chapter_note)
         active = bool(ledger.active())
         queue_work = _queue_work(ledger)
         if not active and not queue_work:
             if chapter_line is not None:                    # chapter downloads only
-                return _chapters_only(ctx, ledger, chapter_report, chapter_line)
+                return _chapters_only(ctx, ledger, chapter_report, chapter_line, mark)
             notes = [n for n in (_replaced(ledger),          # waiting batches retried, the holding folder emptied
-                                 _after(ctx, ledger, _NoReport())) if n]   # pending MangaPixer scans are retried too
+                                 _after(ctx, ledger, _NoReport(mark))) if n]   # pending MangaPixer scans retried too
             return JobResult("skipped", "no downloads in progress" + "".join(f"; {n}" for n in notes))
         conn = ledger.connection()
         if conn is None:
             _log.info("Downloads: no qBittorrent connection is set up; skipped")
             if chapter_report is not None:
-                return _chapters_only(ctx, ledger, chapter_report, chapter_line + "; no qBittorrent connection set up")
+                return _chapters_only(ctx, ledger, chapter_report, chapter_line + "; no qBittorrent connection set up",
+                                      mark)
             return JobResult("skipped", "no qBittorrent connection set up")
         client = (client_factory or _default_client_factory)(conn)
         if client is None:
             _log.warning("Downloads: no qBittorrent client available in this build; skipped")
             if chapter_report is not None:
-                return _chapters_only(ctx, ledger, chapter_report, chapter_line + "; no qBittorrent client available")
+                return _chapters_only(ctx, ledger, chapter_report, chapter_line + "; no qBittorrent client available",
+                                      mark)
             return JobResult("skipped", "no qBittorrent client available")
         from ..downloads.arrivals import ArrivalsReport
         from ..downloads.queueing import run_queue
@@ -245,14 +320,14 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         if replaced_note:
             message += f"; {replaced_note}"
             extra["replaced"] = replaced_note
-        note = _after(ctx, ledger, _Merged(report, chapter_report) if chapter_report is not None else report)
+        note = _after(ctx, ledger, _Merged(report, chapter_report, journal_since=mark))
         if note:
             message += f"; {note}"
             extra["after"] = note
         _log.info("Downloads: %s", message)
         return JobResult(status, message, extra)
 
-    def _chapters_only(ctx: JobContext, ledger, chapter_report, line: str) -> JobResult:
+    def _chapters_only(ctx: JobContext, ledger, chapter_report, line: str, mark=None) -> JobResult:
         """The job's result when only chapter downloads were in progress (or qBittorrent could not run)."""
         extra = _chapter_extra(chapter_report)
         if chapter_report is None:                      # the pass could not run (no Suwayomi set up)
@@ -263,7 +338,7 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
         if replaced_note:
             message += f"; {replaced_note}"
             extra["replaced"] = replaced_note
-        note = _after(ctx, ledger, _Merged(chapter_report))
+        note = _after(ctx, ledger, _Merged(chapter_report, journal_since=mark))
         if note:
             message += f"; {note}"
             extra["after"] = note

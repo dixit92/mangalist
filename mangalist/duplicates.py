@@ -48,7 +48,7 @@ from typing import Collection, Dict, Iterable, List, Optional, Sequence, Tuple
 from .gui.shell import DuplicateFile, DuplicateGroup
 from .inventory import to_number
 from .parsing.model import Layer
-from .parsing.parser import parse_name
+from .parsing.parser import ParseContext, parse_name
 from .store.lock import LOCK_NAME, LockError, RootLock
 
 _log = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
             continue
         root_id, series_rel = series_info[sid]
         series_folder = Path(roots[root_id].path, *_slash_parts(series_rel))
-        for same in _alike(members, number).values():
+        for same in _alike(members, number, series_folder.name).values():
             if len(same) < 2:
                 continue
             files = []
@@ -195,10 +195,10 @@ def _number_pattern(number: Decimal) -> str:
     return r"0*" + re.escape(whole) + (r"\.(?:" + re.escape(frac) + r")0*" if frac else r"(?:\.0+)?")
 
 
-def other_numbers(name: str, number: Decimal) -> Tuple[str, ...]:
+def other_numbers(name: str, number: Decimal, series_title: Optional[str] = None) -> Tuple[str, ...]:
     """The numbers a file name states outside tags and outside its volume / chapter labels: ``009`` in
     ``Sea 009 Vol 01 Title``, ``1`` in ``Series Season 1 v01``. FMD2's download index and a bare unit *number* are not
-    among them. Leading zeros dropped."""
+    among them. Leading zeros dropped. *series_title*: the series folder's title, read as the scan reads it."""
     stem = os.path.splitext(os.path.basename(name))[0]
     text, before = stem, None
     while text != before:                                   # nested tags: "[Vol. 1 Ch. 2 - Title [group]]"
@@ -208,7 +208,7 @@ def other_numbers(name: str, number: Decimal) -> Tuple[str, ...]:
     # mislabelled - MangaPixer's rule counts them), while "009 Vol 01" keeps its 009 and "Season 1 v01" its 1
     text = re.sub(r"(?i)(?<![a-z0-9])(?:v|vol|volume|c|ch|chap|chapter|ep|episode|#)\.?\s*\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?"
                   r"(?![0-9])", " ", text)
-    parsed = parse_name(os.path.basename(name))
+    parsed = parse_name(os.path.basename(name), ParseContext(series_title=series_title) if series_title else None)
     if parsed is not None and parsed.layer == Layer.FMD2 and parsed.index is not None:
         text = re.sub(r"(?<![0-9.])0*" + str(int(parsed.index)) + r"(?![0-9.])", " ", text, count=1)
     if not re.search(r"(?i)(?<![a-z0-9])(?:v|vol|volume|c|ch|chap|chapter)\.?\s*\d", stem):
@@ -216,11 +216,12 @@ def other_numbers(name: str, number: Decimal) -> Tuple[str, ...]:
     return tuple(str(Decimal(d).normalize()) if "." in d else str(int(d)) for d in _DIGITS.findall(text))
 
 
-def _alike(members: List[Tuple[str, Optional[str]]], number: Decimal) -> Dict[Tuple[str, ...], List[Tuple[str, Optional[str]]]]:
+def _alike(members: List[Tuple[str, Optional[str]]], number: Decimal,
+           series_title: Optional[str] = None) -> Dict[Tuple[str, ...], List[Tuple[str, Optional[str]]]]:
     """*members* split by the other numbers their names state: only files that agree on them are copies."""
     out: Dict[Tuple[str, ...], List[Tuple[str, Optional[str]]]] = {}
     for rel, group in members:
-        out.setdefault(other_numbers(rel, number), []).append((rel, group))
+        out.setdefault(other_numbers(rel, number, series_title), []).append((rel, group))
     return out
 
 
