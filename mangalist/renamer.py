@@ -56,7 +56,7 @@ _log = logging.getLogger(__name__)
 KEY_WINDOWS_SERVER = "naming.windows_server"     # Settings > Library: the server name of the Windows path (optional)
 KEY_GUIDED_ROOTS = "renamer.guided_roots"         # root ids the owner started converting from the Renamer window
 KEY_AUTOMATIC_OFFERED = "renamer.automatic_offered"  # root ids already asked "Rename automatically from now on?"
-META_AUTOMATIC_SEEN = "renamer.automatic_seen"    # (meta) per root: the naming inputs + each series looked at, unchanged
+META_AUTOMATIC_SEEN = "renamer.automatic_seen"    # (meta) per root: the naming inputs + the series found unchanged
 PLAN_REASON = "rename to the scheme"
 BATCH_SIZE = 200            # files per journal plan (whole series only: a bigger series is a batch of its own)
 AUTO_LIMIT = 500            # files the automatic pass renames per run at most (the rest waits for the next run)
@@ -1347,7 +1347,8 @@ class Renamer:
                                  (root.id,)):
                 series[r["id"]] = (r["rel_path"], r["kind_hint"])
             # by the (root, path) index: "AND status = ..." made SQLite walk every present archive of every root
-            for r in con.execute("SELECT series_id, rel_path, size, status FROM archives WHERE root_id = ?", (root.id,)):
+            for r in con.execute("SELECT series_id, rel_path, size, status FROM archives WHERE root_id = ?",
+                                 (root.id,)):
                 if r["series_id"] is not None and r["status"] == "present":
                     files[r["series_id"]].append((r["rel_path"], r["size"]))
         out: Dict[int, str] = {}

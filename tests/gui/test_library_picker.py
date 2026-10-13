@@ -574,7 +574,8 @@ def test_deleted_duplicates_and_filed_downloads_rescan_only_their_libraries(lib)
     win._on_files_deleted([str(lib.dirs[MANHWA].parent / "elsewhere" / "c.cbz")])     # outside every library: nothing
     win._on_replaced_chapters_moved([])                                               # nothing named: nothing
     # owner, 2026-10-13: not even the whole library - only the series folders the files were in
-    assert scans == [([MANHWA], {MANHWA: {"Series", "Other"}}), ([MANGA, COMICS], {MANGA: {"Series"}, COMICS: {"Series"}})]
+    assert scans == [([MANHWA], {MANHWA: {"Series", "Other"}}),
+                     ([MANGA, COMICS], {MANGA: {"Series"}, COMICS: {"Series"}})]
 
 
 def test_root_of_takes_the_deepest_library_folder(tmp_path):

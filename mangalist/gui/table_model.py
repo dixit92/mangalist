@@ -128,8 +128,8 @@ def merge_folder_scan(entries: List[MangaEntry], root_id: Optional[int], root_fo
                       scanned: Iterable[MangaEntry]) -> List[MangaEntry]:
     """*entries* (the table's rows) with a folder-level scan merged in: the rows of root *root_id* below the scanned
     top-level folders (*scope*, names of the root's direct children - a subseries is below its franchise parent) are
-    replaced by *scanned*; the root's rows stay in the scan's order (by top-level folder name, as a whole-root scan lists
-    them), the other roots' rows stay as they are (selective scanning, Stage 1)."""
+    replaced by *scanned*; the root's rows stay in the scan's order (by top-level folder name, as a whole-root scan
+    lists them), the other roots' rows stay as they are (selective scanning, Stage 1)."""
     names = set(scope)
     base = Path(root_folder)
 

@@ -216,7 +216,8 @@ def test_a_folder_scan_touches_nothing_outside_its_folders(tmp_path):
     result = scan_and_record_folders(lib.root("Manga"), ["Alpha"], lib.db)
     assert [Path(e.folder).name for e in result.entries] == ["Alpha"] and result.loose == []
     assert lib.db.get_series(lib.manga.id, "Beta").status == "present"
-    assert all(a.status == "present" for a in lib.db.list_archives(root_id=lib.manga.id) if a.rel_path.startswith("Beta/"))
+    assert all(a.status == "present" for a in lib.db.list_archives(root_id=lib.manga.id)
+               if a.rel_path.startswith("Beta/"))
     assert lib.db.archive_at(lib.manga.id, "Alpha/Alpha v04.cbz").status == "present"
 
 

@@ -620,8 +620,9 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
     renamed: List[tuple] = []
     scanned = [rs for rs in result.roots if not rs.error and rs.root_id is not None]
     for rs in scanned:
-        rec = retry_if_locked(lambda rs=rs: db.record_scan(rs.root_id, rs.folder, seen_from_entries(rs.folder, rs.entries),
-                                                           scope=rs.scope), what=f"Recording {rs.root_name}")
+        rec = retry_if_locked(lambda rs=rs: db.record_scan(rs.root_id, rs.folder,
+                                                           seen_from_entries(rs.folder, rs.entries), scope=rs.scope),
+                              what=f"Recording {rs.root_name}")
         if getattr(rec, "added", None) or getattr(rec, "missing", None) or getattr(rec, "excluded", None):
             result.series_changed = True
         _log.debug("Scan: recorded %s (%d series)", rs.root_name, len(rs.entries))
@@ -658,7 +659,8 @@ def record_library_scan(db, result: LibraryScan, *, pair: bool = True) -> List[t
         result.series_changed = True
     for rs in scanned:      # last: a carried kind answer is applied to the units right away
         try:
-            retry_if_locked(lambda rs=rs: _record_units(db, rs, getattr(_root_of(db, rs.root_id), "naming_scheme", None)),
+            scheme = getattr(_root_of(db, rs.root_id), "naming_scheme", None)
+            retry_if_locked(lambda rs=rs, scheme=scheme: _record_units(db, rs, scheme),
                             what=f"Recording the units of {rs.root_name}")
         except Exception:  # noqa: BLE001 - the series rows and re-links are already recorded
             _log.warning("Recording the units of %s failed", rs.root_name, exc_info=True)
