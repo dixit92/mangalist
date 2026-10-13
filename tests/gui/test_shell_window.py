@@ -199,9 +199,13 @@ def test_lane_cs_view_takes_the_tables_place(make_window, qapp):
     view.show_in_list.emit(str(LIB / TWIN_B))
     assert win._list.current_filter() is None and win._list.stack.currentIndex() == 0 and _selected(win) == [TWIN_B]
     scans = []
-    win._start_scan = lambda roots=None: scans.append(roots)
+    win._start_scan = lambda roots=None, scopes=None: scans.append((roots, scopes))
+    view.files_deleted.emit(["/elsewhere/Twin Series/Twin v01 (copy).cbz"])      # in no library: nothing to scan
+    assert scans == [] and "1 duplicate file(s) deleted" in win._status_label.text()
+    library = SimpleNamespace(id=1, name="Library", path="/lib")
+    win._roots = lambda: [library]
     view.files_deleted.emit(["/lib/Twin Series/Twin v01 (copy).cbz"])
-    assert scans == [None] and "1 duplicate file(s) deleted" in win._status_label.text()
+    assert scans == [([library], {1: {"Twin Series"}})]                         # only that series' folder
 
 
 class FocusingDuplicatesView(FakeDuplicatesView):
@@ -316,7 +320,7 @@ def test_a_scan_stopped_on_close_records_nothing(qapp, monkeypatch):
 
     seen, shown = [], []
 
-    def fake_scan(roots, db=None, *, progress=None, on_start=None, on_root=None):
+    def fake_scan(roots, db=None, *, progress=None, on_start=None, on_root=None, **kw):
         on_start(1, 1, "Library")
         for i, name in enumerate(("Series A", "Series B", "Series C"), 1):
             progress(i, 3, name)
@@ -363,9 +367,14 @@ class ReplacingDownloadTab(FakeDownloadTab):
 def test_restore_move_or_delete_of_replaced_chapters_rescans(make_window):
     win = make_window(downloads=True, tab=ReplacingDownloadTab)
     scans = []
-    win._start_scan = lambda roots=None: scans.append(roots)
+    win._start_scan = lambda roots=None, scopes=None: scans.append((roots, scopes))
+    library = SimpleNamespace(id=1, name="Library", path="/lib")
+    win._roots = lambda: [library]
     win._download_tab.library_changed.emit(["/lib/Series A"])
-    assert scans == [None] and "Files changed in 1 series - rescanning" in win._status_label.text()
+    assert scans == [([library], {1: {"Series A"}})]                            # the series' folder, not every root
+    assert "Files changed in 1 series - rescanning" in win._status_label.text()
+    win._download_tab.library_changed.emit([])
+    assert len(scans) == 1                                                      # nothing named: nothing scanned
 
 
 def test_exclude_from_its_library_adds_an_anchored_pattern_and_rescans_that_root(make_window, tmp_path):
@@ -376,13 +385,13 @@ def test_exclude_from_its_library_adds_an_anchored_pattern_and_rescans_that_root
     entry = _entry("Series A")
     entry.folder, entry.root_id = lib / "Series A", root.id
     scans, asked = [], []
-    win._start_scan = lambda roots=None: scans.append([r.id for r in roots] if roots else None)
+    win._start_scan = lambda roots=None, scopes=None: scans.append(([r.id for r in roots] if roots else None, scopes))
     win.confirm_exclude = lambda names: asked.append(list(names)) or False
     assert win.exclude_from_library([entry]) == 0 and win._db.get_root(root.id).exclusions == ["*.txt"]
     win.confirm_exclude = lambda names: asked.append(list(names)) or True
     assert win.exclude_from_library([entry]) == 1
     assert win._db.get_root(root.id).exclusions == ["*.txt", "Series A/**"]     # anchored: only that folder
-    assert scans == [[root.id]] and asked == [["Series A"], ["Series A"]]
+    assert scans == [([root.id], {root.id: {"Series A"}})] and asked == [["Series A"], ["Series A"]]   # that folder
     assert win.exclude_from_library([entry]) == 0                                # already excluded: nothing added
 
 

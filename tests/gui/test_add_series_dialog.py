@@ -364,18 +364,21 @@ def test_the_top_bar_button_opens_the_dialog_and_rescans_the_library_it_was_adde
     monkeypatch.setattr(ui, "LiveBackend", lambda database: backend)
     monkeypatch.setattr(AddSeriesDialog, "exec", fake_exec)
     scans = []
-    window._start_scan = lambda roots=None: scans.append([r.name for r in roots] if roots is not None else None)
+    window._start_scan = lambda roots=None, scopes=None: scans.append(
+        ([r.name for r in roots] if roots is not None else None, scopes))
     window._library = roots[1].id                                            # the library picked in the window
     window._top.btn_add_series.click()
     assert opened == [("Comics", ["Manga", "Comics"])]
-    assert scans == [["Comics"]]                                             # only the library that got the folder
+    (names, scopes), = scans
+    assert names == ["Comics"] and list(scopes) == [roots[1].id]              # only the library that got the folder
+    assert len(scopes[roots[1].id]) == 1                                     # ... and in it only the new folder
 
 
 def test_cancelling_the_dialog_rescans_nothing(qapp, window, libs, monkeypatch):
     monkeypatch.setattr(ui, "LiveBackend", lambda database: FakeBackend(libs[0]))
     monkeypatch.setattr(AddSeriesDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
     scans = []
-    window._start_scan = lambda roots=None: scans.append(roots)
+    window._start_scan = lambda roots=None, scopes=None: scans.append(roots)
     window._top.btn_add_series.click()
     assert scans == []
 
