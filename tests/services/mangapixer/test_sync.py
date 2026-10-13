@@ -182,6 +182,33 @@ def test_unknown_provider_is_kept_but_not_used(connected, fake, client_factory):
     assert item["record"]["provider"] == "gcd" and mpc.usable_record(item) is None
 
 
+def test_a_mangadex_record_is_used_and_switch_to_mangaupdates_re_links_the_same_node(connected, fake, client_factory):
+    from mangalist.knowledge import from_mangapixer_item
+
+    uuid = "00000000-0000-4000-8000-0000000000cc"
+    mdx = folder("n0001", ["A"], provider="mangadex", updated="2026-10-01T00:00:00.000Z")
+    mdx["record"].update(externalId=uuid, latestChapter="18")
+    mdx["companions"] = {"mangadex": uuid, "anilist": None,
+                         "mangadexReleased": {"language": "en", "latestChapter": "18", "chapters": 18,
+                                              "fetchedAt": "2026-10-01T00:00:00.000Z"}}
+    fake.items["lib0manga"] = [mdx]
+    fake.server_time = "2026-10-01T00:00:00.000Z"
+    _sync(connected, client_factory, fake)
+    item = connected.item("lib0manga", "n0001")
+    assert mpc.usable_record(item)["externalId"] == uuid
+    k = from_mangapixer_item(item)
+    assert k.mangadex_record and k.mangadex_id == uuid and k.mu_id is None and k.mangadex_latest == 18
+    # MangaPixer's "Switch to MangaUpdates": the same node, a MangaUpdates record - an incremental sync replaces it.
+    switched = folder("n0001", ["A"], updated="2026-10-01T10:00:00.000Z")
+    switched["companions"] = dict(mdx["companions"])
+    fake.items["lib0manga"] = [switched]
+    fake.server_time = "2026-10-02T00:00:00.000Z"
+    assert _sync(connected, client_factory, fake).libraries[0].mode == "incremental"
+    k = from_mangapixer_item(connected.item("lib0manga", "n0001"))
+    assert connected.item_count("lib0manga") == 1
+    assert not k.mangadex_record and k.mu_id == switched["record"]["externalId"] and k.mangadex_id == uuid
+
+
 def test_force_full_and_unconfigured(cache, fake, client_factory):
     assert sync_all(cache, list_series=lambda rid: []).status == "skipped"
     cache.set_connection(base_url=fake.url, token=TOKEN)
