@@ -23,7 +23,8 @@ MU_URL = "https://www.mangaupdates.com/series/" + core.base36_from_mu_id(1000) +
 
 
 def mu_record(sid=1000, title="Made Up Series") -> Dict[str, Any]:
-    return {"series_id": sid, "title": title, "url": f"https://www.mangaupdates.com/series/{core.base36_from_mu_id(sid)}/x",
+    url = f"https://www.mangaupdates.com/series/{core.base36_from_mu_id(sid)}/x"
+    return {"series_id": sid, "title": title, "url": url,
             "type": "Manga", "year": "2015", "licensed": True, "latest_chapter": 42, "associated": []}
 
 
@@ -173,7 +174,8 @@ def test_a_mangadex_link_asks_suwayomi_and_passes_the_source_on(qapp, dialogs, l
 def test_a_mangadex_series_without_a_mangaupdates_page_can_be_picked_or_added_bare(qapp, dialogs, libs):
     db, roots, base = libs
     md = core.mangadex_from_record({"data": {"id": UUID, "attributes": {"title": {"en": "Made Up English"}}}})
-    look = core.Lookup(info=core.info_from_mangadex(md), mangadex=md, candidates=[mu_record(7, "Seven"), mu_record(8, "Eight")],
+    look = core.Lookup(info=core.info_from_mangadex(md), mangadex=md,
+                       candidates=[mu_record(7, "Seven"), mu_record(8, "Eight")],
                        notes=["MangaDex lists no MangaUpdates page for this series."])
     backend = FakeBackend(db, look={UUID: look})
     dlg, _ = open_dialog(dialogs, qapp, libs, backend)
@@ -314,7 +316,7 @@ def test_the_live_backend_adds_through_the_core(libs, monkeypatch):
     monkeypatch.setattr("mangalist.renamer.request_mangapixer_scans", lambda db, ids: asked.append(list(ids)) or "")
     out = ui.LiveBackend(db).add(roots[0], "Made Up Series", info, None)
     assert (base / "Manga" / "Made Up Series").is_dir() and asked == [[out.series_id]]
-    assert mu_cache.load_entry(out.folder)["scan_latest_chapter"] == 42.0           # the record's progress fields came along
+    assert mu_cache.load_entry(out.folder)["scan_latest_chapter"] == 42.0       # the record's progress came along
     with pytest.raises(ui.BackendError, match="already exists"):
         ui.LiveBackend(db).add(roots[0], "made up series", info, None)
 
@@ -333,8 +335,8 @@ def test_the_live_backend_turns_core_errors_into_readable_ones(libs):
 def window(qapp, libs, monkeypatch):
     from mangalist.gui import lanes
     from mangalist.gui import main_window as mw
-    from tests.gui.conftest import FakeBackend as DownloadsFake
-    from tests.gui.test_shell_window import FakeDownloadTab, FakeDuplicatesView
+    from .conftest import FakeBackend as DownloadsFake
+    from .test_shell_window import FakeDownloadTab, FakeDuplicatesView
 
     monkeypatch.setattr(mw.MainWindow, "_make_volumes_backend", lambda self: DownloadsFake())
     monkeypatch.setattr(lanes, "download_tab_class", lambda: FakeDownloadTab)

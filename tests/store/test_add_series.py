@@ -21,7 +21,8 @@ UUID = "12345678-1234-4abc-8def-1234567890ab"
 
 
 @pytest.mark.parametrize("text, expected", [
-    ("https://www.mangaupdates.com/series/pb8uwds/some-series", A.ParsedLink(A.KIND_MANGAUPDATES, mu_id=int("pb8uwds", 36))),
+    ("https://www.mangaupdates.com/series/pb8uwds/some-series",
+     A.ParsedLink(A.KIND_MANGAUPDATES, mu_id=int("pb8uwds", 36))),
     ("https://www.mangaupdates.com/series/pb8uwds", A.ParsedLink(A.KIND_MANGAUPDATES, mu_id=int("pb8uwds", 36))),
     ("  mangaupdates.com/series/PB8UWDS/x?foo=1  ", A.ParsedLink(A.KIND_MANGAUPDATES, mu_id=int("pb8uwds", 36))),
     ("<https://mangaupdates.com/series/0abc/>", A.ParsedLink(A.KIND_MANGAUPDATES, mu_id=int("0abc", 36))),
@@ -54,7 +55,7 @@ def test_links_that_cannot_be_used_say_why(text, hint):
 
 
 def test_base36_round_trip():
-    assert A.mu_id_from_base36("pb8uwds") == 55099564912       # a made-up id; the live check confirmed the rule
+    assert A.mu_id_from_base36("pb8uwds") == 55099564912       # an id the live check read from the API
     assert A.base36_from_mu_id(55099564912) == "pb8uwds"
     assert A.base36_from_mu_id(0) == "0"
     with pytest.raises(ValueError):
@@ -140,7 +141,7 @@ def test_a_mangadex_link_without_mangaupdates_offers_a_search_and_can_go_without
     assert [c["series_id"] for c in out.candidates] == [7, 8]
     assert f.search_calls == ["Made Up English"]            # MangaDex's English title is what is searched
     assert any("lists no MangaUpdates page" in n for n in out.notes)
-    assert out.info.summary()[-1] == "No MangaUpdates match"
+    assert out.info.summary() == ["2015", "No MangaUpdates match"]
     picked = A.with_mu_record(out, out.candidates[0], mu_get=Fakes({7: mu_record(7)}).mu_get)
     assert picked.mu_id == 7 and picked.mangadex_id == UUID and picked.english_title == "Made Up English"
 
