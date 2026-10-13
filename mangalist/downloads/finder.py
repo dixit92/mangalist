@@ -126,8 +126,10 @@ def _rest(candidate: NyaaCandidate) -> float:
 
 
 def certain(candidate: NyaaCandidate) -> bool:
-    """The release's title names volumes that are missing (not a light novel)."""
-    return candidate.vol_from is not None and bool(candidate.covers_missing) and not candidate.not_comic
+    """The release's title names volumes that are missing (not a light novel; numbers without a volume mark - "001-051"
+    - may be chapters, so they are never certain)."""
+    return (candidate.vol_from is not None and bool(candidate.covers_missing) and not candidate.not_comic
+            and not candidate.numbers_only)
 
 
 def best_next(pool: Sequence[NyaaCandidate], remaining: Set[Decimal]) -> Optional[Tuple[NyaaCandidate, Tuple[str, ...]]]:
@@ -162,10 +164,31 @@ def cover(candidates: Sequence[NyaaCandidate], missing: Sequence[str],
 
 
 def best_uncertain(candidates: Sequence[NyaaCandidate], skip_hashes: Iterable[str] = ()) -> Optional[NyaaCandidate]:
-    """The best release whose title states no volumes (it may hold the missing ones)."""
+    """The best release whose title states no volumes - or only numbers without a volume mark (it may hold the missing
+    ones)."""
     skip = {h.lower() for h in skip_hashes}
-    return next((c for c in candidates if c.vol_from is None and not c.not_comic and c.info_hash.lower() not in skip),
-                None)
+    return next((c for c in candidates if (c.vol_from is None or c.numbers_only) and not c.not_comic
+                 and c.info_hash.lower() not in skip), None)
+
+
+def _uncertain_volume_release(ctx, candidates: Sequence[NyaaCandidate], skip: Set[str],
+                              fills: Sequence[str]) -> Optional[NyaaCandidate]:
+    """:func:`best_uncertain`, passing over a release of bare numbers ("001-051") whose files are all chapters - a
+    chapter pack, not volumes (owner, 2026-10-13). A few tries at most (each reads a .torrent)."""
+    passed = set(skip)
+    for _ in range(3):
+        unsure = best_uncertain(candidates, passed)
+        if unsure is None or not unsure.numbers_only or not _partial_on(ctx):
+            return unsure
+        try:
+            selection = ctx.backend.inspect_pack(unsure, list(fills))
+        except Exception:  # noqa: BLE001 - not readable now: offered as uncertain, as before
+            return unsure
+        if not getattr(selection, "chapters_only", False):
+            return unsure
+        _log.info("Find pass %d: %s: its files are chapters, not volumes - not offered", ctx.run_id, unsure.title)
+        passed.add(unsure.info_hash.lower())
+    return None
 
 
 # --- the wanted list --------------------------------------------------------------------------------------------------
@@ -455,7 +478,7 @@ def _volumes(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> bo
         keep.add(pick.pick_key)
         _send_or_offer_volumes(ctx, sid, name, mode, pick)
     if remaining:
-        unsure = best_uncertain(candidates, skip)
+        unsure = _uncertain_volume_release(ctx, candidates, skip, [v for v in wanted if _key(v) in remaining])
         if unsure is not None:
             fills = tuple(v for v in wanted if _key(v) in remaining)
             pick = _Pick(_kind(fills, volume_keys), f"nyaa:{unsure.info_hash.lower()}", unsure.title, fills,
