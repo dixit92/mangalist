@@ -147,6 +147,28 @@ def cmd_timing():
     print(f"stat of every directory ({n} dirs): {time.monotonic() - t:.2f} s", flush=True)
 
 
+def cmd_diffpass():
+    """The cheap detection: walk + stat every archive, parse nothing, compare with the database's archive rows."""
+    from mangalist.scanner import changed_top_folders, scan_changed
+    db = db_open()
+    roots = db.list_roots()
+    scan_and_record_library(roots, db)             # settle
+    for rep in (1, 2, 3):
+        t = time.monotonic()
+        tot = 0
+        dirty = 0
+        for r in roots:
+            names, n = changed_top_folders(db, r)
+            tot += n
+            dirty += len(names)
+        print(f"[{rep}] diff pass over all roots, settled database: {time.monotonic() - t:.1f} s "
+              f"({tot} archives stat'ed, {dirty} changed folders)", flush=True)
+    big, _c = largest_root(db)
+    t = time.monotonic()
+    names, n = changed_top_folders(db, big)
+    print(f"diff pass over the largest root: {time.monotonic() - t:.1f} s ({n} archives, {len(names)} changed)", flush=True)
+
+
 def cmd_pending():
     from mangalist.duplicates import find_duplicate_files
     from mangalist.renamer import Renamer
@@ -331,4 +353,4 @@ def cmd_equiv_plain():
 
 
 if __name__ == "__main__":
-    {"timing": cmd_timing, "pending": cmd_pending, "equiv": cmd_equiv}[sys.argv[1]]()
+    {"timing": cmd_timing, "pending": cmd_pending, "equiv": cmd_equiv, "diffpass": cmd_diffpass}[sys.argv[1]]()

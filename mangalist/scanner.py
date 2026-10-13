@@ -638,3 +638,52 @@ def scan_and_record_folders(root, folders: Iterable[str], db, *, pair: bool = Tr
     if not rs.error and rs.root_id is not None:
         record_library_scan(db, LibraryScan(roots=[rs]), pair=pair)
     return rs
+
+
+def changed_top_folders(db, root) -> Tuple[set, int]:
+    """PROTOTYPE (research lane): the direct children of *root* whose archives differ from the database's present archive
+    rows (a path, size or mtime that differs, a file added or gone), plus folders on disk the database has no series
+    under and series folders it still holds that are gone. Walks every series folder and stats every archive, but parses
+    nothing: no mtime of a directory is trusted. Returns (names, archives looked at)."""
+    from .store.exclusions import ExclusionSet
+
+    folder = Path(root.path).resolve()
+    top = _Excl(_as_exclusion_set(list(getattr(root, "exclusions", []) or [])), "")
+    known: Dict[str, Dict[str, tuple]] = {}
+    for a in db.list_archives(root_id=root.id, status="present"):
+        known.setdefault(a.rel_path.split("/", 1)[0], {})[a.rel_path] = (a.size, a.mtime_ns)
+    series_tops = {s.rel_path.split("/", 1)[0] for s in db.list_series(root.id) if s.status == "present"}
+    dirty: set = set()
+    on_disk: set = set()
+    looked = 0
+    for p in sorted(folder.iterdir(), key=lambda q: q.name.lower()):
+        try:
+            if not p.is_dir() or p.name.startswith(".") or top.hides(p.name, True):
+                continue
+        except OSError:
+            continue
+        on_disk.add(p.name)
+        if p.name not in series_tops:
+            dirty.add(p.name)
+            continue
+        seen = {}
+        for hit in _walk_manga_folder(p, _ex=top.child(p.name), annotate=False):
+            seen[rel_posix(hit.path, folder)] = (hit.size, hit.mtime_ns)
+        looked += len(seen)
+        if seen != known.get(p.name, {}):
+            dirty.add(p.name)
+    dirty |= {name for name in series_tops if name not in on_disk}
+    dirty |= {name for name in known if name not in on_disk}
+    return dirty, looked
+
+
+def scan_changed(db, roots: Sequence) -> Dict[int, set]:
+    """PROTOTYPE: for every root, find the changed top-level folders (:func:`changed_top_folders`) and scan and record
+    only those. Returns {root id: folder names scanned}."""
+    out: Dict[int, set] = {}
+    for root in roots:
+        names, _n = changed_top_folders(db, root)
+        out[root.id] = names
+        if names:
+            scan_and_record_folders(root, names, db, pair=False)
+    return out
