@@ -148,10 +148,11 @@ def _has_direct_archives(folder: Path, _ex: _Excl = _NO_EXCL) -> bool:
 
 
 def _get_subdirs_with_archives(folder: Path, _ex: _Excl = _NO_EXCL) -> List[Path]:
-    """Return immediate subdirectories that contain archive files (at any depth)."""
+    """Return immediate subdirectories that contain archive files (at any depth), in the walk's fixed order (the
+    filesystem's own order differs between ext4, APFS and NTFS, and with it the List's order of sub-series)."""
     result: List[Path] = []
     try:
-        for subdir in folder.iterdir():
+        for subdir in sorted(folder.iterdir(), key=lambda p: _name_order(p.name)):
             if not subdir.is_dir() or _ex.hides(subdir.name, True):
                 continue
             # Check if this subdir has any archives (using existing walk; nothing parsed)
