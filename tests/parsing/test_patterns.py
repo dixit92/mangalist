@@ -225,3 +225,25 @@ def test_the_bare_layer_itself_still_reports_an_unknown_kind():
 def test_generic_ambiguity(name, ambiguous):
     r = parse_name(name)
     assert r.layer is Layer.GENERIC and r.ambiguous is ambiguous
+
+
+def test_a_varying_series_head_counts_as_the_series_title_before_a_titled_number():
+    # owner, 2026-10-13: a folder named by the romaji title held "<English title> 001 <chapter title>.cbz" files; the
+    # head (the English title, before a number that varies) now reads them, so the "chapters" answer applies
+    from mangalist.parsing import parse_names
+
+    words = ["Why Is It Me", "Oh, Lord!", "A Fierce Senior", "In the Rain", "Let It Go"]
+    names = [f"English Name {n:03d} {w}.cbz" for n, w in enumerate(words, 1)] + ["English Name 006.cbz"]
+    ctx = ParseContext(series_title="Romaji Name [English Name]", kind_hint="chapters")
+    out = parse_names(names, ctx)
+    assert [(r.kind, str(r.chapter)) for r in out] == [(Kind.CHAPTER, str(n)) for n in range(1, 7)]
+    assert out[0].title == "Why Is It Me"
+    # without the head (one file alone) the name stays unread, as before
+    assert parse_name(names[0], ctx).number is None
+
+
+def test_a_head_that_does_not_vary_reads_no_titled_number():
+    from mangalist.parsing import parse_names
+
+    names = ["Other Name 100 Part One.cbz", "Other Name 100 Part Two.cbz"]
+    assert all(r.number is None for r in parse_names(names, ParseContext(series_title="Something Else")))
