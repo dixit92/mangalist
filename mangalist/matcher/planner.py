@@ -1,4 +1,5 @@
-"""Query planning (port of MangaPixer 1.32.0 ``MatchQueryPlanner.cs``).
+"""Query planning (port of MangaPixer 1.42.0 ``MatchQueryPlanner.cs``; its 1.34.0 "Collection about" and 1.37.0 marked
+artist folders are not ported: MangaList has no such folder marks).
 
 Builds the provider queries for one work: ordered, de-duplicated query variants plus the local
 corroboration context. Pure; the variants come from display names only and nothing here is sent
@@ -8,8 +9,10 @@ Variant order (= ``QueryVariantKind`` order): ComicInfo series, folder primary, 
 ``[English Title]``, subtitle split, sequel-number split, archive-derived title, and for doujin-shaped
 archives the MangaUpdates ``<parody> dj - <title>`` form. One exception (1.27.0): an archive-derived
 title that extends the folder name word for word (the folder is the leading part of a long title) is the
-second search, right after the folder's own names. Variants are de-duplicated by their scoring form (a
-variant that differs only in case or punctuation is one query).
+second search, right after the folder's own names. A dated doujin name (:mod:`dated_doujin`, 1.34.2) is searched by
+its title (the cleaned name already is), and the character it is about is the last, review-only search
+(``QueryVariantKind.CHARACTER_NAME``). Variants are de-duplicated by their scoring form (a variant that differs only
+in case or punctuation is one query).
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import anatomy as _anatomy
 from . import count_evidence
+from . import dated_doujin
 from ._text import distinct_ignore_case
 from . import auto_match_text as amt
 from .contracts import (
@@ -88,6 +92,7 @@ def plan_folder(folder: FolderShape, classification: WorkClassification,
         single = normalize(archives[0]).primary
         if single:
             variants.add(single, QueryVariantKind.ARCHIVE_DERIVED_TITLE)
+    _add_character_fallback(variants, [folder.display_name, archives[0]] if len(archives) == 1 else [folder.display_name])
 
     anatomies = [_anatomy.parse(a) for a in archives]
     author_tags = _dominant_creator_tags(anatomies)
@@ -172,6 +177,8 @@ def plan_archive_group(folder: FolderShape, classification: WorkClassification, 
             variants.add(f"{a.parody} dj - {title}", QueryVariantKind.DOUJIN_PARODY_FORM)
             break
 
+    _add_character_fallback(variants, names)
+
     author_tags: List[str] = []
     for a in anatomies:
         for tag in a.creator_tags:
@@ -216,6 +223,17 @@ def _add_name_variants(variants: _VariantList, name: NormalizedTitle) -> None:
     for d in name.derived:
         if d.kind == DerivedTitleKind.SEQUEL_NUMBER_SPLIT:
             variants.add(d.text, QueryVariantKind.SEQUEL_NUMBER_SPLIT)
+
+
+def _add_character_fallback(variants: _VariantList, display_names) -> None:
+    """The character the first dated doujin name with a title is about (1.34.2), as the last search: the name's own title
+    is searched first, the character only when nothing confident was found - and it can never link on its own (the
+    scorer caps it)."""
+    character = next((d.character for d in (dated_doujin.try_parse(n) for n in display_names)
+                      if d is not None and d.title is not None and d.character is not None), None)
+    clean = normalize(character).primary
+    if clean:
+        variants.add(clean, QueryVariantKind.CHARACTER_NAME)
 
 
 def _add_creator_splits(variants: _VariantList, display_name: Optional[str]) -> None:

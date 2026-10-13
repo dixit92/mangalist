@@ -1,4 +1,4 @@
-"""The work detector (port of MangaPixer 1.31.1 ``WorkDetector.cs``).
+"""The work detector (port of MangaPixer 1.42.0 ``WorkDetector.cs``; its 1.34.0 / 1.37.0 folder marks are not ported).
 
 Classifies a folder from its shape alone - display names and counts, no IO - so only folders that
 ARE one work are matched at folder level, collections are matched archive by archive (numbered
@@ -244,7 +244,9 @@ def _is_provider_author_folder(folder: FolderShape) -> bool:
     folder_name = normalize(folder.display_name).primary
     if not folder_name or amt.is_category_word(folder_name) or not amt.is_author_like(folder_name, require_two_tokens=False):
         return False
-    return any(amt.is_author_like(a, require_two_tokens=False) and amt.names_equal(a, folder_name) for a in known)
+    # 1.39.0 (rules 4): "Main (Alias)" on a record names both.
+    return any(amt.is_author_like(a, require_two_tokens=False) and amt.names_equal(a, folder_name)
+               for a in amt.author_names(known))
 
 
 def group_archives(archives: Sequence[str]) -> Tuple[ArchiveGroup, ...]:
