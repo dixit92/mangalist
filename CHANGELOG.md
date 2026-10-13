@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.30] - 2026-10-13
+
+The twenty-ninth MangaList release (testing build): the cycle "MangaPixer 1.42 parity and MangaDex data" - the parser and matcher level with MangaPixer 1.42.0, MangaDex data and MangaPixer's declared editions / tracking off, Add a series by link, Unbundled Chapters, and selective scanning of changed folders.
+
 - **Parser and matcher level with MangaPixer 1.42.0.** A number the series title ends with is never read as the unit (`<Title 100> v01` is volume 1, not chapter 100), and a number every name in a folder shares belongs to the title (the series head); `[v2]` / `(v3)` is a release revision, not a volume; comics names are read (`Tome`, `Tomo`, `Band`, `Deel`, `Album`, `Livre`, `T03` = volumes; `Annual`, `FCBD`, `Special #1`, `One-Shot` = extras); watermarks are a class, not a list; the matcher takes MangaPixer 1.34.0-1.42.0's name rules (index-prefixed chapters, dated doujin names, an author's bracketed alias, three decimals, placeholder tags). No reading changed across the owner's library.
 - **MangaDex data through the MangaPixer sync.** A series whose chapter count nothing else gives ("Can't tell") takes MangaDex's highest whole English chapter from MangaPixer; MangaDex never lowers a target and is not used where MangaUpdates or the English publisher tells (its count includes chapters MangaDex has taken down). MangaPixer's MangaDex series records (series MangaUpdates does not list) are accepted.
 - **MangaPixer's declared edition and "tracking off".** A folder whose edition is declared in MangaPixer counts that edition's volumes (no upgrades; "Missing volumes · Master edition"); a series with tracking off reads "Not tracked" and leaves To get and the find pass.
