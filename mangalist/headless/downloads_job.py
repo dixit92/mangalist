@@ -273,7 +273,7 @@ def make_downloads_job(open_ledger: Optional[Callable[[], object]] = None,
             if chapter_line is not None:                    # chapter downloads only
                 return _chapters_only(ctx, ledger, chapter_report, chapter_line, mark)
             notes = [n for n in (_replaced(ledger),          # waiting batches retried, the holding folder emptied
-                                 _after(ctx, ledger, _NoReport(mark))) if n]   # pending MangaPixer scans are retried too
+                                 _after(ctx, ledger, _NoReport(mark))) if n]   # pending MangaPixer scans retried too
             return JobResult("skipped", "no downloads in progress" + "".join(f"; {n}" for n in notes))
         conn = ledger.connection()
         if conn is None:

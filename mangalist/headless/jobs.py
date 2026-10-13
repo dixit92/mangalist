@@ -274,7 +274,7 @@ def make_rescan(provider: RootsProvider,
             try:
                 if record:
                     from ..scan_lock import scan_lock
-                    from ..scanner import LibraryScan, scan_library
+                    from ..scanner import scan_library
 
                     with scan_lock(db, what=f"the rescan of {getattr(spec, 'name', '') or root}", tick=ctx.check):
                         one = scan_library([spec], progress=progress, db=db)

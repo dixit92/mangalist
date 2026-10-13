@@ -11,7 +11,8 @@ from .fakes import FakeNamer
 
 
 def _renamer(db, hooks):
-    r = Renamer(db, namer=FakeNamer(), title_for=lambda *a: None, rescan=hooks.rescan, request_scans=hooks.request_scans)
+    r = Renamer(db, namer=FakeNamer(), title_for=lambda *a: None, rescan=hooks.rescan,
+                request_scans=hooks.request_scans)
     looked = []
     real = r.dry_run
 
