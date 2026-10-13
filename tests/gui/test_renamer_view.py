@@ -271,11 +271,11 @@ def test_rename_pending_shows_in_the_list_and_the_row_menu_opens_the_pilot(lib):
     assert rw is not None and rw.scope.kind == "series" and rw.scope.label == "Series P"
     assert rw.dry_run.count(RENAME) == 2
     scans = []
-    win._start_scan = lambda roots=None: scans.append([r.id for r in roots] if roots else None)
+    win._start_scan = lambda roots=None, scopes=None: scans.append(([r.id for r in roots] if roots else None, scopes))
     rw._confirm = lambda title, text: True
     rw.apply()
     root = lib.root(win, MANGA)
-    assert scans == [[root.id]]                              # the window rescans the library renamed in
+    assert scans == [([root.id], {root.id: {"Series P"}})]   # the window rescans the folder renamed in (the journal)
     assert sorted(p.name for p in (lib.dirs[MANGA] / "Series P").iterdir()) == [
         "Ch. 0001.00 (Part P1) [G].cbz", "Ch. 0002.00 (Part P2) [G].cbz"]
     rw.close()
