@@ -145,6 +145,27 @@ def wanted_series(*, folder: str, title: str, english_title: Optional[str], stat
     return out
 
 
+#: The row menu's Unbundled Chapters entry (a tick; also on a selection) and its help.
+UNBUNDLED_MENU = "Unbundled chapters (volumes + the chapters after the last volume)"
+UNBUNDLED_HELP = ("Also get the chapters after the last volume - Missing chapters from the series' Suwayomi source, "
+                  "Automatic downloads included - before the next volume is out; when it is, it replaces them as an "
+                  "upgrade. Needs MangaPixer's volume list to say where the last volume ends.")
+
+
+def unbundled_detail(on: bool) -> str:
+    """The details panel's flag for a series with Unbundled Chapters on."""
+    return "Unbundled chapters: the chapters after the last volume are wanted too" if on else ""
+
+
+def unbundled_status(on: bool, n: int) -> str:
+    """The status line after the row menu switched the setting for *n* series (0: none of them is scanned yet)."""
+    if n == 0:
+        return "Unbundled chapters: these folders are not scanned yet."
+    series = f"{n} series" if n != 1 else "1 series"
+    return (f"Unbundled chapters on for {series}: the chapters after the last volume are wanted too" if on
+            else f"Unbundled chapters off for {series}: volumes only")
+
+
 def wanted_label(groups: Iterable[str]) -> str:
     """The details panel's call to action for a series in these groups."""
     groups = set(groups)

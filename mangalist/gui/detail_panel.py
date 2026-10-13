@@ -27,7 +27,7 @@ from ..knowledge import OfficialLink, SeriesKnowledge
 from ..models import MangaEntry
 from ..states import ATTENTION_LABELS, SeriesState
 from . import theme
-from .list_text import english_text, holds_text, match_text
+from .list_text import english_text, holds_text, match_text, unbundled_detail
 from .links import open_link
 
 MAX_SAMPLE_FILES = 30
@@ -281,6 +281,8 @@ class DetailPanel(QWidget):
             flags: List[str] = []
             if state.complete_with_upgrade:
                 flags.append("Upgrade available")
+            if state.unbundled:
+                flags.append(unbundled_detail(True))
             if state.upcoming:
                 vol = f"vol. {state.upcoming_volume} " if state.upcoming_volume else ""
                 flags.append(f"Upcoming (English {vol}{state.upcoming_date or 'date not known'})")
