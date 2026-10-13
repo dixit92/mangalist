@@ -347,8 +347,10 @@ class _ChapterPass:
 
     @staticmethod
     def _held_copy(folder: str, number: Optional[str]) -> Optional[str]:
-        """The name of an archive in *folder* that holds exactly chapter *number* (a fresh look), else None."""
-        from ..parsing import Kind, parse_name
+        """The name of an archive in *folder* that holds exactly chapter *number* (a fresh look), else None. The names are
+        read as the scan reads them: with the folder's title and the series head of its archives (a number the title
+        ends with, or one every name shares, is not the chapter)."""
+        from ..parsing import Kind, ParseContext, parse_name, with_series_head
 
         want = to_decimal(number)
         if want is None:
@@ -357,10 +359,10 @@ class _ChapterPass:
             names = sorted(os.listdir(folder))
         except OSError:
             return None
-        for name in names:
-            if os.path.splitext(name)[1].lower() not in ARCHIVE_EXTS:
-                continue
-            parsed = parse_name(name)
+        archives = [n for n in names if os.path.splitext(n)[1].lower() in ARCHIVE_EXTS]
+        ctx = with_series_head(ParseContext(series_title=os.path.basename(os.path.normpath(folder))), archives)
+        for name in archives:
+            parsed = parse_name(name, ctx)
             if parsed.kind not in (Kind.CHAPTER, Kind.BOTH) or parsed.chapter is None:
                 continue
             start, end = parsed.chapter.start, parsed.chapter.end
