@@ -60,6 +60,7 @@ class TopBar(QWidget):
     settings_clicked = Signal()
     library_changed = Signal(object)    # the Library picker: a root id, or None (All libraries)
     missing_clicked = Signal()
+    add_series_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -130,6 +131,10 @@ class TopBar(QWidget):
                                     "to their new folder, or forget them")
         self.btn_missing.clicked.connect(self.missing_clicked)
         self.btn_missing.setVisible(False)
+        self.btn_add_series = QPushButton("Add series\u2026")
+        self.btn_add_series.setToolTip("Add a series by pasting its MangaUpdates or MangaDex link (makes an empty folder in "
+                                       "a library folder)")
+        self.btn_add_series.clicked.connect(self.add_series_clicked)
         self.btn_rescan = QPushButton("Rescan")
         self.btn_rescan.setToolTip("Scan every library folder again")
         self.btn_rescan.clicked.connect(self.rescan_clicked)
@@ -153,6 +158,7 @@ class TopBar(QWidget):
         rescan.addWidget(self.btn_rescan)
         rescan.addWidget(self.btn_rescan_menu)
         right.addWidget(self.btn_missing)
+        right.addWidget(self.btn_add_series)
         right.addLayout(rescan)
         right.addWidget(self.btn_settings)
         row.addLayout(right)

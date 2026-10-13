@@ -161,6 +161,21 @@ class SeriesMixin:
                             (mu_id, 1 if conf else 0, root_id, rel))
         return rec
 
+    def ensure_series(self, root_id: int, rel_path: str) -> Series:
+        """The series row of a folder that exists but has not been scanned yet (Add a series: the owner's new empty
+        folder), made 'present' with no archives; the existing row when there is one. The next scan refreshes it like
+        any other (fingerprint, count, last seen), so the id the Suwayomi choice and the other per-series settings
+        hang on is there from the start."""
+        now = utcnow()
+        with self.connect() as con:
+            con.execute("INSERT OR IGNORE INTO series (root_id, rel_path, fingerprint, n_archives, status,"
+                        " first_seen_at, last_seen_at) VALUES (?,?,NULL,0,'present',?,?)",
+                        (root_id, rel_path, now, now))
+        row = self.get_series(root_id, rel_path)
+        if row is None:
+            raise sqlite3.OperationalError(f"could not make the series row of {rel_path!r}")
+        return row
+
     # --- the "volumes or chapters?" answer (Design Decisions C12) -----------------------------------
 
     def set_series_kind(self, root_id: int, rel_path: str, kind: Optional[str]) -> bool:
