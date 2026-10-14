@@ -62,6 +62,7 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
+    COL_ENG,
     COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MTIME,
     COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label,
     merge_folder_scan, state_matches, under_any,
@@ -187,6 +188,7 @@ class _SortProxy(QSortFilterProxyModel):
         self.setFilterKeyColumn(-1)  # filter across all columns
         self._dupes_only = False
         self._state_filter: Optional[str] = None
+        self._needle = ""                # PERF PROTOTYPE: the search text, matched on three columns only
 
     @contextmanager
     def _filter_change(self):
@@ -226,15 +228,20 @@ class _SortProxy(QSortFilterProxyModel):
                 return int(Qt.AlignRight | Qt.AlignVCenter)
         return super().headerData(section, orientation, role)
 
+    def setFilterFixedString(self, text: str) -> None:     # PERF PROTOTYPE
+        with self._filter_change():
+            self._needle = (text or "").casefold()
+
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
         """Check if row should be shown based on text filter AND dupe filter."""
-        # First apply the standard text filter
-        if not super().filterAcceptsRow(source_row, source_parent):
-            return False
-
         source_model = self.sourceModel()
         if source_model is not None and not source_model.in_scope(source_row):     # the Library picker
             return False
+        if self._needle and source_model is not None:      # PERF PROTOTYPE: title, alternative title, verdict
+            hay = " ".join(str(source_model.data(source_model.index(source_row, c), Qt.DisplayRole) or "")
+                           for c in (COL_TITLE, COL_ENG, COL_VERDICT)).casefold()
+            if self._needle not in hay:
+                return False
         if self._state_filter is not None and source_model is not None:
             if not state_matches(source_model.state_at(source_row), self._state_filter):
                 return False
@@ -1183,7 +1190,11 @@ class MainWindow(QMainWindow):
             try:
                 if self._mp_resolver is None:
                     self._mp_resolver = wanted.open_resolver(self._db)
-                root = self._db.get_root(entry.root_id)
+                roots = getattr(self, "_perf_roots", None)       # PERF PROTOTYPE: one roots read per resolver
+                if roots is None or roots[0] is not self._mp_resolver:
+                    roots = (self._mp_resolver, {r.id: r for r in self._db.list_roots()})
+                    self._perf_roots = roots
+                root = roots[1].get(entry.root_id)
                 if root is not None:
                     item = wanted.mangapixer_item(self._mp_resolver, entry.root_id, root.path, entry.folder)
             except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table

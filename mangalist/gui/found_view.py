@@ -210,6 +210,11 @@ class FoundView(QWidget):
         self._run = last_run
         if self._series is not None and not any(f.series_id == self._series for f in self._findings):
             self._series = None
+        key = ([(f.id, f.series_id, f.status, getattr(f, "release_title", None)) for f in self._findings],
+               sorted(self._names.items()), self._run, self._series)
+        if key == getattr(self, "_shown_key", None):       # PERF PROTOTYPE: nothing changed, keep the cards
+            return
+        self._shown_key = key
         self._show()
 
     def set_series_filter(self, series_id: Optional[int]) -> None:
