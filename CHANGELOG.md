@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.33] - 2026-10-14
+
+The thirty-second MangaList release (testing build): the Download tab's In progress list refreshes again after a series is forgotten.
+
+- **In progress kept refreshing after a forgotten series.** Forgetting a series keeps its download records, without a series. The Download tab's In progress list then failed on every refresh (once a minute) and kept showing what it showed before; it now refreshes, and such a record reads "(series no longer in the library)". The downloads themselves were never affected.
+
 ## [2026.10.32] - 2026-10-14
 
 The thirty-first MangaList release (testing build): dark mode, the same series actions on every screen, a library's own automatic-download mode, chapter files inside held volumes found however the volumes arrived, and Found clears findings whose gap was filled. Database schema 8.
