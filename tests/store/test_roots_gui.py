@@ -177,3 +177,43 @@ def test_fields_nothing_uses_yet_are_hidden(qapp, db, lib):
     finally:
         dlg.close()
         dlg.deleteLater()
+
+
+def test_the_librarys_automatic_downloads_combo(qapp, db, lib):
+    # owner, 2026-10-13: "Can I set Automatic Downloads [Off/Notify/Auto] per library? Since I would need to remember to
+    # do it for any new series in this library in list view."
+    from mangalist.store.findings import FindingStore
+
+    FindingStore(db).set_default_mode("notify")
+    db.add_root(str(lib), "Manga")
+    dlg = RootsEditor(db)
+    combo = dlg.auto_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == ["Use the default (Notify)", "Off", "Notify", "Auto"]
+    assert combo.currentData() is None and combo.isVisibleTo(dlg)
+    combo.setCurrentIndex(combo.findData("off"))
+    assert dlg.commit() and db.list_roots()[0].auto_mode == "off"
+    assert dlg.modes_changed and not dlg.others_changed            # the mode alone: no rescan needed
+    dlg = RootsEditor(db)
+    assert dlg.auto_combo.currentData() == "off"                    # read back
+    dlg.auto_combo.setCurrentIndex(0)
+    dlg.name_edit.setText("Renamed")
+    dlg.name_edit.textEdited.emit("Renamed")
+    assert dlg.commit() and db.list_roots()[0].auto_mode is None
+    assert dlg.modes_changed and dlg.others_changed
+    hidden = RootsEditor(db, auto_modes=False)                      # downloads off: no such row
+    assert not hidden.auto_combo.isVisibleTo(hidden)
+
+
+def test_a_mode_only_save_in_settings_asks_for_no_rescan(qapp, db, lib):
+    from mangalist.gui.settings_library import LibraryPage
+
+    db.add_root(str(lib), "Manga")
+    page = LibraryPage(db)
+    flags = []
+    page.roots_changed.connect(lambda: flags.append("roots"))
+    page.downloads_changed.connect(lambda: flags.append("downloads"))
+    editor = page.edit_root(0)
+    editor.auto_combo.setCurrentIndex(editor.auto_combo.findData("auto"))
+    assert page.save_edit() and flags == ["downloads"]
+    page.edit_root(0)
+    assert page.save_edit() and flags == ["downloads", "roots"]     # nothing changed: as before (a rescan)

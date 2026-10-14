@@ -1,5 +1,7 @@
 """Roots manager: the list of library roots, each root's settings and exclusions, with a live preview of
-what the exclusion patterns hide.
+what the exclusion patterns hide - and each library's default automatic-download mode (owner, 2026-10-13: "Can I set
+Automatic Downloads [Off/Notify/Auto] per library? Since I would need to remember to do it for any new series in this
+library in list view."): a series without its own mode follows its library's, else the one in Settings > Automation.
 
 :class:`RootsEditor` is the content as a widget (the Settings dialog's Library section embeds it); :class:`RootsDialog`
 wraps it with OK / Cancel. Edits are made on copies and written to the database only by :meth:`RootsEditor.commit`
@@ -9,6 +11,7 @@ wraps it with OK / Cancel. Edits are made on copies and written to the database 
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -36,7 +39,8 @@ from ..renamer import ENFORCE_LABELS
 from ..store import Root, RootError
 from ..store.exclusions import InvalidPattern, TreeListing, list_tree, normalize_pattern, preview
 from ..store.roots import validate_root
-from ..store.schema import ENFORCE_NAMING_DEFAULT
+from ..store.schema import AUTO_MODE_DEFAULT, AUTO_MODES, ENFORCE_NAMING_DEFAULT
+from .automation_rules import MODE_HELP, MODE_LABELS, default_entry_label
 from .palette import current
 
 BrowseFn = Callable[[QWidget, str, str], str]
@@ -50,6 +54,19 @@ ENFORCE_TIP = ("What happens to files whose names do not follow the naming schem
                "Rename automatically - the scheduled rescan renames them, once you have started this library's "
                "conversion in the Renamer window (List > Rename library…). Every batch is logged and can be undone.")
 PREVIEW_LIMIT = 500
+AUTO_TIP = ("Automatic downloads for this library's series that have no mode of their own (set one per series in the "
+            "List's row menu):\n" + "\n".join(f"{MODE_LABELS[m]} - {MODE_HELP[m]}" for m in AUTO_MODES) +
+            "\nUse the default - the one in Settings > Automation.")
+
+
+def global_default_mode(db) -> str:
+    """The default in Settings > Automation (the store's setting; Notify when unset or unreadable)."""
+    try:
+        from ..store.findings import FindingStore
+
+        return FindingStore(db).default_mode()
+    except Exception:  # noqa: BLE001 - a label only
+        return AUTO_MODE_DEFAULT
 
 
 def _default_browse(parent: QWidget, title: str, start: str) -> str:
@@ -58,17 +75,21 @@ def _default_browse(parent: QWidget, title: str, start: str) -> str:
 
 class RootsEditor(QWidget):
     def __init__(self, db, parent: Optional[QWidget] = None, browse: Optional[BrowseFn] = None,
-                 button_style: str = "", select: int = 0):
+                 button_style: str = "", select: int = 0, auto_modes: bool = True):
         super().__init__(parent)
         self.setObjectName("rootsEditor")
         self._db = db
         self._browse = browse or _default_browse
         self._button_style = button_style
+        self._auto_modes = auto_modes               # automatic downloads are available (downloads on)
         self._drafts: List[Root] = [copy.deepcopy(r) for r in db.list_roots()]
+        self._saved = {r.id: copy.deepcopy(r) for r in self._drafts}
         self._removed: List[int] = []
         self._listings: Dict[str, TreeListing] = {}
         self._loading = False
         self.changed = False
+        self.modes_changed = False                  # the last commit changed a library's automatic-download mode
+        self.others_changed = False                 # ... and something else (a rescan is due)
         self._build_ui()
         self._refresh_list(select=select)
 
@@ -145,6 +166,16 @@ class RootsEditor(QWidget):
         btn_staging = self._button("Browse")
         btn_staging.clicked.connect(self._on_browse_staging)
         form.addRow("Staging folder:", self._with_button(self.staging_edit, btn_staging))
+        self.auto_combo = QComboBox()
+        self.auto_combo.setObjectName("rootAutoMode")
+        self.auto_combo.setAccessibleName("Automatic downloads")
+        self.auto_combo.addItem(default_entry_label(global_default_mode(self._db)), None)
+        for mode in AUTO_MODES:
+            self.auto_combo.addItem(MODE_LABELS[mode], mode)
+        self.auto_combo.setToolTip(AUTO_TIP)
+        self.auto_combo.currentIndexChanged.connect(self._on_form_edited)
+        form.addRow("Automatic downloads:", self.auto_combo)       # row 5: right under the naming row (4 is hidden)
+        form.setRowVisible(5, self._auto_modes)
         # Origin hint and Staging folder are kept and saved, but nothing uses them yet (the origin evidence is a later
         # phase; finished downloads wait in qBittorrent's download folder): hidden until then, so no field here does
         # nothing (owner, 2026-10-09). The naming row is the renamer's (renamer cycle, 2026-10-10).
@@ -237,7 +268,7 @@ class RootsEditor(QWidget):
         self._loading = True
         enabled = r is not None
         for w in (self.name_edit, self.path_edit, self.origin_combo, self.enforce_combo, self.staging_edit,
-                  self.excl_list, self.pattern_edit):
+                  self.auto_combo, self.excl_list, self.pattern_edit):
             w.setEnabled(enabled)
         self.name_edit.setText(r.name if r else "")
         self.path_edit.setText(r.path if r else "")
@@ -245,6 +276,7 @@ class RootsEditor(QWidget):
         self.enforce_combo.setCurrentIndex(
             max(0, self.enforce_combo.findData(r.enforce_naming if r else ENFORCE_NAMING_DEFAULT)))
         self.staging_edit.setText((r.staging_folder or "") if r else "")
+        self.auto_combo.setCurrentIndex(max(0, self.auto_combo.findData(r.auto_mode if r else None)))
         self.excl_list.clear()
         for pat in (r.exclusions if r else []):
             self.excl_list.addItem(pat)
@@ -263,6 +295,7 @@ class RootsEditor(QWidget):
         r.origin_hint = self.origin_combo.currentData()
         r.enforce_naming = self.enforce_combo.currentData()
         r.staging_folder = self.staging_edit.text().strip() or None
+        r.auto_mode = self.auto_combo.currentData()
         item = self.root_list.currentItem()
         if item is not None:
             item.setText(f"{r.name or Path(r.path).name}\n{r.path}")
@@ -416,6 +449,7 @@ class RootsEditor(QWidget):
         except RootError as exc:
             self.error_label.setText(str(exc))
             return False
+        self.modes_changed, self.others_changed = self._what_changed()
         try:
             for root_id in self._removed:
                 self._db.remove_root(root_id)
@@ -423,7 +457,7 @@ class RootsEditor(QWidget):
                 if r.id is None:
                     saved = self._db.add_root(r.path, r.name, origin_hint=r.origin_hint,
                                               enforce_naming=r.enforce_naming, staging_folder=r.staging_folder,
-                                              exclusions=list(r.exclusions))
+                                              exclusions=list(r.exclusions), auto_mode=r.auto_mode)
                     r.id = saved.id
                 else:
                     self._db.update_root(r)
@@ -431,9 +465,26 @@ class RootsEditor(QWidget):
             self.error_label.setText(str(exc))
             return False
         self._removed.clear()
+        self._saved = {r.id: copy.deepcopy(r) for r in self._drafts}
         self.changed = True
         self.error_label.clear()
         return True
+
+    def _what_changed(self) -> tuple:
+        """(a library's automatic-download mode changed, anything else changed): a change of the modes alone needs no
+        rescan - the List's mode chips and Found follow it."""
+        modes, others = False, bool(self._removed)
+        for r in self._drafts:
+            before = self._saved.get(r.id) if r.id is not None else None
+            if before is None:
+                others = True
+                modes = modes or r.auto_mode is not None
+                continue
+            if before.auto_mode != r.auto_mode:
+                modes = True
+            if replace(before, auto_mode=None) != replace(r, auto_mode=None):
+                others = True
+        return modes, others
 
 
 class RootsDialog(QDialog):

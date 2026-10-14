@@ -26,6 +26,41 @@ def test_mode_texts_say_when_a_series_follows_the_default():
     assert set(ar.MODE_HELP) == set(ar.MODES) and all(t.endswith(".") for t in ar.MODE_HELP.values())
 
 
+def test_the_texts_say_whose_default_a_series_follows():
+    # a library's default mode (schema 8; owner, 2026-10-13: "Can I set Automatic Downloads [Off/Notify/Auto] per
+    # library?")
+    assert ar.mode_text(None, "off", library=True) == "Off (the library's default)"
+    assert ar.mode_text("auto", "off", library=True) == "Auto"
+    assert ar.default_entry_label("off", library=True) == "Use the library's default (Off)"
+    assert "Settings > Library" in ar.default_entry_tip(True) and "Settings > Automation" in ar.default_entry_tip(False)
+    assert ar.set_mode_text(None, 2, "off", library=True) == ("Automatic downloads: 2 series follow the library's "
+                                                              "default again (Off).")
+    assert ar.set_mode_text(None, 2, None) == "Automatic downloads: 2 series follow their defaults again."
+
+
+def test_a_selection_names_the_default_only_when_it_is_the_same_for_all():
+    assert ar.selection_default([("off", True), ("off", True)]) == ("Use the library's default (Off)", True)
+    assert ar.selection_default([("notify", False)]) == ("Use the default (Notify)", False)
+    # the same mode from different places: the mode, not whose
+    assert ar.selection_default([("notify", True), ("notify", False)]) == ("Use the default (Notify)", None)
+    # libraries whose defaults differ: plain
+    assert ar.selection_default([("off", True), ("notify", False)]) == ("Use the default", None)
+
+
+def test_defaults_come_from_the_backend_when_it_has_them():
+    backend = FakeFindingBackend(library_modes={1: "off"})
+    assert ar.default_of(backend, 1) == ("off", True) and ar.default_of(backend, 2) == ("notify", False)
+    assert ar.defaults_of(backend, [1, 2]) == {1: ("off", True), 2: ("notify", False)}
+
+    class Older(FakeFindingBackend):            # an adapter from before schema 8: the default setting for all
+        default_for = None
+        series_defaults = None
+
+    older = Older(library_modes={1: "off"})
+    assert ar.default_of(older, 1) == ("notify", False) and ar.defaults_of(older, [1]) == {1: ("notify", False)}
+    assert ar.defaults_of(backend, []) == {}
+
+
 def test_the_menu_ticks_only_what_every_selected_series_has():
     assert ar.common_choice(["auto", "auto"]) == "auto"
     assert ar.common_choice([None, None]) == ar.DEFAULT_KEY

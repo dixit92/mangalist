@@ -28,6 +28,15 @@ the checked series (or, none checked, the whole group shown) - a bulk find, whic
 Found. The tab's badge counts the series to get plus the findings waiting. **Search selected on nyaa** (the search queue
 above) stays: it searches nyaa for each checked series and leaves the pick to the owner.
 
+**Series actions everywhere** (owner, 2026-10-13: "Can I set auto download mode directly from here instead of going back
+to the List?"; :mod:`.series_actions`): a To get row's menu - on the checked rows when the right-clicked one is checked -
+has Automatic downloads, Unbundled chapters, Mark Behind as up to date, Show in List, Open folder, Copy title, the
+MangaUpdates / MangaPixer pages, Fix MangaUpdates match…, Check for new chapters… and (a chapter series) Change source…;
+a Found card's "⋯" has Show in To get, Show in List, Open folder, Automatic downloads and Skip all; the series panels'
+"⋯" has Show in List, Open folder and Automatic downloads. What needs the List goes through the main window
+(:meth:`DownloadTab.set_series_host`); a mode set here fires :attr:`DownloadTab.modes_changed`, and the List's own
+changes come back through :meth:`DownloadTab.refresh_modes` and :meth:`DownloadTab.set_wanted`.
+
 Every backend call runs off the UI thread (:mod:`.background`) - the findings, the modes and the last pass are quick
 reads (the contract) and run on it; the search queue runs one series at a time.
 """
@@ -47,6 +56,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QSplitter,
     QStackedWidget,
     QStyle,
@@ -92,6 +102,14 @@ from .downloads_list import DownloadsList
 from .found_view import FoundView
 from .palette import current
 from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
+from .series_actions import (
+    CHANGE_SOURCE,
+    CHANGE_SOURCE_TIP,
+    CHECK_NEW_CHAPTERS,
+    SHOW_IN_TO_GET,
+    SeriesMenu,
+    SeriesRef,
+)
 from .replaced_chapters import ConfirmDeleteFn, ReplacedBar, ReplacedDialog
 from .shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
 from .volumes_target import VolumeTarget
@@ -186,16 +204,19 @@ class DownloadTab(QWidget):
     show_in_list = Signal(str)              # a series folder: show it in the List tab
     settings_requested = Signal(str)        # a section of the Settings dialog (SECTION_*)
     library_changed = Signal(list)          # series folders whose files moved (restore / hold / delete): rescan them
-    modes_changed = Signal()                # a series' automatic-download mode was set in Found: the List's chips follow
+    modes_changed = Signal()                # a series' mode was set here (Found, a series menu): the List's chips follow
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
                  autostart: bool = True, refresh_ms: int = REFRESH_MS, search_delay_ms: int = SEARCH_DELAY_MS,
                  replaced=None, confirm_delete: Optional[ConfirmDeleteFn] = None,
-                 confirm_send_all: Optional[Callable[[str, str], bool]] = None):
+                 confirm_send_all: Optional[Callable[[str, str], bool]] = None,
+                 confirm_skip_all: Optional[Callable[[str, str], bool]] = None):
         super().__init__(parent)
         self.setObjectName("downloadTab")
         self._backend = backend
+        self._host = None                           # the series host (the main window): see set_series_host
+        self._confirm_skip_all = confirm_skip_all or self._ask_skip_all
         self._automation = has_automation(backend)
         self._findings: list = []                   # the waiting findings (automatic downloads)
         self._last_run = None
@@ -371,15 +392,19 @@ class DownloadTab(QWidget):
         self.releases.search_again.connect(self._search_again)
         self.releases.sent.connect(self._on_sent)
         self.releases.settings_requested.connect(self.settings_requested)
+        self.releases.series_menu_requested.connect(self._on_panel_menu)
         self.chapters = ChaptersPanel(self._backend, top, confirm=confirm,
                                       downloads_for=lambda sid: [r for r in self._records.get(sid, ()) if r.is_chapters])
         self.chapters.sent.connect(self._on_sent)
         self.chapters.looked_up.connect(self._on_chapter_lookup)
         self.chapters.settings_requested.connect(self.settings_requested)
+        self.chapters.series_menu_requested.connect(self._on_panel_menu)
         self.found = FoundView(self._backend, top, confirm=confirm_send_all)
         self.found.changed.connect(self._on_found_changed)
         self.found.change_source.connect(self.open_chapters_of)
         self.found.mode_changed.connect(self.modes_changed)
+        self.found.series_menu_requested.connect(self._on_found_menu)
+        self.found.set_series_menu_enabled(True)
         self.panels = QStackedWidget()
         self.panels.addWidget(self.releases)
         self.panels.addWidget(self.chapters)
@@ -540,6 +565,7 @@ class DownloadTab(QWidget):
                 self._current = None
                 self._show_upgrade_note(None)
                 self.releases.show_message("", "Select a series to see its releases.")
+        self._sync_series_buttons()
 
     def _found_by_series(self) -> Dict[int, list]:
         """The waiting findings by series, the filter applied to the series' names."""
@@ -685,6 +711,7 @@ class DownloadTab(QWidget):
             else:
                 self.panels.setCurrentIndex(PANEL_RELEASES)
                 self.releases.show_message("", "Select a series to see its releases.")
+        self._sync_series_buttons()
 
     def current_group(self) -> str:
         return self._group
@@ -701,31 +728,19 @@ class DownloadTab(QWidget):
 
     def focus(self, folder: str) -> None:
         """Select that series and search it now ("Get the missing volumes" in the List tab)."""
-        if folder not in self._by_folder:
-            return
-        groups = [e.group for e in self._entries.get(folder, ())] or [self._by_folder[folder].group]
-        if self._group not in groups:                    # show the group that holds it
-            self.show_group(next((g for g in TAB_GROUPS if g in groups), groups[0]))
-        if folder not in self._items and self.filter_edit.text():
-            self.filter_edit.clear()                     # the filter hid it
-        item = self._items.get(folder)
-        if item is None:
-            return
-        self._pending_focus = folder
-        if self.tree.currentItem() is item:
-            self._show_series(folder, now=True)
-        else:
-            self.tree.setCurrentItem(item)
-        self.tree.scrollToItem(item)
+        self.select_series(folder)
 
-    def open_chapters_of(self, series_id: int) -> bool:
-        """Open a series in Missing chapters - its chapters panel, where its source is picked (Found's Change source…).
-        False when the series is not in that group (nothing changes)."""
-        folder = next((f for f, sid in self._series_ids.items() if sid == series_id), None)
-        if folder is None or self._chapters_entry(folder) is None:
-            self.found.say("This series has no missing chapters to look up any more.", "warn")
+    def select_series(self, folder: str, group: Optional[str] = None) -> bool:
+        """Show the group that holds *folder* (*group* when it is one of them) and select the series there, so its
+        releases / chapters panel shows (looked up now). False when the series is not in To get."""
+        if folder not in self._by_folder:
             return False
-        self.show_group(GROUP_CHAPTERS)
+        groups = [e.group for e in self._entries.get(folder, ())] or [self._by_folder[folder].group]
+        if group in groups:
+            if self._group != group:
+                self.show_group(group)
+        elif self._group not in groups:                  # show the group that holds it
+            self.show_group(next((g for g in TAB_GROUPS if g in groups), groups[0]))
         if folder not in self._items and self.filter_edit.text():
             self.filter_edit.clear()                     # the filter hid it
         item = self._items.get(folder)
@@ -738,6 +753,15 @@ class DownloadTab(QWidget):
             self.tree.setCurrentItem(item)
         self.tree.scrollToItem(item)
         return True
+
+    def open_chapters_of(self, series_id: int) -> bool:
+        """Open a series in Missing chapters - its chapters panel, where its source is picked (Found's Change source…).
+        False when the series is not in that group (nothing changes)."""
+        folder = self.folder_of_series(series_id)
+        if folder is None or self._chapters_entry(folder) is None:
+            self.found.say("This series has no missing chapters to look up any more.", "warn")
+            return False
+        return self.select_series(folder, GROUP_CHAPTERS)
 
     def current_folder(self) -> Optional[str]:
         return self._current
@@ -753,6 +777,7 @@ class DownloadTab(QWidget):
         now = self._pending_focus == folder
         self._pending_focus = None
         self._show_series(folder, now=now)
+        self._sync_series_buttons()
 
     def _target_for(self, series: WantedSeries) -> Optional[VolumeTarget]:
         sid = self._series_ids.get(series.folder)
@@ -829,21 +854,194 @@ class DownloadTab(QWidget):
     def _exec_menu(self, menu: QMenu, pos):
         return menu.exec(pos)
 
+    # --- series menus (series_actions.py) ---------------------------------------------------------------
+
+    def set_series_host(self, host) -> None:
+        """The main window: what the series menus need from the List (Unbundled, Behind, the MangaUpdates match,
+        MangaPixer's page, a series' folder by its id) - see :mod:`.series_actions`."""
+        self._host = host
+
+    def folder_of_series(self, series_id: Optional[int]) -> Optional[str]:
+        """A series id's folder: from the To get list, else the host's (a Found series with no gaps any more)."""
+        if series_id is None:
+            return None
+        folder = next((f for f, sid in self._series_ids.items() if sid == series_id), None)
+        fn = getattr(self._host, "folder_for_series", None)
+        if folder is None and callable(fn):
+            try:
+                folder = fn(series_id)
+            except Exception:  # noqa: BLE001 - the entries that need it stay off
+                _log.warning("Looking up the folder of series %s failed", series_id, exc_info=True)
+        return folder
+
+    def _series_menu(self, menu: QMenu, refs: Sequence[SeriesRef]) -> SeriesMenu:
+        return SeriesMenu(menu, refs, backend=self._backend if self._automation else None, host=self._host,
+                          show_in_list=self.show_in_list.emit, on_change=self._series_changed)
+
+    def _series_changed(self, kind: str) -> None:
+        """A series menu changed a mode / Unbundled / Behind: the List's chips follow (the window refreshes its states
+        and sends the To get list again for the other two)."""
+        if kind == "modes":
+            self.found.refresh_mode()
+            self.modes_changed.emit()
+
+    def refresh_modes(self) -> None:
+        """A mode was changed on another screen (the List): Found's picker reads it again."""
+        if self._automation:
+            self.found.refresh_mode()
+
+    def _say(self, text: str, tone: str = "") -> None:
+        """A series menu's status line: under the list (Found: in the view)."""
+        if not text:
+            return
+        if self._group == GROUP_FOUND:
+            self.found.say(text, tone)
+        else:
+            self._set_bulk_text(text)
+
+    def _ref(self, folder: str) -> SeriesRef:
+        series = self._by_folder.get(folder)
+        sid = self._series_ids.get(folder)
+        if sid is None and series is not None:
+            sid = series.series_id
+        return SeriesRef(folder, sid, series.title if series is not None else "")
+
     def _on_tree_menu(self, pos) -> None:
-        """A To get row's menu: Check for new chapters (owner, 2026-10-11: "Can I check for new chapters on a
-        volumes-based series within the download view?")."""
+        """A To get row's menu (owner, 2026-10-13: "Can I set auto download mode directly from here"): the shared series
+        entries - on every checked row when the right-clicked one is checked - then Check for new chapters (owner,
+        2026-10-11: "Can I check for new chapters on a volumes-based series within the download view?") and, for a
+        chapter series, Change source…."""
         item = self.tree.itemAt(pos)
         folder = item.data(0, ROLE_FOLDER) if item is not None else None
         series = self._by_folder.get(folder) if folder else None
         if series is None:
             return
+        checked = self.checked_folders()
+        folders = checked if folder in self._checked and len(checked) > 1 else [folder]
+        refs = [self._ref(f) for f in folders]
         menu = QMenu(self.tree)
-        act_new = menu.addAction("Check for new chapters…")
-        act_new.setToolTip("Ask the series' Suwayomi source for chapters newer than the newest one you have (for "
-                           "volumes: the last chapter of your newest volume)")
-        if self._exec_menu(menu, self.tree.viewport().mapToGlobal(pos)) is act_new:
+        actions = self._series_menu(menu, refs)
+        if len(refs) > 1:
+            menu.addAction(f"{len(refs)} checked series").setEnabled(False)
+            menu.addSeparator()
+        actions.add_modes()
+        actions.add_unbundled()
+        actions.add_behind()
+        act_new = act_source = None
+        if len(refs) == 1:
+            menu.addSeparator()
+            actions.add_show_in_list()
+            actions.add_open_folder()
+            actions.add_copy_title()
+            menu.addSeparator()
+            actions.add_mu_page()
+            actions.add_mangapixer()
+            actions.add_fix_mu()
+            menu.addSeparator()
+            act_new = menu.addAction(CHECK_NEW_CHAPTERS)
+            act_new.setToolTip("Ask the series' Suwayomi source for chapters newer than the newest one you have (for "
+                               "volumes: the last chapter of your newest volume)")
+            if self._chapters_entry(folder) is not None and callable(getattr(self._backend, "other_candidates", None)):
+                act_source = menu.addAction(CHANGE_SOURCE)
+                act_source.setToolTip(CHANGE_SOURCE_TIP)
+                act_source.setEnabled(self.suwayomi_ready() and refs[0].series_id is not None)
+        chosen = self._exec_menu(menu, self.tree.viewport().mapToGlobal(pos))
+        said = actions.run(chosen)
+        if said is not None:
+            self._say(said)
+        elif act_new is not None and chosen is act_new:
             sid = self._series_ids.get(folder) or series.series_id
             self.check_new_chapters(sid, folder, series.title, series.titles or (series.title,))
+        elif act_source is not None and chosen is act_source:
+            self.change_source_of(folder)
+
+    def change_source_of(self, folder: str) -> bool:
+        """Change source… for a chapter series: its chapters panel, then the other sources (once its lookup is in)."""
+        sid = self._series_ids.get(folder)
+        if sid is None or not self.select_series(folder, GROUP_CHAPTERS):
+            return False
+        return self.chapters.request_change_source()
+
+    def _on_found_menu(self, series_id: int, pos) -> None:
+        """A Found card's "⋯": Show in To get (its other releases / chapters, to pick another than the one offered),
+        Show in List, Open folder, Automatic downloads, Skip all of this series' findings."""
+        folder = self.folder_of_series(series_id)
+        name = self.found.name_of(series_id)
+        findings = [f for f in self._findings if f.series_id == series_id]
+        menu = QMenu(self.found)
+        actions = self._series_menu(menu, [SeriesRef(folder, series_id, name)])
+        in_to_get = folder in self._by_folder if folder else False
+        act_to_get = actions.add_action(
+            SHOW_IN_TO_GET, lambda: self.show_in_to_get(series_id),
+            "Its releases or chapters in To get: pick another than the one offered here" if in_to_get else
+            "Not in To get any more: it has no gaps now", in_to_get)
+        actions.add_show_in_list()
+        actions.add_open_folder()
+        menu.addSeparator()
+        actions.add_modes()
+        menu.addSeparator()
+        n = len(findings)
+        act_skip = actions.add_action(f"Skip all of this series' findings ({n})" if n > 1 else
+                                      "Skip all of this series' findings",
+                                      lambda: self._skip_series(series_id, n),
+                                      "Not offered again: every finding of this series leaves Found", bool(n))
+        del act_to_get, act_skip
+        said = actions.run(self._exec_menu(menu, pos))
+        if said:
+            self.found.say(said)
+
+    def _skip_series(self, series_id: int, n: int) -> str:
+        if n > 1 and not self._confirm_skip_all(
+                f"Skip all {n}?", f"Skip all {n} findings of {self.found.name_of(series_id)}? They are not offered "
+                                  "again (a later find pass offers only new releases)."):
+            return ""
+        self.found.skip_series(series_id)
+        return ""
+
+    def _ask_skip_all(self, title: str, text: str) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=self)
+        yes = box.addButton("Skip all", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def show_in_to_get(self, series_id: int) -> bool:
+        """Found's "Show in To get": the series selected in the group of its (first) finding, so its releases /
+        chapters panel shows - to pick another release than the one offered."""
+        folder = self.folder_of_series(series_id)
+        if folder is None or folder not in self._by_folder:
+            self.found.say("This series is not in To get any more: it has no gaps now.", "warn")
+            return False
+        kinds = [f.kind for f in self.found.shown() if f.series_id == series_id] or \
+                [f.kind for f in self._findings if f.series_id == series_id]
+        group = {"volumes": GROUP_VOLUMES, "upgrades": GROUP_UPGRADES, "chapters": GROUP_CHAPTERS}.get(
+            kinds[0] if kinds else "", None)
+        return self.select_series(folder, group)
+
+    def _on_panel_menu(self, pos) -> None:
+        """The series panels' "⋯": Show in List, Open folder, Automatic downloads for the series shown."""
+        folder = self._current
+        if not folder:
+            return
+        ref = self._ref(folder)
+        if ref.series_id is None and self.panels.currentIndex() == PANEL_CHAPTERS:
+            ref = SeriesRef(folder, self.chapters.series_id, ref.title)
+        menu = QMenu(self)
+        actions = self._series_menu(menu, [ref])
+        actions.add_show_in_list()
+        actions.add_open_folder()
+        menu.addSeparator()
+        actions.add_modes()
+        said = actions.run(self._exec_menu(menu, pos))
+        if said is not None:
+            self._say(said)
+
+    def _sync_series_buttons(self) -> None:
+        """The panels' "⋯" shows while they show a series (not the empty message, not Found)."""
+        shown = bool(self._current) and self._group != GROUP_FOUND
+        self.releases.btn_series.setVisible(shown and bool(self.releases.title_label.text()))
+        self.chapters.btn_series.setVisible(shown)
 
     def check_new_chapters(self, series_id: Optional[int], folder: str, title: str, titles: Sequence[str]) -> bool:
         """"Check for new chapters" (the List's row menu; owner, 2026-10-11): the chapters panel with what the series'
@@ -862,6 +1060,7 @@ class DownloadTab(QWidget):
         self._current = folder
         self.panels.setCurrentIndex(PANEL_CHAPTERS)
         self.chapters.open_series(series_id, title, (), tuple(titles) or (title,), newer=True)
+        self._sync_series_buttons()
         return True
 
     def _on_chapter_lookup(self, series_id: int, lookup) -> None:

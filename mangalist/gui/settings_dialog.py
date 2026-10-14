@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .automation_rules import has_automation
 from .download_style import apply_style, set_prop
 from .download_widgets import button, label
 from .downloads_backend import DownloadsBackend
@@ -136,7 +137,7 @@ class SettingsDialog(QDialog):
 
         self.stack = QStackedWidget()
         self.pages: Dict[str, SectionPage] = {
-            SECTION_LIBRARY: LibraryPage(db, browse=browse, cache=cache),
+            SECTION_LIBRARY: LibraryPage(db, browse=browse, cache=cache, auto_modes=has_automation(backend)),
             SECTION_SERVICES: ServicesPage(db, backend, cache, client_factory=client_factory, info=info),
             SECTION_SOURCES: SourcesPage(db, backend),
             SECTION_MATCHING: MatchingPage(db),
