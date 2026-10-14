@@ -1,5 +1,5 @@
-"""The Settings dialog: one dialog, six sections on the left (Library, Connected services, Download sources, Matching,
-Automation, Logging) - the approved mockup's ``Settings.dc.html``. It absorbs the Roots, MangaPixer and qBittorrent dialogs.
+"""The Settings dialog: one dialog, seven sections on the left (Library, Connected services, Download sources, Matching,
+Automation, Appearance, Logging) - the approved mockup's ``Settings.dc.html``. It absorbs the Roots, MangaPixer and qBittorrent dialogs.
 
 :func:`open_settings` opens it modally and returns what changed (:class:`~mangalist.gui.shell.SettingsResult`) so the
 shell can rescan, re-read MangaPixer's data or reload the Download tab. Switches are stored as they are changed; the
@@ -28,6 +28,7 @@ from .download_widgets import button, label
 from .downloads_backend import DownloadsBackend
 from .mangapixer_dialog import ClientFactory
 from .roots_dialog import BrowseFn
+from .settings_appearance import SECTION_APPEARANCE, AppearancePage
 from .settings_common import SectionPage
 from .settings_library import LibraryPage
 from .settings_sections import SECTION_LOGGING, AutomationPage, LoggingPage, MatchingPage, SourcesPage
@@ -48,10 +49,12 @@ NAV = (
     (SECTION_SOURCES, "Download sources", "nyaa, Suwayomi sources"),
     (SECTION_MATCHING, "Matching", "MangaUpdates"),
     (SECTION_AUTOMATION, "Automation", "Schedules, Remove Completed"),
+    (SECTION_APPEARANCE, "Appearance", "Light, Dark or the system's"),
     (SECTION_LOGGING, "Logging", "Level, log files and folder"),
 )
-# The sections of this dialog: the shell's five, then Logging (kept here so the shell's list is not changed).
-DIALOG_SECTIONS = (*SECTIONS, SECTION_LOGGING)
+# The sections of this dialog: the shell's five, then Appearance and Logging (kept here so the shell's list is not
+# changed).
+DIALOG_SECTIONS = (*SECTIONS, SECTION_APPEARANCE, SECTION_LOGGING)
 
 
 class _NavButton(QFrame):
@@ -139,6 +142,7 @@ class SettingsDialog(QDialog):
             SECTION_SOURCES: SourcesPage(db, backend),
             SECTION_MATCHING: MatchingPage(db),
             SECTION_AUTOMATION: AutomationPage(db, backend, cache, env=env),
+            SECTION_APPEARANCE: AppearancePage(db),
             SECTION_LOGGING: LoggingPage(db, env=env),
         }
         for key in DIALOG_SECTIONS:
@@ -196,4 +200,4 @@ def open_settings(parent: Optional[QWidget], db, backend: Optional[DownloadsBack
     return result
 
 
-__all__ = ["SettingsDialog", "open_settings", "NAV", "DIALOG_SECTIONS", "SECTION_LOGGING"]
+__all__ = ["SettingsDialog", "open_settings", "NAV", "DIALOG_SECTIONS", "SECTION_APPEARANCE", "SECTION_LOGGING"]

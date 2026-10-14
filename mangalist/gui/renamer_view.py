@@ -62,6 +62,7 @@ from ..renamer import (
     SeriesPreview,
     file_units,
 )
+from . import palette, theme
 from .download_widgets import ROLE_CHIPS, ROLE_SUB, TwoLineDelegate
 
 _log = logging.getLogger(__name__)
@@ -77,7 +78,20 @@ class _SeriesRowDelegate(TwoLineDelegate):
         hint.setWidth(1)
         return hint
 
-STATUS_COLORS = {RENAME: "#1f4fb8", UNCHANGED: "#6b6b67", LEFT_ALONE: "#9a5b00", COLLISION: "#8b1d1d"}
+#: The colour of each status: a palette token (accent blue, grey, amber, red), read when the preview is filled.
+STATUS_TOKENS = {RENAME: "accent", UNCHANGED: "muted_2", LEFT_ALONE: "caution_text", COLLISION: "bad_text"}
+
+
+def status_colors() -> dict:
+    return {status: getattr(palette.current(), token) for status, token in STATUS_TOKENS.items()}
+
+
+def __getattr__(name: str):
+    if name == "STATUS_COLORS":                 # the old constant: the colours in the current palette
+        return status_colors()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 # A preview: the table always shows what renaming WOULD do (applying re-runs the preview) - owner, 2026-10-10.
 STATUS_TEXT = {RENAME: "will be renamed", UNCHANGED: "already named by the scheme", LEFT_ALONE: "left alone",
                COLLISION: "keeps its name: name collision"}
@@ -295,6 +309,7 @@ class RenamerWindow(QDialog):
         self.series_list.setSpacing(2)
         self.series_list.currentRowChanged.connect(self._show_series)
         self.preview = QTreeWidget()
+        theme.on_retheme(self.preview, self._recolor_preview)
         self.preview.setColumnCount(3)
         self.preview.setHeaderLabels(["Now", "After", "What happens"])
         self.preview.setRootIsDecorated(False)
@@ -565,6 +580,16 @@ class RenamerWindow(QDialog):
         self._after_change([s.root_id] if s.root_id is not None else [])
         return True
 
+    def _recolor_preview(self) -> None:
+        """The preview's rows in the palette in force (a switch of Appearance)."""
+        colors = status_colors()
+        for i in range(self.preview.topLevelItemCount()):
+            item = self.preview.topLevelItem(i)
+            color = colors.get(item.data(0, Qt.ItemDataRole.UserRole))
+            if color is not None:
+                for col in range(3):
+                    item.setForeground(col, QBrush(QColor(color)))
+
     def _show_series(self, _row: int) -> None:
         self.preview.clear()
         s = self._current_series()
@@ -590,7 +615,7 @@ class RenamerWindow(QDialog):
             if flags and f.status == RENAME:
                 what += " (" + ", ".join(flags) + ")"
             item = QTreeWidgetItem([prefix + f.name, after, what])
-            color = QBrush(QColor(STATUS_COLORS[f.status]))
+            color = QBrush(QColor(status_colors()[f.status]))
             for col in range(3):
                 item.setForeground(col, color)
             item.setToolTip(0, f.path)

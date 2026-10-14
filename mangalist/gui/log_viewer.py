@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QPersistentModelIndex, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QKeySequence
@@ -46,11 +46,11 @@ from PySide6.QtWidgets import (
 from .. import paths
 from . import log_tail, theme
 from .background import start_call
-from .download_style import ACCENT, ACCENT_SOFT, BADGES, FIELD_LINE, GROUND, INK, LINE, MUTED, SELECTED, STYLESHEET
-from .download_style import set_prop
+from .download_style import set_prop, stylesheet
 from .download_widgets import button, hbox, label
 from .downloads_backend import BackendError
 from .links import open_folder as open_folder_default
+from .palette import Palette, current
 
 _log = logging.getLogger(__name__)
 
@@ -65,24 +65,34 @@ EMPTY_TEXT = {
 }
 NO_MATCH_TEXT = "No lines match. Change the filters or the search."
 
-_WARN_BG, _WARN_FG = BADGES["warn"]
-_BAD_BG, _BAD_FG = BADGES["bad"]
-_DEBUG_FG = "#6b6b67"
+#: The line colours by tone: (foreground token, background token or None) - the badges' warn / bad, debug grey.
+_TONE_TOKENS = {"bad": ("bad_text", "bad_bg"), "warn": ("warn_text", "warn_bg"), "debug": ("muted_2", None),
+                "marker": ("muted", None)}
 
-VIEWER_STYLE = f"""
-QWidget#logViewer {{ background: {GROUND}; color: {INK}; font-size: 14px; }}
-QFrame#logViewerBar {{ background: #ffffff; border: none; border-bottom: 1px solid {LINE}; }}
-QFrame#logViewerFooter {{ background: #fafaf8; border: none; border-top: 1px solid {LINE}; }}
-QListView#logLines {{ border: none; background: #ffffff; outline: 0; selection-background-color: {SELECTED};
-                      selection-color: {INK}; }}
+
+def viewer_style(pal: Optional[Palette] = None) -> str:
+    p = pal or current()
+    return f"""
+QWidget#logViewer {{ background: {p.background}; color: {p.text}; font-size: 14px; }}
+QFrame#logViewerBar {{ background: {p.surface}; border: none; border-bottom: 1px solid {p.border}; }}
+QFrame#logViewerFooter {{ background: {p.surface_subtle}; border: none; border-top: 1px solid {p.border}; }}
+QListView#logLines {{ border: none; background: {p.surface}; outline: 0; selection-background-color: {p.selected};
+                      selection-color: {p.text}; }}
 QListView#logLines::item {{ padding: 0 16px; min-height: 20px; }}
-QLabel#logEmpty {{ background: #ffffff; color: {MUTED}; padding: 32px; }}
-QPushButton[segment] {{ min-height: 32px; padding: 0 14px; border: 1px solid {FIELD_LINE}; background: #ffffff; }}
+QLabel#logEmpty {{ background: {p.surface}; color: {p.muted}; padding: 32px; }}
+QPushButton[segment] {{ min-height: 32px; padding: 0 14px; border: 1px solid {p.control}; background: {p.surface}; }}
 QPushButton[segment="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
 QPushButton[segment="last"] {{ border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }}
-QPushButton[segment]:checked {{ background: {ACCENT_SOFT}; color: {ACCENT}; border-color: {ACCENT}; font-weight: 600; }}
-QPushButton[segment="last"]:checked {{ border-left: 1px solid {ACCENT}; }}
+QPushButton[segment]:checked {{ background: {p.accent_tint}; color: {p.accent}; border-color: {p.accent};
+                               font-weight: 600; }}
+QPushButton[segment="last"]:checked {{ border-left: 1px solid {p.accent}; }}
 """
+
+
+def __getattr__(name: str):
+    if name == "VIEWER_STYLE":                  # the old constant: the viewer's rules in the current palette
+        return viewer_style()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 Row = Tuple[str, int, bool]         # the text of one line, its record's level, a marker
 
@@ -102,9 +112,7 @@ class LogModel(QAbstractListModel):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.rows: List[Row] = []
-        self._fg = {"bad": QBrush(QColor(_BAD_FG)), "warn": QBrush(QColor(_WARN_FG)), "debug": QBrush(QColor(_DEBUG_FG)),
-                    "marker": QBrush(QColor(MUTED))}
-        self._bg = {"bad": QBrush(QColor(_BAD_BG)), "warn": QBrush(QColor(_WARN_BG))}
+        self._brushes: Dict[str, Tuple[Dict[str, QBrush], Dict[str, QBrush]]] = {}     # per palette: (fg, bg)
         self.marker_font = None
 
     def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: B008
@@ -122,6 +130,17 @@ class LogModel(QAbstractListModel):
             return "debug"
         return ""
 
+    def brushes(self) -> Tuple[Dict[str, QBrush], Dict[str, QBrush]]:
+        """(foreground, background) brushes by tone in the palette in force (made once per palette, read at
+        ``data()`` time so a switch of Appearance shows at the next repaint)."""
+        pal = current()
+        made = self._brushes.get(pal.name)
+        if made is None:
+            fg = {tone: QBrush(QColor(getattr(pal, f))) for tone, (f, _b) in _TONE_TOKENS.items()}
+            bg = {tone: QBrush(QColor(getattr(pal, b))) for tone, (_f, b) in _TONE_TOKENS.items() if b}
+            made = self._brushes[pal.name] = (fg, bg)
+        return made
+
     def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid() or not 0 <= index.row() < len(self.rows):
             return None
@@ -129,9 +148,9 @@ class LogModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return text
         if role == Qt.ItemDataRole.ForegroundRole:
-            return self._fg.get(self.tone(level, marker))
+            return self.brushes()[0].get(self.tone(level, marker))
         if role == Qt.ItemDataRole.BackgroundRole:
-            return self._bg.get(self.tone(level, marker))
+            return self.brushes()[1].get(self.tone(level, marker))
         if role == Qt.ItemDataRole.FontRole and marker:
             return self.marker_font
         return None
@@ -299,7 +318,7 @@ class LogViewer(QWidget):
         foot.setLayout(fl)
         outer.addWidget(foot)
 
-        self.setStyleSheet(STYLESHEET + VIEWER_STYLE)
+        theme.bind_sheet(self, lambda: stylesheet() + viewer_style())
 
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)

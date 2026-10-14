@@ -100,6 +100,7 @@ from .download_widgets import ROLE_ASIDE, ROLE_CHIPS, ROLE_SUB, TwoLineDelegate,
 from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList
 from .found_view import FoundView
+from .palette import current
 from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
 from .series_actions import (
     CHANGE_SOURCE,
@@ -125,12 +126,15 @@ _log = logging.getLogger(__name__)
 
 REFRESH_MS = 60_000
 SEARCH_DELAY_MS = 350          # a pause after selecting a series, before it is searched
-UPGRADE_NOTE_STYLE = "\nQLabel#upgradeNote { background: #e8eefb; border-radius: 6px; padding: 8px 12px; }\n"
+def upgrade_note_style() -> str:
+    return f"\nQLabel#upgradeNote {{ background: {current().accent_tint}; border-radius: 6px; padding: 8px 12px; }}\n"
+
+
 # The group chips as the List tab's (theme.py): the tab's own sheet would make them 36 px, taller than the flow layout's
 # lines (they wrap since the Found chip).
 CHIP_STYLE = 'QPushButton[chip="true"] { min-height: 30px; max-height: 30px; padding: 0; border-radius: 16px; }\n'
 
-_NOTE_COLORS = {"muted": "#5a5a57", "warn": "#8a3f00"}
+_NOTE_TOKENS = {"muted": "muted", "warn": "warn_text"}
 
 
 def replaced_service(backend):
@@ -181,13 +185,13 @@ class _ToGetDelegate(TwoLineDelegate):
         font.setWeight(QFont.Weight.DemiBold)
         font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 104)
         painter.setFont(font)
-        painter.setPen(QColor("#3a3a38"))
+        painter.setPen(QColor(current().text_2))
         painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, str(header))
         note = index.data(ROLE_ASIDE) or ""
         if note:
             font.setWeight(QFont.Weight.Normal)
             painter.setFont(font)
-            painter.setPen(QColor(_NOTE_COLORS.get(index.data(ROLE_NOTE_TONE) or "muted", "#5a5a57")))
+            painter.setPen(QColor(getattr(current(), _NOTE_TOKENS.get(index.data(ROLE_NOTE_TONE) or "muted", "muted"))))
             painter.drawText(rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, str(note))
         painter.restore()
 
@@ -261,8 +265,7 @@ class DownloadTab(QWidget):
             self._refresh_timer.setInterval(refresh_ms)
             self._refresh_timer.timeout.connect(self.downloads.refresh)
             self._refresh_timer.start()
-        apply_style(self)
-        self.setStyleSheet(self.styleSheet() + UPGRADE_NOTE_STYLE + CHIP_STYLE)
+        apply_style(self, extra=lambda: upgrade_note_style() + CHIP_STYLE)
         if self._group == GROUP_FOUND:                  # remembered from the last session
             self.panels.setCurrentIndex(PANEL_FOUND)
             self.footer.setVisible(False)
