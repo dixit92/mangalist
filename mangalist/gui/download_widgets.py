@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from .download_style import FONT_MONO, badges, set_prop
+from .indicators import paint_radio
 from .palette import current
 
 ROLE_SUB = Qt.ItemDataRole.UserRole + 1          # the second line of a two-line cell
@@ -283,4 +284,7 @@ class RadioDelegate(QStyledItemDelegate):
             QStyle.StateFlag.State_On if option.state & QStyle.StateFlag.State_Selected else QStyle.StateFlag.State_Off)
         size = style.pixelMetric(QStyle.PixelMetric.PM_ExclusiveIndicatorWidth, radio, widget)
         radio.rect = QRect(option.rect.left() + 10, option.rect.center().y() - size // 2, size, size)
+        if current().dark:                              # Fusion's edge vanishes on a dark window (indicators.py)
+            paint_radio(painter, radio.rect, bool(radio.state & QStyle.StateFlag.State_On))
+            return
         style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorRadioButton, radio, painter, widget)

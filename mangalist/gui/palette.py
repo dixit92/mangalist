@@ -60,6 +60,7 @@ class Palette:
     accent_fill_hover: str      # a primary button under the mouse (the List's sheet)
     accent_fill_hover_2: str    # a primary button under the mouse (the Download tab's / Settings' sheet)
     accent_fill_disabled: str   # a disabled primary button (Download tab / Settings)
+    accent_text_disabled: str   # the label on a disabled primary button
     accent_tint: str            # a checked chip, the current Settings section, the upgrade note
     busy_row: str               # the List row being looked up on MangaUpdates
     tooltip_bg: str
@@ -109,7 +110,8 @@ LIGHT = Palette(
     border="#dcdcd8", border_soft="#e3e3df", row_rule="#efefec", control="#c4c4bf", control_strong="#a9a9a4",
     shadow="#8e8e8a", arrow_off="#b4b4b0",
     accent="#1f4fb8", accent_fill="#1f4fb8", accent_text="#ffffff", accent_hover="#163a87",
-    accent_fill_hover="#163a87", accent_fill_hover_2="#1a43a0", accent_fill_disabled="#a9b9dc", accent_tint="#e8eefb",
+    accent_fill_hover="#163a87", accent_fill_hover_2="#1a43a0", accent_fill_disabled="#a9b9dc",
+    accent_text_disabled="#ffffff", accent_tint="#e8eefb",
     busy_row="#dce6fa", tooltip_bg="#161616", tooltip_text="#ffffff",
     ok_bg="#e7f3ec", ok_text="#1d5e36", warn_bg="#fdf0e3", warn_text="#8a3f00", bad_bg="#fbeaea", bad_text="#8b1d1d",
     info_bg="#e8eefb", info_text="#1f4fb8", neutral_bg="#ededea", neutral_text="#4a4a47", quiet_bg="#eef0f2",
@@ -193,7 +195,8 @@ DARK = Palette(
     control=mix(MP_INK, _ON, 0.22), control_strong=mix(MP_INK, _ON, 0.36), shadow="#000000",
     arrow_off=mix(MP_INK, _ON, 0.25),
     accent=MP_BLUE, accent_fill=MP_BLUE_STRONG, accent_text="#ffffff", accent_hover=MP_BLUE_SOFT,
-    accent_fill_hover=MP_BLUE_40, accent_fill_hover_2=MP_BLUE_40, accent_fill_disabled=mix(MP_BLUE_STRONG, _ON, 0.35),
+    accent_fill_hover=MP_BLUE_40, accent_fill_hover_2=MP_BLUE_40, accent_fill_disabled=mix(MP_BLUE_STRONG, _ON, 0.28),
+    accent_text_disabled=mix(MP_TEXT, _ON, 0.45),
     accent_tint=mix(MP_BLUE_STRONG, _ON, 0.22), busy_row=mix(MP_BLUE_STRONG, _ON, 0.30),
     tooltip_bg=MP_TEXT, tooltip_text=MP_SURFACE,
     ok_bg=mix(MP_SUCCESS_STRONG, _ON, 0.20), ok_text=MP_SUCCESS,
