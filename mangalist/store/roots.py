@@ -11,7 +11,7 @@ from typing import List, Optional, Sequence
 
 from .db import utcnow
 from .exclusions import ExclusionSet, normalize_pattern
-from .schema import ENFORCE_NAMING, ENFORCE_NAMING_DEFAULT, ORIGIN_HINTS
+from .schema import AUTO_MODES, ENFORCE_NAMING, ENFORCE_NAMING_DEFAULT, ORIGIN_HINTS
 
 
 _log = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ class Root:
     naming_scheme: Optional[str] = None
     position: int = 0
     exclusions: List[str] = field(default_factory=list)
+    auto_mode: Optional[str] = None     # the library's automatic-download mode for series without their own; None: the default
 
     @property
     def folder(self) -> Path:
@@ -68,6 +69,10 @@ def validate_root(root: Root, others: Sequence[Root]) -> Root:
         raise RootError(f"unknown origin hint {root.origin_hint!r}")
     if root.enforce_naming not in ENFORCE_NAMING:
         raise RootError(f"enforce naming must be one of {', '.join(ENFORCE_NAMING)}")
+    if root.auto_mode in ("", "default"):
+        root.auto_mode = None
+    if root.auto_mode is not None and root.auto_mode not in AUTO_MODES:
+        raise RootError(f"automatic downloads must be one of {', '.join(AUTO_MODES)} (or the default)")
     if root.staging_folder is not None:
         root.staging_folder = root.staging_folder.strip() or None
         if root.staging_folder is not None:
@@ -116,9 +121,9 @@ class RootsMixin:
             now = utcnow()
             cur = con.execute(
                 "INSERT INTO roots (name, path, origin_hint, enforce_naming, naming_scheme, staging_folder,"
-                " position, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                " position, auto_mode, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (root.name, root.path, root.origin_hint, root.enforce_naming, root.naming_scheme,
-                 root.staging_folder, root.position, now, now))
+                 root.staging_folder, root.position, root.auto_mode, now, now))
             root.id = int(cur.lastrowid)
             _write_exclusions(con, root.id, root.exclusions)
         _log.info("Root added: %s (%s), %d exclusion%s", root.name or "unnamed", root.path, len(root.exclusions),
@@ -135,9 +140,9 @@ class RootsMixin:
             validate_root(root, existing)
             con.execute(
                 "UPDATE roots SET name=?, path=?, origin_hint=?, enforce_naming=?, naming_scheme=?,"
-                " staging_folder=?, position=?, updated_at=? WHERE id=?",
+                " staging_folder=?, position=?, auto_mode=?, updated_at=? WHERE id=?",
                 (root.name, root.path, root.origin_hint, root.enforce_naming, root.naming_scheme,
-                 root.staging_folder, root.position, utcnow(), root.id))
+                 root.staging_folder, root.position, root.auto_mode, utcnow(), root.id))
             _write_exclusions(con, root.id, root.exclusions)
         _log.info("Root changed: %s (%s), %d exclusion%s", root.name or "unnamed", root.path, len(root.exclusions),
                   "" if len(root.exclusions) == 1 else "s")
@@ -166,7 +171,8 @@ def _list_roots(con: sqlite3.Connection) -> List[Root]:
     return [Root(id=r["id"], name=r["name"], path=r["path"], origin_hint=r["origin_hint"],
                  enforce_naming=r["enforce_naming"] or ENFORCE_NAMING_DEFAULT,
                  staging_folder=r["staging_folder"], naming_scheme=r["naming_scheme"],
-                 position=r["position"], exclusions=excl.get(r["id"], []))
+                 position=r["position"], exclusions=excl.get(r["id"], []),
+                 auto_mode=r["auto_mode"] if r["auto_mode"] in AUTO_MODES else None)
             for r in rows]
 
 

@@ -433,6 +433,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS findings_pick ON findings (series_id, kind, pi
 CREATE INDEX IF NOT EXISTS findings_by_status ON findings (status);
 """
 
+# A library's default automatic-download mode (owner, 2026-10-13: "Can I set Automatic Downloads [Off/Notify/Auto] per
+# library? Since I would need to remember to do it for any new series in this library"): a series without its own mode
+# follows its library's, then the default setting.
+_V8_ROOT_AUTO_MODE = """
+ALTER TABLE roots ADD COLUMN auto_mode TEXT;             -- off | notify | auto; NULL = the default setting
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
@@ -442,6 +449,7 @@ MIGRATIONS: List[Tuple[int, str]] = [
     (5, _V5_DOWNLOADS),
     (6, _V6_REPLACEMENTS),
     (7, _V7_FINDINGS),
+    (8, _V8_ROOT_AUTO_MODE),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

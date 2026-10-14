@@ -34,6 +34,8 @@ except the quick ones; see :mod:`mangalist.gui.downloads_backend` for the table)
     own_series_mode(series_id) -> Optional[str]         # quick: None = follows the default
     set_series_mode(series_ids, mode_or_None) -> None   # quick
     default_mode() -> str / set_default_mode(mode)      # quick
+    default_for(series_id) -> (mode, from_library)      # quick, optional (schema 8: a library's default mode)
+    series_defaults(series_ids) -> {id: (mode, lib)}   # quick, optional
     last_find_run() -> Optional[FindRun]               # quick
 
 **The schedule**: the headless runner's existing ``dispatch-batch`` job (``schedule_dispatch``, default

@@ -19,7 +19,7 @@ from mangalist.gui.download_tab import GROUP_FOUND, DownloadTab  # noqa: E402
 from mangalist.store.findings import FindingStore, NewFinding  # noqa: E402
 
 from ..downloads.fakes import data, scan  # noqa: E402
-from .conftest import qapp  # noqa: E402,F401
+from .conftest import qapp, wait_until  # noqa: E402,F401
 
 
 @pytest.fixture
@@ -65,3 +65,21 @@ def test_found_skip_and_modes_through_the_real_adapter(qapp, library_db):
     finally:
         tab.stop()
         tab.deleteLater()
+
+
+def test_a_librarys_default_mode_through_the_real_adapter(qapp, library_db):
+    # owner, 2026-10-13: "Can I set Automatic Downloads [Off/Notify/Auto] per library?"
+    db, sid, folder = library_db
+    backend = Backend(db)
+    root = db.list_roots()[0]
+    root.auto_mode = "off"
+    db.update_root(root)
+    assert backend.series_modes([sid]) == {sid: "off"} and backend.default_for(sid) == ("off", True)
+    assert backend.series_defaults([sid]) == {sid: ("off", True)}
+    modes = AutoModes(backend)
+    assert modes.detail(folder)[0] == "Off (the library's default)"
+    modes.refresh([folder])                             # off the UI thread
+    wait_until(qapp, lambda: modes.mode_of(folder) is not None and not modes._running)
+    assert modes.mode_of(folder) == "off" and modes.chips() == {}       # on its library's default: no chip
+    modes.apply([folder], "notify")
+    assert modes.chips() == {folder: "Notify"}          # its own mode differs from its library's

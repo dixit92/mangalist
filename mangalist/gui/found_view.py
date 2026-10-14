@@ -7,7 +7,9 @@ A chapter finding with nothing to send - the series' source is gone or lacks the
 **Change source…** instead of Send: it opens the series in Missing chapters, where its source is picked (owner,
 2026-10-12: "there's no option here to change the source"); Send all leaves such findings out. Showing one series, the
 header has its **Automatic downloads** mode (Off / Notify / Auto / the default; owner, 2026-10-12: "I should also be able
-to switch a series from notify to auto here").
+to switch a series from notify to auto here"); its "Use the default" names whose default it is - the series' library's
+or the one in Settings > Automation. Each card's **⋯** opens the series' menu (the Download tab builds it with
+:mod:`.series_actions`: Show in To get, Show in List, Open folder, Automatic downloads, Skip all of this series).
 
 Sends run one at a time (a pack may take a while: its file list is read to narrow it). **Send** while one runs queues the
 finding - its button says "Queued" - and the queue is worked through in order (owner, 2026-10-12: "Am I not able to
@@ -26,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -45,6 +47,8 @@ from .automation_rules import (
     MODE_LABELS,
     MODES,
     default_entry_label,
+    default_entry_tip,
+    default_of,
     gets_text,
     kind_text,
     last_run_text,
@@ -58,6 +62,7 @@ from .automation_rules import (
 from .background import BackgroundCall, describe_error, start_call
 from .download_style import set_tone
 from .download_widgets import button, card, hbox, label, pill
+from .series_actions import below, menu_button
 
 _log = logging.getLogger(__name__)
 
@@ -92,7 +97,10 @@ class FoundRow(QFrame):
         self.size_label.setVisible(not self.needs_source)          # nothing to download yet: no size to tell
         # The series' name alone on the first line with the actions; the kind and the numbers under it (owner: title
         # and counts clearly apart).
-        top = hbox(self.name_label, self.size_label, first, self.btn_skip, spacing=10)
+        self.btn_more = menu_button("This series: Show in To get (its other releases or chapters), Show in List, "
+                                    "Open folder, Automatic downloads, Skip all of its findings")
+        self.btn_more.setVisible(False)                             # shown when the host builds the menu
+        top = hbox(self.name_label, self.size_label, first, self.btn_skip, self.btn_more, spacing=10)
         top.setStretchFactor(self.name_label, 1)
         lay.addLayout(top)
         self.gets_label = label(f"Gets {gets_text(finding)}", "lead")
@@ -115,6 +123,7 @@ class FoundView(QWidget):
     changed = Signal()              # findings were sent or skipped: the host reloads them (and the downloads)
     change_source = Signal(int)     # a series id: open it in Missing chapters to pick its source
     mode_changed = Signal()         # a series' automatic-download mode was set here: the List's chips follow
+    series_menu_requested = Signal(int, QPoint)     # a card's "⋯": (series id, where) - the host opens the menu
 
     def __init__(self, backend, parent: Optional[QWidget] = None, confirm: Optional[ConfirmFn] = None):
         super().__init__(parent)
@@ -131,6 +140,7 @@ class FoundView(QWidget):
         self._sending_text = ""
         self._last_outcome = ("", "")
         self._busy_text = ""
+        self._series_menu = False                   # the cards' "⋯" (the host handles series_menu_requested)
         self.rows: Dict[int, FoundRow] = {}
 
         outer = QVBoxLayout(self)
@@ -146,7 +156,8 @@ class FoundView(QWidget):
         # One series shown: its automatic-download mode, changed in place.
         self.mode_combo = QComboBox()
         self.mode_combo.setObjectName("foundMode")
-        self.mode_combo.setToolTip("This series' automatic downloads; the default is set in Settings > Automation")
+        self.mode_combo.setToolTip("This series' automatic downloads; the default is its library's (Settings > Library) "
+                                   "or else the one in Settings > Automation")
         self.mode_combo.activated.connect(self._mode_chosen)
         self.mode_help = label("", "muted", wrap=True)
         self.mode_row = QWidget()
@@ -264,6 +275,9 @@ class FoundView(QWidget):
             row.btn_send.clicked.connect(lambda _=False, fid=finding.id: self.send(fid))
             row.btn_source.clicked.connect(lambda _=False, sid=finding.series_id: self.change_source.emit(sid))
             row.btn_skip.clicked.connect(lambda _=False, fid=finding.id: self.skip(fid))
+            row.btn_more.setVisible(self._series_menu)
+            row.btn_more.clicked.connect(lambda _=False, sid=finding.series_id, b=row.btn_more:
+                                         self.series_menu_requested.emit(sid, below(b)))
             self._list.insertWidget(self._list.count() - 1, row)
             row.show()                          # shown with the list (a reparented widget starts hidden)
             self.rows[finding.id] = row
@@ -285,7 +299,17 @@ class FoundView(QWidget):
         self._show_mode()
         self._enable()
 
+    def set_series_menu_enabled(self, on: bool) -> None:
+        """Show each card's "⋯" (the host opens the series' menu on :attr:`series_menu_requested`)."""
+        self._series_menu = bool(on)
+        for row in self.rows.values():
+            row.btn_more.setVisible(self._series_menu)
+
     # --- the series' mode ----------------------------------------------------------------------------
+
+    def refresh_mode(self) -> None:
+        """Read the shown series' mode again (it was changed on another screen)."""
+        self._show_mode()
 
     def _show_mode(self) -> None:
         """One series shown: its own mode ticked (or "Use the default (…)"), and what the mode in force does."""
@@ -296,7 +320,7 @@ class FoundView(QWidget):
             return
         try:
             own = self._backend.own_series_mode(sid)
-            default = self._backend.default_mode()
+            default, library = default_of(self._backend, sid)
         except Exception as exc:  # noqa: BLE001 - the line says why; nothing else depends on it
             self.mode_row.setVisible(False)
             _log.warning("Found: the mode of series %s could not be read: %s", sid, describe_error(exc))
@@ -305,7 +329,8 @@ class FoundView(QWidget):
         self.mode_combo.clear()
         for mode in MODES:
             self.mode_combo.addItem(MODE_LABELS[mode], mode)
-        self.mode_combo.addItem(default_entry_label(default), None)
+        self.mode_combo.addItem(default_entry_label(default, library), None)
+        self.mode_combo.setItemData(len(MODES), default_entry_tip(library), Qt.ItemDataRole.ToolTipRole)
         self.mode_combo.setCurrentIndex(MODES.index(own) if own in MODES else len(MODES))
         self.mode_combo.blockSignals(False)
         in_force = own if own in MODES else default
@@ -327,8 +352,14 @@ class FoundView(QWidget):
             return
         _log.info("Found: automatic downloads %s for series %s", mode or "the default", sid)
         name = self.name_of(sid)
+        whose = "the default"
+        if not mode:
+            try:
+                whose = "the library's default" if default_of(self._backend, sid)[1] else "the default"
+            except Exception:  # noqa: BLE001 - the wording only
+                pass
         self.say(f"Automatic downloads for {name}: {MODE_LABELS[mode]}." if mode else
-                 f"Automatic downloads for {name}: the default again.", "ok")
+                 f"Automatic downloads for {name}: {whose} again.", "ok")
         self._show_mode()
         self.mode_changed.emit()
 
@@ -416,6 +447,32 @@ class FoundView(QWidget):
         self.say(f"Skipped {gets_text(finding)} of {name}: it is not offered again.")
         self.changed.emit()
         return True
+
+    def skip_series(self, series_id: int) -> int:
+        """Skip every finding of *series_id* waiting here (the card menu's "Skip all"), but the one being sent; how many
+        were skipped. Never offered again, like Skip."""
+        if self._busy_text:
+            return 0
+        ids = [f.id for f in self._findings if f.series_id == series_id and f.id != self._sending]
+        done, error = 0, ""
+        for fid in ids:
+            if fid in self._queue:
+                self._queue.remove(fid)
+            try:
+                self._backend.skip_finding(fid)
+            except Exception as exc:  # noqa: BLE001 - the others still go; the first error is shown
+                error = error or describe_error(exc)
+                continue
+            done += 1
+        _log.info("Found: skipped %d finding(s) of series %s", done, series_id)
+        name = self.name_of(series_id)
+        if error:
+            self.say(f"Skipped {done} of {len(ids)} for {name}; could not skip the rest: {error}", "bad")
+        else:
+            self.say(f"Skipped {done} finding{'s' if done != 1 else ''} of {name}: not offered again.")
+        if done:
+            self.changed.emit()
+        return done
 
     def _ask(self, title: str, text: str) -> bool:
         box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=self)

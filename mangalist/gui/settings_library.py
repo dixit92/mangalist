@@ -1,6 +1,6 @@
 """Settings > Library: the roots MangaList manages (name, folder, how many series, the MangaPixer library each maps to),
 Add a root, Edit (the roots editor with its exclusions and live preview, and what happens to files not named by the
-scheme), and File naming: the scheme in plain words and the Windows server name the length rule uses
+scheme, and the library's default automatic-download mode - owner, 2026-10-13), and File naming: the scheme in plain words and the Windows server name the length rule uses
 (:data:`mangalist.renamer.KEY_WINDOWS_SERVER`, saved when the field is left).
 
 Editing roots is on copies, written only by Save in the editor (Cancel leaves everything as it was). Nothing on disk is
@@ -38,9 +38,11 @@ def _default_browse(parent: QWidget, title: str, start: str) -> str:
 
 
 class LibraryPage(SectionPage):
-    def __init__(self, db, parent: Optional[QWidget] = None, browse: Optional[BrowseFn] = None, cache=None):
+    def __init__(self, db, parent: Optional[QWidget] = None, browse: Optional[BrowseFn] = None, cache=None,
+                 auto_modes: bool = True):
         super().__init__("Library", LEAD, parent)
         self._db = db
+        self._auto_modes = auto_modes               # automatic downloads available: the editor offers a library mode
         self._browse = browse or _default_browse
         self._cache = cache
         self.editor: Optional[RootsEditor] = None
@@ -184,7 +186,8 @@ class LibraryPage(SectionPage):
     def edit_root(self, index: int = 0, add_path: Optional[str] = None) -> RootsEditor:
         """Open the roots editor on root *index* (optionally with a new root at *add_path* added to it)."""
         self._close_editor()
-        editor = RootsEditor(self._db, self.editor_page, browse=self._browse, select=index)
+        editor = RootsEditor(self._db, self.editor_page, browse=self._browse, select=index,
+                             auto_modes=self._auto_modes)
         if add_path:
             editor.add_root(add_path)
         self.editor = editor
@@ -210,9 +213,13 @@ class LibraryPage(SectionPage):
     def save_edit(self) -> bool:
         if self.editor is None or not self.editor.commit():
             return False
+        modes, others = self.editor.modes_changed, self.editor.others_changed
         self._close_editor()
         self.refresh()
-        self.roots_changed.emit()
+        if others or not modes:             # a library's mode alone needs no rescan
+            self.roots_changed.emit()
+        if modes:                           # the List's mode chips and Found follow (the window re-reads the modes)
+            self.downloads_changed.emit()
         return True
 
     def cancel_edit(self) -> None:
