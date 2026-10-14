@@ -34,20 +34,31 @@ from ..classifier import _human
 from ..store.replacements import Batch, ReplacementConflict
 from .background import BackgroundCall, start_call
 from .download_rules import batch_status_text, replaced_bar_text
-from .download_style import STYLESHEET, set_tone
+from . import theme
+from .download_style import set_tone, stylesheet
 from .download_widgets import button, flat_table, hbox, label
 from .downloads_backend import BackendError
+from .palette import current
 from .volumes_target import numbers_text, volume_label
 
 ConfirmDeleteFn = Callable[[QWidget, Batch], bool]
 COLUMNS = ("Series", "Volumes", "Files", "State")
 #: The download widgets' look, plus the two delete buttons: "Delete..." (opens the list) and the final "Delete N files".
-DIALOG_STYLE = STYLESHEET + """
-QPushButton[role="danger-quiet"] { color: #8b1d1d; border-color: #d9a3a3; }
-QPushButton[role="danger-quiet"]:hover { background: #fbeaea; }
-QPushButton[role="danger"] { border: 1px solid #8b1d1d; background: #8b1d1d; color: #ffffff; font-weight: 600; }
-QPushButton[role="danger"]:hover { background: #6e1616; }
+def dialog_style() -> str:
+    p = current()
+    return stylesheet(p) + f"""
+QPushButton[role="danger-quiet"] {{ color: {p.bad_text}; border-color: {p.bad_line}; }}
+QPushButton[role="danger-quiet"]:hover {{ background: {p.bad_bg}; }}
+QPushButton[role="danger"] {{ border: 1px solid {p.bad_fill}; background: {p.bad_fill}; color: {p.accent_text};
+                             font-weight: 600; }}
+QPushButton[role="danger"]:hover {{ background: {p.bad_fill_hover}; }}
 """
+
+
+def __getattr__(name: str):
+    if name == "DIALOG_STYLE":                  # the old constant: the sheet in the current palette
+        return dialog_style()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def file_line(f, *, full: bool = False) -> str:
@@ -76,7 +87,8 @@ class ReplacedBar(QFrame):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setObjectName("replacedBar")
-        self.setStyleSheet("QFrame#replacedBar { background: #ffffff; border: none; border-top: 1px solid #dcdcd8; }")
+        theme.bind_sheet(self, lambda: f"QFrame#replacedBar {{ background: {current().surface}; border: none; "
+                                       f"border-top: 1px solid {current().border}; }}")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(20, 8, 20, 8)
         lay.setSpacing(10)
@@ -107,7 +119,7 @@ class ConfirmReplaceDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Delete these chapter files?")
         self.setObjectName("settingsDialog")            # the download widgets' look
-        self.setStyleSheet(DIALOG_STYLE)
+        theme.bind_sheet(self, dialog_style)
         self.setModal(True)
         self.resize(760, 440)
         n = len(batch.files)
@@ -167,7 +179,7 @@ class ReplacedDialog(QDialog):
         self._confirm_empty = confirm_empty or (lambda parent, batch: ask_empty(parent, batch, self._title(batch)))
         self.setWindowTitle("Replaced chapters")
         self.setObjectName("settingsDialog")
-        self.setStyleSheet(DIALOG_STYLE)
+        theme.bind_sheet(self, dialog_style)
         self.resize(860, 560)
         self._service = service
         self._confirm = confirm or (lambda parent, batch: ask_delete(parent, batch, self._title(batch)))

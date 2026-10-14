@@ -48,7 +48,7 @@ class MuPickerDialog(QDialog):
         layout.addLayout(search_row)
 
         self._status = QLabel("")
-        self._status.setStyleSheet("color: #666;")
+        self._status.setProperty("role", "muted")      # the theme's secondary grey (was #666, before the palette)
         layout.addWidget(self._status)
 
         self._list = QListWidget()

@@ -49,9 +49,14 @@ def _paint(path: str, up: bool, color: str) -> None:
         raise OSError(f"could not write {path}")
 
 
-def arrow_files(color: str = "#5a5a57", disabled: str = "#b4b4b0") -> Optional[Dict[str, str]]:
+def arrow_files(color: Optional[str] = None, disabled: Optional[str] = None) -> Optional[Dict[str, str]]:
     """{"up", "down", "up_off", "down_off"} -> file paths ('/' separators, as stylesheets want); None when they cannot
-    be written. Painted once per process and colour pair."""
+    be written. Painted once per process and colour pair (the current palette's muted / arrow_off by default; a switch
+    of Appearance paints the other palette's pair once)."""
+    from .palette import current
+
+    color = color or current().muted
+    disabled = disabled or current().arrow_off
     key = f"{color}|{disabled}"
     if key in _made:
         return _made[key]
@@ -73,10 +78,15 @@ def arrow_files(color: str = "#5a5a57", disabled: str = "#b4b4b0") -> Optional[D
     return out
 
 
-def spin_rules(line: str = "#c4c4bf", hover: str = "#f3f3f1", color: str = "#5a5a57") -> str:
+def spin_rules(line: Optional[str] = None, hover: Optional[str] = None, color: Optional[str] = None,
+               disabled: Optional[str] = None) -> str:
     """Stylesheet rules giving ``QSpinBox`` / ``QDoubleSpinBox`` visible up / down buttons ("" when the arrows could not
-    be drawn)."""
-    files = arrow_files(color)
+    be drawn). Colours default to the current palette's (edge: control, hover: background, arrows: muted / arrow_off)."""
+    from .palette import current
+
+    pal = current()
+    line, hover = line or pal.control, hover or pal.background
+    files = arrow_files(color or pal.muted, disabled or pal.arrow_off)
     if not files:
         return ""
     boxes = ("QSpinBox", "QDoubleSpinBox")
