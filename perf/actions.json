@@ -1,0 +1,16 @@
+[
+ {"do": "click", "x": 180, "y": 90, "label": "filter box", "gap": 1.0},
+ {"do": "type", "text": "zq", "gap": 1.0},
+ {"do": "key", "key": "backspace", "n": 2, "gap": 1.0},
+ {"do": "move", "x0": 400, "y0": 186, "x1": 400, "y1": 986, "n": 9, "label": "rows", "gap": 0.6},
+ {"do": "wheel", "x": 600, "y": 600, "dir": "down", "n": 6, "label": "table down", "gap": 0.6},
+ {"do": "wheel", "x": 600, "y": 600, "dir": "up", "n": 6, "label": "table up", "gap": 0.6},
+ {"do": "click", "x": 400, "y": 336, "label": "select row", "gap": 1.0},
+ {"do": "click", "x": 400, "y": 436, "label": "select row", "gap": 1.0},
+ {"do": "click", "x": 500, "y": 89, "label": "chip Missing volumes", "gap": 1.0},
+ {"do": "click", "x": 386, "y": 89, "label": "chip All", "gap": 1.0},
+ {"do": "click", "x": 277, "y": 30, "label": "tab Download", "gap": 1.0},
+ {"do": "click", "x": 193, "y": 30, "label": "tab List", "gap": 1.0},
+ {"do": "click", "x": 277, "y": 30, "label": "tab Download", "gap": 1.0},
+ {"do": "click", "x": 193, "y": 30, "label": "tab List", "gap": 1.0}
+]

@@ -211,7 +211,9 @@ def main():
     ap.add_argument("--lossless", action="store_true")
     ap.add_argument("--compress", type=int, default=2)
     ap.add_argument("--actions", required=True)
-    ap.add_argument("--quiet-ms", type=int, default=400)
+    ap.add_argument("--quiet-ms", type=int, default=1200)
+    ap.add_argument("--min-area", type=int, default=2500, help="updates smaller than this (the caret blink) do not "
+                    "count as the action's response")
     args = ap.parse_args()
     c = Client(args.sock, None if args.lossless else args.quality, args.compress)
     th = threading.Thread(target=c.loop, daemon=True)
@@ -242,9 +244,14 @@ def main():
             fire()
             last = t0
             got = []
+            small = 0
             while True:
                 time.sleep(0.005)
                 new = c.take()
+                got_all = new
+                new = [u for u in new if u[3] >= args.min_area]
+                if got_all:
+                    small += len(got_all) - len(new)
                 if new:
                     got += new
                     last = new[-1][0]
@@ -256,7 +263,7 @@ def main():
                    "area_px": sum(u[3] for u in got), "jpeg_rects": sum(u[4] for u in got),
                    "first_ms": round((got[0][0] - t0) * 1000, 1) if got else None,
                    "settled_ms": round((last - t0) * 1000, 1) if got else None,
-                   "xvnc_cpu_ms": round((xvnc_cpu() - cpu0) * 1000, 1)}
+                   "xvnc_cpu_ms": round((xvnc_cpu() - cpu0) * 1000, 1), "small_updates": small}
             print(json.dumps(rec), flush=True)
             time.sleep(a.get("gap", 0.2))
     return 0
