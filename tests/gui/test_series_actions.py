@@ -232,7 +232,8 @@ def test_change_source_from_to_get_opens_the_chapters_and_looks_on_other_sources
     wait_until(qapp, lambda: backend.other_searches and not tab.chapters._calls)
     assert tab.panels.currentIndex() == dt.PANEL_CHAPTERS and tab.current_folder() == CHAPTER_FOLDER
     assert backend.other_searches[-1][0] == 4                 # after its lookup came in
-    assert "Change source…" not in texts(tree_menu(tab.__class__ and tab, "/lib/Beta Days")) or True
+    tab.show_group(GROUP_VOLUMES)
+    assert "Change source…" not in texts(tree_menu(tab, "/lib/Beta Days"))    # a volume series: none
 
 
 # --- a Found card's menu ------------------------------------------------------------------------------------

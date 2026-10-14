@@ -74,7 +74,8 @@ CHECK_NEW_TIP = ("Ask the series' Suwayomi source for chapters newer than the ne
                  "MangaUpdates lists them")
 CHANGE_SOURCE_TIP = ("Open the series' chapters and pick where they come from: MangaDex or your other Suwayomi sources. "
                      "Remembered for the series")
-BEHIND_DONE_TIP = "Treat the series as up to date: its chapter gaps stop counting, so it leaves the To get list"
+BEHIND_DONE_TIP = ("Treat the series as up to date: the List shows it Up to date, and scheduled find passes and Find now "
+                   "skip it (it stays listed in To get, as in the List's Gaps)")
 
 
 MENU_BUTTON_TEXT = "⋯"
@@ -251,8 +252,8 @@ class SeriesMenu:
         return text or ""
 
     def add_behind(self) -> Tuple[Optional[QAction], Optional[QAction]]:
-        """Mark Behind as up to date / Clear 'up to date' override (a series marked up to date leaves the To get
-        list)."""
+        """Mark Behind as up to date / Clear 'up to date' override (a series marked up to date is not searched by the
+        find pass - :func:`mangalist.downloads.finder.up_to_date_folders`)."""
         counts, set_done = self._host_fn("behind_counts"), self._host_fn("set_behind_done")
         folders = self.folders()
         if counts is None or set_done is None or not folders:
