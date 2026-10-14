@@ -47,7 +47,8 @@ def load_snapshot(backend: DownloadsBackend) -> DownloadsSnapshot:
     """Everything the list needs, in one background call (the optional backend extras are used when present)."""
     records = list(backend.records())
     titles_fn = getattr(backend, "series_titles", None)
-    titles = dict(titles_fn({r.series_id for r in records})) if titles_fn and records else {}
+    ids = {r.series_id for r in records if r.series_id is not None}     # a forgotten series' records have none
+    titles = dict(titles_fn(ids)) if titles_fn and ids else {}
     next_fn = getattr(backend, "next_check", None)
     budget_fn = getattr(backend, "budget_status", None)
     return DownloadsSnapshot(records, titles, next_fn() if next_fn else None, budget_fn() if budget_fn else None)
@@ -181,6 +182,8 @@ class DownloadsList(QWidget):
         self.records_loaded.emit(list(self.records))
 
     def name_of(self, record: DownloadRecord) -> str:
+        if record.series_id is None:
+            return "(series no longer in the library)"
         return (self._titles.get(record.series_id) or self._known_titles.get(record.series_id)
                 or (self._series_name(record.series_id) if self._series_name else f"Series #{record.series_id}"))
 
