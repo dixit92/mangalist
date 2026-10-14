@@ -1,5 +1,5 @@
 """The Settings dialog (offscreen Qt, a real database in a temporary folder, fake backend and fake MangaPixer client):
-its six sections, the live status of the connected services, the roots editor with Save / Cancel, the stored
+its seven sections, the live status of the connected services, the roots editor with Save / Cancel, the stored
 switches, write-only secrets, and what ``open_settings`` reports as changed."""
 
 from __future__ import annotations
@@ -123,15 +123,17 @@ def all_text(widget):
 # --- the frame ----------------------------------------------------------------------------------------------
 
 
-def test_six_sections_in_the_mockups_order_with_their_hints(qapp, db, cache):
+def test_seven_sections_in_the_mockups_order_with_their_hints(qapp, db, cache):
     dlg, _ = make(qapp, db, cache)
     assert [k for k, _t, _h in sd.NAV] == list(sd.DIALOG_SECTIONS) == [
-        SECTION_LIBRARY, SECTION_SERVICES, SECTION_SOURCES, SECTION_MATCHING, SECTION_AUTOMATION, sd.SECTION_LOGGING]
-    assert tuple(SECTIONS) == sd.DIALOG_SECTIONS[:5], "the shell's five are unchanged; Logging is the dialog's sixth"
+        SECTION_LIBRARY, SECTION_SERVICES, SECTION_SOURCES, SECTION_MATCHING, SECTION_AUTOMATION, sd.SECTION_APPEARANCE,
+        sd.SECTION_LOGGING]
+    assert tuple(SECTIONS) == sd.DIALOG_SECTIONS[:5], "the shell's five are unchanged; Appearance and Logging follow"
     assert [(t, h) for _k, t, h in sd.NAV] == [
         ("Library", "Roots, file naming"), ("Connected services", "MangaPixer, qBittorrent, Suwayomi"),
         ("Download sources", "nyaa, Suwayomi sources"), ("Matching", "MangaUpdates"),
-        ("Automation", "Schedules, Remove Completed"), ("Logging", "Level, log files and folder")]
+        ("Automation", "Schedules, Remove Completed"), ("Appearance", "Light, Dark or the system's"),
+        ("Logging", "Level, log files and folder")]
     assert dlg.current == SECTION_LIBRARY and dlg.windowTitle() == "Settings"
     assert dlg._nav[SECTION_LIBRARY].property("current") is True
     dlg.show_section(SECTION_MATCHING)

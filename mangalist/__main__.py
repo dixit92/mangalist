@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     from mangalist import log_config, paths
     from mangalist.gui.app_icon import build_app_icon
     from mangalist.gui.main_window import MainWindow
-    from mangalist.gui.theme import apply_theme
+    from mangalist.gui.theme import apply_theme, stored_appearance
 
     log_config.setup()
     # Once: copy settings and cache from the pre-per-user location (data/ next to the program).
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("MangaList")
     app.setWindowIcon(build_app_icon())
-    if not apply_theme(app):
+    if not apply_theme(app, stored_appearance()):     # Settings > Appearance (Light until the owner chooses)
         logging.getLogger(__name__).warning("The bundled fonts did not load; using the system font")
     win = MainWindow()
     win.show()

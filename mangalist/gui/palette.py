@@ -13,7 +13,7 @@ Owner, 2026-10-13: "we need a dark mode option. Switching from animefetch to Man
   flattened to solid colours here. The accent is MangaPixer's **blue** accent (``themes/_accents.scss``, dark family),
   not its default violet: MangaList is blue in Light, and animefetch's dark accent is blue too. Violet stays for the
   Wanted badge, which was already MangaList's violet. Every text token reads at WCAG AA (4.5:1) on the surfaces it is
-  drawn on (``tests/gui/test_palette.py``).
+  drawn on (``tests/test_palette.py``).
 """
 
 from __future__ import annotations
