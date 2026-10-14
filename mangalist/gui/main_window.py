@@ -57,7 +57,7 @@ from . import lanes
 from .app_icon import build_app_icon
 from .downloads_backend import create_backend as create_downloads_backend
 from .list_tab import DUPLICATES, PAGE_DUPLICATES, PAGE_EMPTY, PAGE_TABLE, ListTab, all_filter_keys, chip_label
-from .list_text import UNBUNDLED_HELP, UNBUNDLED_MENU, unbundled_status, wanted_label
+from .list_text import unbundled_status, wanted_label
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
@@ -68,7 +68,8 @@ from .table_model import (
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
-from .links import OPEN_FOLDER_LABEL, open_folder, open_link
+from .links import open_folder, open_link
+from .series_actions import SeriesMenu, SeriesRef
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +426,7 @@ class MainWindow(QMainWindow):
         lst.add_root_clicked.connect(lambda: self._on_choose_root())
         lst.rename_library_clicked.connect(self.rename_library)
         self._detail.get_requested.connect(self._on_get_requested)
+        self._detail.unbundled_toggled.connect(self._on_detail_unbundled)
 
         header = self._table.horizontalHeader()
         header.customContextMenuRequested.connect(self._on_header_context_menu)
@@ -452,6 +454,8 @@ class MainWindow(QMainWindow):
                 tab.library_changed.connect(self._on_replaced_chapters_moved)
             if hasattr(tab, "modes_changed"):           # a series' mode set in Found: the List's Auto chips follow
                 tab.modes_changed.connect(lambda: self._refresh_auto_modes(force=True))
+            if hasattr(tab, "set_series_host"):         # the series menus' List side (series_actions.py)
+                tab.set_series_host(self)
             self._download_tab = tab
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
@@ -531,6 +535,7 @@ class MainWindow(QMainWindow):
             self._after_mangapixer_changed(carry_before)
         if getattr(result, "roots_changed", False):
             self._after_roots_changed(rescan=True)
+            self._refresh_auto_modes(force=True)            # a library's default mode may have changed
         if getattr(result, "downloads_changed", False) and self._volumes is not None:
             self._volumes.refresh_records()
             self._rebuild_wanted(force=True)
@@ -1888,6 +1893,7 @@ class MainWindow(QMainWindow):
                                 held_volumes=m.held_volumes_at(row), held_chapters=m.held_chapters_at(row))
         self._update_detail_wanted()
         self._update_detail_auto()
+        self._update_detail_unbundled()
         if self._volumes is not None:
             self._volumes.show_in_detail(row)
 
@@ -1934,13 +1940,16 @@ class MainWindow(QMainWindow):
         n_with_mu = sum(1 for e in entries if e.mu_id is not None)
         n_confirmed = sum(1 for e in entries if e.mu_confirmed)
         n_unconfirmed = sum(1 for e in entries if e.mu_id is not None and not e.mu_confirmed)
-        n_overridable = sum(1 for e in entries if e.mu_id is not None and e.behind_override != "done")
-        n_overridden = sum(1 for e in entries if e.behind_override == "done")
 
         menu = QMenu(self._table)
+        # The entries every screen shares (series_actions.py: the Download tab's To get rows, Found cards, the panels)
+        modes = self._auto_modes
+        series = SeriesMenu(menu, [SeriesRef(str(e.folder), modes.series_id(str(e.folder)) if modes else None, e.title)
+                                   for e in entries],
+                            backend=self._volumes_backend if self._auto_modes is not None else None, host=self)
         act_kind = None
         act_get = act_new = act_aside = None
-        act_dupes = act_mangapixer = None
+        act_dupes = None
         act_exclude = None
         act_rename = act_rename_library = None
 
@@ -1949,10 +1958,10 @@ class MainWindow(QMainWindow):
                 act_kind = menu.addAction("Volumes or chapters?…")
                 act_kind.setToolTip("Its files are bare numbers: say once whether they are volumes or chapters")
                 menu.addSeparator()
-            act_open = menu.addAction(OPEN_FOLDER_LABEL)
+            series.add_open_folder()
             menu.addSeparator()
             act_copy_path = menu.addAction("Copy folder path")
-            act_copy_title = menu.addAction("Copy title")
+            series.add_copy_title()
             act_exclude = menu.addAction("Exclude from its library…")
             act_exclude.setToolTip("Add this folder to its library's exclusions: MangaList stops scanning it (its files "
                                    "are not touched; Settings > Library undoes it)")
@@ -1963,10 +1972,9 @@ class MainWindow(QMainWindow):
                                   "(undoable) - the first step before a whole library")
             act_rename_library = menu.addAction("Rename its whole library…")
             menu.addSeparator()
-            act_fix_mu = menu.addAction("Fix MangaUpdates match…")
+            series.add_fix_mu()
             entry0 = entries[0]
-            act_open_mu = menu.addAction("Open MangaUpdates page")
-            act_open_mu.setEnabled(bool(entry0.mu_url))
+            series.add_mu_page(entry0.mu_url or "")
             act_check_mu = menu.addAction("Check MU for this entry")
             if self._download_tab is not None:
                 groups = self._wanted_groups(str(entry0.folder))
@@ -1986,9 +1994,7 @@ class MainWindow(QMainWindow):
             if vols or chs:
                 act_dupes = menu.addAction(f"Review duplicate files ({vols + chs})…")
                 act_dupes.setToolTip("The Duplicates view on this series only: keep or discard its extra copies")
-            mp_url = self.mangapixer_series_url(str(entry0.folder))
-            if mp_url:
-                act_mangapixer = menu.addAction("Open in MangaPixer")
+            series.add_mangapixer()
             links_menu = menu.addMenu("Official sources")
             link_actions = {}
             for link in self._model.links_at(rows[0]):
@@ -1998,7 +2004,7 @@ class MainWindow(QMainWindow):
             links_menu.setEnabled(bool(link_actions))
             menu.addSeparator()
         else:
-            act_open = act_copy_path = act_copy_title = act_fix_mu = act_open_mu = None
+            act_copy_path = None
             link_actions = {}
             menu.addAction(f"{n} folders selected").setEnabled(False)
             menu.addSeparator()
@@ -2007,12 +2013,8 @@ class MainWindow(QMainWindow):
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
             menu.addSeparator()
 
-        act_unbundled = menu.addAction(UNBUNDLED_MENU)
-        act_unbundled.setCheckable(True)
-        act_unbundled.setChecked(self._unbundled.all_on(e.folder for e in entries))
-        act_unbundled.setToolTip(UNBUNDLED_HELP)
-        menu.setToolTipsVisible(True)
-        auto_actions, act_bulk_find = self._add_automation_menu(menu, entries)
+        series.add_unbundled()
+        act_bulk_find = self._add_automation_menu(series, entries)
 
         act_confirm_mu = menu.addAction(
             "Confirm MU match" if n == 1 else f"Confirm MU match ({n_unconfirmed})"
@@ -2028,14 +2030,7 @@ class MainWindow(QMainWindow):
         act_clear_mu.setEnabled(n_with_mu > 0)
 
         menu.addSeparator()
-        act_mark_behind_done = menu.addAction(
-            "Mark Behind as up to date" if n == 1 else f"Mark Behind as up to date ({n_overridable})"
-        )
-        act_mark_behind_done.setEnabled(n_overridable > 0)
-        act_clear_behind_override = menu.addAction(
-            "Clear 'up to date' override" if n == 1 else f"Clear 'up to date' override ({n_overridden})"
-        )
-        act_clear_behind_override.setEnabled(n_overridden > 0)
+        series.add_behind()
 
         menu.addSeparator()
         act_mark = menu.addAction(
@@ -2053,10 +2048,10 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if chosen is act_unbundled:
-            self.set_unbundled(entries, not self._unbundled.all_on(e.folder for e in entries))   # the tick, flipped
-        elif chosen in auto_actions:
-            self._status_label.setText(self._auto_modes.apply([str(e.folder) for e in entries], auto_actions[chosen]))
+        said = series.run(chosen)
+        if said is not None:                # one of the shared entries (series_actions.py): done, its line shown
+            if said:
+                self._status_label.setText(said)
         elif act_bulk_find is not None and chosen is act_bulk_find:
             self.bulk_find(entries)
         elif act_kind is not None and chosen is act_kind:
@@ -2066,8 +2061,6 @@ class MainWindow(QMainWindow):
                 self._model.refresh_states()
         elif act_dupes is not None and chosen is act_dupes:
             self.review_duplicates(str(entries[0].folder))
-        elif act_mangapixer is not None and chosen is act_mangapixer:
-            self._open_url(self.mangapixer_series_url(str(entries[0].folder)) or "")
         elif chosen in link_actions and link_actions[chosen]:
             self._open_url(link_actions[chosen])
         elif act_exclude is not None and chosen is act_exclude:
@@ -2076,8 +2069,6 @@ class MainWindow(QMainWindow):
             self.rename_series(entries)
         elif act_rename_library is not None and chosen is act_rename_library:
             self.rename_library(entries[0].root_id)
-        elif chosen is act_open and entries:
-            self._open_in_explorer(entries[0].folder)
         elif chosen is act_get and act_get is not None:
             self.get_missing(str(entries[0].folder))
         elif chosen is act_new and act_new is not None:
@@ -2101,36 +2092,9 @@ class MainWindow(QMainWindow):
                 if e.mu_id is not None:
                     if self._model.clear_mu_match(r):
                         mu_cache.delete_entry(e.folder)
-        elif chosen is act_mark_behind_done:
-            for r, e in zip(rows, entries):
-                if e.mu_id is not None and e.behind_override != "done":
-                    e.behind_override = "done"
-                    mu_cache.set_behind_override(e.folder, "done")
-                    self._model.dataChanged.emit(
-                        self._model.index(r, COL_BEHIND),
-                        self._model.index(r, COL_BEHIND),
-                        [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole],
-                    )
-        elif chosen is act_clear_behind_override:
-            for r, e in zip(rows, entries):
-                if e.behind_override == "done":
-                    e.behind_override = None
-                    mu_cache.set_behind_override(e.folder, None)
-                    self._model.dataChanged.emit(
-                        self._model.index(r, COL_BEHIND),
-                        self._model.index(r, COL_BEHIND),
-                        [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole],
-                    )
-        elif chosen is act_fix_mu and entries:
-            self._on_fix_mu_match(rows[0], entries[0])
-        elif chosen is act_open_mu and entries and entries[0].mu_url:
-            self._open_url(entries[0].mu_url)
         elif chosen is act_copy_path and entries:
             QGuiApplication.clipboard().setText(str(entries[0].folder))
             self._status_label.setText(f"Copied path: {entries[0].folder}")
-        elif chosen is act_copy_title and entries:
-            QGuiApplication.clipboard().setText(entries[0].title)
-            self._status_label.setText(f"Copied title: {entries[0].title}")
         elif chosen is act_mark:
             self._set_examined_for_rows(rows, True)
         elif chosen is act_unmark:
@@ -2156,6 +2120,89 @@ class MainWindow(QMainWindow):
             self._on_row_changed()
         return n
 
+    # --- The series host (series_actions.py): what the series menus of every screen need from the List ----------
+
+    def _entries_for(self, folders) -> List[Tuple[int, MangaEntry]]:
+        wanted_folders = {str(f) for f in folders}
+        out = []
+        for r in range(self._model.rowCount()):
+            e = self._model.entry_at(r)
+            if e is not None and str(e.folder) in wanted_folders:
+                out.append((r, e))
+        return out
+
+    def open_series_folder(self, folder: str) -> None:
+        self._open_in_explorer(Path(folder))
+
+    def copy_series_title(self, title: str) -> None:
+        QGuiApplication.clipboard().setText(title)
+        self._status_label.setText(f"Copied title: {title}")
+
+    def series_mu_url(self, folder: str) -> Optional[str]:
+        found = self._entries_for([folder])
+        return (found[0][1].mu_url or None) if found else None
+
+    def fix_mu_match_for(self, folder: str) -> bool:
+        """"Fix MangaUpdates match…" for *folder*'s series (the List's dialog, from any screen)."""
+        found = self._entries_for([folder])
+        if not found:
+            return False
+        self._on_fix_mu_match(*found[0])
+        return True
+
+    def unbundled_on(self, folders) -> bool:
+        return self._unbundled.all_on(folders)
+
+    def set_unbundled_for(self, folders, on: bool) -> str:
+        """Unbundled chapters for *folders*' series from any screen; the states and the To get list follow."""
+        entries = [e for _r, e in self._entries_for(folders)]
+        if not entries:
+            return unbundled_status(on, 0)
+        self.set_unbundled(entries, on)
+        return self._status_label.text()
+
+    def behind_counts(self, folders) -> Tuple[int, int]:
+        """(how many of *folders*' series can be marked up to date - a MangaUpdates match, not marked yet -, how many
+        are marked)."""
+        entries = [e for _r, e in self._entries_for(folders)]
+        return (sum(1 for e in entries if e.mu_id is not None and e.behind_override != "done"),
+                sum(1 for e in entries if e.behind_override == "done"))
+
+    def set_behind_done(self, folders, done: bool) -> str:
+        """Mark Behind as up to date (or clear it) for *folders*' series, from any screen: the states follow (Up to
+        date), and the find pass skips a series marked so."""
+        n = 0
+        for r, e in self._entries_for(folders):
+            if done and (e.mu_id is None or e.behind_override == "done"):
+                continue
+            if not done and e.behind_override != "done":
+                continue
+            e.behind_override = "done" if done else None
+            mu_cache.set_behind_override(e.folder, e.behind_override)
+            self._model.dataChanged.emit(self._model.index(r, COL_BEHIND), self._model.index(r, COL_BEHIND),
+                                         [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+            n += 1
+        what = "marked up to date" if done else "counted as behind again"
+        return f"Behind: {n} series {what}." if n else ""
+
+    def folder_for_series(self, series_id: int) -> Optional[str]:
+        """The folder of a store series id among the List's rows (the To get list's ids first, then the modes' cache,
+        then a look at every row)."""
+        for item in self._wanted_series:
+            if item.series_id == series_id:
+                return item.folder
+        if self._auto_modes is not None:
+            folder = self._auto_modes.folder_of(series_id)
+            if folder:
+                return folder
+        if self._volumes is None:
+            return None
+        for r in range(self._model.rowCount()):
+            e = self._model.entry_at(r)
+            if e is not None and self._volumes.series_id_for(e) == series_id:
+                return str(e.folder)
+        return None
+
     # --- Automatic downloads: the per-series mode, the mode chip, the bulk find ---------------------------
 
     def _make_auto_modes(self) -> None:
@@ -2167,6 +2214,7 @@ class MainWindow(QMainWindow):
         self._auto_modes = AutoModes(self._volumes_backend, self, background=lambda *a: self._background(*a))
         self._auto_modes.changed.connect(self._on_auto_modes_changed)
         self._detail.set_auto_enabled(True)
+        self._detail.auto_mode_chosen.connect(self._on_detail_mode_chosen)
 
     def _refresh_auto_modes(self, force: bool = False) -> None:
         if self._auto_modes is None:
@@ -2177,6 +2225,8 @@ class MainWindow(QMainWindow):
     def _on_auto_modes_changed(self) -> None:
         self._model.set_mode_chips(self._auto_modes.chips())
         self._update_detail_auto()
+        if callable(getattr(self._download_tab, "refresh_modes", None)):   # Found's picker, the panels' menus
+            self._download_tab.refresh_modes()
 
     def _update_detail_auto(self) -> None:
         if self._auto_modes is None:
@@ -2186,15 +2236,43 @@ class MainWindow(QMainWindow):
             self._detail.set_auto_mode(None)
             return
         self._detail.set_auto_mode(*self._auto_modes.detail(str(entry.folder)))
+        state = self._auto_modes.detail_state(str(entry.folder))
+        self._detail.set_auto_choice(*state if isinstance(state, tuple) else (None, None, False),
+                                     available=isinstance(state, tuple))
 
-    def _add_automation_menu(self, menu: QMenu, entries) -> tuple:
-        """The row menu's "Automatic downloads" submenu and "Find releases for N series" ({} and None without)."""
+    def _update_detail_unbundled(self) -> None:
+        """The details panel's Unbundled chapters switch (owner, 2026-10-13: toggled there too)."""
+        entry = self._current_entry()
+        if entry is None:
+            return
+        try:
+            scanned = self._unbundled.series_id(entry.folder) is not None
+            on = self._unbundled.is_on(entry.folder)
+        except Exception:  # noqa: BLE001 - the switch stays off; the row menu says why
+            scanned = on = False
+        self._detail.set_unbundled_choice(on, available=scanned)
+
+    def _on_detail_mode_chosen(self, mode) -> None:
+        """The details panel's picker (owner, 2026-10-13: the Automatic line becomes a picker, like Found's)."""
+        entry = self._current_entry()
+        if entry is None or self._auto_modes is None:
+            return
+        self._status_label.setText(self._auto_modes.apply([str(entry.folder)], mode))
+
+    def _on_detail_unbundled(self, on: bool) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.set_unbundled([entry], on)
+
+    def _add_automation_menu(self, series: SeriesMenu, entries):
+        """The row menu's "Automatic downloads" submenu and "Find releases for N series" (None without)."""
         if self._auto_modes is None:
-            return {}, None
+            return None
         from .automation_rules import bulk_find_label
 
+        menu = series.menu
         folders = [str(e.folder) for e in entries]
-        actions = self._auto_modes.add_menu(menu, folders)
+        series.add_modes(apply=lambda mode: self._auto_modes.apply(folders, mode))
         act_bulk = None
         if callable(getattr(self._download_tab, "find_for", None)):
             ids = self._auto_modes.series_ids(folders)
@@ -2204,7 +2282,7 @@ class MainWindow(QMainWindow):
                                 "tab - nothing is sent by itself" if ids else "Not scanned yet: rescan first")
             menu.setToolTipsVisible(True)
         menu.addSeparator()
-        return actions, act_bulk
+        return act_bulk
 
     def bulk_find(self, entries) -> bool:
         """"Find releases for N series": the Download tab's bulk find for these series, shown under Found."""

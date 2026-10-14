@@ -131,20 +131,40 @@ class FindingStore:
         return value if value in AUTO_MODES else None
 
     def mode(self, series_id: int) -> str:
-        """The mode in force for the series: its own, else the default."""
-        return self.own_mode(series_id) or self.default_mode()
+        """The mode in force for the series: its own, else its library's, else the default setting."""
+        return self.own_mode(series_id) or self.default_for(series_id)[0]
+
+    _MODES_SQL = ("SELECT s.id, s.auto_mode, r.auto_mode AS root_mode FROM series s"
+                  " LEFT JOIN roots r ON r.id = s.root_id")
 
     def modes(self, series_ids: Optional[Iterable[int]] = None) -> Dict[int, str]:
-        """series id -> the mode in force (every series when *series_ids* is None)."""
+        """series id -> the mode in force (every series when *series_ids* is None): the series' own mode, else its
+        library's (schema 8), else the default setting."""
         default = self.default_mode()
         with self.store.connect() as con:
             if series_ids is None:
-                rows = con.execute("SELECT id, auto_mode FROM series").fetchall()
+                rows = con.execute(self._MODES_SQL).fetchall()
             else:
                 ids = sorted(set(int(i) for i in series_ids))
                 rows = [r for chunk in _chunks(ids) for r in con.execute(
-                    f"SELECT id, auto_mode FROM series WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall()]
-        return {r["id"]: (r["auto_mode"] if r["auto_mode"] in AUTO_MODES else default) for r in rows}
+                    f"{self._MODES_SQL} WHERE s.id IN ({','.join('?' * len(chunk))})", chunk).fetchall()]
+        return {r["id"]: (r["auto_mode"] if r["auto_mode"] in AUTO_MODES
+                          else r["root_mode"] if r["root_mode"] in AUTO_MODES else default) for r in rows}
+
+    def default_for(self, series_id: int) -> Tuple[str, bool]:
+        """(the mode the series follows when it has none of its own, True when that is its library's - else the
+        default setting)."""
+        return self.defaults([series_id]).get(int(series_id), (self.default_mode(), False))
+
+    def defaults(self, series_ids: Iterable[int]) -> Dict[int, Tuple[str, bool]]:
+        """series id -> (the mode it follows without one of its own, True when that is its library's): what the List's
+        mode chips compare with (a series on its library's Off is not marked) and what "Use the default" names."""
+        default = self.default_mode()
+        ids = sorted(set(int(i) for i in series_ids))
+        with self.store.connect() as con:
+            rows = [r for chunk in _chunks(ids) for r in con.execute(
+                f"{self._MODES_SQL} WHERE s.id IN ({','.join('?' * len(chunk))})", chunk).fetchall()]
+        return {r["id"]: ((r["root_mode"], True) if r["root_mode"] in AUTO_MODES else (default, False)) for r in rows}
 
     def set_mode(self, series_ids: Iterable[int], mode: Optional[str]) -> int:
         """Set the series' own mode (None: follow the default). Returns how many series rows changed."""

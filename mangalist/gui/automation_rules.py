@@ -47,16 +47,76 @@ def mode_label(mode: Optional[str]) -> str:
     return MODE_LABELS.get(mode or "", str(mode or ""))
 
 
-def default_entry_label(default: str) -> str:
-    """The row menu's "follow the default" entry: ``Use the default (Notify)``."""
-    return f"Use the default ({mode_label(default)})"
+def whose_default(library: bool) -> str:
+    """``the default`` (Settings > Automation) or ``the library's default`` (Settings > Library > Edit, schema 8)."""
+    return "the library's default" if library else "the default"
 
 
-def mode_text(own: Optional[str], default: str) -> str:
-    """What the details panel says: ``Auto``, or ``Notify (the default)`` for a series that follows the default."""
+def default_entry_label(default: str, library: bool = False) -> str:
+    """The row menu's "follow the default" entry: ``Use the default (Notify)``, or ``Use the library's default (Off)``
+    when the series' library sets one."""
+    return f"Use {whose_default(library)} ({mode_label(default)})"
+
+
+def default_entry_tip(library: Optional[bool]) -> str:
+    """The tooltip of that entry: where the default it follows is set (None: a selection whose defaults differ)."""
+    if library is None:
+        return ("Follow the default again: each series its library's (Settings > Library > Edit) or else the one in "
+                "Settings > Automation")
+    if library:
+        return "Follow the default set for this series' library in Settings > Library (Edit)"
+    return "Follow the default set in Settings > Automation"
+
+
+def mode_text(own: Optional[str], default: str, library: bool = False) -> str:
+    """What the details panel says: ``Auto``, or ``Notify (the default)`` / ``Off (the library's default)`` for a series
+    that follows a default."""
     if own in MODES:
         return mode_label(own)
-    return f"{mode_label(default)} (the default)"
+    return f"{mode_label(default)} ({whose_default(library)})"
+
+
+def default_of(backend, series_id: int) -> Tuple[str, bool]:
+    """(the default a series follows, True when it is its library's): the backend's ``default_for`` when it has one,
+    else the default setting."""
+    fn = getattr(backend, "default_for", None)
+    if callable(fn):
+        mode, library = fn(series_id)
+        return mode, bool(library)
+    return backend.default_mode(), False
+
+
+def defaults_of(backend, series_ids: Iterable[int]) -> Dict[int, Tuple[str, bool]]:
+    """series id -> :func:`default_of`, in one read when the backend has ``series_defaults`` (else one per series, or
+    the default setting for all on a backend without library defaults)."""
+    ids = sorted({int(i) for i in series_ids})
+    if not ids:
+        return {}
+    fn = getattr(backend, "series_defaults", None)
+    if callable(fn):
+        got = {int(k): (v[0], bool(v[1])) for k, v in dict(fn(ids)).items()}
+        if len(got) < len(ids):                         # a series the store does not know: the default setting
+            default = backend.default_mode()
+            got.update({i: (default, False) for i in ids if i not in got})
+        return got
+    if callable(getattr(backend, "default_for", None)):
+        return {i: default_of(backend, i) for i in ids}
+    default = backend.default_mode()
+    return {i: (default, False) for i in ids}
+
+
+def selection_default(pairs: Iterable[Tuple[str, bool]]) -> Tuple[str, Optional[bool]]:
+    """(the "follow the default" entry's label, whose default it is - None when they differ) for a selection's
+    (default, from its library) pairs: the default named when every series follows the same one, the mode alone when
+    they agree on it from different places, a plain ``Use the default`` across libraries whose defaults differ."""
+    pairs = set(pairs)
+    if len(pairs) == 1:
+        mode, library = pairs.pop()
+        return default_entry_label(mode, library), library
+    modes = {mode for mode, _library in pairs}
+    if len(modes) == 1:
+        return default_entry_label(modes.pop()), None
+    return "Use the default", None
 
 
 def common_choice(owns: Iterable[Optional[str]]) -> Optional[str]:
@@ -66,11 +126,14 @@ def common_choice(owns: Iterable[Optional[str]]) -> Optional[str]:
     return keys.pop() if len(keys) == 1 else None
 
 
-def set_mode_text(mode: Optional[str], n: int, default: str) -> str:
-    """The status line after the row menu changed the mode of *n* series."""
+def set_mode_text(mode: Optional[str], n: int, default: Optional[str], library: bool = False) -> str:
+    """The status line after the row menu changed the mode of *n* series (*default*: the one they follow now, None
+    when it differs between them)."""
     series = f"{n} series"
     if mode is None:
-        return f"Automatic downloads: {series} follow the default again ({mode_label(default)})."
+        if default is None:
+            return f"Automatic downloads: {series} follow their defaults again."
+        return f"Automatic downloads: {series} follow {whose_default(library)} again ({mode_label(default)})."
     return f"Automatic downloads: {mode_label(mode)} for {series}."
 
 

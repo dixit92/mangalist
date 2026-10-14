@@ -25,7 +25,7 @@ import html
 from dataclasses import replace
 from typing import Callable, Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -45,6 +45,7 @@ from .download_style import set_tone
 from .download_widgets import button, flat_table, hbox, label
 from .downloads_backend import DownloadsBackend
 from .releases_panel import NO_FOLDER_CHOSEN, folder_text
+from .series_actions import below, menu_button
 from .shell import SECTION_SOURCES
 from .tables import cell, resizable_columns
 from .volumes_target import numbers_text
@@ -82,6 +83,7 @@ class ChaptersPanel(QWidget):
     sent = Signal(object)               # a list of DownloadRecord, once Suwayomi has them
     looked_up = Signal(int, object)     # (series id, ChapterLookup or None on failure) - the host's chips
     settings_requested = Signal(str)
+    series_menu_requested = Signal(QPoint)  # the "⋯" in the header: the host opens the series' menu there
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None,
@@ -101,6 +103,7 @@ class ChaptersPanel(QWidget):
         self._busy = False
         self._combos: Dict[int, QComboBox] = {}
         self._loading = False
+        self._source_pending: Optional[int] = None  # Change source… asked for this series before its lookup was in
         self._build_ui()
 
     # --- UI ---------------------------------------------------------------------------------------------
@@ -141,6 +144,10 @@ class ChaptersPanel(QWidget):
         head.addWidget(self.progress)
         head.addWidget(self.btn_other)
         head.addWidget(self.btn_again)
+        self.btn_series = menu_button()             # the series' menu (series_actions.py); the host shows it
+        self.btn_series.clicked.connect(lambda: self.series_menu_requested.emit(below(self.btn_series)))
+        self.btn_series.setVisible(False)
+        head.addWidget(self.btn_series)
         outer.addLayout(head)
 
         self.folder_row = QWidget()
@@ -285,6 +292,24 @@ class ChaptersPanel(QWidget):
             self._calls.remove(call)
         if not self._calls:
             self._set_busy(False)
+            if self._source_pending is not None and self._source_pending == self._series_id and self.lookup is not None:
+                self._source_pending = None
+                self.other_sources()
+
+    @property
+    def series_id(self) -> Optional[int]:
+        """The series shown (None: none yet)."""
+        return self._series_id
+
+    def request_change_source(self) -> bool:
+        """Change source… from another screen (the To get row menu): at once when the series' lookup is in, else as
+        soon as it is. False when this backend cannot look on other sources."""
+        if not callable(getattr(self._backend, "other_candidates", None)) or self._series_id is None:
+            return False
+        if self.lookup is not None and not self._busy:
+            return self.other_sources()
+        self._source_pending = self._series_id
+        return True
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy

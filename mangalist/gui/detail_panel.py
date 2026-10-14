@@ -1,6 +1,8 @@
 """The List tab's details panel (mockup: the right-hand aside): the selected series' title and match, its state as a
 badge, gaps, what the folder holds, the English edition, MangaPixer's cross-check, the download status, "Get the missing
-volumes" (to the Download tab), the official sources and the folder's files.
+volumes" (to the Download tab), the official sources and the folder's files. The Automatic line is a picker (Off /
+Notify / Auto / the default, naming whose default) and Unbundled chapters a switch (owner, 2026-10-13: series actions
+everywhere) - the window sets them through the same calls as the row menu.
 
 Collapsible (owner, 2026-10-08): the close button asks the window to hide it (:attr:`DetailPanel.close_requested`)."""
 
@@ -11,6 +13,8 @@ from typing import List, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -27,7 +31,8 @@ from ..knowledge import OfficialLink, SeriesKnowledge
 from ..models import MangaEntry
 from ..states import ATTENTION_LABELS, SeriesState
 from . import theme
-from .list_text import english_text, holds_text, match_text, unbundled_detail
+from .automation_rules import MODE_LABELS, MODES, default_entry_label, default_entry_tip
+from .list_text import UNBUNDLED_HELP, english_text, holds_text, match_text, unbundled_detail
 from .links import open_link
 
 MAX_SAMPLE_FILES = 30
@@ -57,6 +62,8 @@ def badge_style(state_value: Optional[str]) -> str:
 class DetailPanel(QWidget):
     close_requested = Signal()
     get_requested = Signal()            # "Get the missing volumes": the window switches to the Download tab
+    auto_mode_chosen = Signal(object)   # the picker: "off" / "notify" / "auto", or None (back to the default)
+    unbundled_toggled = Signal(bool)    # the Unbundled chapters switch
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,6 +123,22 @@ class DetailPanel(QWidget):
         self._lbl_mangapixer = _label("-")
         self._lbl_download = _label("-")
         self._lbl_auto = _label("-")          # automatic downloads: Off / Notify / Auto (owner decisions 2026-10-10)
+        self.auto_combo = QComboBox()         # ... changed in place (2026-10-13), like Found's header picker
+        self.auto_combo.setObjectName("detailAutoMode")
+        self.auto_combo.setAccessibleName("Automatic downloads")
+        self.auto_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.auto_combo.activated.connect(lambda i: self.auto_mode_chosen.emit(self.auto_combo.itemData(i)))
+        self.auto_combo.setVisible(False)
+        auto_cell = QWidget()
+        al = QHBoxLayout(auto_cell)
+        al.setContentsMargins(0, 0, 0, 0)
+        al.addWidget(self._lbl_auto, 1)
+        al.addWidget(self.auto_combo)
+        al.addStretch(0)
+        self.unbundled_check = QCheckBox("Also the chapters after the last volume")
+        self.unbundled_check.setObjectName("detailUnbundled")
+        self.unbundled_check.setToolTip(UNBUNDLED_HELP)
+        self.unbundled_check.clicked.connect(self.unbundled_toggled)
         self._lbl_kind = _label("-")
         self._path_label = _label("", mono=True)
         for key, caption, widget in (("state", "State", state_cell), ("flags", "Flags", self._lbl_flags),
@@ -123,7 +146,9 @@ class DetailPanel(QWidget):
                                      ("english", "English", self._lbl_english),
                                      ("mangapixer", "MangaPixer", self._lbl_mangapixer),
                                      ("download", "Download", self._lbl_download),
-                                     ("auto", "Automatic", self._lbl_auto), ("kind", "Kind", self._lbl_kind),
+                                     ("auto", "Automatic", auto_cell),
+                                     ("unbundled", "Unbundled", self.unbundled_check),
+                                     ("kind", "Kind", self._lbl_kind),
                                      ("folder", "Folder", self._path_label)):
             self._add_row(key, caption, widget)
         root.addLayout(grid)
@@ -196,6 +221,36 @@ class DetailPanel(QWidget):
 
     def auto_mode_text(self) -> str:
         return self._lbl_auto.text()
+
+    def set_auto_choice(self, own: Optional[str], default: Optional[str], library: bool = False,
+                        available: bool = True) -> None:
+        """The picker: the series' own mode ticked, else "Use the default (Notify)" / "Use the library's default
+        (Off)"; *available* False (not scanned, the modes not readable) shows the line's text instead."""
+        shown = available and default is not None
+        self.auto_combo.blockSignals(True)
+        self.auto_combo.clear()
+        if shown:
+            for mode in MODES:
+                self.auto_combo.addItem(MODE_LABELS[mode], mode)
+            self.auto_combo.addItem(default_entry_label(default, library), None)
+            self.auto_combo.setItemData(len(MODES), default_entry_tip(library), Qt.ItemDataRole.ToolTipRole)
+            self.auto_combo.setCurrentIndex(MODES.index(own) if own in MODES else len(MODES))
+            self.auto_combo.setToolTip(self._lbl_auto.toolTip())
+        self.auto_combo.blockSignals(False)
+        self.auto_combo.setVisible(shown)
+        self._lbl_auto.setVisible(not shown)
+
+    def auto_choice(self) -> Optional[str]:
+        """The picker's entry ('' when it is not shown): ``Auto``, ``Use the default (Notify)``, ..."""
+        return self.auto_combo.currentText() if self.auto_combo.isVisibleTo(self) else ""
+
+    def set_unbundled_choice(self, on: bool, available: bool = True) -> None:
+        """The Unbundled chapters switch (off and greyed for a folder not scanned yet)."""
+        self.unbundled_check.blockSignals(True)
+        self.unbundled_check.setChecked(bool(on))
+        self.unbundled_check.blockSignals(False)
+        self.unbundled_check.setEnabled(available)
+        self.unbundled_check.setToolTip(UNBUNDLED_HELP if available else "Not available until the folder is scanned")
 
     def set_download(self, text: Optional[str], tooltip: str = "") -> None:
         """The selected series' download status ("Downloading", "Filed v03-v05", ...), or None for none."""
