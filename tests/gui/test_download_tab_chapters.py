@@ -143,9 +143,17 @@ def test_a_to_get_row_menu_checks_a_volume_series_for_new_chapters(qapp):
     row = next(tab.tree.topLevelItem(i) for i in range(tab.tree.topLevelItemCount())
                if tab.tree.topLevelItem(i).data(0, dt.ROLE_FOLDER) == "/lib/Oshi no Ko")
     menus = []
-    tab._exec_menu = lambda menu, pos: menus.append([a.text() for a in menu.actions()]) or menu.actions()[0]
+
+    def answer(menu, pos):
+        menus.append([a.text() for a in menu.actions() if not a.isSeparator()])
+        return next(a for a in menu.actions() if a.text() == "Check for new chapters…")
+
+    tab._exec_menu = answer
     tab._on_tree_menu(tab.tree.visualItemRect(row).center())
-    assert menus == [["Check for new chapters…"]]
+    from mangalist.gui.links import OPEN_FOLDER_LABEL
+
+    # the shared series entries first (series_actions.py; without the window's host: what the tab can do itself)
+    assert menus == [["Show in List", OPEN_FOLDER_LABEL, "Copy title", "Check for new chapters…"]]
     settle(qapp, tab)
     assert backend.lookups[-1][0] == 3 and backend.lookups[-1][-1] == "newer"
     assert tab.panels.currentIndex() == dt.PANEL_CHAPTERS and tab.current_folder() == "/lib/Oshi no Ko"
