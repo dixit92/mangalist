@@ -68,3 +68,14 @@ def test_nothing_is_offered_without_estimates_or_a_held_volume(db, library, hold
     assert found.status == "nothing" and "estimates no volume" in found.error
     with pytest.raises(ReplacementConflict):
         upgrades.set_aside_estimated(db, sid, [f"{SERIES} c51.cbz"])
+
+
+def test_mapped_ranges_count_too(db, library, holding, estimates, monkeypatch):
+    # owner, 2026-10-14: volumes that arrived outside MangaList's downloads kept their chapter files beside them, and the
+    # action - estimates only - found nothing; the volume list's mapped ranges now count, estimates fill the rest
+    sid, _ = _series(db, library)
+    estimates[:] = []
+    monkeypatch.setattr(upgrades, "_knowledge_volumes", lambda db, series: ([VolumeInfo("7", "51", "62")], ""))
+    found = upgrades.estimated_duplicates(db, sid)
+    assert found.status == "pending" and found.error == "by MangaPixer's volume list" and list(found.volumes) == ["7"]
+    assert {f.volume for f in found.files} == {"7"} and len(found.files) == 12           # chapters 51-62

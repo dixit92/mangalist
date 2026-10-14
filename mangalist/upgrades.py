@@ -459,8 +459,11 @@ def _knowledge_estimates(db, series) -> Tuple[Sequence[VolumeInfo], str]:
 
 
 def estimated_duplicates(db, series_id: int) -> NewBatch:
-    """The chapter files of *series_id* that volumes it holds contain, by MangaPixer's estimated ranges - for the owner
-    to confirm (nothing is moved here). ``status`` "pending" with the files, else "nothing" with why."""
+    """The chapter files of *series_id* that volumes it holds contain - by MangaPixer's volume list, and by its
+    estimated ranges for held volumes the list does not map - for the owner to confirm (nothing is moved here).
+    ``status`` "pending" with the files, else "nothing" with why. The mapped ranges count too (owner, 2026-10-14:
+    volumes that arrived outside MangaList's downloads kept 30 chapter files beside them, and this action - estimates
+    only until then - found nothing)."""
     from .downloads.placement import locate_series
 
     series, root, series_dir = locate_series(db, series_id)
@@ -468,9 +471,11 @@ def estimated_duplicates(db, series_id: int) -> NewBatch:
     def nothing(why: str, **kw) -> NewBatch:
         return NewBatch(download_id=0, series_id=series_id, status="nothing", error=why, **kw)
 
-    estimates, why = _knowledge_estimates(db, series)
-    if not estimates:
-        return nothing(why)
+    listed, list_why = _knowledge_volumes(db, series)
+    mapped = [v for v in (listed or ()) if v.has_chapters]
+    estimates, est_why = _knowledge_estimates(db, series)
+    if not mapped and not estimates:
+        return nothing(est_why or list_why)
     units = db.list_units(series.id)
     held: Dict[Decimal, str] = {}
     for u in units:
@@ -479,9 +484,15 @@ def estimated_duplicates(db, series_id: int) -> NewBatch:
         lo, hi = to_decimal(u.vol_from), to_decimal(u.vol_to if u.vol_to is not None else u.vol_from)
         for n in (_numbers(lo, hi) or []) if lo is not None and hi is not None else []:
             held.setdefault(n, u.rel_path)
-    covered = [v for v in estimates if to_decimal(v.volume) in held]
+    by_volume: Dict[Decimal, VolumeInfo] = {}
+    for v in estimates:                                     # an estimate only where the list maps no range
+        by_volume.setdefault(to_decimal(v.volume), v)
+    for v in mapped:
+        by_volume[to_decimal(v.volume)] = v
+    covered = [v for n, v in sorted(by_volume.items()) if n in held]
     if not covered:
-        return nothing("no volume you hold has an estimated chapter range")
+        return nothing("no volume you hold has a chapter range (mapped or estimated)")
+    estimated_used = any(v in estimates for v in covered)
     numbers = sorted({to_decimal(v.volume) for v in covered})
     volume_files = []
     for rel in dict.fromkeys(held[n] for n in numbers):
@@ -503,9 +514,12 @@ def estimated_duplicates(db, series_id: int) -> NewBatch:
         files.append(ReplacedFile(path=path, rel=rel, size=st.st_size, modified=_iso_from_ns(st.st_mtime_ns),
                                   chapters=chapters, volume=volume))
     if not files:
-        return nothing("no chapter file lies inside the estimated range of a volume you hold", kept=kept, **common)
+        return nothing("no chapter file lies inside the chapter range of a volume you hold", kept=kept, **common)
+    how = "by MangaPixer's volume list" + (" and its estimated ranges" if estimated_used else "")
+    if estimated_used and not any(v in mapped for v in covered):
+        how = "by MangaPixer's estimated volume ranges"
     return NewBatch(download_id=0, series_id=series_id, status="pending", files=files, kept=kept, mode=MODE_HOLDING,
-                    error="by MangaPixer's estimated volume ranges", **common)
+                    error=how, **common)
 
 
 def set_aside_estimated(db, series_id: int, rels: Sequence[str], *, journal=None,
