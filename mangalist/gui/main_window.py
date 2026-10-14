@@ -2169,8 +2169,8 @@ class MainWindow(QMainWindow):
                 sum(1 for e in entries if e.behind_override == "done"))
 
     def set_behind_done(self, folders, done: bool) -> str:
-        """Mark Behind as up to date (or clear it) for *folders*' series: the states follow, and a series marked up to
-        date leaves the To get list (its chapter gaps stop counting)."""
+        """Mark Behind as up to date (or clear it) for *folders*' series, from any screen: the states follow (Up to
+        date), and the find pass skips a series marked so."""
         n = 0
         for r, e in self._entries_for(folders):
             if done and (e.mu_id is None or e.behind_override == "done"):
