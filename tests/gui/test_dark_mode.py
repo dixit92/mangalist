@@ -36,6 +36,7 @@ def themed(qapp, monkeypatch):
         theme.apply_theme(qapp, "light")
         yield qapp
     finally:
+        theme._ask_platform(qapp, "light")                   # give the platform its own say back
         palette.set_current(LIGHT)
         theme._appearance = None
         qapp.setStyleSheet(saved[3])
@@ -175,3 +176,17 @@ def test_settings_appearance_switches_the_application(themed, db):
     assert palette.current() is LIGHT
     page.deleteLater()
 
+
+
+def test_dark_asks_the_platform_for_dark_frames_and_light_gives_it_back(themed):
+    # the offscreen platform ignores the request, so a fake style-hints object records it
+    from PySide6.QtCore import Qt
+
+    asked = []
+    app = SimpleNamespace(styleHints=lambda: SimpleNamespace(setColorScheme=asked.append))
+    theme._ask_platform(app, "light")
+    assert asked == []                                   # Light alone never touches the platform (as before)
+    theme._ask_platform(app, "dark")
+    theme._ask_platform(app, "system")
+    theme._ask_platform(app, "light")
+    assert asked == [Qt.ColorScheme.Dark, Qt.ColorScheme.Unknown]
