@@ -20,7 +20,7 @@ chapters filed too. Without chapter records nothing about the job changes.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from .jobs import Cancelled, JobContext, JobFunc, JobResult
 
@@ -83,6 +83,8 @@ def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
     scopes = _scopes_after(store, records, getattr(report, "journal_since", None))
     if scopes:
         notes.append(_scan_after(ctx, store, scopes))
+    if records:
+        notes.extend(_retire_filled(store))
     if not get_flag(store, KEY_SCAN_AFTER_FILING):
         return "; ".join(notes) or None
     cache = open_cache(store)
@@ -90,6 +92,18 @@ def after_pass(ctx: JobContext, ledger, report) -> Optional[str]:
     if libraries or cache.pending_scans():
         notes.append(request_scans(cache, libraries).summary())
     return "; ".join(notes) or None
+
+
+def _retire_filled(store) -> List[str]:
+    """Waiting findings the pass's filings made unnecessary leave Found now, not at the next find pass."""
+    from ..downloads.finder import retire_filled
+
+    try:
+        n = retire_filled(store)
+    except Exception:  # noqa: BLE001 - a courtesy; the next find pass retires them anyway
+        _log.warning("Downloads: retiring filled findings failed", exc_info=True)
+        return []
+    return [f"{n} finding(s) no longer needed"] if n else []
 
 
 def _scopes_after(store, records, journal_since) -> dict:
