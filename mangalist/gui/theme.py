@@ -494,10 +494,14 @@ def apply_theme(app, appearance: Optional[str] = None) -> bool:
         _watch_system(app)
     pal = current()
     loaded = load_fonts()
-    if (app.style().name() or "").lower() != "fusion":         # a style change restyles every widget: only once
+    # A style change restyles every widget (about 5 s with the main window open): once per application. Not by asking
+    # app.style() - once a stylesheet is set it is Qt's stylesheet proxy, whose name() is empty, so a name check never
+    # held and every switch set the style again (UI performance research, 2026-10-14).
+    if getattr(app, "_mangalist_fusion", False) is not True:
         style = QStyleFactory.create("Fusion")
         if style is not None:
             app.setStyle(style)
+            app._mangalist_fusion = True
     app.setPalette(palette(pal))
     base = font(BASE_PX)
     if app.font() != base:
