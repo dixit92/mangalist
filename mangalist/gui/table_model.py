@@ -175,7 +175,8 @@ class MangaTableModel(QAbstractTableModel):
         self._needs_kind_for: Callable[[MangaEntry], bool] = lambda e: False
         self._unbundled_for: Callable[[MangaEntry], bool] = lambda e: False     # mangalist.unbundled
         self.dataChanged.connect(self._on_data_changed)
-        self.modelReset.connect(self._state_cache.clear)
+        # PERF PROTOTYPE: the cache is keyed by the entry object (id + identity check), so a reset that keeps a row's
+        # entry (another library's scan, a re-sort) keeps its state; a rescanned series is a new entry object.
         # Build initial dupe map if entries provided
         if self._entries:
             self._rebuild_dupe_map()
@@ -220,29 +221,33 @@ class MangaTableModel(QAbstractTableModel):
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
     def _on_data_changed(self, top_left, bottom_right, roles=()) -> None:
+        if top_left.column() == bottom_right.column() and top_left.column() in (COL_DUPE, COL_LIBRARY, COL_RENAME,
+                                                                                 COL_EXAMINED):
+            return                                          # PERF PROTOTYPE: not an input of the state
         rows = range(top_left.row(), bottom_right.row() + 1)
-        if not any(r in self._state_cache for r in rows):
+        keys = [id(self._entries[r]) for r in rows if 0 <= r < len(self._entries)]
+        if not any(k in self._state_cache for k in keys):
             return
-        for r in rows:
-            self._state_cache.pop(r, None)
+        for k in keys:
+            self._state_cache.pop(k, None)
         if top_left.column() > COL_STATE or bottom_right.column() < COL_ENGLISH:
             # The row changed elsewhere (MU match, override): repaint its state cells too.
             self.dataChanged.emit(self.index(top_left.row(), COL_STATE), self.index(bottom_right.row(), COL_ENGLISH),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
     def _evaluate(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]:
-        cached = self._state_cache.get(row)
-        if cached is not None:
-            return cached
         e = self.entry_at(row)
         if e is None:
             return None
+        cached = self._state_cache.get(id(e))
+        if cached is not None and cached[0] is e:
+            return cached[1]
         st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
                                  needs_kind=self._needs_kind_for(e),
                                  rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today,
                                  unbundled=self._unbundled_for(e))
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
-        self._state_cache[row] = (st, links, knowledge)
+        self._state_cache[id(e)] = (e, (st, links, knowledge))
         return st, links, knowledge
 
     def state_at(self, row: int) -> Optional[SeriesState]:
