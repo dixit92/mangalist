@@ -191,6 +191,37 @@ def _uncertain_volume_release(ctx, candidates: Sequence[NyaaCandidate], skip: Se
     return None
 
 
+def retire_filled(db, wanted: "Wanted" = None) -> int:
+    """Retire (``gone``) the waiting findings none of whose numbers is still missing - a gap filled by a manual send or
+    another release - without a search. A find pass retires them too, but only when it runs (owner, 2026-10-13: a
+    finding for chapters already filed by hand waited in Found, and its Change source said the series had nothing to
+    look up). A part (``62.1``) counts while its whole chapter is missing. Returns how many were retired."""
+    store = FindingStore(db)
+    waiting = store.list(WAITING)
+    if not waiting:
+        return 0
+    kinds_of = {GROUP_VOLUMES: (KIND_VOLUMES, KIND_UPGRADES), GROUP_UPGRADES: (KIND_VOLUMES, KIND_UPGRADES),
+                GROUP_CHAPTERS: (KIND_CHAPTERS,)}
+    missing: Dict[Tuple[int, str], Set[Decimal]] = {}
+    for e in load_wanted(db, wanted):
+        for kind in kinds_of.get(e.group, ()):
+            missing.setdefault((e.series_id, kind), set()).update(k for k in (_key(v) for v in e.missing) if k is not None)
+    retired = 0
+    for f in waiting:
+        still = missing.get((f.series_id, f.kind), set())
+        keys = [k for k in (_key(v) for v in f.fills) if k is not None]
+        if not keys or any(k in still or Decimal(int(k)) in still for k in keys):
+            continue
+        try:
+            store.set_status(f.id, GONE, expect=(WAITING,))
+        except FindingConflict:
+            continue                    # moved meanwhile (sent / skipped in the window)
+        retired += 1
+        _log.info("Findings: %s finding %s of series %s retired: %s no longer missing", f.kind, f.id, f.series_id,
+                  ", ".join(f.fills))
+    return retired
+
+
 # --- the wanted list --------------------------------------------------------------------------------------------------
 
 Wanted = Any        # a sequence of WantedSeries, or a callable (db, *, root_ids=None) -> that sequence
