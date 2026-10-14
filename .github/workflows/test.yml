@@ -73,4 +73,4 @@ jobs:
           PYTEST_ADDOPTS: -n auto       # pytest-xdist: one worker per core
         run: >
           python -m pytest -q tests/matcher tests/golden tests/test_mu_match.py tests/test_mu_cache.py
-          tests/test_paths.py tests/test_classifier.py tests/parsing tests/headless tests/store tests/services tests/inventory tests/states tests/test_phase1_integration.py tests/identity tests/downloads tests/duplicates tests/upgrades tests/renamer tests/wanted tests/log_reading
+          tests/test_paths.py tests/test_palette.py tests/test_classifier.py tests/parsing tests/headless tests/store tests/services tests/inventory tests/states tests/test_phase1_integration.py tests/identity tests/downloads tests/duplicates tests/upgrades tests/renamer tests/wanted tests/log_reading
