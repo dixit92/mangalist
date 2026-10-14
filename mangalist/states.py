@@ -120,11 +120,13 @@ ATTENTION_UNMATCHED = "unmatched"
 ATTENTION_REVIEW = "needs review"
 ATTENTION_KIND = "needs kind"
 ATTENTION_NOT_A_WORK = "not one work"
+ATTENTION_IN_VOLUMES = "chapters in volumes"
 ATTENTION_LABELS = {
     ATTENTION_UNMATCHED: "No MangaUpdates match",
     ATTENTION_REVIEW: "Match needs review",
     ATTENTION_KIND: "Volumes or chapters? (bare numbers)",
     ATTENTION_NOT_A_WORK: "Not matched: the folder is not one work",
+    ATTENTION_IN_VOLUMES: "Chapter files inside volumes you hold - row menu: Set aside chapters its volumes hold…",
 }
 
 
@@ -176,6 +178,7 @@ class _Held:
     highest_chapter: Optional[Decimal]
     n_unknown: int
     split_missing: Tuple[Decimal, ...] = ()   # parts of a split chapter missing below the highest part held
+    inside_volumes: int = 0        # loose chapter files inside a held volume's mapped range (owner, 2026-10-14)
 
     def holds_chapter(self, c: Decimal) -> bool:
         if c in self.chapters or c in self.covered:
@@ -226,6 +229,20 @@ def _count(value: Any) -> int:
 def _held(inv: Any, knowledge: Optional[SeriesKnowledge]) -> _Held:
     vols, _ = _decimals(getattr(inv, "held_volumes", ()) or ())
     chs, ranges = _decimals(getattr(inv, "held_chapters", ()) or ())
+    # Loose chapter files a held volume already holds by the volume list's MAPPED range - however the volume arrived
+    # (owner, 2026-10-14: volumes that came in outside MangaList's downloads kept their chapter files; the upgrade step
+    # only looks at its own downloads). Counted for a hint only; nothing moves until the owner sets them aside.
+    spans = [(to_decimal(v.chapters_from), to_decimal(v.chapters_to)) for v in (knowledge.volumes if knowledge else ())
+             if to_decimal(v.volume) in vols and v.has_chapters]
+    spans = [(lo, hi) for lo, hi in spans if lo is not None and hi is not None and lo <= hi]
+
+    parts = splits_of(chs, ranges).parts if spans else frozenset()    # N.1, N.2 ... count by chapter N (N.5: extra)
+
+    def _inside(lo: Decimal, hi: Decimal) -> bool:
+        whole = lo.to_integral_value(rounding="ROUND_FLOOR")
+        return any((a <= lo and hi <= b) or (lo == hi and lo in parts and a <= whole <= b) for a, b in spans)
+
+    inside = sum(1 for c in chs if _inside(c, c)) + sum(1 for lo, hi in ranges if _inside(lo, hi)) if spans else 0
     # Split chapters (2.1 + 2.2 = chapter 2), MangaPixer's rule: the chapter counts as held.
     splits = splits_of(chs, ranges)
     chs = set(chs) | {Decimal(n) for n in splits.chapters}
@@ -249,7 +266,7 @@ def _held(inv: Any, knowledge: Optional[SeriesKnowledge]) -> _Held:
     if hc is None and (chs or ranges):
         hc = max(list(chs) + [hi for _, hi in ranges])
     return _Held(frozenset(vols), frozenset(chs), tuple(ranges), frozenset(covered), hv, hc,
-                 _count(getattr(inv, "unknown_kind_files", None)), splits.missing_parts)
+                 _count(getattr(inv, "unknown_kind_files", None)), splits.missing_parts, inside)
 
 
 def _whole_numbers(lo: Decimal, hi: Decimal) -> Set[Decimal]:
@@ -594,6 +611,8 @@ def _evaluate(
         attention.append(ATTENTION_REVIEW)
     if needs_kind or (held.n_unknown > 0 and not folder_empty):
         attention.append(ATTENTION_KIND)
+    if held.inside_volumes:
+        attention.append(ATTENTION_IN_VOLUMES)
 
     upcoming_vol = next_announced(k.volumes, today) if k is not None else None
     common = dict(
