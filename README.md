@@ -7,8 +7,6 @@ A PySide6 desktop tool that scans a "Manga Root" folder, classifies each manga s
 `.rar`, `.7z`, `.cb7`), and matches it to [MangaUpdates](https://www.mangaupdates.com) to show what
 is licensed, finished or behind.
 
-![Main window](docs/screenshot.png)
-
 ## Install
 
 Download from the [Releases](../../releases) page:
