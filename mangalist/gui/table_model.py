@@ -15,6 +15,7 @@ from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 from ..official_sources import KIND_SEARCH, official_links, primary_label
+from .colors import qcolor
 from .list_text import english_text
 from .palette import current
 from .shell import DuplicateSeries
@@ -72,6 +73,9 @@ COL_ENGLISH = 18
 COL_LIBRARY = 19
 COL_RENAME = 20
 STATE_COLUMNS = (COL_STATE, COL_GAPS, COL_OFFICIAL)
+# Columns a series' state does not read: a change of one of them alone keeps the state (the Rename counts are an input,
+# but set_rename_counts drops the states of the series whose count changed itself).
+NOT_STATE_INPUTS = frozenset({COL_DUPE, COL_LIBRARY, COL_RENAME})
 
 # Extra roles for the List tab's delegates (list_delegates.py).
 SUBTITLE_ROLE = Qt.UserRole + 1     # Title: the matched series' title, shown under the folder's
@@ -79,6 +83,8 @@ REVIEW_ROLE = Qt.UserRole + 2       # Title: the match needs review (the subtitl
 STATE_ROLE = Qt.UserRole + 3        # State: the SeriesState (the badge's colour)
 MODE_CHIP_ROLE = Qt.UserRole + 20   # Title: the series' own automatic-downloads mode where it differs from the default
                                     # (a small chip after the title; "" for none)
+# Roles a series' state does not read: a dataChanged for these alone keeps the cached state.
+NOT_STATE_ROLES = frozenset({int(Qt.BackgroundRole), int(MODE_CHIP_ROLE)})
 
 # State filters (key -> label), in the order the toolbar lists them; None = every row.
 STATE_FILTERS: List[Tuple[Optional[str], str]] = (
@@ -169,8 +175,12 @@ class MangaTableModel(QAbstractTableModel):
         self._rename_counts: Dict[str, int] = {}
         # folder -> the Title's automatic-downloads chip: the series' own mode where it differs from the default
         self._mode_chips: Dict[str, str] = {}
-        # Rescan state + official sources per row, computed on first use and dropped when the row changes.
-        self._state_cache: Dict[int, Tuple[SeriesState, List[OfficialLink]]] = {}
+        # Rescan state + official sources + knowledge per series, computed on first use. Keyed by the entry object
+        # (``id(entry)`` -> (entry, result); the entry is kept so the id cannot be reused): a reset that keeps a row's
+        # entry - another library's scan, a library switch - keeps its state; a rescanned series is a new entry. Dropped
+        # when the row changes (dataChanged on a column the state reads), the rename counts or the providers change.
+        self._state_cache: Dict[int, Tuple[MangaEntry, Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]] = {}
+        self.evaluations = 0            # how many states were computed (the work-counter tests read it)
         self._today: Optional[datetime.date] = None
         # Where a row's inventory and knowledge come from. FALLBACK defaults: the inventory read from the
         # entry's file names (states.fallback_inventory_from_entry) and the own matcher's knowledge; the
@@ -181,7 +191,6 @@ class MangaTableModel(QAbstractTableModel):
         self._needs_kind_for: Callable[[MangaEntry], bool] = lambda e: False
         self._unbundled_for: Callable[[MangaEntry], bool] = lambda e: False     # mangalist.unbundled
         self.dataChanged.connect(self._on_data_changed)
-        self.modelReset.connect(self._state_cache.clear)
         # Build initial dupe map if entries provided
         if self._entries:
             self._rebuild_dupe_map()
@@ -189,11 +198,21 @@ class MangaTableModel(QAbstractTableModel):
     # --- data plumbing -------------------------------------------------------
 
     def set_entries(self, entries: List[MangaEntry]) -> None:
+        """Show *entries*. The states of entries shown before are kept (see ``_state_cache``); an entry changed in place
+        outside the model's setters must be handed to :meth:`forget_states`."""
         self.beginResetModel()
         self._entries = list(entries)
         self._mu_processing_row = None
         self._rebuild_dupe_map()
+        kept = {id(e) for e in self._entries}
+        for key in [k for k in self._state_cache if k not in kept]:
+            del self._state_cache[key]
         self.endResetModel()
+
+    def forget_states(self, entries: Iterable[MangaEntry]) -> None:
+        """*entries* were changed in place (their MangaUpdates data, kind or folder): compute their states again."""
+        for e in entries:
+            self._state_cache.pop(id(e), None)
 
     # --- rescan state ----------------------------------------------------------
 
@@ -226,29 +245,35 @@ class MangaTableModel(QAbstractTableModel):
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
     def _on_data_changed(self, top_left, bottom_right, roles=()) -> None:
-        rows = range(top_left.row(), bottom_right.row() + 1)
-        if not any(r in self._state_cache for r in rows):
+        if top_left.column() == bottom_right.column() and top_left.column() in NOT_STATE_INPUTS:
+            return                      # the Dupe / Library / Rename column alone: the state does not read them
+        if roles and {int(r) for r in roles} <= NOT_STATE_ROLES:
+            return                      # a tint (the row being looked up) or the mode chip
+        keys = [id(self._entries[r]) for r in range(top_left.row(), bottom_right.row() + 1)
+                if 0 <= r < len(self._entries)]
+        if not any(k in self._state_cache for k in keys):
             return
-        for r in rows:
-            self._state_cache.pop(r, None)
+        for k in keys:
+            self._state_cache.pop(k, None)
         if top_left.column() > COL_STATE or bottom_right.column() < COL_ENGLISH:
             # The row changed elsewhere (MU match, override): repaint its state cells too.
             self.dataChanged.emit(self.index(top_left.row(), COL_STATE), self.index(bottom_right.row(), COL_ENGLISH),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
     def _evaluate(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]:
-        cached = self._state_cache.get(row)
-        if cached is not None:
-            return cached
         e = self.entry_at(row)
         if e is None:
             return None
+        cached = self._state_cache.get(id(e))
+        if cached is not None and cached[0] is e:
+            return cached[1]
+        self.evaluations += 1
         st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
                                  needs_kind=self._needs_kind_for(e),
                                  rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today,
                                  unbundled=self._unbundled_for(e))
         links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
-        self._state_cache[row] = (st, links, knowledge)
+        self._state_cache[id(e)] = (e, (st, links, knowledge))
         return st, links, knowledge
 
     def state_at(self, row: int) -> Optional[SeriesState]:
@@ -315,6 +340,16 @@ class MangaTableModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(0, COL_DUPE), self.index(len(self._entries) - 1, COL_DUPE),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
+    def search_text(self, row: int) -> str:
+        """What the List's filter box matches for *row*, case-folded: the Title as shown (``Parent / Title`` for a
+        subseries), the alternative (English) title and the Kind - what its placeholder promises, read straight from
+        the entry (no state is computed)."""
+        e = self.entry_at(row)
+        if e is None:
+            return ""
+        title = f"{e.parent_folder.name} / {e.title}" if e.parent_folder is not None else e.title
+        return f"{title}\n{e.english_title or ''}\n{e.verdict.value}".casefold()
+
     def in_scope(self, row: int) -> bool:
         e = self.entry_at(row)
         return e is not None and (self._scope is None or e.root_id == self._scope)
@@ -367,11 +402,15 @@ class MangaTableModel(QAbstractTableModel):
         new = {str(k): int(v) for k, v in counts.items() if int(v) > 0}
         if new == self._rename_counts:
             return
+        flipped = {f for f in set(new) | set(self._rename_counts) if new.get(f) != self._rename_counts.get(f)}
         self._rename_counts = new
-        self._state_cache.clear()
-        if self._entries:
-            self.dataChanged.emit(self.index(0, COL_STATE), self.index(len(self._entries) - 1, COL_ENGLISH),
+        rows = [r for r, e in enumerate(self._entries) if str(e.folder) in flipped]
+        for r in rows:                  # only the series whose count changed are evaluated again
+            self._state_cache.pop(id(self._entries[r]), None)
+        for r in rows:
+            self.dataChanged.emit(self.index(r, COL_STATE), self.index(r, COL_ENGLISH),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+        if self._entries:
             self.dataChanged.emit(self.index(0, COL_RENAME), self.index(len(self._entries) - 1, COL_RENAME),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
@@ -601,11 +640,11 @@ class MangaTableModel(QAbstractTableModel):
 
         if role == Qt.BackgroundRole:
             if self._mu_processing_row == index.row():
-                return QColor(current().busy_row)
+                return qcolor("busy_row")
             if e.examined:
-                return QColor(current().ok_bg)
+                return qcolor("ok_bg")
             if col == COL_MU_TITLE and needs_review(e):
-                return QColor(current().warn_bg)
+                return qcolor("warn_bg")
 
         if role == Qt.ToolTipRole:
             if col == COL_EXAMINED:

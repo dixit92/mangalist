@@ -49,8 +49,8 @@ def test_found_skip_and_modes_through_the_real_adapter(qapp, library_db):
     tab = DownloadTab(backend, confirm=lambda p, t: True, refresh_ms=0, search_delay_ms=0)
     try:
         tab.show_group(GROUP_FOUND)
-        assert sorted(r.gets_label.text() for r in tab.found.rows.values()) == ["Gets v02", "Gets v03"]
-        assert {r.name_label.text() for r in tab.found.rows.values()} == {"Series A"}      # the adapter's name
+        assert sorted(r.gets for r in tab.found.rows.values()) == ["v02", "v03"]
+        assert {r.name for r in tab.found.rows.values()} == {"Series A"}                   # the adapter's name
         assert "1 series searched" in tab.found.run_label.text()
         first = next(iter(tab.found.rows))
         assert tab.found.skip(first)

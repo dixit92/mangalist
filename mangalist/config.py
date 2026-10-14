@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from . import paths, store
 
@@ -61,5 +61,14 @@ def load() -> Dict[str, Any]:
 def save(cfg: Dict[str, Any]) -> None:
     try:
         store.get_store().set_settings(dict(cfg))
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        _log.warning("Could not save the settings", exc_info=True)
+
+
+def save_values(values: Mapping[str, Any]) -> None:
+    """Save only these keys (a splitter's sizes, the library picked): :func:`save` rewrites every key, the examined list
+    and the column layout included, which made a library switch or a drag pay for all of them."""
+    try:
+        store.get_store().set_settings(dict(values))
     except (OSError, sqlite3.Error, TypeError, ValueError):
         _log.warning("Could not save the settings", exc_info=True)
