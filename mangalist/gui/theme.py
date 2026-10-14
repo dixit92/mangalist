@@ -282,9 +282,6 @@ def palette(pal: Optional[Palette] = None):
         QPalette.ColorRole.Midlight: c.border_soft, QPalette.ColorRole.Dark: c.control_strong,
         QPalette.ColorRole.Light: c.surface, QPalette.ColorRole.Shadow: c.shadow,
     }
-    accent_role = getattr(QPalette.ColorRole, "Accent", None)          # Qt 6.6+
-    if accent_role is not None:
-        roles[accent_role] = c.accent_fill
     for role, color in roles.items():
         p.setColor(role, QColor(color))
     for role in (QPalette.ColorRole.Text, QPalette.ColorRole.WindowText, QPalette.ColorRole.ButtonText):
