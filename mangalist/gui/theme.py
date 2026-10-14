@@ -169,10 +169,12 @@ QLineEdit QToolButton, QLineEdit QToolButton:hover, QLineEdit QToolButton:presse
     min-height: 0px; min-width: 0px; padding: 0px; border: none; background: transparent;
 }}
 QPushButton[variant="primary"] {{
-    min-height: 38px; background: {p.accent_fill}; border-color: {p.accent_fill}; color: {p.accent_text}; font-weight: 600;
+    min-height: 38px; background: {p.accent_fill}; border-color: {p.accent_fill}; color: {p.accent_text};
+    font-weight: 600;
 }}
 QPushButton[variant="primary"]:hover {{ background: {p.accent_fill_hover}; border-color: {p.accent_fill_hover}; }}
-QPushButton[variant="primary"]:disabled {{ background: {p.control}; border-color: {p.control}; color: {p.accent_text}; }}
+QPushButton[variant="primary"]:disabled {{ background: {p.control}; border-color: {p.control};
+    color: {p.accent_text_disabled}; }}
 QPushButton[variant="ghost"] {{ border-color: transparent; background: transparent; }}
 QPushButton[variant="ghost"]:hover {{ background: {p.pressed}; }}
 QPushButton[variant="icon"] {{ min-width: 38px; max-width: 38px; padding: 0; }}
@@ -469,10 +471,12 @@ def apply_theme(app, appearance: Optional[str] = None) -> bool:
     base = font(BASE_PX)
     if app.font() != base:
         app.setFont(base)
+    from .indicators import indicator_rules
     from .spin_arrows import spin_rules
 
     app.setStyleSheet(stylesheet(sans_family(), mono_family(), pal)
-                      + spin_rules(line=pal.control, color=pal.muted, hover=pal.background, disabled=pal.arrow_off))
+                      + spin_rules(line=pal.control, color=pal.muted, hover=pal.background, disabled=pal.arrow_off)
+                      + indicator_rules(pal))                    # Dark only: Fusion's edges vanish on a dark window
     _retheme_widgets(app, old, pal)
     if old is not pal:
         _log.info("Appearance: %s (%s palette)", _appearance, pal.name)

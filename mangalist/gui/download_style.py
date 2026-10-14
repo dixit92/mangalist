@@ -103,7 +103,7 @@ QPushButton[primary="true"] {{ border: 1px solid {p.accent_fill}; background: {p
                                font-weight: 600; }}
 QPushButton[primary="true"]:hover {{ background: {p.accent_fill_hover_2}; }}
 QPushButton[primary="true"]:disabled {{ background: {p.accent_fill_disabled}; border-color: {p.accent_fill_disabled};
-                                        color: {p.accent_text}; }}
+                                        color: {p.accent_text_disabled}; }}
 QPushButton[link="true"] {{ border: none; background: transparent; color: {p.accent}; min-height: 24px; padding: 0 4px; }}
 QPushButton[link="true"]:hover {{ color: {p.accent_hover}; text-decoration: underline; }}
 QPushButton[link="true"]:disabled {{ color: {p.disabled}; }}
