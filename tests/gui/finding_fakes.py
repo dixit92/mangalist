@@ -31,8 +31,9 @@ def find_run(id=1, trigger="schedule", summary="12 series searched, 1 sent, 2 wa
 
 class FakeFindingBackend(FakeChapterBackend):
     def __init__(self, *, found=(), modes: Optional[Dict[int, Optional[str]]] = None, default="notify", last_run=None,
-                 **kw):
+                 library_modes: Optional[Dict[int, str]] = None, **kw):
         super().__init__(**kw)
+        self.library_modes: Dict[int, str] = dict(library_modes or {})     # series id -> its library's default (schema 8)
         self.found: List[Finding] = list(found)
         self.own_modes: Dict[int, Optional[str]] = dict(modes or {})
         self.default = default
@@ -91,7 +92,14 @@ class FakeFindingBackend(FakeChapterBackend):
 
     # --- modes
     def series_modes(self, series_ids):
-        return {int(i): self.own_modes.get(int(i)) or self.default for i in series_ids}
+        return {int(i): self.own_modes.get(int(i)) or self.default_for(int(i))[0] for i in series_ids}
+
+    def default_for(self, series_id):
+        lib = self.library_modes.get(int(series_id))
+        return (lib, True) if lib else (self.default, False)
+
+    def series_defaults(self, series_ids):
+        return {int(i): self.default_for(int(i)) for i in series_ids}
 
     def own_series_mode(self, series_id):
         return self.own_modes.get(series_id)

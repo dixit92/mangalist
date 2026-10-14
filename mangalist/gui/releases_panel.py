@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -77,6 +77,7 @@ from .downloads_backend import DownloadsBackend
 from .tables import resizable_columns
 from .volumes_target import VolumeTarget, numbers_text, volume_label
 from .links import open_link
+from .series_actions import below, menu_button
 
 ConfirmFn = Callable[[QWidget, str], bool]
 #: The over-the-cap question: (parent, kind, text) -> "queue" | "send" | "cancel"; kind is "over" (queue it, send it now
@@ -215,7 +216,8 @@ def _mono(text: str) -> str:
 class ReleasesPanel(QWidget):
     sent = Signal(object)               # a DownloadRecord, once qBittorrent has the release
     search_again = Signal()             # managed: "Search again" was pressed, the host runs the search
-    settings_requested = Signal(str)    # a section of the Settings dialog
+    settings_requested = Signal(str)
+    series_menu_requested = Signal(QPoint)  # the "⋯" in the header: the host opens the series' menu there    # a section of the Settings dialog
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
@@ -285,6 +287,10 @@ class ReleasesPanel(QWidget):
         head.addWidget(self.search_label)
         head.addWidget(self.progress)
         head.addWidget(self.btn_retry)
+        self.btn_series = menu_button()             # the series' menu (series_actions.py); the host shows it
+        self.btn_series.clicked.connect(lambda: self.series_menu_requested.emit(below(self.btn_series)))
+        self.btn_series.setVisible(False)
+        head.addWidget(self.btn_series)
         outer.addLayout(head)
 
         # The folder choice (only when the layout is ambiguous)

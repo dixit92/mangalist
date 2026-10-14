@@ -162,9 +162,10 @@ def test_the_mode_chip_shows_only_where_the_series_differs_from_the_default(make
     win = make_window(backend)
     assert _chips(win) == {"Alpha Saga": "Auto"}
     win._select_source_row(_row(win, "Alpha Saga"))
-    assert win._detail.auto_mode_text() == "Auto" and win._detail._lbl_auto.isVisibleTo(win._detail)
+    assert win._detail.auto_mode_text() == "Auto" and win._detail.auto_choice() == "Auto"     # the picker (2026-10-13)
     win._select_source_row(_row(win, "Beta Days"))
     assert win._detail.auto_mode_text() == "Notify (the default)"
+    assert win._detail.auto_choice() == "Use the default (Notify)"
     _choose(win, ["Beta Days"], "Auto")
     assert _chips(win) == {"Alpha Saga": "Auto", "Beta Days": "Auto"}
     assert win._detail.auto_mode_text() == "Auto"
@@ -193,6 +194,7 @@ def test_bulk_find_from_the_list_opens_found(make_window, qapp):
 def test_nothing_of_it_without_the_backend_methods(make_window):
     win = make_window(FakeBackend(series_ids={str(Path("/lib") / "Alpha Saga"): 1}))
     assert win._auto_modes is None and not win._detail._lbl_auto.isVisibleTo(win._detail)
+    assert win._detail.auto_choice() == ""
     menu = _menu_for(win, "Alpha Saga")
     assert not any(a.text() == "Automatic downloads" for a in menu.actions())
     assert not any(a.text().startswith("Find releases for") for a in menu.actions())
