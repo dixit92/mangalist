@@ -8,7 +8,7 @@ import math
 from typing import Optional, Sequence, Tuple
 
 from PySide6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPen
+from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .colors import hex_color, qcolor
 from .download_style import FONT_MONO, badges, set_prop
 from .indicators import paint_radio
 from .palette import current
@@ -94,10 +95,10 @@ def paint_chips(painter: QPainter, font: QFont, rect: QRect, chips: Sequence[Tup
     for (text, (_t, kind)), width in zip(zip(texts, chips), widths):
         bg, fg, border = colors.get(kind, colors["muted"])
         box = QRectF(x + 0.5, y + 0.5, width - 1, height - 1)
-        painter.setPen(QPen(QColor(border), 1))
-        painter.setBrush(QColor(bg))
+        painter.setPen(QPen(hex_color(border), 1))
+        painter.setBrush(hex_color(bg))
         painter.drawRoundedRect(box, height / 2, height / 2)
-        painter.setPen(QColor(fg))
+        painter.setPen(hex_color(fg))
         painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
         x += width + CHIP_GAP
     painter.restore()
@@ -248,7 +249,7 @@ class TwoLineDelegate(QStyledItemDelegate):
         elif aside:
             shown, aside_w = fit_text(QFontMetricsF(aside_font), aside, room)
             painter.setFont(aside_font)
-            painter.setPen(QColor(current().muted))
+            painter.setPen(qcolor("muted"))
             painter.drawText(QRect(rect.right() - aside_w + 1, rect.top(), aside_w, rect.height()),
                              Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, shown)
             rect = rect.adjusted(0, 0, -(aside_w + 8), 0)
@@ -256,12 +257,12 @@ class TwoLineDelegate(QStyledItemDelegate):
         sub_h = QFontMetrics(sub_font).height()
         y = rect.top() + (rect.height() - top_h - (sub_h if sub else 0)) // 2
         painter.setFont(top)
-        painter.setPen(QColor(current().text))
+        painter.setPen(qcolor("text"))
         painter.drawText(QRect(rect.left(), y, rect.width(), top_h), Qt.AlignmentFlag.AlignVCenter,
                          QFontMetrics(top).elidedText(title, Qt.TextElideMode.ElideRight, rect.width()))
         if sub:
             painter.setFont(sub_font)
-            painter.setPen(QColor(current().muted_2))
+            painter.setPen(qcolor("muted_2"))
             painter.drawText(QRect(rect.left(), y + top_h, rect.width(), sub_h), Qt.AlignmentFlag.AlignVCenter,
                              QFontMetrics(sub_font).elidedText(sub, Qt.TextElideMode.ElideRight, rect.width()))
         painter.restore()

@@ -184,10 +184,12 @@ class _SortProxy(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSortRole(Qt.UserRole)
-        self.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.setFilterKeyColumn(-1)  # filter across all columns
         self._dupes_only = False
         self._state_filter: Optional[str] = None
+        # The filter box's text, case-folded: matched against the Title, the alternative title and the Kind only (what
+        # the box's placeholder promises; the model's search_text) - never the 21 columns, some of which compute the
+        # series' state or a MangaPixer view per call (UI Performance Research, stage 1 #1).
+        self._needle = ""
 
     @contextmanager
     def _filter_change(self):
@@ -207,6 +209,17 @@ class _SortProxy(QSortFilterProxyModel):
         """The model's library scope changed: let the rows of the picked library through."""
         with self._filter_change():
             pass
+
+    def set_text_filter(self, text: str) -> None:
+        """Show only the rows whose Title, alternative title or Kind holds *text* (any case; '' shows every row)."""
+        needle = (text or "").strip().casefold()
+        if needle == self._needle:
+            return
+        with self._filter_change():
+            self._needle = needle
+
+    def text_filter(self) -> str:
+        return self._needle
 
     def set_dupes_only(self, enabled: bool) -> None:
         """Filter to show only duplicate MU matches."""
@@ -228,23 +241,20 @@ class _SortProxy(QSortFilterProxyModel):
         return super().headerData(section, orientation, role)
 
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
-        """Check if row should be shown based on text filter AND dupe filter."""
-        # First apply the standard text filter
-        if not super().filterAcceptsRow(source_row, source_parent):
-            return False
-
+        """The row is in the library picked, holds the filter box's text, and passes the state and duplicates
+        filters (the cheap checks first: the state is computed only for rows the text lets through)."""
         source_model = self.sourceModel()
-        if source_model is not None and not source_model.in_scope(source_row):     # the Library picker
+        if source_model is None:
+            return True
+        if not source_model.in_scope(source_row):     # the Library picker
             return False
-        if self._state_filter is not None and source_model is not None:
+        if self._needle and self._needle not in source_model.search_text(source_row):
+            return False
+        if self._state_filter is not None:
             if not state_matches(source_model.state_at(source_row), self._state_filter):
                 return False
-
-        # Then apply duplicates-only filter if enabled
         if self._dupes_only:
-            if source_model is not None:
-                return source_model.is_duplicate(source_row)
-
+            return source_model.is_duplicate(source_row)
         return True
 
 
@@ -295,6 +305,8 @@ class MainWindow(QMainWindow):
     _CFG_LIBRARY = "list_library"                      # the picked library folder's path ("" or absent: all libraries)
     _CFG_SPLITTER = "list_splitter_sizes"
     _CFG_DETAILS = "details_panel"
+    _FILTER_DELAY_MS = 150                  # the filter box: how long after the last key the rows are filtered
+    _SAVE_DELAY_MS = 400                    # a splitter drag / column move: how long after the last change it is saved
 
     def __init__(self):
         super().__init__()
@@ -320,6 +332,8 @@ class MainWindow(QMainWindow):
         # fall back to the own matcher (knowledge_for returns None).
         self._mp_resolver = None
         self._mp_items: dict = {}   # folder -> the resolved MangaPixer item (or None), per scan
+        self._mp_roots: dict = {}   # root id -> (stored path, resolved path), read once per resolver
+        self._mp_roots_of = None    # ... the resolver they were read for
         self._unbundled = UnbundledFolders(self._db)     # the per-series Unbundled Chapters setting
         self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
                                         needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)),
@@ -336,6 +350,7 @@ class MainWindow(QMainWindow):
         self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
         self._dupe_call = None
         self._wanted_series: List[WantedSeries] = []
+        self._wanted_cache: Dict[int, tuple] = {}    # id(entry) -> (entry, its state, series id, its To get entries)
         self._dupe_per_folder: Dict[str, Tuple[int, int]] = {}
         self._last_scan: Optional[datetime.datetime] = None
         self._scan_label = ""
@@ -354,6 +369,7 @@ class MainWindow(QMainWindow):
         self._mu_thread: QThread | None = None
         self._mu_worker: MuWorker | None = None
         self._mu_entries: List[MangaEntry] = []
+        self._mu_lookup_gen = 0                            # bumped by every start / stop of the MangaUpdates lookup
         self._sig_thread: QThread | None = None
         self._sig_worker: SignatureWorker | None = None
         # The renamer: its window, and "Rename pending" counted after each scan (off the UI thread). Tests swap
@@ -368,10 +384,10 @@ class MainWindow(QMainWindow):
         self._background = _start_call
         self._build_ui()
 
-        # Debounce timer so rapid column-resize events don't thrash config I/O.
+        # Debounce timers so rapid column-resize / column-move / splitter events don't thrash config I/O.
         self._col_resize_timer = QTimer(self)
         self._col_resize_timer.setSingleShot(True)
-        self._col_resize_timer.setInterval(400)
+        self._col_resize_timer.setInterval(self._SAVE_DELAY_MS)
         self._col_resize_timer.timeout.connect(self._save_column_state)
 
         self._show_roots()
@@ -412,7 +428,12 @@ class MainWindow(QMainWindow):
         self._table.setModel(self._proxy)
         self._detail = lst.details
         self._filter_edit = lst.search
-        self._filter_edit.textChanged.connect(self._proxy.setFilterFixedString)
+        # Typing filters 150 ms after the last key (a burst of keys filters once); clearing the box applies at once.
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(self._FILTER_DELAY_MS)
+        self._filter_timer.timeout.connect(self._apply_text_filter)
+        self._filter_edit.textChanged.connect(self._on_filter_text)
         self._status_label = lst.status_label
         self._progress = lst.progress
         self._sig_label = lst.sig_label
@@ -439,6 +460,10 @@ class MainWindow(QMainWindow):
         saved = self._cfg.get(self._CFG_SPLITTER)
         width = max(self.width(), 900)
         lst.splitter.setSizes([int(s) for s in saved] if saved and len(saved) == 2 else [width - 380, 380])
+        self._splitter_timer = QTimer(self)
+        self._splitter_timer.setSingleShot(True)
+        self._splitter_timer.setInterval(self._SAVE_DELAY_MS)
+        self._splitter_timer.timeout.connect(self._save_splitter)
         lst.splitter.splitterMoved.connect(self._on_splitter_moved)
 
         # --- the Download tab (lane B's) and the downloads' status
@@ -506,6 +531,17 @@ class MainWindow(QMainWindow):
     def show_tab(self, tab: int) -> None:
         self._top.set_current(tab)
         self._on_tab_changed(tab)
+
+    def _on_filter_text(self, text: str) -> None:
+        if not text.strip():
+            self._filter_timer.stop()
+            self._apply_text_filter()
+        else:
+            self._filter_timer.start()
+
+    def _apply_text_filter(self) -> None:
+        self._filter_timer.stop()
+        self._proxy.set_text_filter(self._filter_edit.text())
 
     def _focus_search(self) -> None:
         self.show_tab(TAB_LIST)
@@ -609,7 +645,7 @@ class MainWindow(QMainWindow):
             root_id = None
         # "" = all libraries (the settings store only writes keys, so a removed key would keep its old value)
         self._cfg[self._CFG_LIBRARY] = root.path if root is not None else ""
-        config.save(self._cfg)
+        config.save_values({self._CFG_LIBRARY: self._cfg[self._CFG_LIBRARY]})
         self._apply_library(root_id)
         self._refresh_derived()
         self._on_filter_changed(self._list.current_filter())
@@ -690,14 +726,26 @@ class MainWindow(QMainWindow):
         out: List[WantedSeries] = []
         model = self._model
         downloads = self._volumes is not None
+        cache = self._wanted_cache
+        live = {id(e) for e in model.entries()}
+        for key in [k for k in cache if k not in live]:     # series no longer in the table
+            del cache[key]
         for row in model.scope_rows():          # the library picked
             entry = model.entry_at(row)
             st = model.state_at(row)
             if entry is None or st is None or not st.gaps:
                 continue
             series_id = self._volumes.series_id_for(entry) if downloads else None
-            out += wanted.series_wanted(entry, st, model.knowledge_at(row), model.held_volumes_at(row), series_id,
-                                        downloads=downloads)
+            # A series' entries are kept while its entry and its (cached) state are the same objects: a library
+            # switch or an unrelated change does not work them out again.
+            got = cache.get(id(entry))
+            if got is not None and got[0] is entry and got[1] is st and got[2] == series_id:
+                items = got[3]
+            else:
+                items = wanted.series_wanted(entry, st, model.knowledge_at(row), model.held_volumes_at(row), series_id,
+                                             downloads=downloads)
+                cache[id(entry)] = (entry, st, series_id, items)
+            out += items
         if out == self._wanted_series and not force:
             return
         self._wanted_series = out
@@ -1188,9 +1236,13 @@ class MainWindow(QMainWindow):
             try:
                 if self._mp_resolver is None:
                     self._mp_resolver = wanted.open_resolver(self._db)
-                root = self._db.get_root(entry.root_id)
+                if self._mp_roots_of is not self._mp_resolver:     # the roots, read and resolved once per resolver
+                    self._mp_roots = wanted.resolved_roots(self._db)
+                    self._mp_roots_of = self._mp_resolver
+                root = self._mp_roots.get(entry.root_id)
                 if root is not None:
-                    item = wanted.mangapixer_item(self._mp_resolver, entry.root_id, root.path, entry.folder)
+                    item = wanted.mangapixer_item(self._mp_resolver, entry.root_id, root[0], entry.folder,
+                                                  resolved_root=root[1])
             except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
                 _log.warning("MangaPixer data for %s unavailable", entry.folder, exc_info=True)
         self._mp_items[key] = item
@@ -1565,6 +1617,7 @@ class MainWindow(QMainWindow):
             return
         cached_all = mu_cache.load_all()
         changed = False
+        moved_entries = []
         for e in entries:
             key = str(e.folder)
             if e.examined != (key in examined):
@@ -1572,6 +1625,7 @@ class MainWindow(QMainWindow):
                 changed = True
             if key not in targets:
                 continue
+            moved_entries.append(e)
             cached = cached_all.get(key)
             if cached:
                 _apply_cache(e, cached)
@@ -1588,6 +1642,7 @@ class MainWindow(QMainWindow):
         if changed:
             self._mp_resolver = None
             self._mp_items = {}
+            self._model.forget_states(moved_entries)     # changed in place: the others keep their states
             self._model.set_entries(entries)
 
     def _start_signatures(self) -> None:
@@ -1643,7 +1698,10 @@ class MainWindow(QMainWindow):
     # --- MangaUpdates background lookup ----------------------------------
 
     def _start_mu_lookup(self, entries: List[MangaEntry]) -> None:
-        """Start a background worker to enrich *entries* with MU data."""
+        """Start a background worker to enrich *entries* with MU data. Which of them MangaPixer knows is read off the
+        UI thread for the folders not resolved yet (a MangaPixer lookup resolves each folder on the library share: 3 s
+        for a whole library at the end of a scan)."""
+        self._mu_lookup_gen += 1                    # a lookup still deciding what to fetch is dropped
         if self._mu_thread is not None:
             self._mu_worker.abort()
             self._mu_thread = None
@@ -1651,24 +1709,49 @@ class MainWindow(QMainWindow):
 
         if not entries:
             return
+        entries = list(entries)
+        unresolved = [(e.root_id, str(e.folder)) for e in entries if str(e.folder) not in self._mp_items]
+        if not unresolved:
+            self._run_mu_lookup(entries, set())
+            return
+        gen, db = self._mu_lookup_gen, self._db
+
+        def known_now(known) -> None:
+            if gen == self._mu_lookup_gen:
+                self._run_mu_lookup(entries, set(known))
+
+        def failed(message: str) -> None:
+            _log.warning("Reading which folders MangaPixer knows failed: %s", message)
+            known_now(set())
+
+        self._background(lambda: wanted.mangapixer_known(db, unresolved), known_now, failed, None)
+
+    def _run_mu_lookup(self, entries: List[MangaEntry], known_folders: set) -> None:
+        """The MangaUpdates worker for *entries*, but the folders MangaPixer knows (*known_folders*, plus those the
+        table resolved already) and the entries no longer shown."""
         # Owner decision (MangaPixer Data Source, 2026-10-02): for folders MangaPixer knows, MangaList
         # fetches nothing itself - their knowledge comes from the MangaPixer export.
-        known = [e for e in entries if self._mp_item_for(e) is not None]
-        if known:
-            entries = [e for e in entries if self._mp_item_for(e) is None]
+        def known(e: MangaEntry) -> bool:
+            key = str(e.folder)
+            return self._mp_items[key] is not None if key in self._mp_items else key in known_folders
+
+        skipped = [e for e in entries if known(e)]
+        if skipped:
+            entries = [e for e in entries if not known(e)]
             self._status_label.setText(
-                f"{len(known)} folder(s) skipped: MangaPixer knows them (sync MangaPixer to refresh)")
+                f"{len(skipped)} folder(s) skipped: MangaPixer knows them (sync MangaPixer to refresh)")
             if not entries:
                 return
 
-        # Build (source_row, entry) pairs — find the row of each entry in the model.
+        # Build (source_row, entry) pairs - the row of each entry still in the model (a scan may have replaced it
+        # while MangaPixer was asked).
         folder_to_row = {
             str(self._model.entry_at(r).folder): r
             for r in range(self._model.rowCount())
             if self._model.entry_at(r) is not None
         }
-        pairs = [(folder_to_row[str(e.folder)], e)
-                 for e in entries if str(e.folder) in folder_to_row]
+        pairs = [(folder_to_row[str(e.folder)], e) for e in entries
+                 if str(e.folder) in folder_to_row and self._model.entry_at(folder_to_row[str(e.folder)]) is e]
         if not pairs:
             return
 
@@ -1721,12 +1804,14 @@ class MainWindow(QMainWindow):
         self._start_mu_lookup(self._mu_entries)
 
     def _on_mu_stop(self) -> None:
+        self._mu_lookup_gen += 1                    # a lookup still asking MangaPixer does not start either
         if self._mu_worker is not None:
             _log.info("MangaUpdates lookup stopped by the owner")
             self._mu_worker.abort()
         self._list.set_mu_running(False)
 
     def _stop_mu(self, wait_ms: int = 5000) -> None:
+        self._mu_lookup_gen += 1
         if self._mu_worker is not None:
             self._mu_worker.abort()
         if self._mu_thread is not None:
@@ -1801,14 +1886,19 @@ class MainWindow(QMainWindow):
 
     def _on_column_moved(self, _logical: int, _old: int, _new: int) -> None:
         self._keep_last_column_readable()
-        self._save_column_state()
+        self._col_resize_timer.start()              # saved once the columns stop moving (every key is rewritten)
 
     def _on_section_resized(self, _logical: int, _old: int, _new: int) -> None:
         self._col_resize_timer.start()
 
     def _on_splitter_moved(self, _pos: int, _idx: int) -> None:
+        """A drag of the details panel's edge: saved 400 ms after the last move, not on every pixel."""
+        self._splitter_timer.start()
+
+    def _save_splitter(self) -> None:
+        self._splitter_timer.stop()
         self._cfg[self._CFG_SPLITTER] = self._list.splitter.sizes()
-        config.save(self._cfg)
+        config.save_values({self._CFG_SPLITTER: self._cfg[self._CFG_SPLITTER]})
 
     # --- Column visibility -----------------------------------------------
 
@@ -2438,6 +2528,10 @@ class MainWindow(QMainWindow):
         self._stop_mu()
         self._stop_signatures()
         self._cfg["window"] = {"w": self.width(), "h": self.height()}
+        if self._splitter_timer.isActive():         # a drag just before closing is kept
+            self._cfg[self._CFG_SPLITTER] = self._list.splitter.sizes()
+        self._splitter_timer.stop()
+        self._col_resize_timer.stop()
         self._save_column_state()
         super().closeEvent(event)
 

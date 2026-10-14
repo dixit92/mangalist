@@ -129,7 +129,7 @@ def test_show_in_list_from_to_get_and_from_found(win):
     tab.show_group("found")
     menus = []
     tab._exec_menu = lambda menu, pos: menus.append(menu) or find_action(menu, "Show in List")
-    next(iter(tab.found.rows.values())).btn_more.click()
+    tab.found.click(next(iter(tab.found.rows)), "more")
     assert win._top.current() == TAB_LIST and win._current_entry().title == "Alpha Saga"
 
 

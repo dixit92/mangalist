@@ -183,6 +183,60 @@ def kind_text(finding) -> str:
     return KIND_TEXT.get(finding.kind, finding.kind)
 
 
+def source_text(finding) -> str:
+    """Where a finding would come from: ``nyaa``, ``Suwayomi · MangaDex (EN)``; '' when it has nothing to send yet (or
+    the pass did not say)."""
+    payload = finding.payload if isinstance(finding.payload, Mapping) else {}
+    kind = payload.get("type")
+    if kind == "nyaa":
+        return "nyaa"
+    if kind == "suwayomi":
+        name = payload.get("source_name")
+        return f"Suwayomi · {name}" if name else "Suwayomi"
+    return ""
+
+
+def release_text(finding) -> str:
+    """The release line of a Found row: its title, then where it comes from (``... (Digital) · nyaa``)."""
+    source = source_text(finding)
+    return f"{finding.title} · {source}" if source and finding.title else finding.title or source
+
+
+def reason_text(finding) -> str:
+    """Why a finding waits for the owner, as the Found row says it (the backend's words)."""
+    return finding.reason or "Waits for you"
+
+
+def ordinal(n: int) -> str:
+    """``1st`` / ``2nd`` / ``3rd`` / ``11th`` / ``22nd``."""
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def status_text(finding, state: str = "", queue_pos: int = 0) -> Tuple[str, str]:
+    """(the Found row's status chip, its chip kind): ``Change source?`` (warn) for a finding with nothing to send,
+    ``Sending…`` / ``Queued · 2nd`` (run) while it is on its way, else ``Waiting`` (ready)."""
+    if needs_source(finding):
+        return "Change source?", "warn"
+    if state == "sending":
+        return "Sending…", "run"
+    if state == "queued":
+        return (f"Queued · {ordinal(queue_pos)}" if queue_pos > 0 else "Queued"), "run"
+    return "Waiting", "ready"
+
+
+def mode_chip(in_force: Optional[str], default: str, library: bool = False) -> Tuple[str, str]:
+    """(a Found series header's mode chip, its tooltip): the series' own mode where it differs from the default it
+    follows (as the List's chips), else ``Default (Notify)``."""
+    if in_force in MODES and in_force != default:
+        return mode_label(in_force), f"Automatic downloads: {mode_label(in_force)} (this series' own). " \
+                                     f"{MODE_HELP[in_force]} Click to change it."
+    where = "Settings > Library" if library else "Settings > Automation"
+    return f"Default ({mode_label(default)})", f"Automatic downloads: {mode_label(default)}, {whose_default(library)} " \
+                                                f"({where}). Click to change it."
+
+
 def total_size(findings: Sequence) -> Tuple[int, int]:
     """(the bytes of the findings that say their size, how many do not)."""
     known = sum(int(f.size_bytes) for f in findings if f.size_bytes)

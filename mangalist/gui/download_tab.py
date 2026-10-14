@@ -72,7 +72,7 @@ from .. import config
 from .background import describe_error, start_call
 from .chips import ChipButton, FlowLayout
 from .chapters_panel import ChaptersPanel
-from .automation_rules import bulk_find_label, by_series, has_automation, report_text, series_line
+from .automation_rules import bulk_find_label, by_series, has_automation, needs_source, report_text, series_line
 from .download_rules import (
     CHAPTER_CHIPS,
     GROUP_TITLES,
@@ -125,6 +125,7 @@ GROUP_FOUND = "found"           # the Found chip (automatic downloads): not a "T
 _log = logging.getLogger(__name__)
 
 REFRESH_MS = 60_000
+LAYOUT_SAVE_MS = 400           # a splitter drag is saved this long after its last step
 SEARCH_DELAY_MS = 350          # a pause after selecting a series, before it is searched
 def upgrade_note_style() -> str:
     return f"\nQLabel#upgradeNote {{ background: {current().accent_tint}; border-radius: 6px; padding: 8px 12px; }}\n"
@@ -219,6 +220,7 @@ class DownloadTab(QWidget):
         self._confirm_skip_all = confirm_skip_all or self._ask_skip_all
         self._automation = has_automation(backend)
         self._findings: list = []                   # the waiting findings (automatic downloads)
+        self._found_names: Dict[int, str] = {}      # their series' names, as last handed to the Found view
         self._last_run = None
         self._find_call = None                      # the find pass running for this tab (Find now / a bulk find)
         self._replaced = replaced if replaced is not None else replaced_service(backend)
@@ -231,7 +233,7 @@ class DownloadTab(QWidget):
         self._checked: set = set()
         # One group at a time, picked with the chips above the list (owner, 2026-10-09: "I shouldn't need to scroll down
         # to get to 'upgrades'"); remembered, like the panel's width.
-        cfg = config.load()
+        cfg = config.load()                 # read once: the group, the sort and the panels' sizes (_build_ui)
         self._group = cfg.get(CFG_GROUP) if cfg.get(CFG_GROUP) in self.chip_groups() else GROUP_VOLUMES
         self._group_chosen = False          # the owner picked a group this session: keep it even when it is empty
         self._results: Dict[str, SearchOutcome] = {}
@@ -254,7 +256,12 @@ class DownloadTab(QWidget):
         self._pending_focus: Optional[str] = None
         self._rebuilding = False
         self._stopped = False
-        self._build_ui(confirm, open_url, confirm_send_all)
+        self._build_ui(confirm, open_url, confirm_send_all, cfg)
+        # The panels' sizes are saved 400 ms after the last drag step, not on every pixel (every key is rewritten).
+        self._layout_timer = QTimer(self)
+        self._layout_timer.setSingleShot(True)
+        self._layout_timer.setInterval(LAYOUT_SAVE_MS)
+        self._layout_timer.timeout.connect(self.save_layout)
         self._delay = QTimer(self)
         self._delay.setSingleShot(True)
         self._delay.setInterval(search_delay_ms)
@@ -276,7 +283,8 @@ class DownloadTab(QWidget):
 
     # --- UI ------------------------------------------------------------------------------------------
 
-    def _build_ui(self, confirm, open_url, confirm_send_all=None) -> None:
+    def _build_ui(self, confirm, open_url, confirm_send_all=None, cfg=None) -> None:
+        cfg = cfg if cfg is not None else config.load()
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -309,7 +317,7 @@ class DownloadTab(QWidget):
         self.sort_combo.setAccessibleName("Sort series to get")
         for key, text in SORTS:
             self.sort_combo.addItem(text, key)
-        saved_sort = config.load().get(CFG_SORT)
+        saved_sort = cfg.get(CFG_SORT)
         self.sort_combo.setCurrentIndex(max(0, self.sort_combo.findData(saved_sort)))
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         filter_row = QHBoxLayout()
@@ -440,14 +448,14 @@ class DownloadTab(QWidget):
         self.vsplitter.addWidget(bottom)
         self.vsplitter.setStretchFactor(0, 1)
         self.vsplitter.setStretchFactor(1, 0)
-        vsaved = config.load().get(CFG_VSPLIT)
+        vsaved = cfg.get(CFG_VSPLIT)
         self.vsplitter.setSizes([int(vsaved[0]), int(vsaved[1])] if isinstance(vsaved, list) and len(vsaved) == 2
                                 else [600, 270])
         self.vsplitter.splitterMoved.connect(self._remember_vsplit)
         self.splitter.addWidget(right_widget)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        saved = config.load().get(CFG_SPLIT)
+        saved = cfg.get(CFG_SPLIT)
         self.splitter.setSizes([int(saved[0]), int(saved[1])] if isinstance(saved, list) and len(saved) == 2
                                else [400, 1000])
         self.splitter.splitterMoved.connect(self._remember_split)
@@ -487,7 +495,8 @@ class DownloadTab(QWidget):
         self._checked &= set(self._by_folder)
         self._queue = deque(f for f in self._queue if f in self._by_folder)
         if self._automation:                            # the findings' series names come from this list
-            self.found.set_findings(self._findings, self.found_names(), self._last_run)
+            self._found_names = self.found_names()
+            self.found.set_findings(self._findings, self._found_names, self._last_run)
         self._rebuild()
         self.downloads.set_known_titles({sid: self._by_folder[f].title for f, sid in self._series_ids.items()
                                          if sid is not None})
@@ -717,14 +726,16 @@ class DownloadTab(QWidget):
         return self._group
 
     def _remember_split(self, *_args) -> None:
-        cfg = config.load()
-        cfg[CFG_SPLIT] = [int(x) for x in self.splitter.sizes()]
-        config.save(cfg)
+        self._layout_timer.start()
 
     def _remember_vsplit(self, *_args) -> None:
-        cfg = config.load()
-        cfg[CFG_VSPLIT] = [int(x) for x in self.vsplitter.sizes()]
-        config.save(cfg)
+        self._layout_timer.start()
+
+    def save_layout(self) -> None:
+        """Remember the To get panel's width and the In progress panel's height (after a drag; on stop)."""
+        self._layout_timer.stop()
+        config.save_values({CFG_SPLIT: [int(x) for x in self.splitter.sizes()],
+                            CFG_VSPLIT: [int(x) for x in self.vsplitter.sizes()]})
 
     def focus(self, folder: str) -> None:
         """Select that series and search it now ("Get the missing volumes" in the List tab)."""
@@ -980,6 +991,8 @@ class DownloadTab(QWidget):
         menu.addSeparator()
         actions.add_modes()
         menu.addSeparator()
+        if any(needs_source(f) for f in findings):        # nothing to send until the series has a source
+            actions.add_action(CHANGE_SOURCE, lambda: self._change_source_from_found(series_id), CHANGE_SOURCE_TIP)
         n = len(findings)
         act_skip = actions.add_action(f"Skip all of this series' findings ({n})" if n > 1 else
                                       "Skip all of this series' findings",
@@ -989,6 +1002,10 @@ class DownloadTab(QWidget):
         said = actions.run(self._exec_menu(menu, pos))
         if said:
             self.found.say(said)
+
+    def _change_source_from_found(self, series_id: int) -> str:
+        self.open_chapters_of(series_id)
+        return ""
 
     def _skip_series(self, series_id: int, n: int) -> str:
         if n > 1 and not self._confirm_skip_all(
@@ -1277,10 +1294,13 @@ class DownloadTab(QWidget):
         except Exception as exc:  # noqa: BLE001 - shown in the view; the old list stays
             self.found.say(f"Could not read what was found: {describe_error(exc)}", "bad")
             return
-        changed = [f.id for f in findings] != [f.id for f in self._findings]
+        new = findings != self._findings
         self._findings, self._last_run = findings, last_run
-        self.found.set_findings(findings, self.found_names(), last_run)
-        if changed or self._group == GROUP_FOUND:
+        names = self.found_names() if new else self._found_names     # (names of the series not in To get: a read)
+        changed = new or names != self._found_names
+        self._found_names = names
+        self.found.set_findings(findings, names, last_run)       # unchanged: the view changes nothing
+        if changed:                                     # the chips' counts, the Found list on the left
             self._rebuild()
         self.count_changed.emit(self.badge_count())
 
@@ -1457,6 +1477,8 @@ class DownloadTab(QWidget):
     def stop(self) -> None:
         """On close: abandon the background calls (their results are dropped)."""
         self._stopped = True
+        if self._layout_timer.isActive():           # a drag just before closing is kept
+            self.save_layout()
         self._delay.stop()
         if self._refresh_timer is not None:
             self._refresh_timer.stop()
