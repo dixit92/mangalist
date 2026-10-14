@@ -50,53 +50,69 @@ from ..duplicates import (
     largest,
     newest,
 )
+from . import theme
 from .background import BackgroundCall, start_call
 from .links import open_folder as open_folder_default, open_link
+from .palette import Palette, current
 from .shell import DuplicateFile, DuplicateGroup, DuplicateSeries
 
 _log = logging.getLogger(__name__)
 
-# The mockup's palette (Main.dc.html): ground, panels, ink, accent and the badge colours.
-STYLE = """
-#DuplicatesView { background: #f3f3f1; color: #161616; }
-#DuplicatesView QScrollArea, #DuplicatesView #Body { background: transparent; border: none; }
-#DuplicatesView QLabel { background: transparent; color: #161616; }
-#DuplicatesView QLabel[role="heading"] { font-size: 12px; font-weight: 600; color: #5a5a57; }
-#DuplicatesView QLabel[role="muted"] { color: #6b6b67; font-size: 12px; }
-#DuplicatesView QLabel[role="title"] { font-size: 15px; font-weight: 700; }
-#DuplicatesView QLabel[role="mono"] { font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }
-#DuplicatesView QLabel[role="mono"][tone="muted"] { color: #6b6b67; }
-#DuplicatesView QLabel[role="pill"] { padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 600;
-    background: #e8eefb; color: #1f4fb8; }
-#DuplicatesView QLabel[role="error"] { color: #8b1d1d; }
-#DuplicatesView QFrame[role="card"] { background: #ffffff; border: 1px solid #dcdcd8; border-radius: 8px; }
-#DuplicatesView QFrame[role="folder"] { background: #fafaf8; border: 1px solid #e3e3df; border-radius: 6px; }
-#DuplicatesView QFrame[role="row"] { background: transparent; border: none; border-top: 1px solid #efefec; }
-#DuplicatesView QFrame[role="bar"] { background: #ffffff; border: none; border-top: 1px solid #dcdcd8; }
-#DuplicatesView QPushButton { height: 32px; padding: 0 14px; border: 1px solid #c4c4bf; border-radius: 6px;
-    background: #ffffff; color: #161616; }
-#DuplicatesView QPushButton:hover { background: #f3f3f1; }
-#DuplicatesView QPushButton:disabled { color: #9a9a96; background: #f3f3f1; }
-#DuplicatesView QPushButton[role="primary"] { height: 36px; border: 1px solid #1f4fb8; background: #1f4fb8;
-    color: #ffffff; font-weight: 600; }
-#DuplicatesView QPushButton[role="primary"]:hover { background: #163a87; }
-#DuplicatesView QPushButton[role="primary"]:disabled { border-color: #c4c4bf; background: #e3e3df; color: #9a9a96; }
-#DuplicatesView QPushButton[role="danger"] { height: 36px; border: 1px solid #8b1d1d; background: #8b1d1d; color: #ffffff;
-    font-weight: 600; }
-#DuplicatesView QPushButton[role="danger"]:hover { background: #6e1616; }
-#DuplicatesView QListWidget { background: #ffffff; border: 1px solid #dcdcd8; border-radius: 6px;
-    font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }
-#DuplicatesView QPushButton[role="link"] { height: 26px; padding: 0 10px; font-size: 12px; }
-#DuplicatesView QPushButton[role="keep"], #DuplicatesView QPushButton[role="discard"] { height: 26px; min-width: 52px;
-    padding: 0 10px; font-size: 12px; background: #ffffff; color: #3a3a38; }
-#DuplicatesView QPushButton[role="keep"] { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-#DuplicatesView QPushButton[role="discard"] { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }
-#DuplicatesView QPushButton[role="keep"]:checked { background: #e7f3ec; color: #1d5e36; border-color: #1d5e36; font-weight: 600; }
-#DuplicatesView QPushButton[role="discard"]:checked { background: #fbeaea; color: #8b1d1d; border-color: #8b1d1d; font-weight: 600; }
-#DuplicatesView QProgressBar { border: none; background: #e3e3df; border-radius: 2px; max-height: 4px; min-height: 4px; }
-#DuplicatesView QProgressBar::chunk { background: #1f4fb8; border-radius: 2px; }
-#DuplicatesView QLabel[role="busy"] { color: #1f4fb8; font-size: 12px; font-weight: 600; }
+
+# The mockup's palette (Main.dc.html): ground, panels, ink, accent and the badge colours - the palette in force.
+def style(pal: Optional[Palette] = None) -> str:
+    p = pal or current()
+    return f"""
+#DuplicatesView {{ background: {p.background}; color: {p.text}; }}
+#DuplicatesView QScrollArea, #DuplicatesView #Body {{ background: transparent; border: none; }}
+#DuplicatesView QLabel {{ background: transparent; color: {p.text}; }}
+#DuplicatesView QLabel[role="heading"] {{ font-size: 12px; font-weight: 600; color: {p.muted}; }}
+#DuplicatesView QLabel[role="muted"] {{ color: {p.muted_2}; font-size: 12px; }}
+#DuplicatesView QLabel[role="title"] {{ font-size: 15px; font-weight: 700; }}
+#DuplicatesView QLabel[role="mono"] {{ font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }}
+#DuplicatesView QLabel[role="mono"][tone="muted"] {{ color: {p.muted_2}; }}
+#DuplicatesView QLabel[role="pill"] {{ padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 600;
+    background: {p.info_bg}; color: {p.info_text}; }}
+#DuplicatesView QLabel[role="error"] {{ color: {p.bad_text}; }}
+#DuplicatesView QFrame[role="card"] {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 8px; }}
+#DuplicatesView QFrame[role="folder"] {{ background: {p.surface_subtle}; border: 1px solid {p.border_soft};
+    border-radius: 6px; }}
+#DuplicatesView QFrame[role="row"] {{ background: transparent; border: none; border-top: 1px solid {p.row_rule}; }}
+#DuplicatesView QFrame[role="bar"] {{ background: {p.surface}; border: none; border-top: 1px solid {p.border}; }}
+#DuplicatesView QPushButton {{ height: 32px; padding: 0 14px; border: 1px solid {p.control}; border-radius: 6px;
+    background: {p.surface}; color: {p.text}; }}
+#DuplicatesView QPushButton:hover {{ background: {p.background}; }}
+#DuplicatesView QPushButton:disabled {{ color: {p.disabled}; background: {p.background}; }}
+#DuplicatesView QPushButton[role="primary"] {{ height: 36px; border: 1px solid {p.accent_fill}; background: {p.accent_fill};
+    color: {p.accent_text}; font-weight: 600; }}
+#DuplicatesView QPushButton[role="primary"]:hover {{ background: {p.accent_fill_hover}; }}
+#DuplicatesView QPushButton[role="primary"]:disabled {{ border-color: {p.control}; background: {p.border_soft};
+    color: {p.disabled}; }}
+#DuplicatesView QPushButton[role="danger"] {{ height: 36px; border: 1px solid {p.bad_fill}; background: {p.bad_fill};
+    color: {p.accent_text}; font-weight: 600; }}
+#DuplicatesView QPushButton[role="danger"]:hover {{ background: {p.bad_fill_hover}; }}
+#DuplicatesView QListWidget {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 6px;
+    font-family: "IBM Plex Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }}
+#DuplicatesView QPushButton[role="link"] {{ height: 26px; padding: 0 10px; font-size: 12px; }}
+#DuplicatesView QPushButton[role="keep"], #DuplicatesView QPushButton[role="discard"] {{ height: 26px; min-width: 52px;
+    padding: 0 10px; font-size: 12px; background: {p.surface}; color: {p.text_2}; }}
+#DuplicatesView QPushButton[role="keep"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
+#DuplicatesView QPushButton[role="discard"] {{ border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }}
+#DuplicatesView QPushButton[role="keep"]:checked {{ background: {p.ok_bg}; color: {p.ok_text}; border-color: {p.ok_text};
+    font-weight: 600; }}
+#DuplicatesView QPushButton[role="discard"]:checked {{ background: {p.bad_bg}; color: {p.bad_text};
+    border-color: {p.bad_text}; font-weight: 600; }}
+#DuplicatesView QProgressBar {{ border: none; background: {p.border_soft}; border-radius: 2px; max-height: 4px;
+    min-height: 4px; }}
+#DuplicatesView QProgressBar::chunk {{ background: {p.accent}; border-radius: 2px; }}
+#DuplicatesView QLabel[role="busy"] {{ color: {p.accent}; font-size: 12px; font-weight: 600; }}
 """
+
+
+def __getattr__(name: str):
+    if name == "STYLE":                         # the old constant: the sheet in the current palette
+        return style()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _label(text: str = "", role: Optional[str] = None, tone: Optional[str] = None, tip: Optional[str] = None) -> QLabel:
@@ -167,7 +183,7 @@ class ConfirmDiscardDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Delete these files?")
         self.setObjectName("DuplicatesView")          # the view's look (its stylesheet is keyed on this name)
-        self.setStyleSheet(STYLE)
+        theme.bind_sheet(self, style)
         self.setModal(True)
         self.resize(720, 420)
         total = sum(f.size for f in files)
@@ -269,7 +285,7 @@ class DuplicatesView(QWidget):
                  open_folder: Optional[Callable[[str], object]] = None):
         super().__init__(parent)
         self.setObjectName("DuplicatesView")
-        self.setStyleSheet(STYLE)
+        theme.bind_sheet(self, style)
         self._db = db
         self._confirm = confirm or (lambda files: _ask_confirmation(self, files))
         self._open_folder = open_folder or open_folder_default

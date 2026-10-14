@@ -41,6 +41,7 @@ from ..store.exclusions import InvalidPattern, TreeListing, list_tree, normalize
 from ..store.roots import validate_root
 from ..store.schema import AUTO_MODE_DEFAULT, AUTO_MODES, ENFORCE_NAMING_DEFAULT
 from .automation_rules import MODE_HELP, MODE_LABELS, default_entry_label
+from .palette import current
 
 BrowseFn = Callable[[QWidget, str, str], str]
 
@@ -252,7 +253,7 @@ class RootsEditor(QWidget):
             item = QListWidgetItem(f"{r.name}\n{r.path}")
             item.setToolTip(r.path)
             if not Path(r.path).is_dir():
-                item.setForeground(QColor("#b71c1c"))
+                item.setForeground(QColor(current().error_text))
                 item.setToolTip(f"{r.path}\n(not reachable now)")
             self.root_list.addItem(item)
         self._loading = False

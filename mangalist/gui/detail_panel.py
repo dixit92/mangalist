@@ -311,10 +311,10 @@ class DetailPanel(QWidget):
         lines = []
         for hit in entry.files[:MAX_SAMPLE_FILES]:
             name = html.escape(("  " * hit.depth) + hit.path.name)
-            lines.append(f'{name} <span style="color:{theme.MUTED_2}">{html.escape(_human(hit.size))}</span>')
+            lines.append(f'{name} <span {theme.color_attr("muted_2")}>{html.escape(_human(hit.size))}</span>')
         if len(entry.files) > MAX_SAMPLE_FILES:
-            lines.append(f'<span style="color:{theme.MUTED_2}">and {len(entry.files) - MAX_SAMPLE_FILES} more</span>')
-        self._files_label.setText("<br>".join(lines) or f'<span style="color:{theme.MUTED_2}">No files</span>')
+            lines.append(f'<span {theme.color_attr("muted_2")}>and {len(entry.files) - MAX_SAMPLE_FILES} more</span>')
+        self._files_label.setText("<br>".join(lines) or f'<span {theme.color_attr("muted_2")}>No files</span>')
 
     @staticmethod
     def _repolish(widget: QWidget) -> None:
@@ -328,10 +328,10 @@ class DetailPanel(QWidget):
             for lbl in (self._lbl_state, self._lbl_flags, self._lbl_gaps, self._lbl_mangapixer):
                 lbl.setText("-")
                 lbl.setToolTip("")
-            self._lbl_state.setStyleSheet("")
+            theme.bind_sheet(self._lbl_state, None)
         else:
             self._lbl_state.setText(state.state.value)
-            self._lbl_state.setStyleSheet(badge_style(state.state.value))
+            theme.bind_sheet(self._lbl_state, lambda v=state.state.value: badge_style(v))
             self._lbl_state.setToolTip("\n".join(state.reasons))
             flags: List[str] = []
             if state.complete_with_upgrade:
@@ -367,5 +367,5 @@ def links_html(links: Sequence[OfficialLink]) -> str:
         if link.url:
             lines.append(f'<a href="{html.escape(link.url, quote=True)}">{label}</a>')
         else:
-            lines.append(f'<span style="color:{theme.MUTED_2}">{label} (no page known)</span>')
+            lines.append(f'<span {theme.color_attr("muted_2")}>{label} (no page known)</span>')
     return "<br>".join(lines)

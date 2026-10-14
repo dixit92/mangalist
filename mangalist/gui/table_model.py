@@ -16,6 +16,7 @@ from ..mu_match import match_tooltip, needs_review
 from ..mu_progress import behind_sort_key, format_behind, format_behind_tooltip
 from ..official_sources import KIND_SEARCH, official_links, primary_label
 from .list_text import english_text
+from .palette import current
 from .shell import DuplicateSeries
 from ..states import MISSING_STATES, STATE_ORDER, WANTED_STATES, SeriesState, State, fallback_inventory_from_entry
 from ..wanted import evaluate, held_volumes
@@ -107,11 +108,16 @@ def state_matches(state: Optional[SeriesState], key: Optional[str]) -> bool:
         return state.state == State.UPGRADE or state.complete_with_upgrade
     return state.state.value == key
 
-# Row tints in the light theme's colours (gui/theme.py): examined rows green, a match in the review tier orange,
-# the row being fetched from MangaUpdates blue - each distinct from the picked row (#eef3fd).
-EXAMINED_ROW_BG = QColor("#e7f3ec")
-WEAK_MATCH_BG = QColor("#fdf0e3")
-MU_PROCESSING_BG = QColor("#dce6fa")
+# Row tints, palette tokens read at data() time (a switch of Appearance shows at the next repaint): examined rows
+# green, a match in the review tier orange, the row being fetched from MangaUpdates blue - each distinct from the
+# picked row.
+ROW_TINTS = {"EXAMINED_ROW_BG": "ok_bg", "WEAK_MATCH_BG": "warn_bg", "MU_PROCESSING_BG": "busy_row"}
+
+
+def __getattr__(name: str):
+    if name in ROW_TINTS:                       # the old constants: the tint in the current palette
+        return QColor(getattr(current(), ROW_TINTS[name]))
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def under_any(folder: str, tops: Iterable[str]) -> bool:
@@ -595,11 +601,11 @@ class MangaTableModel(QAbstractTableModel):
 
         if role == Qt.BackgroundRole:
             if self._mu_processing_row == index.row():
-                return MU_PROCESSING_BG
+                return QColor(current().busy_row)
             if e.examined:
-                return EXAMINED_ROW_BG
+                return QColor(current().ok_bg)
             if col == COL_MU_TITLE and needs_review(e):
-                return WEAK_MATCH_BG
+                return QColor(current().warn_bg)
 
         if role == Qt.ToolTipRole:
             if col == COL_EXAMINED:
