@@ -770,7 +770,8 @@ def _evaluate(
             unbundled_missing = [c for c in _whole_numbers(after, target) if c > after and not held.holds_chapter(c)]
             if target != target.to_integral_value() and target > after and not held.holds_chapter(target):
                 unbundled_missing.append(target)
-            unbundled_missing += [p for p in held.split_missing if after < p <= target and p not in unbundled_missing]
+            unbundled_missing += [p for p in held.split_missing if after < p <= target and p not in unbundled_missing
+                                  and not held.holds_chapter(p)]
     # A volumes-only folder holding volumes the volume list does not map: which chapters those hold is unknown, so the
     # chapter numbers are not compared (owner, 2026-10-11: every volume of a finished 4-koma held, the list mapped only
     # volumes 1-3, and MangaUpdates' strip count 717 made "missing ch 261-717").
@@ -792,7 +793,8 @@ def _evaluate(
             missing = [c for c in _whole_numbers(start, target) if not held.holds_chapter(c)]
             if target != target.to_integral_value() and not held.holds_chapter(target):
                 missing.append(target)
-            missing += [p for p in held.split_missing if p <= target and p not in missing]
+            # a missing part the folder holds after all (a range file, a volume) is not missing (owner, 2026-10-14)
+            missing += [p for p in held.split_missing if p <= target and p not in missing and not held.holds_chapter(p)]
             if unbundled_missing is not None:
                 missing, unbundled_missing = sorted(set(missing) | set(unbundled_missing)), None
             gaps += _chapter_gaps(missing)
