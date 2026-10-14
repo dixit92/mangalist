@@ -369,10 +369,14 @@ def test_show_in_list_and_stop(qapp):
 # --- groups as chips, a resizable panel (owner, 2026-10-09) ------------------------------------------------------
 
 def test_the_chosen_group_and_the_panel_width_are_remembered(qapp):
+    from mangalist import config
+
     tab, _ = make(qapp)
     tab.show_group(GROUP_UPGRADES)
     tab.splitter.setSizes([520, 900])
     tab.splitter.splitterMoved.emit(520, 1)
+    assert config.load().get(dt.CFG_SPLIT) != tab.splitter.sizes()           # not saved on every pixel of the drag
+    wait_until(qapp, lambda: config.load().get(dt.CFG_SPLIT) == tab.splitter.sizes())    # but once it stops
     again, _ = make(qapp)
     assert again.current_group() == GROUP_UPGRADES and rows(again)[1] == ["Spy x Family"]
     assert again.splitter.sizes()[0] == tab.splitter.sizes()[0]
@@ -399,6 +403,7 @@ def test_the_in_progress_panel_height_is_resizable_and_remembered(qapp):
     tab, _ = make(qapp)
     tab.vsplitter.setSizes([400, 360])
     tab.vsplitter.splitterMoved.emit(400, 1)
+    tab.stop()                                                          # closing keeps a drag not saved yet
     again, _ = make(qapp)
     assert again.vsplitter.sizes()[1] == tab.vsplitter.sizes()[1]
 

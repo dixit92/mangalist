@@ -83,12 +83,15 @@ def test_the_found_chip_counts_waiting_findings_and_the_badge_adds_them(qapp):
     names = [tab.tree.topLevelItem(i).text(0) for i in range(1, tab.tree.topLevelItemCount())]
     assert heads[0] == "FOUND · 3 SERIES" and names == ["Alpha Saga", "Beta Days", "Gamma Webcomic"]
     assert tab.tree.topLevelItem(3).data(0, dt.ROLE_SUB) == "ch 41-42"
-    rows = tab.found.rows
-    assert [r.name_label.text() for r in rows.values()] == ["Alpha Saga", "Beta Days", "Gamma Webcomic"]
+    rows = tab.found.rows                                               # one painted row per finding
+    assert [r.name for r in rows.values()] == ["Alpha Saga", "Beta Days", "Gamma Webcomic"]
     beta = rows[2]
-    assert beta.gets_label.text() == "Gets v02-v03" and beta.size_label.text() == "size not known"
-    assert beta.reason_label.text() == "Waits because a pack whose files cannot be narrowed to the missing volumes"
-    assert beta.kind_pill.text() == "Missing volumes" and rows[3].kind_pill.text() == "Missing chapters"
+    assert beta.gets == "v02-v03" and beta.size == "size not known" and beta.status == ("Waiting", "ready")
+    assert beta.reason == "a pack whose files cannot be narrowed to the missing volumes"
+    assert beta.kind == "Missing volumes" and rows[3].kind == "Missing chapters"
+    assert rows[1].release == "Alpha Saga v02 (Digital)" and rows[1].size == "700 MB"
+    heads = tab.found.headers()                                         # each series under its own header
+    assert list(heads) == [1, 2, 3] and heads[2].count == "1 waiting" and heads[1].count == "1 waiting · 700 MB"
     assert tab.found.count_label.text() == "3 waiting · 700 MB + 2 of size not known"
     tab.show_group(GROUP_VOLUMES)                                       # back to a To get group: the releases panel
     assert tab.panels.currentIndex() == dt.PANEL_RELEASES and not tab.footer.isHidden()
@@ -107,7 +110,7 @@ def test_picking_a_series_in_the_found_list_shows_only_its_findings(qapp):
 def test_send_runs_off_the_ui_thread_and_the_row_leaves(qapp):
     tab, backend, _c, _a = make(qapp)
     tab.show_group(GROUP_FOUND)
-    tab.found.rows[1].btn_send.click()
+    tab.found.click(1, "action")
     settle(qapp, tab)
     assert backend.sent_findings == [1] and backend.threads[-1] != threading.get_ident()
     assert 1 not in tab.found.rows and tab.group_chips[GROUP_FOUND].count == 2
@@ -126,7 +129,7 @@ def test_a_refused_send_says_why_and_keeps_the_row(qapp):
 
 def test_skip_is_quick_and_the_finding_is_not_offered_again(qapp):
     tab, backend, _c, _a = make(qapp)
-    tab.found.rows[3].btn_skip.click()
+    tab.found.click(3, "skip")
     assert backend.skipped_findings == [3] and 3 not in tab.found.rows
     assert "not offered again" in tab.found.status_label.text()
 
@@ -142,7 +145,7 @@ def test_send_all_asks_first_with_the_count_and_size(qapp):
     assert tab.found.send_all()
     settle(qapp, tab)
     assert backend.sent_findings == [1, 2, 3] and tab.found.status_label.text() == "Sent 3 of 3."
-    assert tab.found.rows == {} and not tab.found.empty.isHidden()
+    assert tab.found.rows == {} and not tab.found.empty.isHidden() and tab.found.box.isHidden()
 
 
 def test_the_empty_state_says_nothing_waits_and_when_the_last_pass_ran(qapp):
@@ -220,11 +223,12 @@ def test_a_finding_without_a_source_offers_change_source_which_opens_missing_cha
     tab, backend, confirm, answers = make(qapp, FakeFindingBackend(found=FOUND + [DROPPED], last_run=find_run()))
     tab.show_group(GROUP_FOUND)
     row = tab.found.rows[4]
-    assert row.btn_send.isHidden() and not row.btn_source.isHidden() and row.btn_source.text() == "Change source…"
-    assert not tab.found.rows[3].btn_send.isHidden() and tab.found.rows[3].btn_source.isHidden()
+    assert row.action == "Change source…" and row.action_enabled and row.status == ("Change source?", "warn")
+    assert row.size == ""                                                 # nothing to download yet: no size
+    assert tab.found.rows[3].action == "Send"
     # Send all leaves it out: there is nothing to send until the series has a source.
     assert tab.found.btn_send_all.text() == "Send all 3…"
-    row.btn_source.click()
+    tab.found.click(4, "action")
     assert tab._group == GROUP_CHAPTERS and tab.current_folder() == "/lib/Gamma Webcomic"
     assert backend.sent_findings == []
 
@@ -262,11 +266,17 @@ def test_send_while_one_is_sending_queues_it_and_the_queue_runs_in_order(qapp):
     assert found.send(1)
     assert found.send(3) and found.send(2) and found.queued() == [3, 2]
     assert not found.send(3)                                              # already queued
-    assert found.rows[1].btn_send.text() == "Sending…" and found.rows[3].btn_send.text() == "Queued"
-    assert not found.rows[3].btn_send.isEnabled() and found.rows[3].btn_skip.isEnabled()
-    assert not found.rows[1].btn_skip.isEnabled() and "(2 more queued)" in found.status_label.text()
-    found.rows[2].btn_skip.click()                                        # skipping a queued one unqueues it
-    assert backend.skipped_findings == [2] and found.queued() == [3] and found.rows[3].btn_send.text() == "Queued"
+    assert found.rows[1].action == "Sending…" and found.rows[3].action == "Queued"
+    assert found.rows[1].status == ("Sending…", "run") and found.rows[3].status == ("Queued · 1st", "run")
+    assert found.rows[2].status == ("Queued · 2nd", "run")
+    assert not found.rows[3].action_enabled and found.rows[3].skip_enabled
+    assert not found.rows[1].skip_enabled and "(2 more queued)" in found.status_label.text()
+    found.click(1, "skip")                                                # the one being sent cannot be skipped
+    found.click(3, "action")                                              # nor a queued one sent again
+    assert backend.skipped_findings == [] and found.queued() == [3, 2]
+    found.click(2, "skip")                                                # skipping a queued one unqueues it
+    assert backend.skipped_findings == [2] and found.queued() == [3] and found.rows[3].action == "Queued"
+    assert found.rows[3].status == ("Queued · 1st", "run")
     backend.send_gate.set()
     settle(qapp, tab)
     assert backend.sent_findings == [1, 3] and found.queued() == [] and found.rows == {}

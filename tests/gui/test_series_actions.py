@@ -241,14 +241,14 @@ def test_change_source_from_to_get_opens_the_chapters_and_looks_on_other_sources
 def card_menu(tab, finding_id, pick: Optional[str] = None):
     menus = []
     tab._exec_menu = lambda menu, pos: menus.append(menu) or (find_action(menu, pick) if pick else None)
-    tab.found.rows[finding_id].btn_more.click()
+    tab.found.click(finding_id, "more")
     return menus[-1]
 
 
 def test_a_found_card_has_its_series_menu(qapp):
     tab, backend, host = make(qapp)
     tab.show_group(GROUP_FOUND)
-    assert all(row.btn_more.isVisibleTo(tab.found) for row in tab.found.rows.values())
+    assert all(row.menu for row in tab.found.rows.values())
     menu = card_menu(tab, 3)
     assert texts(menu) == ["Show in To get", "Show in List", OPEN_FOLDER_LABEL, "Automatic downloads",
                            "Skip all of this series' findings"]

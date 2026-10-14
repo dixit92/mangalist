@@ -225,6 +225,10 @@ class MangaEntry:
     # files): their archives stay in ``files`` (counts as before) but not in the inventory / units.
     nested_series: List[Path] = field(default_factory=list)
     _inventory_cache: Any = field(default=None, init=False, repr=False, compare=False)
+    # (files signature, volume list, Inventory) of the last inventory with a volume list (MangaPixer's), and
+    # (files signature, restarting units): both read for every state, the wanted list and the details
+    _inventory_vl_cache: Any = field(default=None, init=False, repr=False, compare=False)
+    _restarts_cache: Any = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def n_files(self) -> int:
@@ -276,12 +280,28 @@ class MangaEntry:
         nested = [Path(p) for p in self.nested_series]
         return [f for f in self.files if not any(_is_under(f.path, n) for n in nested)]
 
+    def _files_signature(self) -> tuple:
+        """What the cached inventory depends on: the file objects and their parses (a rescan or a re-parse replaces
+        them), the nested series, the folder and the kind hint (an unparsed file is parsed with it)."""
+        return tuple((id(f), id(f.parsed)) for f in self.files) + (tuple(map(str, self.nested_series)),
+                                                                   str(self.folder), self.kind_hint)
+
     @property
     def restarting_units(self) -> FrozenSet[str]:
         """``{"chapter"}`` / ``{"volume"}`` when those numbers start again in another folder of the series - ``Season 1``
         and ``Season 2`` both from chapter 1 - so they cannot be compared with one total (MangaPixer 1.29.0's rule,
         ported: two folders share two or more numbers, or start at the same number; 0 is ignored; one shared number
-        between folders that start apart is a duplicate at a boundary, not a restart). Empty: nothing restarts."""
+        between folders that start apart is a duplicate at a boundary, not a restart). Empty: nothing restarts. Cached
+        while the files and their parses are the same."""
+        sig = self._files_signature()
+        cached = self._restarts_cache
+        if cached is not None and cached[0] == sig:
+            return cached[1]
+        out = self._restarting_units()
+        self._restarts_cache = (sig, out)
+        return out
+
+    def _restarting_units(self) -> FrozenSet[str]:
         out = set()
         for attr in ("chapter", "volume"):
             sets: Dict[str, set] = {}
@@ -308,12 +328,17 @@ class MangaEntry:
     def inventory(self, volume_list: Optional[Iterable[Any]] = None) -> "Inventory":
         """The series' held units (:class:`mangalist.inventory.Inventory`), optionally merged with a
         volume list (MangaPixer's ``volumes.items``). Cached while the files and their parses are the
-        same (without a volume list)."""
+        same (with a volume list: the last one, while it is the same list or an equal one)."""
         from .inventory import inventory_of_entry
 
+        sig = self._files_signature()
         if volume_list is not None:
-            return inventory_of_entry(self, volume_list)
-        sig = tuple((id(f), id(f.parsed)) for f in self.files) + (tuple(map(str, self.nested_series)),)
+            cached = self._inventory_vl_cache
+            if cached is not None and cached[0] == sig and (cached[1] is volume_list or cached[1] == volume_list):
+                return cached[2]
+            inv = inventory_of_entry(self, volume_list)
+            self._inventory_vl_cache = (sig, volume_list, inv)
+            return inv
         cached = self._inventory_cache
         if cached is not None and cached[0] == sig:
             return cached[1]
