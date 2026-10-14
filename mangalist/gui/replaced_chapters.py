@@ -6,7 +6,8 @@ the owner's answers.
   hidden when there is nothing. "Review" opens the dialog.
 - :class:`ReplacedDialog` - every open batch (series, volumes, files, state) and the selected batch's files: **Restore**
   (held), **Move to holding folder** (pending, holding mode), **Delete...** (pending, delete mode: the confirmation
-  first), **Try again** (failed) and **Keep them** (pending or failed: never asked again).
+  first), **Try again** (failed) and **Keep them** (pending or failed: never asked again); **Empty all...** (two or
+  more held: every held batch at once, the same guarded empty as Settings > Replaced chapters).
 - :class:`ConfirmReplaceDialog` - lists every file about to be deleted; Delete is explicit, Cancel is the default
   (the duplicates view's confirmation).
 
@@ -42,6 +43,7 @@ from .palette import current
 from .volumes_target import numbers_text, volume_label
 
 ConfirmDeleteFn = Callable[[QWidget, Batch], bool]
+ConfirmEmptyAllFn = Callable[[QWidget, Sequence[Batch]], bool]
 COLUMNS = ("Series", "Volumes", "Files", "State")
 #: The download widgets' look, plus the two delete buttons: "Delete..." (opens the list) and the final "Delete N files".
 def dialog_style() -> str:
@@ -69,6 +71,10 @@ def file_line(f, *, full: bool = False) -> str:
 
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'s' if n != 1 else ''}"
+
+
+def _series(n: int) -> str:
+    return f"{n} series"                         # the same word for one and many
 
 
 def _guarded(fn: Callable[[], object]) -> Callable[[], object]:
@@ -168,15 +174,35 @@ def ask_empty(parent: QWidget, batch: Batch, series: str = "") -> bool:
     return box.clickedButton() is yes
 
 
+def ask_empty_all(parent: QWidget, held: Sequence[Batch], titles: Sequence[str] = ()) -> bool:
+    """Empty every held batch now? Cancel is the default."""
+    files = sum(len(b.files) for b in held)
+    size = sum(b.total_size for b in held)
+    names = ", ".join(titles[:3]) + (f" and {len(titles) - 3} more" if len(titles) > 3 else "")
+    box = QMessageBox(QMessageBox.Icon.Question, "Empty the holding folder now?",
+                      f"Delete the {_plural(files, 'chapter file')} ({_human(size)}) of {_series(len(held))}"
+                      f"{f' ({names})' if names else ''} from the holding folder now?\n\nThey cannot be restored "
+                      "afterwards. A series is only emptied while the volumes that replaced its chapters are still in "
+                      "the library; any other stays held.", parent=parent)
+    yes = box.addButton("Empty all", QMessageBox.ButtonRole.DestructiveRole)
+    no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(no)
+    box.exec()
+    return box.clickedButton() is yes
+
+
 class ReplacedDialog(QDialog):
     """The open batches and the owner's answers. ``changed`` carries the series folders whose files moved."""
 
     changed = Signal(list)
 
     def __init__(self, service, batches: Sequence[Batch], parent: Optional[QWidget] = None,
-                 confirm: Optional[ConfirmDeleteFn] = None, confirm_empty: Optional[ConfirmDeleteFn] = None):
+                 confirm: Optional[ConfirmDeleteFn] = None, confirm_empty: Optional[ConfirmDeleteFn] = None,
+                 confirm_empty_all: Optional[ConfirmEmptyAllFn] = None):
         super().__init__(parent)
         self._confirm_empty = confirm_empty or (lambda parent, batch: ask_empty(parent, batch, self._title(batch)))
+        self._confirm_empty_all = confirm_empty_all or (
+            lambda parent, held: ask_empty_all(parent, held, [self._title(b) for b in held]))
         self.setWindowTitle("Replaced chapters")
         self.setObjectName("settingsDialog")
         theme.bind_sheet(self, dialog_style)
@@ -214,6 +240,9 @@ class ReplacedDialog(QDialog):
         self.btn_empty = button("Empty now...", tip="Delete them from the holding folder now - only while the volumes "
                                                     "that replaced them are still in the library")
         self.btn_empty.setProperty("role", "danger-quiet")
+        self.btn_empty_all = button("Empty all...", tip="Delete every held series' files from the holding folder now - "
+                                                        "each only while its volumes are still in the library")
+        self.btn_empty_all.setProperty("role", "danger-quiet")
         self.btn_close = button("Close")
         self.btn_restore.clicked.connect(self.restore_selected)
         self.btn_hold.clicked.connect(self.hold_selected)
@@ -221,9 +250,10 @@ class ReplacedDialog(QDialog):
         self.btn_keep.clicked.connect(self.keep_selected)
         self.btn_retry.clicked.connect(self.retry_selected)
         self.btn_empty.clicked.connect(self.empty_selected)
+        self.btn_empty_all.clicked.connect(self.empty_all)
         self.btn_close.clicked.connect(self.reject)
         lay.addLayout(hbox(self.btn_restore, self.btn_empty, self.btn_hold, self.btn_delete, self.btn_retry,
-                           self.btn_keep, None, self.btn_close))
+                           self.btn_keep, None, self.btn_empty_all, self.btn_close))
         self._fill()
 
     # --- the list ------------------------------------------------------------------------------------------
@@ -267,10 +297,15 @@ class ReplacedDialog(QDialog):
             return None
         return self._batches[rows[0].row()]
 
+    def held(self) -> List[Batch]:
+        return [b for b in self._batches if b.status == "held"]
+
     def _show_selected(self) -> None:
         batch = self.selected()
         self.files.clear()
         busy = self._call is not None
+        self.btn_empty_all.setVisible(len(self.held()) > 1)
+        self.btn_empty_all.setEnabled(not busy)
         if batch is None:
             self.where_label.setText("Nothing to review." if not self._batches else "")
             self.kept_label.setText("")
@@ -341,6 +376,20 @@ class ReplacedDialog(QDialog):
                   lambda: self._service.empty_now(batch.id), moved=False)
         return True
 
+    def empty_all(self) -> bool:
+        """Empty every held batch now (owner, 2026-10-14: "I can still only empty one series at a time") - after one
+        yes; each batch only while its volumes are still in the library (the service keeps any other, saying why)."""
+        held = self.held()
+        if not held or self._call is not None:
+            return False
+        if not self._confirm_empty_all(self, held):
+            self._say("Nothing deleted.", "")
+            return False
+        files = sum(len(b.files) for b in held)
+        self._run(f"Emptying {_plural(files, 'file')} of {_series(len(held))} from the holding folder...",
+                  held[0], self._service.empty_all_now, moved=False)
+        return True
+
     def delete_selected(self) -> bool:
         """Delete the selected pending batch's files - only after the confirmation listing every one of them."""
         batch = self.selected()
@@ -374,7 +423,14 @@ class ReplacedDialog(QDialog):
     def _done(self, batch: Batch, result, moved: bool, batches: Optional[List[Batch]] = None) -> None:
         if batches is not None:
             self._batches = batches
-        if isinstance(result, list):                        # a delete: one outcome per file
+        if isinstance(result, tuple):                       # Empty all: (emptied ids, [(id, why not)])
+            emptied, refused = result
+            text = f"Emptied {_series(len(emptied))} from the holding folder."
+            if refused:
+                text += f" {len(refused)} kept: " + "; ".join(why for _id, why in refused[:3]) + (
+                    " ..." if len(refused) > 3 else "")
+            self._say(text, "warn" if refused else "ok")
+        elif isinstance(result, list):                      # a delete: one outcome per file
             gone = sum(1 for o in result if o.deleted)
             refused = [o for o in result if not o.deleted]
             text = f"Deleted {_plural(gone, 'file')}." + (f" {len(refused)} not deleted: {refused[0].reason}."

@@ -76,6 +76,14 @@ class FakeReplaced:
         self.threads.append(threading.get_ident())
         return self._set(bid, "purged")
 
+    def empty_all_now(self):
+        self.calls.append(("empty_all_now",))
+        self.threads.append(threading.get_ident())
+        held = [b.id for b in self.batches if b.status == "held"]
+        for bid in held:
+            self._set(bid, "purged")
+        return held, []
+
     def restore(self, bid):
         self.calls.append(("restore", bid))
         self.threads.append(threading.get_ident())
@@ -352,3 +360,32 @@ def test_the_release_panel_says_upgrade_for_an_upgrade(qapp):
     tab.focus(FOLDER)
     settle(qapp, tab)
     assert tab.releases.note_label.text() == UPGRADE_FOOTER_NOTE != FOOTER_NOTE
+
+
+def test_empty_all_empties_every_held_series_after_one_yes(qapp):
+    # owner, 2026-10-14: "I can still only empty one series at a time"
+    service = FakeReplaced([batch(1, "held", mode="holding"), batch(2, "held", mode="holding")], mode="holding")
+    tab, _ = make(qapp, [], service=service)
+    tab.replaced_bar.set_batches(service.open_batches())
+    dialog = tab.replaced_dialog()
+    assert dialog.btn_empty_all.isVisibleTo(dialog)
+    asked = []
+    dialog._confirm_empty_all = lambda parent, held: asked.append(len(held)) or False
+    assert not dialog.empty_all() and service.calls == [] and asked == [2]      # Cancel: nothing
+    dialog._confirm_empty_all = lambda parent, held: True
+    assert dialog.empty_all()
+    wait_until(qapp, lambda: not dialog.busy())
+    assert service.calls == [("empty_all_now",)] and threading.get_ident() not in service.threads[-1:]
+    assert dialog.message_label.text() == "Emptied 2 series from the holding folder."
+    assert dialog.table.rowCount() == 0 and not dialog.btn_empty_all.isVisibleTo(dialog)
+    dialog.reject()
+
+
+def test_empty_all_is_offered_only_for_two_or_more_held(qapp):
+    service = FakeReplaced([batch(1, "held", mode="holding"), batch(2, "pending")], mode="holding")
+    tab, _ = make(qapp, [], service=service)
+    tab.replaced_bar.set_batches(service.open_batches())
+    dialog = tab.replaced_dialog()
+    assert not dialog.btn_empty_all.isVisibleTo(dialog) and dialog.btn_empty.isVisibleTo(dialog)
+    dialog.reject()
+
