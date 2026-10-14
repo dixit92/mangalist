@@ -122,6 +122,7 @@ QFrame[card="dashed"] QLabel {{ color: {p.muted}; }}
 QTreeWidget#toGetTree {{ border: none; background: {p.surface}; outline: 0; selection-background-color: {p.selected};
                          selection-color: {p.text}; }}
 QTreeWidget#toGetTree::item {{ border: none; }}
+QListView#foundList {{ border: none; background: {p.surface}; outline: 0; }}
 QTableWidget#releasesTable, QTableWidget#progressTable {{ border: none; background: {p.surface};
                                                           gridline-color: {p.row_rule}; outline: 0;
                                                           selection-background-color: {p.selected};
