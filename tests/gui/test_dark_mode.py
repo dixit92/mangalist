@@ -42,6 +42,7 @@ def themed(qapp, monkeypatch):
         qapp.setStyleSheet(saved[3])
         if saved[0]:
             qapp.setStyle(saved[0])
+        qapp._mangalist_fusion = False                       # the next apply_theme sets Fusion again
         qapp.setPalette(saved[1])
         qapp.setFont(saved[2])
 
@@ -190,3 +191,15 @@ def test_dark_asks_the_platform_for_dark_frames_and_light_gives_it_back(themed):
     theme._ask_platform(app, "system")
     theme._ask_platform(app, "light")
     assert asked == [Qt.ColorScheme.Dark, Qt.ColorScheme.Unknown]
+
+
+def test_a_switch_sets_the_style_only_once(themed, monkeypatch):
+    # once a stylesheet is set, app.style() is Qt's stylesheet proxy with an empty name(): a name check never held and
+    # every switch restyled every widget again (about 5 s with the main window open - UI performance research)
+    calls = []
+    real = type(themed).setStyle
+    monkeypatch.setattr(type(themed), "setStyle", staticmethod(lambda *a: calls.append(a) or real(*a)))
+    theme.apply_theme(themed, "dark")
+    theme.apply_theme(themed, "light")
+    theme.apply_theme(themed, "dark")
+    assert calls == []
