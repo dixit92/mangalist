@@ -180,3 +180,20 @@ def test_remove_now_asks_and_a_no_removes_nothing(qapp):
     dlg = DownloadsList(backend, confirm_remove=lambda rec: False)
     wait_until(qapp, lambda: dlg.table.rowCount() == 1)
     assert not dlg.remove_now(backend.record_list[0]) and not getattr(backend, "removed_now", [])
+
+
+class _TitledBackend(FakeBackend):
+    """Names series like the real adapter: ``int()`` of every id it is given."""
+
+    def series_titles(self, series_ids):
+        return {int(i): f"Folder {int(i)}" for i in series_ids}
+
+
+def test_a_record_whose_series_was_forgotten_does_not_stop_the_list(qapp):
+    # owner's box, 2026-10-13: a forgotten series leaves its records with no series id (ON DELETE SET NULL); the title
+    # lookup's int(None) failed every refresh and the In progress list stayed as it was for hours
+    backend = _TitledBackend(records=[record(1, status=S.SENT), record(2, series_id=None, status=S.SENT)])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.records)
+    names = sorted(dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount()))
+    assert names == ["(series no longer in the library)", "Folder 7"]

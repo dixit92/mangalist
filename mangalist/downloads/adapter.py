@@ -339,8 +339,10 @@ class Backend:
         self.ledger.set_remove_completed(on)
 
     def series_titles(self, series_ids: Sequence[int]) -> Dict[int, str]:
-        """The folder name of each library series row (what the Downloads list calls the series)."""
-        wanted = sorted({int(i) for i in series_ids})
+        """The folder name of each library series row (what the Downloads list calls the series). A record whose series
+        was forgotten has no series id (the ledger keeps it, ``ON DELETE SET NULL``): skipped, never an error (owner's
+        box, 2026-10-13: one forgotten series stopped the In progress list from refreshing for hours)."""
+        wanted = sorted({int(i) for i in series_ids if i is not None})
         if not wanted:
             return {}
         marks = ",".join("?" * len(wanted))
