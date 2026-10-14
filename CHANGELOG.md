@@ -7,6 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.34] - 2026-10-14
+
+The thirty-third MangaList release (testing build): a faster window and Found as one list, split chapters you hold are no longer asked for again, and the holding folder empties in one go.
+
+- **Found is one list.** The findings are one list grouped by series instead of a card each: a series' header shows how many wait, their size and its automatic-download mode (a chip that changes it) and folds the series away; each row shows what it fills, the release and source, why it waits, its state (Waiting, Sending..., Queued, Change source?) and its size, with Send, Skip and the "..." menu at the right. A new box filters the series and releases. Everything the cards did is still there; the "..." menu also offers Change source... for a series with nothing to send.
+- **A faster window.** Measured on a library of 692 series: a key typed in the List's filter takes about 0.02 s instead of up to 1 s (the filter looks at the title, the other title and the kind, a moment after the last key); Found refreshes in a few milliseconds when nothing changed instead of about 1 s; Light / Dark switches in under 1 s instead of about 7 s; switching back to a library takes 0.2 s instead of 1.5 s; the longest freeze during a scan is about 1 s instead of almost 5 s; the window opens in about 1.6 s instead of 3.6 s.
+- **Split chapters and extras you hold are not missing.** A folder holding chapter parts next to extras (`6.1`, `6.2`, `6.5` "Extras", `6.6` "Bonus") read as missing 6.3, 6.4 and 6.5, so the find pass asked the source for chapters the folder holds and the filing refused them ("chapter 6.5 is already in the folder"). Now `.5` and the numbers after it continue a split only after `.4`, and a chapter the folder holds is never missing. Four series of the owner's library go to Up to date.
+- **Empty all.** Replaced chapters' Review offers Empty all... when two or more series are in the holding folder: one confirmation, and each series is still emptied only while the volumes that replaced its chapters are in the library.
+
 ## [2026.10.33] - 2026-10-14
 
 The thirty-second MangaList release (testing build): the Download tab's In progress list refreshes again after a series is forgotten.
