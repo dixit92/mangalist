@@ -4,10 +4,13 @@ A port of MangaPixer's ``MissingUnits.SplitsOf`` (MangaPixer 1.29.1, refined in 
 view, Missing report and - since 1.35.0 - volume covers use), so MangaList and MangaPixer agree on what a folder holds:
 
 - A part is a one-decimal number (``12.1`` ... ``12.9``); ``12.25`` / ``12.75`` never are.
-- ``N.5`` is the usual number of an extra (``10.5``), so it is a part only after ``N.4``.
+- ``N.5`` is the usual number of an extra (``10.5``), so it is a part only after ``N.4`` - and so is every number above it
+  (``N.6``, ``N.7`` ...): without ``N.4`` they are the extras that follow ``N.5`` (owner, 2026-10-14: a folder holding
+  ``6.1``, ``6.2``, ``6.5`` "Extras", ``6.6`` "Bonus" was missing "6.3, 6.4, 6.5", and the find pass kept asking for 6.5).
 - The parts must start at the beginning: at ``N.1``, or at ``N.2`` when a file ``N`` is here (that file is the first part;
   a file ``N.1`` next to it stays an extra). A run that starts later (``N.6`` next to ``N`` and ``N.5``) is extras.
-- A part missing below the highest part here is reported (``4.1`` and ``4.3`` here: ``4.2`` is missing).
+- A part missing below the highest part here is reported (``4.1`` and ``4.3`` here: ``4.2`` is missing); a number the
+  folder holds never is, whatever it was read as (MangaPixer 1.42 still reports a held ``6.5`` missing there).
 
 Numbers are exact ``Decimal`` values, as everywhere in MangaList. No Qt.
 """
@@ -64,11 +67,13 @@ def splits_of(singles: Iterable[Optional[Decimal]],
     for n in sorted(tenths_by_chapter):
         tenths = tenths_by_chapter[n]
         has_file = n in wholes
-        own = sorted(t for t in tenths if (t != 5 or 4 in tenths) and (not has_file or t >= 2))
+        # .5 and above continue a split only after .4; otherwise they are the extras after N.5 (stricter than
+        # MangaPixer's "t != 5 or 4 in tenths", which made 6.6 a part next to the extra 6.5 and 6.3-6.5 "missing")
+        own = sorted(t for t in tenths if (t < 5 or 4 in tenths) and (not has_file or t >= 2))
         if not own or own[0] != (2 if has_file else 1):
             continue
         chapters.add(n)
-        present = set(own) | ({1} if has_file else set())
+        present = set(tenths) | ({1} if has_file else set())     # a held number (an extra too) is never missing
         parts.update(Decimal(n) + Decimal(t) / 10 for t in own)
         missing.extend(Decimal(n) + Decimal(t) / 10 for t in range(1, own[-1]) if t not in present)
     return SplitChapters(frozenset(parts), frozenset(chapters), tuple(missing))
