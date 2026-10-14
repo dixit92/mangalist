@@ -7,6 +7,17 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.32] - 2026-10-14
+
+The thirty-first MangaList release (testing build): dark mode, the same series actions on every screen, a library's own automatic-download mode, chapter files inside held volumes found however the volumes arrived, and Found clears findings whose gap was filled. Database schema 8.
+
+- **Dark mode.** Settings > Appearance: Light, Dark or Follow the system. Dark takes MangaPixer's dark theme so the apps look like one family; Light is unchanged. The switch applies at once to every open window. In the container, the base image's `DARK_MODE=1` also darkens the parts MangaList does not draw (dialog frames, the file manager, the web page's bar) after a restart.
+- **A library's automatic-download mode.** Settings > Library > Edit > Automatic downloads: Off, Notify, Auto or the default. A series without its own mode follows its library's, then the default - new series in that library included; everywhere a mode is inherited, it says whose default it is ("Off (the library's default)"). Schema 8 adds the column; nothing else in the database changes.
+- **Series actions everywhere.** The To get list's row menu (also on the checked rows) gets the automatic-download mode, Unbundled chapters, Mark Behind as up to date, Show in List, Open folder, Copy title, the MangaUpdates / MangaPixer pages, Fix MangaUpdates match…, Check for new chapters… and Change source…; a Found card's "⋯" menu: Show in To get (its series' other releases), Show in List, Open folder, the mode, Skip all; the series panels' headers: Show in List, Open folder, the mode; the List's details panel: the mode as a picker and Unbundled as a switch. A change made on one screen shows on the others.
+- **Chapter files inside held volumes.** "Set aside chapters its volumes hold…" uses MangaPixer's volume list as well as its estimates, so chapter files beside volumes that arrived outside MangaList's downloads can be set aside; such a series reads "Needs attention: Chapter files inside volumes you hold" until they are. Nothing moves by itself.
+- **Found clears filled gaps.** A waiting finding whose numbers are no longer missing (chapters sent by hand, another release) leaves Found after the next filing instead of waiting for the next find pass.
+- **The README** no longer shows a screenshot.
+
 ## [2026.10.31] - 2026-10-13
 
 The thirtieth MangaList release (testing build): a chapter pack is never taken for volumes, chapters a source splits into parts (62.1 + 62.2) are found and sent, and titled chapter files after the series' English title are read.
