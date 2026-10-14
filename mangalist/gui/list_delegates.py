@@ -55,7 +55,7 @@ class TitleDelegate(QStyledItemDelegate):
                          QFontMetrics(main).elidedText(title, Qt.TextElideMode.ElideRight, int(rect.width())))
         if subtitle:
             painter.setFont(small)
-            painter.setPen(QColor("#8a3f00" if review else theme.MUTED_2))
+            painter.setPen(QColor(theme.current().warn_text if review else theme.MUTED_2))
             painter.drawText(QRectF(rect.left(), top + main_h, rect.width(), small_h), Qt.AlignmentFlag.AlignVCenter,
                              QFontMetrics(small).elidedText(subtitle, Qt.TextElideMode.ElideRight, int(rect.width())))
         painter.restore()

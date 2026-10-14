@@ -25,16 +25,29 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .download_style import ACCENT, BADGES, FONT_MONO, set_prop
+from .download_style import FONT_MONO, badges, set_prop
+from .palette import current
 
 ROLE_SUB = Qt.ItemDataRole.UserRole + 1          # the second line of a two-line cell
 ROLE_ASIDE = Qt.ItemDataRole.UserRole + 2        # text at the right edge of a cell
 ROLE_CHIPS = Qt.ItemDataRole.UserRole + 3        # [(text, kind)]: pills at the right edge, drawn instead of the aside
 
-#: Chip colours (background, text, border): the badges of the In progress list, and "ready" - an outlined accent pill
-#: for releases found, so it is not mistaken for a download on its way (blue, filled).
-CHIP_COLORS = {kind: (bg, fg, bg) for kind, (bg, fg) in BADGES.items()}
-CHIP_COLORS["ready"] = ("#ffffff", ACCENT, ACCENT)
+def chip_colors() -> dict:
+    """Chip colours (background, text, border) in the current palette: the badges of the In progress list, and
+    "ready" - an outlined accent pill for releases found, so it is not mistaken for a download on its way (blue,
+    filled)."""
+    p = current()
+    out = {kind: (bg, fg, bg) for kind, (bg, fg) in badges(p).items()}
+    out["ready"] = (p.surface, p.accent, p.accent)
+    return out
+
+
+def __getattr__(name: str):
+    if name == "CHIP_COLORS":                   # the old constant: the current palette's chip colours
+        return chip_colors()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 CHIP_PAD_X, CHIP_PAD_Y, CHIP_GAP, CHIP_MIN = 8, 3, 6, 40
 TITLE_MIN = 120                 # a row with chips keeps at least this much for its title
 
@@ -76,8 +89,9 @@ def paint_chips(painter: QPainter, font: QFont, rect: QRect, chips: Sequence[Tup
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.setFont(font)
+    colors = chip_colors()
     for (text, (_t, kind)), width in zip(zip(texts, chips), widths):
-        bg, fg, border = CHIP_COLORS.get(kind, CHIP_COLORS["muted"])
+        bg, fg, border = colors.get(kind, colors["muted"])
         box = QRectF(x + 0.5, y + 0.5, width - 1, height - 1)
         painter.setPen(QPen(QColor(border), 1))
         painter.setBrush(QColor(bg))
@@ -233,7 +247,7 @@ class TwoLineDelegate(QStyledItemDelegate):
         elif aside:
             shown, aside_w = fit_text(QFontMetricsF(aside_font), aside, room)
             painter.setFont(aside_font)
-            painter.setPen(QColor("#5a5a57"))
+            painter.setPen(QColor(current().muted))
             painter.drawText(QRect(rect.right() - aside_w + 1, rect.top(), aside_w, rect.height()),
                              Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, shown)
             rect = rect.adjusted(0, 0, -(aside_w + 8), 0)
@@ -241,12 +255,12 @@ class TwoLineDelegate(QStyledItemDelegate):
         sub_h = QFontMetrics(sub_font).height()
         y = rect.top() + (rect.height() - top_h - (sub_h if sub else 0)) // 2
         painter.setFont(top)
-        painter.setPen(QColor("#161616"))
+        painter.setPen(QColor(current().text))
         painter.drawText(QRect(rect.left(), y, rect.width(), top_h), Qt.AlignmentFlag.AlignVCenter,
                          QFontMetrics(top).elidedText(title, Qt.TextElideMode.ElideRight, rect.width()))
         if sub:
             painter.setFont(sub_font)
-            painter.setPen(QColor("#6b6b67"))
+            painter.setPen(QColor(current().muted_2))
             painter.drawText(QRect(rect.left(), y + top_h, rect.width(), sub_h), Qt.AlignmentFlag.AlignVCenter,
                              QFontMetrics(sub_font).elidedText(sub, Qt.TextElideMode.ElideRight, rect.width()))
         painter.restore()

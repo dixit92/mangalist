@@ -30,9 +30,10 @@ from PySide6.QtWidgets import (
 
 from .. import add_series as core
 from .background import BackgroundCall, start_call
-from .download_style import FONT_SANS, INK, apply_style, set_tone
+from .download_style import FONT_SANS, apply_style, set_tone
 from .download_widgets import button, card, hbox, label, vbox
 from .downloads_backend import BackendError
+from .palette import current
 
 _log = logging.getLogger(__name__)
 
@@ -197,9 +198,8 @@ class AddSeriesDialog(QDialog):
         self._check_timer.setInterval(NAME_CHECK_DELAY_MS)
         self._check_timer.timeout.connect(self._check_name)
 
-        apply_style(self)
-        self.setStyleSheet(self.styleSheet() + f"\nQDialog#addSeriesDialog {{ background: #ffffff; color: {INK}; "
-                                               f"font-family: {FONT_SANS}; font-size: 14px; }}")
+        apply_style(self, extra=lambda: f"\nQDialog#addSeriesDialog {{ background: {current().surface}; "
+                                        f"color: {current().text}; font-family: {FONT_SANS}; font-size: 14px; }}")
         if not self.roots:
             self._say("Add a library folder first (Settings).", "bad")
             self.input.setEnabled(False)
