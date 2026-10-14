@@ -404,6 +404,7 @@ def _retheme_widgets(app, old: Palette, new: Palette) -> None:
 
 _appearance: Optional[str] = None       # the choice in force (None until apply_theme is given one)
 _watching: bool = False
+_applying: bool = False                 # apply_theme is running (the platform-scheme request below signals back)
 
 
 def system_scheme(app=None) -> Optional[str]:
@@ -442,8 +443,33 @@ def _watch_system(app) -> None:
 
 
 def _system_changed(app) -> None:
+    if _applying:
+        return
     if _appearance == APPEARANCE_SYSTEM and resolve(APPEARANCE_SYSTEM, system_scheme(app)) is not current():
         apply_theme(app, APPEARANCE_SYSTEM)
+
+
+def _ask_platform(app, choice: str) -> None:
+    """Dark asks the platform for its dark window frames and native dialogs too (Qt 6.8+, Windows / macOS; the
+    container's frames come from its window manager, ``DARK_MODE``); any other choice gives the platform its own say
+    back (Unknown), which is how the app always ran - so Light's frames are as before and Follow the system reads the
+    platform's real scheme."""
+    try:
+        from PySide6.QtCore import Qt
+
+        hints = app.styleHints()
+        setter = getattr(hints, "setColorScheme", None)
+        if setter is None:
+            return
+        want = Qt.ColorScheme.Dark if choice == _palette.APPEARANCE_DARK else Qt.ColorScheme.Unknown
+        if choice == _palette.APPEARANCE_DARK or _appearance_requested[0]:
+            setter(want)
+            _appearance_requested[0] = choice == _palette.APPEARANCE_DARK
+    except Exception:  # noqa: BLE001 - the frames are a nicety; the app's own look does not depend on them
+        _log.debug("Could not ask the platform for a colour scheme", exc_info=True)
+
+
+_appearance_requested = [False]         # did we ask the platform for Dark (so a later choice must give it back)
 
 
 def apply_theme(app, appearance: Optional[str] = None) -> bool:
@@ -453,12 +479,17 @@ def apply_theme(app, appearance: Optional[str] = None) -> bool:
     Called again with another choice, it switches every open window at once: the application's palette and
     stylesheet, every :func:`bind_sheet` stylesheet, :func:`on_retheme` hook, :func:`color_attr` span and item brush,
     then a repaint (painted cells read the palette as they paint)."""
-    global _appearance
+    global _appearance, _applying
     from PySide6.QtWidgets import QStyleFactory
 
     old = current()
     if appearance is not None:
         _appearance = appearance
+        _applying = True
+        try:
+            _ask_platform(app, appearance)
+        finally:
+            _applying = False
         set_current(resolve(appearance, system_scheme(app)))
         _watch_system(app)
     pal = current()
