@@ -16,8 +16,10 @@ changed since the last scan is read at the next one (the same as the List). Cost
 archives on the dev box, half of it ``pathlib`` in the inventory and the restart rule (shared with the window).
 
 **One implementation.** The window's state providers (``MainWindow._mp_item_for`` / ``_knowledge_for`` /
-``_inventory_for``), the table model's ``_evaluate`` and the window's ``_rebuild_wanted`` loop call the functions below;
-the window keeps its own caching. What the window has that the database does not: the rename counts (they only set the
+``_inventory_for``), the table model's ``_compute`` and the window's To get entries call the functions below; the window
+keeps its own caching. Since UI performance stage 2 the window computes them off the UI thread (the states' worker:
+:func:`evaluate`, :func:`inventory_of`, :func:`series_wanted` per series, as :func:`library_states` composes them), and
+its Rename-pending count runs in a subprocess over :func:`entries_from_db` - the series as the last scan recorded them. What the window has that the database does not: the rename counts (they only set the
 Rename pending flag, never a gap) and the table's unsaved edits (none touch the state: overrides, links and kind answers
 are saved at once).
 """
@@ -39,7 +41,7 @@ from .gui.volumes_target import Availability, find_volumes_availability
 from .knowledge import SeriesKnowledge, declared_edition_of, fmt_num, from_mangapixer_item, from_own_matcher, to_decimal
 from .models import FileHit, MangaEntry
 from .states import SeriesState, compute_state, fallback_inventory_from_entry
-from .unbundled import unbundled_ids
+from .unbundled import unbundled_choices
 
 _log = logging.getLogger(__name__)
 
@@ -175,7 +177,7 @@ def inventory_of(entry: MangaEntry, item: Optional[Mapping[str, Any]]):
 
 def evaluate(entry: MangaEntry, *, knowledge: Optional[SeriesKnowledge], inventory: Any, needs_kind: bool,
              rename_count: int = 0, today: Optional[_dt.date] = None,
-             unbundled: bool = False) -> Tuple[SeriesState, SeriesKnowledge]:
+             unbundled: Any = False) -> Tuple[SeriesState, SeriesKnowledge]:
     """The series' state as the List shows it, and the knowledge behind it (*knowledge* None: the own matcher's;
     *inventory* None: read from the entry's file names; *unbundled*: the series' Unbundled Chapters setting,
     :mod:`mangalist.unbundled`)."""
@@ -198,22 +200,39 @@ def series_wanted(entry: MangaEntry, state: Optional[SeriesState], knowledge: Op
                   held: Sequence[str], series_id: Optional[int], *, downloads: bool = True) -> List[WantedSeries]:
     """What one series adds to "To get" (nothing without gaps). With *downloads* on, volumes and upgrades are
     findable by the nyaa rule (:func:`~mangalist.gui.volumes_target.find_volumes_availability`); off: "downloads are
-    off"."""
+    off".
+
+    A series the owner marked up to date (the List's Behind override "done") adds nothing either (owner, 2026-10-15:
+    "Mark Behind as up to date" also takes the series out of To get) - the List still shows its gaps, and clearing the
+    override in the List brings it back."""
     if entry is None or state is None or not state.gaps:
         return []
+    if getattr(entry, "behind_override", None) == "done":
+        return []
     volumes = None
+    by_hand = False
     if knowledge is not None and knowledge.edition_label and state.missing_volumes:
         # A declared edition's volumes are numbered by that edition, nyaa's releases mostly by the regular one: a
-        # search would take regular volume 3 for the edition's volume 3. Shown in To get, never searched (nor by the
-        # find pass).
+        # search would take regular volume 3 for the edition's volume 3. Shown in To get, never searched automatically
+        # (nor by the find pass or a bulk search) - but the owner may search by hand in the Download tab and judge the
+        # releases himself (owner, 2026-10-15: "Allow a search by hand in the Download tab?" - "Yes").
         volumes = Availability(False, f"{knowledge.edition_label}: nyaa releases are matched by volume number, and "
-                                      "this edition numbers its volumes its own way - not searched")
+                                      "this edition numbers its volumes its own way - not searched automatically")
+        by_hand = downloads
     elif downloads and (state.missing_volumes or state.upgrade_volumes):
         volumes = find_volumes_availability(series_id=series_id, folder=str(entry.folder), title=entry.title,
                                             english_title=entry.english_title, knowledge=knowledge, state=state,
                                             held=held)
-    return wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title, state=state,
-                         knowledge=knowledge, held=held, series_id=series_id, volumes=volumes)
+    items = wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title, state=state,
+                          knowledge=knowledge, held=held, series_id=series_id, volumes=volumes)
+    if by_hand:
+        from dataclasses import replace
+
+        from .gui.shell import GROUP_UPGRADES, GROUP_VOLUMES
+
+        items = [replace(w, by_hand=True) if w.group in (GROUP_VOLUMES, GROUP_UPGRADES) and not w.findable else w
+                 for w in items]
+    return items
 
 
 # --- the series from the database --------------------------------------------------------------------------------
@@ -317,7 +336,7 @@ def library_states(db, *, root_ids: Optional[Iterable[int]] = None,
     except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not stop the list
         _log.warning("Wanted list: MangaPixer's data unavailable; the own matcher's knowledge is used", exc_info=True)
         resolver = None
-    unbundled = unbundled_ids(db)
+    unbundled = unbundled_choices(db)
     out: List[SeriesView] = []
     for root in roots:
         try:
@@ -333,7 +352,8 @@ def library_states(db, *, root_ids: Optional[Iterable[int]] = None,
             item = _safe_item(resolver, root, entry)
             inventory = inventory_of(entry, item)
             state, knowledge = evaluate(entry, knowledge=knowledge_of_item(item), inventory=inventory,
-                                        needs_kind=entry.needs_kind, today=today, unbundled=row.id in unbundled)
+                                        needs_kind=entry.needs_kind, today=today,
+                                        unbundled=unbundled.get(row.id) or False)
             out.append(SeriesView(row, entry, state, knowledge, held_volumes(inventory)))
     return out
 

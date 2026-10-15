@@ -7,7 +7,8 @@ builds a name itself. The namer is INJECTED (:class:`Namer`); the default (:clas
 Per file the answer is one of:
 
 - **unchanged** - the name already is the scheme's;
-- **rename** - old -> new, in the same folder (files only; folders are never renamed);
+- **rename** - old -> new, in the same folder (a file's folder never changes: only the SERIES folder itself can be
+  renamed, see below);
 - **left alone** - the namer returns None (unreadable, a true extra, ambiguous), the new name would not be valid, the
   file is gone since the last scan, or naming failed;
 - **collision** - two files would get one name (two groups' copies of a chapter normally differ by their group; when they
@@ -34,8 +35,21 @@ Per file the answer is one of:
    converting from the window. The headless **automatic** pass (:meth:`Renamer.automatic_pass`, roots set to
    "Rename automatically") acts only on such roots, at most :data:`AUTO_LIMIT` files per pass, and logs every batch.
 
-**Rename pending** (:meth:`Renamer.pending_counts`): per series folder, how many files the scheme would rename (roots set
-to Off never count). The List shows it as a flag, a column and a filter.
+**Series folders** (owner, 2026-10-15, answer 6: "Always use "<romaji> [<English>]", similar to animefetch. Folders not in
+this scheme are rename candidates."): a top-level series folder whose name is not :mod:`mangalist.folder_scheme`'s
+``<romaji> [<English>]`` is a rename candidate too - in the preview (its own row), in Rename pending (it counts as one),
+in the window's batches (ONE journal step per folder, after the series' file renames; the series row, its link and its
+data follow through the journal's folder-move follow, :meth:`~mangalist.store.series.SeriesMixin.relink_folder`).
+The romaji is the series' MangaUpdates title (MangaPixer's record, else MangaList's own confirmed match); without one
+the folder is left alone. Subseries folders (``Parent/Side 1 - ...``) are never renamed. **A folder is renamed only by
+the owner's explicit Rename in the window**: the automatic pass (and filing) never renames a folder, whatever the
+library's setting (:meth:`Renamer.apply` takes ``folders=True`` only from the window). Answer 12 ("Titles should
+follow the scheme in answer 6 and should change"): the series title volume names use is the same scheme name, so a
+changed match (e.g. MangaPixer's Switch to MangaUpdates) makes the volumes Rename pending as well.
+
+**Rename pending** (:meth:`Renamer.pending_counts`): per series folder, how many files the scheme would rename, plus one
+when the folder itself would be renamed (roots set to Off never count). The List shows it as a flag, a column and a
+filter.
 
 Logging: INFO for every dry run / plan / apply / undo with counts; WARNING for refusals and collisions.
 """
@@ -66,6 +80,10 @@ ENFORCE_LABELS = {ENFORCE_OFF: "Off", ENFORCE_ASK: "Ask before renaming", ENFORC
 
 UNCHANGED, RENAME, LEFT_ALONE, COLLISION = "unchanged", "rename", "left alone", "collision"
 
+FOLDER_NOTE = ("Series folders are renamed to \"<romaji> [<English>]\" only when you press Rename here - never "
+               "automatically. MangaList asks MangaPixer to scan afterwards so it sees the new folder names.")
+TITLE_NOTE = ("Some volume names change only because of the series title \"<romaji> [<English>]\": like folder names, "
+              "they are renamed only when you press Rename here - never automatically.")
 ANALYSIS_WARNING = ("Files MangaPixer has not analysed yet lose their read state when renamed - let MangaPixer finish "
                     "its scan first.")
 NOT_ANALYSED_WARNING = ("MangaPixer has not analysed every archive of {n} series yet: renaming them now loses their "
@@ -187,6 +205,7 @@ class FilePlan:
     group_cut: bool = False         # ... or the group
     unit_words: bool = False        # the chapter title holds a unit word (a parser may read a number from it)
     needs_kind: bool = False        # left alone: a bare number whose kind only the series' "volumes or chapters?" settles
+    title_held: bool = False        # renamed: the scheme's series title changed the name (waits for the owner's Rename)
 
     @property
     def name(self) -> str:
@@ -214,6 +233,10 @@ class SeriesPreview:
     files: List[FilePlan] = field(default_factory=list)
     analysed: Optional[bool] = None              # MangaPixer analysed every archive (None: MangaList cannot tell)
     error: Optional[str] = None                  # why nothing could be previewed
+    # the series folder itself (top-level series only; None: not looked at - a subseries, or no folder scheme)
+    folder_target: Optional[str] = None          # the scheme's folder name ``<romaji> [<English>]``
+    folder_status: Optional[str] = None          # UNCHANGED | RENAME | LEFT_ALONE | COLLISION
+    folder_reason: str = ""                      # left alone / collision: why
 
     def of(self, status: str) -> List[FilePlan]:
         return [f for f in self.files if f.status == status]
@@ -243,6 +266,29 @@ class SeriesPreview:
     def moves(self) -> List[Tuple[str, str]]:
         return [(f.path, f.new_path) for f in self.renames if f.new_path]
 
+    @property
+    def auto_renames(self) -> List[FilePlan]:
+        """The renames the automatic pass may make: not the ones a new series title causes (they wait for the owner)."""
+        return [f for f in self.renames if not f.title_held]
+
+    @property
+    def held_renames(self) -> List[FilePlan]:
+        return [f for f in self.renames if f.title_held]
+
+    @property
+    def folder_rename(self) -> bool:
+        """The series folder would be renamed to the scheme's name."""
+        return self.folder_status == RENAME and bool(self.folder_target)
+
+    @property
+    def new_folder(self) -> Optional[str]:
+        return os.path.join(os.path.dirname(self.folder), self.folder_target) if self.folder_rename else None
+
+    @property
+    def changes(self) -> int:
+        """What renaming this series would change: its files to rename, plus one for its folder."""
+        return len(self.renames) + (1 if self.folder_rename else 0)
+
     def counts(self) -> Dict[str, int]:
         c = Counter(f.status for f in self.files)
         return {s: c.get(s, 0) for s in (RENAME, UNCHANGED, LEFT_ALONE, COLLISION)}
@@ -265,7 +311,11 @@ class RootDryRun:
 
     @property
     def series_to_rename(self) -> List[SeriesPreview]:
-        return [s for s in self.series if s.renames]
+        return [s for s in self.series if s.renames or s.folder_rename]
+
+    @property
+    def folders_to_rename(self) -> List[SeriesPreview]:
+        return [s for s in self.series if s.folder_rename]
 
 
 @dataclass
@@ -290,11 +340,21 @@ class DryRun:
     def files_where(self, predicate: Callable[[FilePlan], bool]) -> List[Tuple[SeriesPreview, FilePlan]]:
         return [(s, f) for s in self.series for f in s.files if predicate(f)]
 
+    @property
+    def folders_to_rename(self) -> List[SeriesPreview]:
+        """Series whose folder would be renamed to the scheme's ``<romaji> [<English>]``."""
+        return [s for s in self.series if s.folder_rename]
+
+    def folders_where(self, *statuses: str) -> List[SeriesPreview]:
+        return [s for s in self.series if s.folder_status in statuses]
+
     def summary(self) -> str:
         """One line of counts (the log and the window's headline)."""
         series = sum(1 for s in self.series if s.renames)
-        return (f"{self.count(RENAME)} file(s) to rename in {series} series, {self.count(UNCHANGED)} already named by "
+        line = (f"{self.count(RENAME)} file(s) to rename in {series} series, {self.count(UNCHANGED)} already named by "
                 f"the scheme, {self.count(LEFT_ALONE)} left alone, {self.count(COLLISION)} name collision(s)")
+        folders = len(self.folders_to_rename)
+        return line + (f", {folders} series folder(s) to rename" if folders else "")
 
 
 @dataclass(frozen=True)
@@ -305,9 +365,19 @@ class RenameBatch:
     root_path: str
     series: Tuple[SeriesPreview, ...]
 
+    folders: bool = False                        # the series folders are renamed too (the owner's Rename only)
+    titles: bool = True                          # renames a new series title causes too (False: the automatic pass)
+
+    def files_of(self, s: SeriesPreview) -> List[FilePlan]:
+        return s.renames if self.titles else s.auto_renames
+
     @property
     def n_files(self) -> int:
-        return sum(len(s.renames) for s in self.series)
+        return sum(len(self.files_of(s)) for s in self.series)
+
+    @property
+    def n_folders(self) -> int:
+        return sum(1 for s in self.series if s.folder_rename) if self.folders else 0
 
 
 @dataclass
@@ -321,6 +391,7 @@ class BatchResult:
     root_ids: List[int] = field(default_factory=list)
     message: str = ""
     after: str = ""                              # what the rescan / MangaPixer scan request said
+    folders: int = 0                             # series folders renamed (or put back) - not counted in ``renamed``
 
 
 @dataclass(frozen=True)
@@ -347,6 +418,7 @@ class AutoReport:
     skipped: Optional[str] = None
     after: str = ""
     unchanged: int = 0                  # series not looked at again: nothing changed since a pass found nothing to do
+    held: int = 0                       # renames a new series title causes: they wait for the owner's Rename
 
     @property
     def renamed(self) -> int:
@@ -358,6 +430,8 @@ class AutoReport:
         parts = [f"{self.renamed} file(s) renamed in {len(self.batches)} batch(es)"] if self.batches else []
         if self.waiting:
             parts.append(f"{len(self.waiting)} root(s) wait for the first guided rename")
+        if self.held:
+            parts.append(f"{self.held} file(s) with a new series title wait for your Rename")
         if self.after:
             parts.append(self.after)
         return "renames: " + ("; ".join(parts) if parts else "nothing to rename")
@@ -398,13 +472,25 @@ _TITLE_SWAP = {"(": "[", ")": "]"}
 _GROUP_SWAP = {"[": "(", "]": ")"}
 
 
+def _has_new_title(name: str, title: Optional[str]) -> bool:
+    """*name* already starts with the new series title (``<new title> - Vol. 1.cbz`` -> ``<new title> - Vol. 001.cbz`` is
+    a padding fix, not a title change)."""
+    return bool(title) and name.casefold().startswith(title.casefold().rstrip() + " ")
+
+
 def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: Optional[str],
                volume_of: Optional[Callable[[Decimal], Optional[Decimal]]] = None, limits: Any = None,
                listdir: Callable[[str], Iterable[str]] = os.listdir,
-               exists: Callable[[str], bool] = os.path.lexists) -> List[FilePlan]:
+               exists: Callable[[str], bool] = os.path.lexists, legacy_title: Optional[str] = None) -> List[FilePlan]:
     """What the scheme makes of each ``(absolute path, ParsedName)``: see the module docstring. Collisions are found per
     folder, comparing names case-insensitively, against the other files of the series AND everything else in the
-    folder (a file that is not part of the series is never displaced)."""
+    folder (a file that is not part of the series is never displaced).
+
+    *legacy_title*: the series title volume names used before the folder scheme (the record's title, else the folder's
+    name). A rename whose target differs from the target that title gives - the scheme's ``<romaji> [<English>]``
+    changed the name, alone or with another fix (a file is never renamed twice) - is marked
+    :attr:`FilePlan.title_held` unless the file already carries the new title: the automatic pass leaves it for the
+    owner's Rename (integrator, 2026-10-15: 2615 such renames in the owner's library, not previewed yet)."""
     first: List[FilePlan] = []
     for path, parsed in files:
         path = os.path.normpath(str(path))
@@ -432,7 +518,9 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
         if target is None:
             bare = getattr(parsed, "number", None) is not None and (
                 str(getattr(getattr(parsed, "kind", None), "value", "")) == "unknown" or getattr(parsed, "guessed", False))
-            why = ("an extra (no chapter number)" if getattr(parsed, "is_extra", False)
+            why = (("a comics extra: not counted as chapter "
+                    f"{parsed.chapter}, so it keeps its name" if getattr(parsed, "chapter", None) is not None
+                    else "an extra (no chapter number)") if getattr(parsed, "is_extra", False)
                    else "a bare number: chapters or volumes? (answer above)" if bare
                    else "the name says no volume or chapter number" if not getattr(parsed, "has_units", True)
                    else "the name could not be read with certainty")
@@ -447,6 +535,13 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
                                                                                 target, _GROUP_SWAP),
                      unit_words=bool(title and _UNIT_WORDS.search(title)))
         status = UNCHANGED if target == name else RENAME
+        if status == RENAME and legacy_title and legacy_title != series_title:
+            try:
+                before = namer.target_name(parsed, ext=ext, series_title=legacy_title, volume_of=volume_of,
+                                           folder=os.path.dirname(path), limits=limits)
+            except Exception:  # noqa: BLE001 - cannot tell: hold it for the owner
+                before = None
+            flags["title_held"] = before != target and (before == name or not _has_new_title(name, series_title))
         first.append(FilePlan(path, target, status, layer, "", **flags))
     return _collisions(first, listdir)
 
@@ -483,15 +578,14 @@ def _collisions(plans: List[FilePlan], listdir: Callable[[str], Iterable[str]]) 
                     continue
                 for i in renamers:
                     p = out[i]
-                    out[i] = FilePlan(p.path, p.target, COLLISION, p.layer, why, p.title_cut, p.group_cut, p.unit_words)
+                    out[i] = replace(p, status=COLLISION, reason=why)
                 changed = True
                 # An unchanged file that the others wanted keeps its name; mark the same-name case on it too, so the
                 # listing shows both halves of the collision.
                 for i in holders:
                     p = out[i]
                     if p.status == UNCHANGED and len(holders) > 1:
-                        out[i] = FilePlan(p.path, p.target, COLLISION, p.layer, why, p.title_cut, p.group_cut,
-                                          p.unit_words)
+                        out[i] = replace(p, status=COLLISION, reason=why)
             if not changed:
                 break
     return out
@@ -530,25 +624,111 @@ def order_moves(moves: Sequence[Tuple[str, str]], *, exists: Callable[[str], boo
     return out
 
 
-def make_batches(previews: Iterable[SeriesPreview], size: int = BATCH_SIZE) -> List[RenameBatch]:
-    """Series with renames, grouped per root into batches of about *size* files (a series is never split)."""
+def make_batches(previews: Iterable[SeriesPreview], size: int = BATCH_SIZE, *, folders: bool = False,
+                 titles: Optional[bool] = None) -> List[RenameBatch]:
+    """Series with renames, grouped per root into batches of about *size* files (a series is never split). With
+    *folders* (the owner's Rename in the window, never the automatic pass) a series whose folder is renamed counts too,
+    its folder as one more step. *titles* (default: as *folders*): the renames a new series title causes are included;
+    without it (the automatic pass) they wait for the owner's Rename."""
+    titles = folders if titles is None else titles
+
+    def weight(s: SeriesPreview) -> int:
+        files = len(s.renames if titles else s.auto_renames)
+        return files + (1 if folders and s.folder_rename else 0)
+
     per_root: Dict[Tuple[Optional[int], str], List[SeriesPreview]] = defaultdict(list)
     for s in previews:
-        if s.renames:
+        if weight(s):
             per_root[(s.root_id, s.root_path)].append(s)
     out: List[RenameBatch] = []
     for (root_id, root_path), series in per_root.items():
         current: List[SeriesPreview] = []
         count = 0
         for s in series:
-            if current and count + len(s.renames) > size:
-                out.append(RenameBatch(root_id, root_path, tuple(current)))
+            if current and count + weight(s) > size:
+                out.append(RenameBatch(root_id, root_path, tuple(current), folders, titles))
                 current, count = [], 0
             current.append(s)
-            count += len(s.renames)
+            count += weight(s)
         if current:
-            out.append(RenameBatch(root_id, root_path, tuple(current)))
+            out.append(RenameBatch(root_id, root_path, tuple(current), folders, titles))
     return out
+
+
+# --- the series folder (lane A, 2026-10-15) -------------------------------------------------------------------------
+
+FOLDER_NO_TITLE = "no MangaUpdates title yet (MangaPixer has not matched the series): the folder keeps its name"
+
+
+def _name_key(name: str) -> str:
+    """A folder name as the library compares names: NFC, case-insensitive (the library is shared over SMB)."""
+    import unicodedata
+
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def folder_names(root_path: str) -> Set[str]:
+    """The names in a library folder, as :func:`_name_key` compares them (empty when it cannot be read)."""
+    try:
+        return {_name_key(n) for n in os.listdir(root_path)}
+    except OSError:
+        return set()
+
+
+def plan_folder(current: str, target: Optional[str], *, names: Set[str],
+                excluded: Callable[[str], bool] = lambda _name: False, no_title: str = FOLDER_NO_TITLE
+                ) -> Tuple[str, str]:
+    """``(status, reason)`` of renaming the series folder *current* to *target* (the scheme's name; None: no title) in
+    a library folder holding *names* (:func:`folder_names`): UNCHANGED, RENAME, LEFT_ALONE (no title, an invalid name,
+    a name the library excludes) or COLLISION (another folder has that name, in any case). Changing only the case of
+    the folder's own name is a rename."""
+    from .store.names import windows_name_problem
+
+    if not target:
+        return LEFT_ALONE, no_title
+    if target == current:
+        return UNCHANGED, ""
+    problem = windows_name_problem(target)
+    if problem or target.startswith("."):
+        return LEFT_ALONE, f"the scheme's name {target!r} cannot be used ({problem or 'a hidden folder'})"
+    if excluded(target):
+        return LEFT_ALONE, f"the library excludes a folder called {target!r} (it would vanish from the List)"
+    if _name_key(target) in names and _name_key(target) != _name_key(current):
+        return COLLISION, f"a folder named {target!r} is already in the library"
+    return RENAME, ""
+
+
+def _root_excludes(root) -> Callable[[str], bool]:
+    try:
+        rules = root.exclusion_set()
+    except Exception:  # noqa: BLE001 - unreadable exclusions: nothing excluded
+        return lambda _name: False
+
+    def excluded(name: str) -> bool:
+        try:
+            return bool(rules.excludes(name, True))
+        except Exception:  # noqa: BLE001
+            return False
+
+    return excluded
+
+
+def mark_folder_collisions(previews: Iterable[SeriesPreview]) -> None:
+    """Two series of one library that would get the same folder name (two folders matched to one MangaUpdates series):
+    neither is renamed - both are listed as a collision."""
+    by_target: Dict[Tuple[Optional[int], str], List[SeriesPreview]] = defaultdict(list)
+    for s in previews:
+        if s.folder_status in (RENAME, UNCHANGED) and s.folder_target:
+            by_target[(s.root_id, _name_key(s.folder_target))].append(s)
+    for holders in by_target.values():
+        if len(holders) < 2:
+            continue
+        names = ", ".join(sorted(s.title for s in holders))
+        for s in holders:
+            if s.folder_status == RENAME:
+                s.folder_status = COLLISION
+                s.folder_reason = (f"{len(holders)} series folders would be named {s.folder_target!r} ({names}); "
+                                   "they keep their names - see the duplicates review")
 
 
 # --- the renamer over the library database --------------------------------------------------------------------------
@@ -568,12 +748,16 @@ def _parse_context(title: Optional[str], kind_hint: Optional[str], scheme: Optio
     return None
 
 
-def _default_title_for(db) -> Callable[[Any, Any], Optional[str]]:
-    """The series title volume names use: MangaPixer's (its own matched item, not a parent's), else None (the caller
-    falls back to the folder's name). Owner, 2026-10-10: "the series title = MangaPixer's title"."""
+def _default_title_for(db) -> Callable[[Any, Any], Optional[Tuple[str, Tuple[str, ...]]]]:
+    """The series' record title (the romaji of the folder scheme, :mod:`mangalist.folder_scheme`) and its alternative
+    titles: MangaPixer's record (its own matched item, not a parent's; owner, 2026-10-10: "the series title =
+    MangaPixer's title"), else MangaList's own MangaUpdates match when it is confirmed or automatic (a series added
+    with Add series before MangaPixer has matched it), else None (no title: the folder keeps its name and volume names
+    use it)."""
     resolver = None
+    links: Optional[Dict[str, Any]] = None
 
-    def title_for(root, series) -> Optional[str]:
+    def mangapixer(root, series):
         nonlocal resolver
         try:
             if resolver is None:
@@ -582,12 +766,52 @@ def _default_title_for(db) -> Callable[[Any, Any], Optional[str]]:
 
                 resolver = Resolver(open_cache(db))
             res = resolver.resolve(root.id, series.rel_path)
-        except Exception:  # noqa: BLE001 - no MangaPixer data: the folder's name
+        except Exception:  # noqa: BLE001 - no MangaPixer data
             return None
         if res is None or res.inherited or res.link_state not in ("Confirmed", "Auto"):
             return None
-        title = (res.record or {}).get("title") if isinstance(res.record, dict) else None
-        return title.strip() if isinstance(title, str) and title.strip() else None
+        record = res.record if isinstance(res.record, dict) else {}
+        title = record.get("title")
+        if not isinstance(title, str) or not title.strip():
+            return None
+        alts = tuple(a.strip() for a in record.get("altTitles") or () if isinstance(a, str) and a.strip())
+        return title.strip(), alts
+
+    def own_match(root, series):
+        nonlocal links
+        import json
+
+        if links is None:
+            links = {}
+            try:
+                with db.connect() as con:
+                    for r in con.execute("SELECT folder, mu_title, mu_associated, mu_confirmed, mu_band"
+                                         " FROM links_cache"):
+                        links[os.path.normcase(r["folder"])] = r
+            except Exception:  # noqa: BLE001 - no links cache: no title from it
+                links = {}
+        from pathlib import Path
+
+        from .store.series import link_key
+
+        row = None
+        for base in dict.fromkeys((root.path, str(Path(root.path).resolve()))):
+            row = links.get(os.path.normcase(link_key(Path(base), series.rel_path)))
+            if row is not None:
+                break
+        if row is None or not (row["mu_confirmed"] or row["mu_band"] == "auto"):
+            return None
+        title = row["mu_title"]
+        if not isinstance(title, str) or not title.strip():
+            return None
+        try:
+            alts = tuple(a.strip() for a in json.loads(row["mu_associated"] or "[]") if isinstance(a, str) and a.strip())
+        except (TypeError, ValueError):
+            alts = ()
+        return title.strip(), alts
+
+    def title_for(root, series) -> Optional[Tuple[str, Tuple[str, ...]]]:
+        return mangapixer(root, series) or own_match(root, series)
 
     return title_for
 
@@ -694,12 +918,25 @@ def with_units(parsed: Any, units: FileUnits, name: str) -> Any:
     return replace(base, kind=Kind.CHAPTER, chapter=rng, volume=vol, **common)
 
 
+def _listing_cache() -> Callable[[str], Set[str]]:
+    """:func:`folder_names` read once per library folder (for one dry run, count or apply)."""
+    seen: Dict[str, Set[str]] = {}
+
+    def names_of(root_path: str) -> Set[str]:
+        if root_path not in seen:
+            seen[root_path] = folder_names(root_path)
+        return seen[root_path]
+
+    return names_of
+
+
 class Renamer:
     """The renamer's actions over one library database. Every method may block (disk, database, MangaPixer): the GUI
     calls them off the UI thread.
 
     Injected (all optional): *namer* (:class:`Namer`; default :class:`DefaultNamer`), *journal_factory* (``db ->``
-    :class:`~mangalist.store.journal.Journal`), *title_for* (``(root, series) -> title or None``), *analysed*
+    :class:`~mangalist.store.journal.Journal`), *title_for* (``(root, series) -> the record title`` - the romaji of
+    the folder scheme -, or ``(title, alternative titles)``, or None), *analysed*
     (``(db, series) -> True / False / None``), *rescan* (``(db, root ids) -> summary``; None: the caller rescans, as
     the GUI does), *request_scans* (``(db, series ids) -> summary``)."""
 
@@ -761,7 +998,7 @@ class Renamer:
             ctx = _parse_context(os.path.basename(folder), series.kind_hint, getattr(root, "naming_scheme", None))
             siblings = [u.rel_path for u in self.db.list_units(series.id) if "/" not in u.rel_path]
             parsed = parse_name(name, with_series_head(ctx, siblings + [name]), file_size=size)
-            title = self._title(root, series) or os.path.basename(folder)
+            title = self.series_title(root, series)
             target = self.namer.target_name(parsed, ext=os.path.splitext(name)[1], series_title=title,
                                             volume_of=self._volume_of(series.id), folder=folder,
                                             limits=self.limits())
@@ -770,13 +1007,71 @@ class Renamer:
             return None
         return target if target and not _name_problem(target) else None
 
-    def _title(self, root, series) -> Optional[str]:
+    def _record_titles(self, root, series) -> Tuple[Optional[str], Tuple[str, ...]]:
+        """The series' record title and alternative titles (see :func:`_default_title_for`); (None, ()) without one."""
         if self._title_for is None:
             self._title_for = _default_title_for(self.db)
         try:
-            return self._title_for(root, series)
+            got = self._title_for(root, series)
         except Exception:  # noqa: BLE001
+            return None, ()
+        if isinstance(got, tuple):
+            title, alts = (got + ((),))[:2]
+            return (title if isinstance(title, str) and title.strip() else None), tuple(alts or ())
+        return (got if isinstance(got, str) and got.strip() else None), ()
+
+    def series_titles(self, root, series):
+        """The :class:`~mangalist.folder_scheme.SeriesTitles` of a series (its romaji and English titles), or None
+        when it has no record title yet."""
+        from .folder_scheme import titles_for
+
+        rel = series.rel_path or ""
+        romaji, alts = self._record_titles(root, series)
+        if romaji is None:
             return None
+        return titles_for(rel.rsplit("/", 1)[-1], romaji, alts, top_level="/" not in rel)
+
+    def scheme_folder_name(self, root, series, fits=None) -> Optional[str]:
+        """The scheme's name ``<romaji> [<English>]`` for the series' folder (None: no record title)."""
+        titles = self.series_titles(root, series)
+        return titles.name(fits) if titles is not None else None
+
+    def series_title(self, root, series) -> str:
+        """The series title volume names use (owner, 2026-10-15, answer 12: "Titles should follow the scheme in answer 6
+        and should change"): the folder scheme's ``<romaji> [<English>]``, else - no record title - the folder's
+        name."""
+        folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
+        try:
+            name = self.scheme_folder_name(root, series)
+        except Exception:  # noqa: BLE001 - the folder's name
+            _log.debug("Renamer: no scheme title for %s", series.rel_path, exc_info=True)
+            name = None
+        return name or os.path.basename(folder)
+
+    def legacy_title(self, root, series) -> str:
+        """The series title volume names used before the folder scheme (2026.10.35): the record's title, else the
+        folder's name. A rename that differs from what this title gives waits for the owner's Rename."""
+        folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
+        romaji, _alts = self._record_titles(root, series)
+        return romaji or os.path.basename(folder)
+
+    def _plan_folder(self, root, series, preview: SeriesPreview, names_of: Callable[[str], Set[str]],
+                     server: Optional[str]) -> None:
+        """The series folder's status in *preview* (top-level series only)."""
+        from .folder_scheme import windows_fits
+
+        rel = series.rel_path or ""
+        if not rel or "/" in rel:
+            return
+        try:
+            target = self.scheme_folder_name(root, series, windows_fits(root.path, server))
+        except Exception:  # noqa: BLE001 - one odd title must not stop the preview
+            _log.warning("Renamer: naming the folder of %s failed; left alone", rel, exc_info=True)
+            preview.folder_status, preview.folder_reason = LEFT_ALONE, "naming the folder failed"
+            return
+        preview.folder_target = target
+        preview.folder_status, preview.folder_reason = plan_folder(rel, target, names=names_of(root.path),
+                                                                   excluded=_root_excludes(root))
 
     def _volume_of(self, series_id: Optional[int]):
         if series_id is None:
@@ -837,20 +1132,23 @@ class Renamer:
             out.append((path, parsed))
         return out
 
-    def _preview(self, root, series, files: Sequence[Tuple[str, Any]], limits: Any) -> SeriesPreview:
+    def _preview(self, root, series, files: Sequence[Tuple[str, Any]], limits: Any,
+                 names_of: Optional[Callable[[str], Set[str]]] = None) -> SeriesPreview:
         folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
-        title = self._title(root, series) or os.path.basename(folder)
+        title = self.series_title(root, series)
         preview = SeriesPreview(series_id=series.id, root_id=root.id, root_path=root.path, folder=folder,
                                 title=os.path.basename(folder), series_title=title)
         try:
             preview.analysed = self._analysed(self.db, series)
         except Exception:  # noqa: BLE001 - not known
             preview.analysed = None
+        self._plan_folder(root, series, preview, names_of or _listing_cache(),
+                          getattr(limits, "windows_server", None) if limits is not None else None)
         if not files:
             preview.error = "no files recorded for this series (rescan first)"
             return preview
         preview.files = plan_files(files, namer=self.namer, series_title=title, volume_of=self._volume_of(series.id),
-                                   limits=limits)
+                                   limits=limits, legacy_title=self.legacy_title(root, series))
         if self._manual:
             preview.files = [replace(f, reason=f.reason or MANUAL_REASON)
                              if f.status in (RENAME, UNCHANGED) and os.path.normpath(f.path) in self._manual else f
@@ -891,6 +1189,7 @@ class Renamer:
                     continue
                 todo.append((root, series))
         per_root: Dict[int, RootDryRun] = {}
+        names_of = _listing_cache()
         for n, (root, series) in enumerate(todo, start=1):
             if should_stop is not None and should_stop():
                 dry.warnings.append("stopped before every series was looked at")
@@ -901,7 +1200,8 @@ class Renamer:
             if rdr is None:
                 rdr = per_root[root.id] = RootDryRun(root.id, root.name, root.path, root.enforce_naming)
                 dry.roots.append(rdr)
-            rdr.series.append(self._preview(root, series, self.files_of(root, series), limits))
+            rdr.series.append(self._preview(root, series, self.files_of(root, series), limits, names_of))
+        mark_folder_collisions(dry.series)
         dry.warnings.extend(self._warnings(dry))
         self._log_preview(dry.series, "dry run of " + (", ".join(r.name for r in dry.roots) or "nothing"))
         return dry
@@ -910,6 +1210,10 @@ class Renamer:
         out = []
         moving = [s for s in dry.series if s.renames]
         not_analysed = [s for s in moving if s.analysed is False]
+        if dry.folders_to_rename:
+            out.append(FOLDER_NOTE)
+        if any(s.held_renames for s in dry.series):
+            out.append(TITLE_NOTE)
         if not_analysed:
             out.append(NOT_ANALYSED_WARNING.format(n=len(not_analysed)))
         if any(s.analysed is None for s in moving):
@@ -924,8 +1228,10 @@ class Renamer:
             if s.collisions:
                 _log.warning("Renamer: %s: %d name collision(s), those files keep their names: %s", s.title,
                              len(s.collisions), "; ".join(f"{f.name} ({f.reason})" for f in s.collisions[:5]))
+        folders = sum(1 for s in previews if s.folder_rename)
         _log.info("Renamer: %s: %d to rename, %d already named by the scheme, %d left alone, %d collision(s) in %d "
-                  "series", what, c[RENAME], c[UNCHANGED], c[LEFT_ALONE], c[COLLISION], len(previews))
+                  "series; %d series folder(s) not named \"<romaji> [<English>]\"", what, c[RENAME], c[UNCHANGED],
+                  c[LEFT_ALONE], c[COLLISION], len(previews), folders)
 
     # --- rename pending ---------------------------------------------------------------------------------------------
 
@@ -937,7 +1243,9 @@ class Renamer:
             return {}
         roots = {r.id: r for r in self.db.list_roots()}
         limits = self.limits()
+        names_of = _listing_cache()
         out: Dict[str, int] = {}
+        folders = 0
         for entry in entries:
             root = roots.get(getattr(entry, "root_id", None))
             if root is None or root.enforce_naming == ENFORCE_OFF:
@@ -951,27 +1259,33 @@ class Renamer:
                 if parsed is None:
                     continue
                 files.append((str(hit.path), parsed))
-            if not files:
-                continue
             try:
-                preview = self._preview(root, series, files, limits)
+                preview = self._preview(root, series, files, limits, names_of)
             except NamingUnavailable:
                 return {}
-            n = len(preview.renames)
+            n = len(preview.renames) if files else 0
+            if preview.folder_rename:           # the folder is not "<romaji> [<English>]": one more to rename
+                n += 1
+                folders += 1
             if n:
                 out[str(entry.folder)] = n
-        _log.info("Renamer: %d series have files not named by the scheme (rename pending)", len(out))
+        _log.info("Renamer: %d series have files or a folder not named by the scheme (rename pending; %d folder(s))",
+                  len(out), folders)
         return out
 
     # --- applying -------------------------------------------------------------------------------------------------
 
-    def batches(self, previews: Iterable[SeriesPreview]) -> List[RenameBatch]:
-        return make_batches(previews, self.batch_size)
+    def batches(self, previews: Iterable[SeriesPreview], *, folders: bool = False) -> List[RenameBatch]:
+        """The journal batches of *previews*; *folders*: their series folders too (the owner's Rename only)."""
+        return make_batches(previews, self.batch_size, folders=folders)
 
     def apply(self, batch: RenameBatch, *, after: bool = True) -> BatchResult:
         """Rename one batch through the journal (one plan, the root's lock). Each series is previewed again first;
         only renames that are still exactly what the preview showed are made (anything else is listed as skipped).
-        With *after*: the rescan is recorded and MangaPixer is asked to scan the libraries touched."""
+        A batch made with ``folders=True`` (the window's Rename, never the automatic pass) also renames each series
+        folder that is still to be renamed to the same name: ONE step, after the series' file renames, so the series
+        keeps its identity (the journal's folder-move follow). With *after*: the rescan is recorded and MangaPixer is
+        asked to scan the libraries touched."""
         from .store.journal import PlanStateError, StepRefused
         from .store.lock import LockError
 
@@ -984,33 +1298,58 @@ class Renamer:
             _log.warning("Renamer: batch not applied: %s", result.message)
             return result
         moves: List[Tuple[str, str]] = []
+        folder_moves: List[Tuple[str, str]] = []
+        names_of = _listing_cache()
+        taken: Set[str] = set()                 # folder names this batch gives out
         for shown in batch.series:
             series = self.series_by_id(shown.series_id) if shown.series_id is not None else None
+            folder_wanted = batch.folders and shown.folder_rename
+            wanted = batch.files_of(shown)          # the automatic pass: not the renames a new series title causes
             if series is None:
-                result.skipped += [(f.name, "the series is no longer in the library") for f in shown.renames]
+                result.skipped += [(f.name, "the series is no longer in the library") for f in wanted]
+                if folder_wanted:
+                    result.skipped.append((shown.title + "/", "the series is no longer in the library"))
                 continue
-            now = self._preview(root, series, self.files_of(root, series), limits)
+            now = self._preview(root, series, self.files_of(root, series), limits, names_of)
             if now.analysed is False:
                 result.skipped += [(f.name, "MangaPixer has not analysed this series' files yet - let it finish its "
-                                            "scan first") for f in shown.renames]
+                                            "scan first") for f in wanted]
+                if folder_wanted:
+                    result.skipped.append((shown.title + "/", "MangaPixer has not analysed this series' files yet"))
                 continue
-            current = {(f.path, f.new_path) for f in now.renames}
-            ok = [(f.path, f.new_path) for f in shown.renames if (f.path, f.new_path) in current]
-            for f in shown.renames:
+            current = {(f.path, f.new_path) for f in batch.files_of(now)}
+            ok = [(f.path, f.new_path) for f in wanted if (f.path, f.new_path) in current]
+            for f in wanted:
                 if (f.path, f.new_path) not in current:
                     result.skipped.append((f.name, "changed since the preview - preview again"))
-            if ok:
+            folder_ok = False
+            if folder_wanted:
+                key = _name_key(shown.folder_target)
+                if not (now.folder_rename and now.folder == shown.folder and now.folder_target == shown.folder_target):
+                    result.skipped.append((shown.title + "/", "the folder changed since the preview - preview again"))
+                elif key in taken:
+                    result.skipped.append((shown.title + "/", f"another series of this batch takes the name "
+                                                              f"{shown.folder_target!r}"))
+                else:
+                    taken.add(key)
+                    folder_ok = True
+            if ok or folder_ok:
                 moves.extend(ok)
+                if folder_ok:
+                    folder_moves.append((now.folder, now.new_folder))
                 result.series_ids.append(series.id)
         for name, why in result.skipped:
             _log.warning("Renamer: %s not renamed: %s", name, why)
-        if not moves:
+        if not moves and not folder_moves:
             result.message = "nothing to rename" + (" (everything changed since the preview)" if result.skipped else "")
             _log.info("Renamer: batch in %s: %s", batch.root_path, result.message)
             return result
         journal = self.journal()
-        ordered = order_moves(moves)
+        # the files first (inside the old folder), then each series folder as one step: undo puts the folder back first
+        ordered = order_moves(moves) + folder_moves
         note = f"{len(moves)} file(s) in {len(result.series_ids)} series"
+        if folder_moves:
+            note += f", {len(folder_moves)} series folder(s) renamed to the scheme"
         try:
             plan = journal.plan(PLAN_REASON, ordered, root_path=root.path, note=note)
         except StepRefused as exc:
@@ -1030,22 +1369,24 @@ class Renamer:
             _log.warning("Renamer: plan %d not applied: %s", plan.id, exc)
             return result
         self._settle(result, plan, ordered)
-        if after and result.renamed:
+        if after and (result.renamed or result.folders):
             result.after = self._after(result.root_ids, result.series_ids)
         return result
 
     def _settle(self, result: BatchResult, plan, ordered: Sequence[Tuple[str, str]]) -> None:
         temps = {os.path.normcase(d) for _s, d in ordered if os.path.basename(d).startswith("~mangalist-rename-")}
         done = [s for s in plan.steps if s.state == "done" and os.path.normcase(s.dst) not in temps]
-        result.renamed = len(done)
+        result.folders = sum(1 for s in done if s.is_dir)
+        result.renamed = len(done) - result.folders
         for s in plan.steps:
             if s.state == "failed":
                 result.failed.append((os.path.basename(s.src), s.error or "failed"))
         if plan.status == "applied":
             result.status = "applied"
-            result.message = f"{result.renamed} file(s) renamed"
-            _log.info("Renamer: plan %d applied: %d file(s) renamed in %d series", plan.id, result.renamed,
-                      len(result.series_ids))
+            result.message = f"{result.renamed} file(s) renamed" + (
+                f", {result.folders} series folder(s) renamed" if result.folders else "")
+            _log.info("Renamer: plan %d applied: %d file(s) and %d series folder(s) renamed in %d series", plan.id,
+                      result.renamed, result.folders, len(result.series_ids))
         else:
             result.status = "partly" if result.renamed else "failed"
             stuck = result.failed[0] if result.failed else ("", plan.status)
@@ -1091,8 +1432,8 @@ class Renamer:
             out.append(res)
             if res.status not in ("applied", "nothing"):
                 break
-        root_ids = sorted({r for res in out if res.renamed for r in res.root_ids})
-        series_ids = sorted({s for res in out if res.renamed for s in res.series_ids})
+        root_ids = sorted({r for res in out if res.renamed or res.folders for r in res.root_ids})
+        series_ids = sorted({s for res in out if res.renamed or res.folders for s in res.series_ids})
         if out and series_ids:
             out[-1].after = self._after(root_ids, series_ids)
         return out
@@ -1142,19 +1483,22 @@ class Renamer:
             return result
         undone = [s for s in after.steps if s.state == "undone"
                   and not os.path.basename(s.dst).startswith("~mangalist-rename-")]
-        result.renamed = len(undone)
+        result.folders = sum(1 for s in undone if s.is_dir)
+        result.renamed = len(undone) - result.folders
         root = self.db.root_for_path(after.root_path) if after.root_path else None
         result.root_ids = [root.id] if root is not None else []
         series_ids = set()
-        for s in undone:
-            sid = self.series_id_for_folder(os.path.dirname(s.src))
+        for s in undone:                        # a folder step's series is at its old folder again
+            sid = self.series_id_for_folder(s.src if s.is_dir else os.path.dirname(s.src))
             if sid is not None:
                 series_ids.add(sid)
         result.series_ids = sorted(series_ids)
         if after.status == "undone":
             result.status = "undone"
-            result.message = f"{len(undone)} file(s) back under their old names"
-            _log.info("Renamer: plan %d undone: %d file(s) back under their old names", plan_id, len(undone))
+            result.message = f"{result.renamed} file(s) back under their old names" + (
+                f", {result.folders} series folder(s) back" if result.folders else "")
+            _log.info("Renamer: plan %d undone: %d file(s) and %d series folder(s) back under their old names", plan_id,
+                      result.renamed, result.folders)
         else:
             stuck = next((s for s in after.steps if s.state == "done" and s.error), None)
             result.status = "partly"
@@ -1245,11 +1589,12 @@ class Renamer:
                 continue
             dry = self.dry_run(root_ids=[root.id], series_ids=todo, should_stop=should_stop)
             for s in dry.series:            # nothing to rename: not looked at again until its files or names change
-                if not s.renames and s.series_id in digests:
+                if not s.auto_renames and s.series_id in digests:       # (a new series title waits for the owner)
                     quiet[str(s.series_id)] = digests[s.series_id]
-            ready = [s for s in dry.series if s.renames and s.analysed is not False]
+            report.held += sum(len(s.held_renames) for s in dry.series)
+            ready = [s for s in dry.series if s.auto_renames and s.analysed is not False]
             for s in dry.series:
-                if s.renames and s.analysed is False:
+                if s.auto_renames and s.analysed is False:
                     _log.warning("Renamer: %s waits: MangaPixer has not analysed its archives yet", s.title)
             for batch in self.batches(ready):
                 if budget <= 0 or (should_stop is not None and should_stop()):
@@ -1258,13 +1603,13 @@ class Renamer:
                     kept = []
                     count = 0
                     for s in batch.series:
-                        if count + len(s.renames) > budget:
+                        if count + len(s.auto_renames) > budget:
                             break
                         kept.append(s)
-                        count += len(s.renames)
+                        count += len(s.auto_renames)
                     if not kept:
                         break
-                    batch = RenameBatch(batch.root_id, batch.root_path, tuple(kept))
+                    batch = RenameBatch(batch.root_id, batch.root_path, tuple(kept), titles=False)
                 res = self.apply(batch, after=False)
                 report.batches.append(res)
                 budget -= res.renamed

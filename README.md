@@ -52,9 +52,12 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 `USER_ID` / `GROUP_ID` default to Unraid's `99` / `100`. The scheduled rescan is `MANGALIST_RESCAN_SCHEDULE`
 (default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1` (below).
 
-The schedules (`MANGALIST_RESCAN_SCHEDULE`, `MANGALIST_MANGAPIXER_SYNC_SCHEDULE`, `MANGALIST_DOWNLOADS_SCHEDULE`) and
-the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run defaults**: you
-change them in **Settings > Automation** and **Settings > Logging**, the container's background runner picks the change
+The schedules (`MANGALIST_RESCAN_SCHEDULE`, `MANGALIST_MANGAPIXER_SYNC_SCHEDULE`, `MANGALIST_DOWNLOADS_SCHEDULE`,
+`MANGALIST_DISPATCH_SCHEDULE`, and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records, off
+by default) and the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run
+defaults**: you change them in **Settings > Scheduled tasks** (one list: each task with its time, last run, next run
+and **Run now**; the full re-read offers every 6 hours, every 12 hours or daily) and **Settings > Logging**, the
+container's background runner picks the change
 up within a minute (no restart), and a value set in Settings is used instead of the variable until you press "Use the
 container's value". The log files are in the data folder's `logs` folder (`mangalist.log` for the window,
 `headless.log` for the runner); Settings > Logging opens that folder or copies its path.
@@ -131,7 +134,12 @@ python -m mangalist          # --version, or --smoke-test for a headless start c
 python -m pytest -q
 ```
 
-Folder names may be `Title`, `English Title` or `Romanized Title [English Title]`.
+The tests never touch the network. A few optional live checks against the real MangaUpdates API (public titles from
+the golden set only) run with `MANGALIST_LIVE_MU=1 python -m pytest -q tests/golden/test_live_mangaupdates.py`.
+
+Series folders are named `Romanized Title [English Title]` - MangaUpdates' title, then the English title in brackets
+when MangaList knows it (just `Romanized Title` otherwise), like animefetch's show folders. Add series proposes that
+name; the Renamer lists a folder named differently as Rename pending and renames it only when you press Rename.
 
 ## MangaUpdates matching
 

@@ -84,6 +84,7 @@ class Fakes:
     def __init__(self, records=None, search=None, md=None):
         self.records = records or {}
         self.search_calls: List[str] = []
+        self.filters: List[tuple] = []
         self.search_results = search or []
         self.md = md
         self.md_calls: List[str] = []
@@ -99,7 +100,10 @@ class Fakes:
 
     def mu_search(self, query, page_size=10, filter_types=None):
         self.search_calls.append(query)
-        return [{"record": r, "hit_title": ""} for r in self.search_results]
+        self.filters.append(tuple(filter_types or ()))
+        hidden = {t.casefold() for t in filter_types or ()}
+        return [{"record": r, "hit_title": ""} for r in self.search_results
+                if str(r.get("type") or "").casefold() not in hidden]
 
     def md_get(self, url):
         self.md_calls.append(url)
@@ -107,8 +111,9 @@ class Fakes:
             raise A.AddSeriesError("MangaDex has no series with that id.")
         return self.md
 
-    def lookup(self, text):
-        return A.lookup(text, mu_get=self.mu_get, mu_search=self.mu_search, mangadex_get=self.md_get)
+    def lookup(self, text, show_all=False):
+        return A.lookup(text, mu_get=self.mu_get, mu_search=self.mu_search, mangadex_get=self.md_get,
+                        show_all=show_all)
 
 
 def test_a_mangaupdates_link_reads_the_record():
@@ -162,6 +167,33 @@ def test_a_title_searches_mangaupdates_only():
         Fakes().lookup("  ")
 
 
+def test_a_title_search_hides_doujinshi_and_artbooks_unless_asked():
+    # owner, 2026-10-15 (answer 7): "Yes, with the option to enable them in the search"
+    rows = [mu_record(1, "Made Up Doujin", type="Doujinshi"), mu_record(2, "Made Up Series"),
+            mu_record(3, "Made Up Artbook", type="Artbook"), mu_record(4, "Made Up Novel", type="Novel")]
+    f = Fakes(search=rows)
+    out = f.lookup("Made Up")
+    assert [c["series_id"] for c in out.candidates] == [2, 4]
+    assert f.filters == [("Doujinshi", "Artbook")]                  # asked of MangaUpdates: the page holds real series
+    out = f.lookup("Made Up", show_all=True)
+    assert [c["series_id"] for c in out.candidates] == [1, 2, 3, 4] and f.filters[-1] == ()
+
+
+def test_hidden_types_are_dropped_even_when_mangaupdates_returns_them():
+    def careless(query, page_size=10, filter_types=None):
+        return [{"record": mu_record(1, "Made Up Doujin", type="doujinshi")}, {"record": mu_record(2)}]
+
+    assert [r["series_id"] for r in A.search_mu("Made Up", careless)] == [2]
+    assert [r["series_id"] for r in A.search_mu("Made Up", careless, show_all=True)] == [1, 2]
+
+
+def test_a_mangadex_series_without_mangaupdates_searches_without_doujinshi_too():
+    f = Fakes(md=md_body(mu=None), search=[mu_record(7, type="Doujinshi"), mu_record(8)])
+    out = f.lookup(UUID)
+    assert [c["series_id"] for c in out.candidates] == [8]
+    assert [c["series_id"] for c in f.lookup(UUID, show_all=True).candidates] == [7, 8]
+
+
 def test_mangadex_records_without_a_title_or_with_a_bad_mu_link_are_handled():
     with pytest.raises(A.AddSeriesError):
         A.mangadex_from_record({"data": {"id": UUID, "attributes": {"title": {}}}})
@@ -200,16 +232,28 @@ def test_clean_folder_name(raw, clean):
     assert A.clean_folder_name(raw) == clean
 
 
-def test_names_are_proposed_english_first_without_repeats():
+def test_the_folder_scheme_is_proposed_first():
+    # owner, 2026-10-15 (answer 6): "Always use "<romaji> [<English>]", similar to animefetch"
     info = A.info_from_mu(mu_record(title="Romaji Title"), A.mangadex_from_record(md_body(title="Romaji Title",
                                                                                           english="English: Title")))
     names = A.propose_names(info)
-    assert names[0] == "English - Title"
-    assert "Romaji Title" in names and "Romaji Title [English - Title]" in names
+    assert names[0] == "Romaji Title [English Title]"               # MangaUpdates' title, MangaDex's English title
+    assert names[0] == info.scheme_name()
+    assert "Romaji Title" in names and "English - Title" in names
     assert "Made Up Series (Alt)" in names and not any("メ" in n for n in names)
-    assert len(names) == len({n.casefold() for n in names})
+    assert len(names) == len(set(names))
     for n in names:
         assert A.windows_name_problem(n) is None
+
+
+def test_without_an_english_title_the_romaji_alone_is_first_and_english_looking_titles_are_offered():
+    info = A.info_from_mu(mu_record(title="Made Up Romaji no Hon",
+                                    associated=[{"title": "The Made Up Book"}, {"title": "Made Up Romaji"},
+                                                {"title": "メイドアップ"}]))
+    names = A.propose_names(info)
+    assert names[0] == "Made Up Romaji no Hon"                     # no English title known: "<romaji>"
+    assert names[1] == "Made Up Romaji no Hon [The Made Up Book]"  # an alternative title that reads as English
+    assert "Made Up Romaji no Hon [Made Up Romaji]" not in names
 
 
 def test_the_matching_title_is_the_only_proposal_when_nothing_differs():
@@ -217,6 +261,26 @@ def test_the_matching_title_is_the_only_proposal_when_nothing_differs():
     assert A.propose_names(info) == ["Same Title"]
     only_md = A.info_from_mangadex(A.mangadex_from_record(md_body(english=None, mu=None)))
     assert A.propose_names(only_md) == ["Made Up Series"]
+
+
+def test_mangadex_english_and_romanised_titles():
+    def md(title, alts):
+        return A.mangadex_from_record({"data": {"id": UUID, "attributes": {"title": title, "altTitles": alts}}})
+
+    # the usual record: the romanised title under "en", the English one among the alternatives
+    m = md({"en": "Made Up Romaji"}, [{"ja": "メイドアップ"}, {"en": "Made Up English"}])
+    assert (m.romaji_title, m.english_title, m.title) == ("Made Up Romaji", "Made Up English", "Made Up English")
+    # the English title as the main one, the romanised title among the alternatives
+    m = md({"en": "Made Up English"}, [{"ko-ro": "Made Up Romaja"}])
+    assert (m.romaji_title, m.english_title) == ("Made Up Romaja", "Made Up English")
+    # only a main title: no English title is known
+    m = md({"en": "Made Up Only"}, [])
+    assert (m.romaji_title, m.english_title, m.title) == ("Made Up Only", None, "Made Up Only")
+    # an "English" alternative that is the romaji again is no English title
+    m = md({"ja-ro": "Made Up Romaji"}, [{"en": "made-up romaji"}])
+    assert m.english_title is None
+    info = A.info_from_mangadex(md({"en": "Made Up English"}, [{"ja-ro": "Made Up Romaji"}]))
+    assert A.propose_names(info)[0] == "Made Up Romaji [Made Up English]"
 
 
 # --- the folder -------------------------------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 2nd in line, Downloading, Downloaded, Filed v03-v05 - seeding, Failed: <reason>, ...), with Check downloads now, the
 time of the next automatic check and the download budget ("Using 31.2 GB of 50 GB; 2 downloads queued"). Chapter
 downloads (Suwayomi) show here too, one row per Send ("Ch. 101-104 · <group> · MangaDex (EN)": Downloading, Filed ch
-101-104 - done, ...); they have no row menu (no torrent, no queue) and the check files them as well.
+101-104 - done, ...); the check files them as well.
 
 The records are read off the UI thread (``refresh``); the Download tab shows this list at the bottom and learns the
 records from :attr:`records_loaded`, the downloads dialog shows it alone.
@@ -10,10 +10,17 @@ records from :attr:`records_loaded`, the downloads dialog shows it alone.
 Row menu (right-click): a filed download offers "Remove now..."; a queued one (owner, 2026-10-09: "the user can override
 the queue") "Send now (past the cap)...", "Move to the front of the queue" and "Remove from the queue...". Sending past
 the cap and removing ask first, as Remove now does; moving to the front does not (it changes no download).
+
+**Dismiss** (owner, 2026-10-15): a FAILED row - a torrent or a chapter download ("already in the folder", ...) - offers
+"Dismiss": the record is marked cancelled and leaves In progress (it stays under Show finished, its failure readable in
+the tooltip). Nothing else changes: no file is touched, a torrent still in qBittorrent is left there and stops counting
+against the download budget. A merged chapter row dismisses every chapter record it shows. It does not ask first (it
+changes no download); the status line says what was dismissed.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
@@ -29,6 +36,8 @@ from .download_widgets import button, flat_table, hbox, label, pill
 from .downloads_backend import DownloadsBackend
 from .tables import cell, resizable_columns
 from .volumes_target import status_text, status_tooltip
+
+_log = logging.getLogger(__name__)
 
 COLUMNS = ("Series", "Release", "Status", "Updated")
 COL_SERIES, COL_RELEASE, COL_STATUS, COL_UPDATED = range(len(COLUMNS))
@@ -59,6 +68,20 @@ ACT_SEND_NOW = "Send now (past the cap)…"
 ACT_TO_FRONT = "Move to the front of the queue"
 ACT_DEQUEUE = "Remove from the queue…"
 QUEUE_ACTIONS = {ACT_SEND_NOW: "send_queued_now", ACT_TO_FRONT: "move_to_front", ACT_DEQUEUE: "remove_from_queue"}
+ACT_DISMISS = "Dismiss"
+DISMISS_TIP = ("Take this failed download out of In progress (it is marked cancelled and stays under Show finished). "
+               "No file is touched; a torrent still in qBittorrent is left there and no longer counts against the "
+               "download budget.")
+
+
+def members_of(row: DownloadRecord, records: Sequence[DownloadRecord]) -> List[int]:
+    """The record ids a shown row stands for: a torrent row its own; a merged chapter row every chapter record of its
+    Send in the same status and with the same error (:func:`~.download_rules.merge_batches`' grouping)."""
+    if not row.is_chapters:
+        return [row.id]
+    key = (row.batch or f"#{row.id}", row.status, row.error or "")
+    ids = [r.id for r in records if r.is_chapters and (r.batch or f"#{r.id}", r.status, r.error or "") == key]
+    return ids or [row.id]
 
 
 class DownloadsList(QWidget):
@@ -145,8 +168,12 @@ class DownloadsList(QWidget):
     # --- loading ---------------------------------------------------------------------------------------
 
     def set_known_titles(self, titles: Mapping[int, str]) -> None:
-        """Names for series ids (the host's wanted series); the backend's own names win."""
-        self._known_titles = dict(titles)
+        """Names for series ids (the host's wanted series); the backend's own names win. Unchanged names rebuild
+        nothing (a library switch sends the same names again; the rebuild cost 40-60 ms - UI performance stage 2)."""
+        titles = dict(titles)
+        if titles == self._known_titles:
+            return
+        self._known_titles = titles
         if self.records:
             self._show(self.records)
 
@@ -298,6 +325,9 @@ class DownloadsList(QWidget):
         if row < 0 or row >= len(shown):
             return
         record = shown[row]
+        if record.status == DownloadStatus.FAILED:
+            self._failed_menu(record, pos)
+            return
         if record.is_chapters:              # a chapter download (Suwayomi): no torrent to remove, nothing queued
             return
         if record.status == DownloadStatus.QUEUED:
@@ -346,6 +376,44 @@ class DownloadsList(QWidget):
         self._note = None
         set_tone(self.status_label, "bad")
         self.status_label.setText(f"Could not remove it: {message}")
+        self._check_failed = True
+
+    # --- Dismiss (a failed download, torrent or chapters) -----------------------------------------------------------
+
+    def _failed_menu(self, record: DownloadRecord, pos: QPoint) -> None:
+        if not callable(getattr(self._backend, "dismiss_downloads", None)):
+            return
+        menu = QMenu(self.table)
+        act = menu.addAction(ACT_DISMISS)
+        act.setToolTip(DISMISS_TIP)
+        act.setEnabled(self._call is None)
+        menu.setToolTipsVisible(True)
+        if self._exec_menu(menu, self.table.viewport().mapToGlobal(pos)) is act:
+            self.dismiss(record)
+
+    def dismiss(self, record: DownloadRecord) -> bool:
+        """Dismiss a failed row (off the UI thread): its records are marked cancelled; the list reloads after."""
+        fn = getattr(self._backend, "dismiss_downloads", None)
+        if self._call is not None or record.status != DownloadStatus.FAILED or not callable(fn):
+            return False
+        ids = members_of(record, self.records)
+        self._busy(True)
+        set_tone(self.status_label, "")
+        self.status_label.setText("Dismissing...")
+        self._check_failed = False
+        _log.info("In progress: dismissing failed download(s) %s", ids)
+        self._call = start_call(lambda: fn(ids), lambda n: self._on_dismissed(record, n), self._on_dismiss_error,
+                                self._after_check)
+        return True
+
+    def _on_dismissed(self, record: DownloadRecord, n: int) -> None:
+        self._note = (f"Dismissed: {record.title} ({self.name_of(record)}). It is under Show finished." if n
+                      else f"Not dismissed: {record.title} is no longer failed.")
+
+    def _on_dismiss_error(self, message: str) -> None:
+        self._note = None
+        set_tone(self.status_label, "bad")
+        self.status_label.setText(f"Could not dismiss it: {message}")
         self._check_failed = True
 
     # --- the queue (the download budget): the owner's overrides -------------------------------------------------

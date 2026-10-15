@@ -363,7 +363,7 @@ class _ChapterPass:
         ctx = with_series_head(ParseContext(series_title=os.path.basename(os.path.normpath(folder))), archives)
         for name in archives:
             parsed = parse_name(name, ctx)
-            if parsed.kind not in (Kind.CHAPTER, Kind.BOTH) or parsed.chapter is None:
+            if parsed.kind not in (Kind.CHAPTER, Kind.BOTH) or parsed.chapter is None or parsed.is_extra:
                 continue
             start, end = parsed.chapter.start, parsed.chapter.end
             if start == want and (end is None or end == start):

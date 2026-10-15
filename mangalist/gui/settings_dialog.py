@@ -1,5 +1,5 @@
-"""The Settings dialog: one dialog, seven sections on the left (Library, Connected services, Download sources, Matching,
-Automation, Appearance, Logging) - the approved mockup's ``Settings.dc.html``. It absorbs the Roots, MangaPixer and qBittorrent dialogs.
+"""The Settings dialog: one dialog, eight sections on the left (Library, Connected services, Download sources, Matching,
+Automation, Scheduled tasks, Appearance, Logging) - the approved mockup's ``Settings.dc.html``. It absorbs the Roots, MangaPixer and qBittorrent dialogs.
 
 :func:`open_settings` opens it modally and returns what changed (:class:`~mangalist.gui.shell.SettingsResult`) so the
 shell can rescan, re-read MangaPixer's data or reload the Download tab. Switches are stored as they are changed; the
@@ -9,7 +9,8 @@ tokens stay write-only.
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional
+from collections.abc import Mapping
+from typing import Callable, Dict, Iterator, List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -33,6 +34,7 @@ from .settings_common import SectionPage
 from .settings_library import LibraryPage
 from .settings_sections import SECTION_LOGGING, AutomationPage, LoggingPage, MatchingPage, SourcesPage
 from .settings_services import ServicesPage
+from .settings_tasks import SECTION_TASKS, ScheduledTasksPage
 from .shell import (
     SECTION_AUTOMATION,
     SECTION_LIBRARY,
@@ -48,13 +50,45 @@ NAV = (
     (SECTION_SERVICES, "Connected services", "MangaPixer, qBittorrent, Suwayomi"),
     (SECTION_SOURCES, "Download sources", "nyaa, Suwayomi sources"),
     (SECTION_MATCHING, "Matching", "MangaUpdates"),
-    (SECTION_AUTOMATION, "Automation", "Schedules, Remove Completed"),
+    (SECTION_AUTOMATION, "Automation", "Remove Completed, default modes"),
+    (SECTION_TASKS, "Scheduled tasks", "What runs on its own, and when"),
     (SECTION_APPEARANCE, "Appearance", "Light, Dark or the system's"),
     (SECTION_LOGGING, "Logging", "Level, log files and folder"),
 )
 # The sections of this dialog: the shell's five, then Appearance and Logging (kept here so the shell's list is not
 # changed).
-DIALOG_SECTIONS = (*SECTIONS, SECTION_APPEARANCE, SECTION_LOGGING)
+DIALOG_SECTIONS = (*SECTIONS, SECTION_TASKS, SECTION_APPEARANCE, SECTION_LOGGING)
+
+
+class _LazyPages(Mapping):
+    """section -> its page, each built the first time it is asked for (shown, or read by a test): opening Settings
+    built all seven pages and read the database for each (about 0.5 s) before the dialog showed (UI performance stage
+    2). ``built()`` is the pages that exist."""
+
+    def __init__(self, factories: Dict[str, Callable[[], SectionPage]], attach: Callable[[str, SectionPage], None]):
+        self._factories = factories
+        self._attach = attach
+        self._built: Dict[str, SectionPage] = {}
+
+    def __getitem__(self, key: str) -> SectionPage:
+        page = self._built.get(key)
+        if page is None:
+            page = self._factories[key]()
+            self._built[key] = page
+            self._attach(key, page)
+        return page
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._factories)
+
+    def __len__(self) -> int:
+        return len(self._factories)
+
+    def __contains__(self, key) -> bool:
+        return key in self._factories
+
+    def built(self) -> List[SectionPage]:
+        return list(self._built.values())
 
 
 class _NavButton(QFrame):
@@ -136,17 +170,9 @@ class SettingsDialog(QDialog):
         body.addWidget(nav)
 
         self.stack = QStackedWidget()
-        self.pages: Dict[str, SectionPage] = {
-            SECTION_LIBRARY: LibraryPage(db, browse=browse, cache=cache, auto_modes=has_automation(backend)),
-            SECTION_SERVICES: ServicesPage(db, backend, cache, client_factory=client_factory, info=info),
-            SECTION_SOURCES: SourcesPage(db, backend),
-            SECTION_MATCHING: MatchingPage(db),
-            SECTION_AUTOMATION: AutomationPage(db, backend, cache, env=env),
-            SECTION_APPEARANCE: AppearancePage(db),
-            SECTION_LOGGING: LoggingPage(db, env=env),
-        }
+        # Each section's page is built when it is first shown (_LazyPages); its scroll area is here from the start.
+        self._holders: Dict[str, QVBoxLayout] = {}
         for key in DIALOG_SECTIONS:
-            page = self.pages[key]
             scroll = QScrollArea()
             scroll.setObjectName("settingsScroll")
             scroll.setWidgetResizable(True)
@@ -155,17 +181,33 @@ class SettingsDialog(QDialog):
             holder.setObjectName("settingsBody")
             hv = QVBoxLayout(holder)
             hv.setContentsMargins(28, 22, 28, 22)
-            hv.addWidget(page)
             scroll.setWidget(holder)
             self.stack.addWidget(scroll)
-            page.roots_changed.connect(lambda: self._flag("roots"))
-            page.mangapixer_changed.connect(lambda: self._flag("mangapixer"))
-            page.downloads_changed.connect(lambda: self._flag("downloads"))
-            page.section_requested.connect(self.show_section)
+            self._holders[key] = hv
+        self.pages: _LazyPages = _LazyPages({
+            SECTION_LIBRARY: lambda: LibraryPage(db, browse=browse, cache=cache, auto_modes=has_automation(backend)),
+            SECTION_SERVICES: lambda: ServicesPage(db, backend, cache, client_factory=client_factory, info=info),
+            SECTION_SOURCES: lambda: SourcesPage(db, backend),
+            SECTION_MATCHING: lambda: MatchingPage(db),
+            SECTION_AUTOMATION: lambda: AutomationPage(db, backend, cache, env=env),
+            SECTION_TASKS: lambda: ScheduledTasksPage(db, env=env),
+            SECTION_APPEARANCE: lambda: AppearancePage(db),
+            SECTION_LOGGING: lambda: LoggingPage(db, env=env),
+        }, self._attach_page)
         body.addWidget(self.stack, 1)
         outer.addLayout(body, 1)
         apply_style(self)
         self.show_section(section if section in DIALOG_SECTIONS else SECTION_LIBRARY)
+
+    def _attach_page(self, key: str, page: SectionPage) -> None:
+        """A page just built: into its section's scroll area (a page outside the dialog's sections stays unshown)."""
+        holder = self._holders.get(key)
+        if holder is not None:
+            holder.addWidget(page)
+        page.roots_changed.connect(lambda: self._flag("roots"))
+        page.mangapixer_changed.connect(lambda: self._flag("mangapixer"))
+        page.downloads_changed.connect(lambda: self._flag("downloads"))
+        page.section_requested.connect(self.show_section)
 
     def _flag(self, name: str) -> None:
         self._flags[name] = True
@@ -184,7 +226,7 @@ class SettingsDialog(QDialog):
                               downloads_changed=self._flags["downloads"])
 
     def done(self, result: int) -> None:
-        for page in self.pages.values():
+        for page in self.pages.built():
             page.stop()
         super().done(result)
 
@@ -200,4 +242,5 @@ def open_settings(parent: Optional[QWidget], db, backend: Optional[DownloadsBack
     return result
 
 
-__all__ = ["SettingsDialog", "open_settings", "NAV", "DIALOG_SECTIONS", "SECTION_APPEARANCE", "SECTION_LOGGING"]
+__all__ = ["SettingsDialog", "open_settings", "NAV", "DIALOG_SECTIONS", "SECTION_APPEARANCE", "SECTION_LOGGING",
+           "SECTION_TASKS"]

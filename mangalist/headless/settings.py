@@ -9,6 +9,9 @@ Variable                       Default             Meaning
 ``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the find pass runs (only with downloads on).
 ``MANGALIST_DOWNLOADS_SCHEDULE`` ``every 1h``      When to file finished downloads and remove completed
                                                    torrents (the ``downloads`` job; only with downloads on).
+``MANGALIST_CLEAN_RECORDS_SCHEDULE`` ``off``       When to clear finished download records (``daily@05:30``,
+                                                   ``weekly@sun 05:30`` or ``monthly@1 05:30``: the period is
+                                                   also how old a record must be to go). Off until chosen.
 ``MANGALIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
 ``MANGALIST_MANGAPIXER_SYNC_SCHEDULE`` ``daily@03:15`` When to sync the MangaPixer source (before the rescan;
                                                    skipped while no MangaPixer server is set up).
@@ -18,8 +21,9 @@ Variable                       Default             Meaning
 
 Schedules in the settings database (owner, 2026-10-09: "This should be configurable by the user")
 --------------------------------------------------------------------------------------------------
-The four schedules are editable in Settings > Automation and stored in the library database's settings table
-(``schedule_rescan``, ``schedule_mangapixer_sync``, ``schedule_dispatch``, ``schedule_downloads``; the text forms of
+The five schedules are editable in Settings > Scheduled tasks and stored in the library database's settings table
+(``schedule_rescan``, ``schedule_mangapixer_sync``, ``schedule_dispatch``, ``schedule_downloads``,
+``schedule_clean_records``; the text forms of
 :mod:`.schedule`, ``off`` included). Order of precedence, per schedule:
 
 1. the stored value, once the owner has set one;
@@ -40,7 +44,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
+from datetime import datetime, timezone, tzinfo
 from typing import Any, Dict, Mapping, NamedTuple, Optional
 
 from .schedule import Schedule, parse_schedule, validate_schedule
@@ -53,11 +57,13 @@ ENV_DISPATCH = "MANGALIST_DISPATCH_SCHEDULE"
 ENV_CATCH_UP = "MANGALIST_CATCH_UP"
 ENV_MANGAPIXER = "MANGALIST_MANGAPIXER_SYNC_SCHEDULE"
 ENV_DOWNLOADS_SCHEDULE = "MANGALIST_DOWNLOADS_SCHEDULE"
+ENV_CLEAN_RECORDS = "MANGALIST_CLEAN_RECORDS_SCHEDULE"
 
 DEFAULT_RESCAN = "daily@03:30"
 DEFAULT_DISPATCH = "daily@04:30"
 DEFAULT_MANGAPIXER = "daily@03:15"
 DEFAULT_DOWNLOADS_SCHEDULE = "every 1h"
+DEFAULT_CLEAN_RECORDS = "off"           # owner, 2026-10-15: a setting, user clearable - nothing is cleared until chosen
 
 
 class ScheduleSpec(NamedTuple):
@@ -78,6 +84,8 @@ SCHEDULES = (
                  DEFAULT_DISPATCH),
     ScheduleSpec("downloads", "File finished downloads", "schedule_downloads", ENV_DOWNLOADS_SCHEDULE,
                  DEFAULT_DOWNLOADS_SCHEDULE),
+    ScheduleSpec("clean-records", "Clear finished download records", "schedule_clean_records", ENV_CLEAN_RECORDS,
+                 DEFAULT_CLEAN_RECORDS),
 )
 SCHEDULE_BY_JOB = {spec.job: spec for spec in SCHEDULES}
 
@@ -161,6 +169,8 @@ def local_timezone(env: Optional[Mapping[str, str]] = None) -> tzinfo:
     """``TZ`` as an IANA zone when it names one, else the system's current local zone."""
     env = os.environ if env is None else env
     name = (env.get("TZ") or "").strip().lstrip(":")
+    if name.upper() in ("UTC", "ETC/UTC", "GMT", "ETC/GMT", "Z"):
+        return timezone.utc                      # needs no time-zone database (Windows has none without tzdata)
     if name:
         try:
             from zoneinfo import ZoneInfo
@@ -199,6 +209,7 @@ class HeadlessSettings:
     tz: tzinfo
     mangapixer_schedule: Optional[Schedule] = None
     downloads_schedule: Optional[Schedule] = None
+    clean_records_schedule: Optional[Schedule] = None
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None, db: Any = None) -> "HeadlessSettings":
@@ -214,4 +225,5 @@ class HeadlessSettings:
             tz=local_timezone(env),
             mangapixer_schedule=schedules["mangapixer-sync"],
             downloads_schedule=schedules["downloads"],
+            clean_records_schedule=schedules["clean-records"],
         )

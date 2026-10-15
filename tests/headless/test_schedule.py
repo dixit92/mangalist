@@ -153,3 +153,37 @@ def test_weekly_keeps_its_wall_clock_time_across_the_fall_back():
 
 def test_validate_stores_weekly_in_its_canonical_form():
     assert validate_schedule("Weekly Wednesday 4:05") == "weekly@wed 04:05"
+
+
+# --- monthly (owner, 2026-10-15: the clean-up of finished download records is Daily, Weekly or Monthly) -----------------
+
+def test_monthly_runs_on_its_day_at_its_local_time_and_rolls_over_the_year():
+    from mangalist.headless.schedule import MonthlyAt
+
+    tz = zone("America/New_York")
+    first = MonthlyAt(1, 5, 30)
+    # 2026-10-15 -> Nov 1 05:30 local; Nov 1 is after the fall-back (EST, UTC-5)
+    assert first.next_after(datetime(2026, 10, 15, 12, 0, tzinfo=UTC), tz) == datetime(2026, 11, 1, 10, 30, tzinfo=UTC)
+    # exactly at the slot -> the next month; in December -> January of the next year
+    assert first.next_after(datetime(2026, 11, 1, 10, 30, tzinfo=UTC), tz) == datetime(2026, 12, 1, 10, 30, tzinfo=UTC)
+    assert first.next_after(datetime(2026, 12, 20, 0, 0, tzinfo=UTC), tz) == datetime(2027, 1, 1, 10, 30, tzinfo=UTC)
+    # earlier in the same month
+    assert MonthlyAt(20, 1, 0).next_after(datetime(2026, 10, 15, 12, 0, tzinfo=UTC), UTC) == \
+        datetime(2026, 10, 20, 1, 0, tzinfo=UTC)
+    assert MonthlyAt(28, 0, 0).next_after(datetime(2027, 2, 10, 0, 0, tzinfo=UTC), UTC) == \
+        datetime(2027, 2, 28, 0, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("text, canonical", [("monthly@1 05:30", "monthly@1 05:30"), ("Monthly 15 4:05", "monthly@15 04:05"),
+                                             ("monthly:28 00:00", "monthly@28 00:00")])
+def test_monthly_parses_and_round_trips(text, canonical):
+    from mangalist.headless.schedule import MonthlyAt
+
+    parsed = parse_schedule(text)
+    assert isinstance(parsed, MonthlyAt) and parsed.describe() == canonical == validate_schedule(text)
+
+
+@pytest.mark.parametrize("text", ["monthly@0 05:30", "monthly@29 05:30", "monthly@1", "monthly 31 05:30", "monthly@1 25:00"])
+def test_monthly_refuses_a_day_that_not_every_month_has(text):
+    with pytest.raises(ValueError):
+        parse_schedule(text)

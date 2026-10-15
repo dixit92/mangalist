@@ -22,6 +22,8 @@ what it can do itself::
     fix_mu_match_for(folder)                 the List's "Fix MangaUpdates match…" dialog
     unbundled_on(folders) -> bool            every one has Unbundled chapters on (the tick)
     set_unbundled_for(folders, on) -> str    the status line; the List's states and the To get list follow
+    unbundled_first_ask(folders) -> ask|None its "first chapter to get" question (one series, the list unmapped)
+    ask_unbundled_first_for(folder) -> str   asks it (again); the status line
     behind_counts(folders) -> (can mark, marked)
     set_behind_done(folders, done) -> str    Mark Behind as up to date / clear it; the states follow
     folder_for_series(series_id) -> str | None
@@ -60,7 +62,7 @@ from .automation_rules import (
 from .background import describe_error
 from .download_widgets import button
 from .links import OPEN_FOLDER_LABEL, open_folder, open_link
-from .list_text import UNBUNDLED_HELP, UNBUNDLED_MENU
+from .list_text import UNBUNDLED_FIRST_HELP, UNBUNDLED_FIRST_MENU, UNBUNDLED_HELP, UNBUNDLED_MENU
 
 _log = logging.getLogger(__name__)
 
@@ -78,8 +80,8 @@ CHECK_NEW_TIP = ("Ask the series' Suwayomi source for chapters newer than the ne
                  "MangaUpdates lists them")
 CHANGE_SOURCE_TIP = ("Open the series' chapters and pick where they come from: MangaDex or your other Suwayomi sources. "
                      "Remembered for the series")
-BEHIND_DONE_TIP = ("Treat the series as up to date: the List shows it Up to date, and scheduled find passes and Find now "
-                   "skip it (it stays listed in To get, as in the List's Gaps)")
+BEHIND_DONE_TIP = ("Treat the series as up to date: the List shows it Up to date, it leaves To get, and find passes skip "
+                   "it (Clear 'up to date' override in the List brings it back)")
 
 
 MOVE_MENU = "Move to library"
@@ -246,7 +248,8 @@ class SeriesMenu:
         return self._modes
 
     def add_unbundled(self) -> Optional[QAction]:
-        """Unbundled chapters (a tick: every series has it on)."""
+        """Unbundled chapters (a tick: every series has it on), then - for one series with it on whose volume list does
+        not say where its newest volume ends - "First chapter to get…" (owner, 2026-10-15: asked once, editable)."""
         is_on, set_on = self._host_fn("unbundled_on"), self._host_fn("set_unbundled_for")
         folders = self.folders()
         if is_on is None or set_on is None or not folders:
@@ -255,7 +258,15 @@ class SeriesMenu:
         act = self._add(UNBUNDLED_MENU, lambda: self._unbundled(set_on, folders, not on), UNBUNDLED_HELP)
         act.setCheckable(True)
         act.setChecked(on)
+        first_ask, ask_first = self._host_fn("unbundled_first_ask"), self._host_fn("ask_unbundled_first_for")
+        if on and len(folders) == 1 and first_ask is not None and ask_first is not None and first_ask(folders):
+            self._add(UNBUNDLED_FIRST_MENU, lambda: self._unbundled_first(ask_first, folders[0]), UNBUNDLED_FIRST_HELP)
         return act
+
+    def _unbundled_first(self, ask_first, folder) -> str:
+        text = ask_first(folder)
+        self._changed("unbundled")
+        return text or ""
 
     def _unbundled(self, set_on, folders, on: bool) -> str:
         text = set_on(folders, on)

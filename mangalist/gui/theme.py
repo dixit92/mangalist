@@ -66,7 +66,7 @@ def __getattr__(name: str) -> str:
 
 
 # State badges: the badge kind of each state. The mockup's six; the Wanted states (empty folders, not in the mockup)
-# take a violet of the same lightness.
+# take a violet of the same lightness; Not tracked its own teal (owner, 2026-10-15: "a new color ... Theme sensitive").
 _STATE_BADGES: Dict[str, str] = {
     "Missing volumes": "warn",
     "Missing chapters": "bad",
@@ -75,6 +75,7 @@ _STATE_BADGES: Dict[str, str] = {
     "Can't tell": "neutral",
     "Not a series": "neutral",
     "Up to date": "quiet",
+    "Not tracked": "untracked",
 }
 
 

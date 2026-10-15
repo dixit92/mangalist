@@ -84,7 +84,8 @@ def test_schedule_rows_read_the_container_environment():
     rows = {w: (when, env) for w, when, env in rules.schedule_rows({})}
     assert rows == {"Rescan the library": ("daily 03:30", False), "Sync with MangaPixer": ("daily 03:15", False),
                     "File finished downloads": ("every hour (and Check downloads now)", False),
-                    SCHEDULE_BY_JOB["dispatch-batch"].label: ("daily 04:30 (and Find now)", False)}   # the find pass
+                    SCHEDULE_BY_JOB["dispatch-batch"].label: ("daily 04:30 (and Find now)", False),   # the find pass
+                    "Clear finished download records": ("off", False)}
     rows = {w: (when, env) for w, when, env in rules.schedule_rows(
         {"MANGALIST_RESCAN_SCHEDULE": "off", "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00",
          "MANGALIST_DOWNLOADS_SCHEDULE": "banana"})}
@@ -192,10 +193,21 @@ def test_a_queued_download_is_a_muted_chip_and_counts_as_in_hand():
 # --- schedule choices (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6 hours") --------
 
 def test_schedule_choices_and_their_text():
+    # The full re-read: 6 hours, 12 hours, Daily - daily at most (owner, 2026-10-15); an older value is kept as one more
     labels = [l for _c, l in rules.schedule_choices("rescan", "daily@03:30")]
+    assert labels == ["Every 6 hours", "Every 12 hours", "Daily"]
+    assert [l for _c, l in rules.schedule_choices("rescan", "weekly@sun 03:30")][-1] == "Weekly"
+    assert [l for _c, l in rules.schedule_choices("rescan", "off")][-1] == "Off"
+    assert [l for _c, l in rules.schedule_choices("clean-records", "off")] == ["Off", "Daily", "Weekly", "Monthly"]
+    labels = [l for _c, l in rules.schedule_choices("dispatch-batch", "daily@03:30")]
     assert labels == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]
     assert [l for _c, l in rules.schedule_choices("downloads", "every 1h")][0] == "Every hour"
     assert ("every 3h", "Every 3 hours") in rules.schedule_choices("rescan", "every 3h")     # kept, never lost
+    assert rules.ScheduleChoice("monthly", hour=5, minute=30, monthday=2).text() == "monthly@2 05:30"
+    assert rules.choice_of("monthly@3 01:02") == rules.ScheduleChoice("monthly", hour=1, minute=2, monthday=3)
+    assert rules.choice_of("off", "clean-records") == rules.ScheduleChoice("off", hour=5, minute=30)
+    assert rules.schedule_text("monthly@1 05:30") == "the 1st of each month 05:30"
+    assert rules.schedule_text("monthly@22 05:30") == "the 22nd of each month 05:30"
     assert rules.ScheduleChoice("weekly", 2, 4, 5).text() == "weekly@wed 04:05"
     assert rules.ScheduleChoice("daily", hour=23, minute=0).text() == "daily@23:00"
     assert rules.ScheduleChoice("every 6h").text() == "every 6h"

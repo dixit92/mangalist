@@ -128,6 +128,11 @@ class Backend:
         series = self.db.series_for_folder(folder)
         return series.id if series is not None else None
 
+    def series_ids_for(self, folders) -> dict:
+        """folder -> series id (None: not scanned) for many folders in one query (the window's To get list after a
+        scan, the automatic-download chips)."""
+        return self.db.series_ids_for_folders(folders)
+
     def placement(self, series_id: int) -> Placement:
         try:
             return placement_for(self.db, series_id)
@@ -334,6 +339,20 @@ class Backend:
             return remove_now(self._client_factory(conn), self.ledger, record_id)
         except (RemoveRefused, QbtError) as exc:
             raise BackendError(f"not removed: {exc}") from None
+
+    def dismiss_downloads(self, record_ids: Sequence[int]) -> int:
+        """Dismiss FAILED download records (torrents or chapters): marked cancelled, nothing else touched. Returns how
+        many were dismissed; one that is no longer FAILED (a pass moved it meanwhile) is left as it is."""
+        ledger = DownloadLedger(self.db, tool=None)
+        done = 0
+        for rid in record_ids:
+            try:
+                ledger.dismiss(int(rid))
+                done += 1
+            except StatusConflict as exc:
+                _log.info("Dismiss: %s", exc)
+        _log.info("Dismissed %d failed download record(s) of %d", done, len(record_ids))
+        return done
 
     def set_remove_completed(self, on: bool) -> None:
         self.ledger.set_remove_completed(on)
@@ -672,6 +691,11 @@ class Backend:
         from ..store.findings import FindingStore
 
         return FindingStore(self.db).own_mode(series_id)
+
+    def own_series_modes(self, series_ids: Sequence[int]) -> Dict[int, Optional[str]]:
+        from ..store.findings import FindingStore
+
+        return FindingStore(self.db).own_modes(series_ids)
 
     def set_series_mode(self, series_ids: Sequence[int], mode: Optional[str]) -> None:
         from ..store.findings import FindingStore

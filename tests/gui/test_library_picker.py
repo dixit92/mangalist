@@ -23,7 +23,7 @@ from mangalist.states import InventorySnapshot  # noqa: E402
 
 from ..identity.conftest import make_archive as unique_archive  # noqa: E402
 from ..states.helpers import TODAY, item  # noqa: E402
-from .conftest import FakeBackend, qapp, wait_until  # noqa: E402,F401
+from .conftest import FakeBackend, qapp, settle_states, wait_until  # noqa: E402,F401
 from .test_shell_window import FakeDownloadTab, FakeDuplicatesView  # noqa: E402
 
 MANGA, MANHWA, COMICS = "Manga", "Manhwa", "Comics"
@@ -77,6 +77,7 @@ class Lib:
         worker.failed.connect(win._on_scan_failed)
         worker.run()
         win._stop_signatures()
+        settle_states(win)                      # the states are computed in the background, as in the app
         return worker
 
 
@@ -125,6 +126,7 @@ def _two_libraries(lib, **kw):
             e.mu_id, e.mu_title, e.mu_band = 1, "Twin", "auto"
     win._model.set_entries(win._model.entries())
     win._refresh_derived()
+    settle_states(win)
     return win
 
 

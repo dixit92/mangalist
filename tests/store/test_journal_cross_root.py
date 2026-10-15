@@ -1,5 +1,5 @@
 """Cross-root journal plans (Move to library): one rename per folder from one library root into another, both roots
-locked in a fixed order, no-replace, EXDEV refused (never copy + delete), crash recovery and undo. Made-up names only."""
+locked in a fixed order, no-replace, the rename tried and EXDEV failing the step (never copy + delete), crash recovery and undo. Made-up names only."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 
 from mangalist.store import LOCK_NAME, Journal, LockBusy, PlanStateError, RootLock, StepRefused
 from mangalist.store import journal as journal_mod
-from mangalist.store.journal import ACROSS_FILESYSTEMS, PLAN_ROOTS_META, AcrossFilesystems, MoveFollower
+from mangalist.store.journal import ACROSS_FILESYSTEMS, PLAN_ROOTS_META, MoveFollower
 
 from .conftest import make_archive
 
@@ -128,13 +128,27 @@ def test_refused_cross_root_plans(journal, roots, tmp_path):
     assert journal.list_plans() == []                                           # nothing recorded
 
 
-def test_different_devices_are_refused_when_planning(journal, roots, monkeypatch):
+def test_the_two_sides_devices_are_not_compared_when_planning_the_rename_is_tried(journal, roots):
+    """Owner, 2026-10-15: try the move; only the system's refusal stops it (no up-front "different devices" refusal)."""
     ongoing, concluded = roots
-    real = journal_mod._device
-    monkeypatch.setattr(journal_mod, "_device", lambda p: real(p) + (1 if str(concluded) in str(p) else 0))
-    with pytest.raises(AcrossFilesystems):
-        journal.plan_across_roots("m", [(ongoing / "Quiet Harbor", concluded / "Quiet Harbor")], [ongoing, concluded])
-    assert journal.list_plans() == []
+    assert not hasattr(journal_mod, "_device")
+    plan = journal.plan_across_roots("m", [(ongoing / "Quiet Harbor", concluded / "Quiet Harbor")], [ongoing, concluded])
+    plan = journal.apply(plan.id)
+    assert plan.status == "applied" and (concluded / "Quiet Harbor").is_dir()
+
+
+def test_any_other_refusal_of_the_rename_fails_the_step_and_moves_nothing(journal, roots, monkeypatch):
+    ongoing, concluded = roots
+    before = _all(ongoing, concluded)
+
+    def refuse(src, dst):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(journal_mod, "rename_noreplace", refuse)
+    plan = journal.plan_across_roots("m", [(ongoing / "Quiet Harbor", concluded / "Quiet Harbor")], [ongoing, concluded])
+    plan = journal.apply(plan.id)
+    assert plan.status == "failed" and plan.steps[0].error.startswith("rename failed: ")
+    assert _all(ongoing, concluded) == before
 
 
 def test_exdev_from_the_rename_fails_the_step_and_copies_nothing(journal, roots, monkeypatch):

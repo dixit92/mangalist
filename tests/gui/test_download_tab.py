@@ -419,3 +419,41 @@ def test_the_releases_panel_names_the_series_torrent_already_in_qbittorrent(qapp
     tab.focus("/lib/Frieren")                                           # no torrent: the line goes
     settle(qapp, tab)
     wait_until(qapp, lambda: tab.releases.downloads_label.text() == "")
+
+
+EDITION_REASON = ("Master edition: nyaa releases are matched by volume number, and this edition numbers its volumes its "
+                  "own way - not searched automatically")
+
+
+def test_a_declared_editions_volumes_can_be_searched_by_hand(qapp):
+    """Owner, 2026-10-15: an edition's volumes (never searched automatically) can be searched by hand here; the
+    releases show as usual and the owner decides."""
+    edition = ws("Harbor Lights Master Edition", "Vol. 3", sid=31, missing=("3",), findable=False,
+                 reason=EDITION_REASON, by_hand=True)
+    plain = ws("Quiet Shelf", "Vol. 2", sid=32, findable=False, reason="Not licensed in English")
+    tab, backend = make(qapp, wanted=WANTED + [edition, plain])
+    tab.focus(edition.folder)
+    settle(qapp, tab)
+    assert tab.releases.message_text.text() == EDITION_REASON and backend.searched == []      # never by itself
+    assert tab.releases.message_search.isVisibleTo(tab) and tab.releases.message_search.text() == "Search nyaa by hand"
+    tab.releases.message_search.click()
+    settle(qapp, tab)
+    wait_until(qapp, lambda: tab.releases.table.rowCount() == 1)
+    assert backend.searched == [((edition.title, edition.title + " Alt"), ("3",), ("1",))]
+    assert tab.upgrade_note_text().startswith("Searched by hand: the Master edition numbers its volumes its own way")
+    assert tab.status_of(edition.folder) == "Releases ready" and tab.releases.btn_send.isEnabled()
+    tab.focus(plain.folder)                                                  # an ordinary reason: no button
+    assert not tab.releases.message_search.isVisibleTo(tab) and not tab.search_by_hand(plain.folder)
+    tab.focus(edition.folder)                                                # the result is kept
+    assert tab.releases.table.rowCount() == 1 and len(backend.searched) == 1
+
+
+def test_a_bulk_search_never_searches_an_edition_by_hand(qapp):
+    edition = ws("Harbor Lights Master Edition", "Vol. 3", sid=31, missing=("3",), findable=False,
+                 reason=EDITION_REASON, by_hand=True)
+    tab, backend = make(qapp, wanted=[edition, ws("Quiet Shelf", "Vol. 2", sid=32)])
+    tab.set_checked(edition.folder)
+    tab.set_checked("/lib/Quiet Shelf")
+    assert tab.find_selected() == 1
+    settle(qapp, tab)
+    assert [s[0][0] for s in backend.searched] == ["Quiet Shelf"]

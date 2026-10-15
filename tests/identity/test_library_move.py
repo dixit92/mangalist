@@ -125,7 +125,7 @@ def test_the_confirmation_names_what_moves_where_and_what_changes(db, library, l
     title, text, button = library_move.confirm_text(check)
     assert title == "Move to Manga-Concluded?" and button == "Move 3 series"
     assert text.startswith("Move 3 series from Manga-Ongoing to Manga-Concluded?")
-    assert f"Into the folder: {library2}" in text
+    assert f"Into the folder: {library2} (the top of the library)" in text
     assert ('Automatic downloads: 2 series on "Use the default" will follow Manga-Concluded\'s default: Off (now Notify).'
             " 1 series keeps its own mode.") in text
     assert "Files not named by the scheme: Rename automatically" in text
@@ -200,7 +200,7 @@ def test_a_scan_or_another_instance_holding_a_lock_refuses_the_move(db, library,
     assert library_move.move_series(db, check).ok                               # free again: it moves
 
 
-def test_exdev_refuses_cleanly_and_changes_nothing(db, library, library2, two, monkeypatch):
+def test_exdev_from_the_system_says_move_it_yourself_and_changes_nothing(db, library, library2, two, monkeypatch):
     r1, r2 = two
     sid = db.get_series(r1.id, "Quiet Harbor").id
 
@@ -210,14 +210,119 @@ def test_exdev_refuses_cleanly_and_changes_nothing(db, library, library2, two, m
     monkeypatch.setattr(journal_mod, "rename_noreplace", exdev)
     check, res = _move(db, [library / "Quiet Harbor"], r2)
     assert res.status == "failed" and res.message == library_move.EXDEV_TEXT
-    assert "different drives/shares" in res.message and "recognise it at the next scan" in res.message
+    assert "The system refused to move the folder" in res.message
+    assert "move it yourself with a file manager" in res.message and "recognises it at the next scan" in res.message
     assert (library / "Quiet Harbor").is_dir() and not (library2 / "Quiet Harbor").exists()
     assert db.get_series(r1.id, "Quiet Harbor").id == sid
     assert library_move.last_move(db) is None                                   # nothing to undo
-    real = journal_mod._device                                                   # different devices: refused up front
-    monkeypatch.setattr(journal_mod, "_device", lambda p: real(p) + (1 if str(library2) in str(p) else 0))
+
+
+def test_no_up_front_refusal_for_different_devices_the_move_is_tried(db, library, library2, two, monkeypatch):
+    """Owner, 2026-10-15: "MangaList should attempt to move it" - nothing compares the two sides' devices first."""
+    r1, r2 = two
+    tried = []
+    real = journal_mod.rename_noreplace
+    monkeypatch.setattr(journal_mod, "rename_noreplace", lambda src, dst: tried.append(dst) or real(src, dst))
     check, res = _move(db, [library / "Quiet Harbor"], r2)
-    assert res.status == "failed" and res.message == library_move.EXDEV_TEXT
+    assert tried == [str(library2 / "Quiet Harbor")] and res.ok
+
+
+def test_any_other_refusal_by_the_system_says_move_it_yourself(db, library, library2, two, monkeypatch):
+    r1, r2 = two
+
+    def refuse(src, dst):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(journal_mod, "rename_noreplace", refuse)
+    check, res = _move(db, [library / "Quiet Harbor"], r2)
+    assert res.status == "failed" and not res.moved
+    assert res.message.startswith("The system refused to move Quiet Harbor (") and "Permission denied" in res.message
+    assert "Nothing was moved. Please move it yourself with a file manager" in res.message
+    assert (library / "Quiet Harbor").is_dir() and library_move.last_move(db) is None
+
+
+def _hold_replacements(db, sid, status="held"):
+    with db.connect() as con:
+        con.execute("INSERT INTO replacements (download_id, series_id, status, created_at, updated_at) VALUES"
+                    " (?, ?, ?, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')", (900 + sid, sid, status))
+
+
+def test_replaced_chapters_held_in_the_holding_folder_refuse_the_move(db, library, two):
+    """Owner, 2026-10-15: "Refuse until emptied" (it only warned before)."""
+    r1, r2 = two
+    _hold_replacements(db, db.get_series(r1.id, "Quiet Harbor").id)
+    check = library_move.check_move(db, [(str(library / "Quiet Harbor"), "Quiet Harbor"),
+                                         (str(library / "Lantern Road"), "Lantern Road")], r2.id)
+    assert [it.title for it in check.items] == ["Lantern Road"]
+    assert check.refused == [("Quiet Harbor", library_move.HELD_REASON)]
+    assert "empty or restore them first" in library_move.HELD_REASON
+    text = library_move.confirm_text(check)[1]
+    assert "Not moved:" in text and "holding folder" in text and "Restore can no longer" not in text
+    _hold_replacements(db, db.get_series(r1.id, "Lantern Road").id)            # held after the confirmation
+    res = library_move.move_series(db, check)
+    assert res.status == "refused" and "Lantern Road" in res.message and (library / "Lantern Road").is_dir()
+
+
+def test_restored_or_purged_replacements_do_not_refuse(db, library, two):
+    r1, r2 = two
+    _hold_replacements(db, db.get_series(r1.id, "Quiet Harbor").id, "purged")
+    check = library_move.check_move(db, [(str(library / "Quiet Harbor"), "Quiet Harbor")], r2.id)
+    assert [it.title for it in check.items] == ["Quiet Harbor"] and not check.refused
+
+
+def test_the_owner_can_choose_a_folder_inside_the_target_library(db, library, library2, two):
+    """Owner, 2026-10-15: "OK default, user settable location" - e.g. into a franchise parent."""
+    r1, r2 = two
+    (library2 / "Harbor Saga").mkdir()
+    (library2 / ".hidden").mkdir()
+    assert library_move.place_choices(db, r2.id) == ["Harbor Saga", "Paper Moths"]
+    sid = _dress(db, r1, "Quiet Harbor")
+    check = library_move.check_move(db, [(str(library / "Quiet Harbor"), "Quiet Harbor")], r2.id, into="Harbor Saga")
+    assert check.items[0].target == str(library2 / "Harbor Saga" / "Quiet Harbor")
+    assert check.items[0].new_rel == "Harbor Saga/Quiet Harbor"
+    title, text, _b = library_move.confirm_text(check)
+    assert text.startswith("Move 1 series from Manga-Ongoing to Manga-Concluded / Harbor Saga?")
+    assert f"Into the folder: {library2 / 'Harbor Saga'}" in text and "(the top of the library)" not in text
+    res = library_move.move_series(db, check)
+    assert res.ok and (library2 / "Harbor Saga" / "Quiet Harbor").is_dir() and not (library / "Quiet Harbor").exists()
+    moved = db.get_series(r2.id, "Harbor Saga/Quiet Harbor")
+    assert moved is not None and moved.id == sid
+    scan(db)                                                                    # read as a subseries of the parent
+    assert db.get_series(r2.id, "Harbor Saga/Quiet Harbor").id == sid
+    undo = library_move.undo_move(db, library_move.last_move(db).plan_id)
+    assert undo.status == "undone" and (library / "Quiet Harbor").is_dir() and (library2 / "Harbor Saga").is_dir()
+
+
+def test_a_chosen_folder_is_checked(db, library, library2, two):
+    r1, r2 = two
+    folders = [(str(library / "Quiet Harbor"), "Quiet Harbor")]
+    for into, why in (("Nowhere", "has no folder named 'Nowhere'"), ("a/b", "is not a folder at the top"),
+                      ("..", "is not a folder at the top")):
+        check = library_move.check_move(db, folders, r2.id, into=into)
+        assert not check.items and why in check.refused[0][1], into
+    (library2 / "Hidden Parent").mkdir()
+    db.set_exclusions(r2.id, ["Hidden Parent"])
+    check = library_move.check_move(db, folders, r2.id, into="Hidden Parent")
+    assert not check.items and "excludes 'Hidden Parent'" in check.refused[0][1]
+    make_archive(library2 / "Paper Moths" / "Quiet Harbor" / "x.cbz")         # taken inside the parent
+    check = library_move.check_move(db, folders, r2.id, into="Paper Moths")
+    assert "Manga-Concluded / Paper Moths already has a folder named 'Quiet Harbor'" in check.refused[0][1]
+
+
+def test_into_a_folder_refuses_a_franchise_parent_and_a_unit_name(db, library, library2, two):
+    r1, r2 = two
+    make_archive(library / "Moth Cycle" / "Moth Cycle v01.cbz")                # a parent with its own files ...
+    make_archive(library / "Moth Cycle" / "Moth Cycle Side" / "Moth Cycle Side v01.cbz")     # ... and a subseries
+    make_archive(library / "Season 2" / "Season 2 v01.cbz")
+    scan(db)
+    (library2 / "Parent Shelf").mkdir()
+    check = library_move.check_move(db, [(str(library / "Moth Cycle"), "Moth Cycle"),
+                                         (str(library / "Season 2"), "Season 2")], r2.id, into="Parent Shelf")
+    why = dict(check.refused)
+    assert not check.items
+    assert "holds subseries of its own" in why["Moth Cycle"] and "reads as a part of 'Parent Shelf'" in why["Season 2"]
+    top = library_move.check_move(db, [(str(library / "Season 2"), "Season 2")], r2.id)
+    assert [it.title for it in top.items] == ["Season 2"]                       # the top of the library: fine
 
 
 def test_undo_puts_the_series_back_with_its_identity(db, library, library2, two):

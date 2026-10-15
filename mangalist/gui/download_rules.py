@@ -405,23 +405,34 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 
 # --- Settings: schedules ---------------------------------------------------------------------------------
 
-# The schedules the Automation section edits (owner, 2026-10-09). Stored in the database; the container's variables only
-# seed them (see mangalist/headless/settings.py). ``dispatch-batch`` is the find pass of automatic downloads (2026-10-10,
-# :mod:`mangalist.downloads.finding`; default daily 04:30) - the headless runner names its label.
-SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads", "dispatch-batch")
+# The schedules the Scheduled tasks section edits (owner, 2026-10-09; the page itself 2026-10-15). Stored in the database;
+# the container's variables only seed them (see mangalist/headless/settings.py). ``dispatch-batch`` is the find pass of
+# automatic downloads (2026-10-10, :mod:`mangalist.downloads.finding`; default daily 04:30) - the headless runner names
+# its label. ``clean-records`` clears finished download records (2026-10-15; off until chosen).
+SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads", "dispatch-batch", "clean-records")
 
 #: The choices each schedule offers (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6
 #: hours"), plus Off. Filing finished downloads also keeps Every hour - its default; without it filing could not run
 #: more often than every 6 hours. A current value that is none of these (a container variable such as "every 3h") is
 #: offered as one more choice, so it is never changed silently.
-CHOICE_WEEKLY, CHOICE_DAILY, CHOICE_OFF = "weekly", "daily", "off"
+CHOICE_MONTHLY, CHOICE_WEEKLY, CHOICE_DAILY, CHOICE_OFF = "monthly", "weekly", "daily", "off"
 SCHEDULE_CHOICES: Tuple[Tuple[str, str], ...] = ((CHOICE_WEEKLY, "Weekly"), (CHOICE_DAILY, "Daily"),
                                                  ("every 12h", "Every 12 hours"), ("every 6h", "Every 6 hours"),
                                                  (CHOICE_OFF, "Off"))
 HOURLY_CHOICE: Tuple[str, str] = ("every 1h", "Every hour")
+#: The full re-read offers 6 hours, 12 hours and Daily - "Daily at most" (owner, 2026-10-15); it is never off or weekly
+#: from here (a value stored before, or a container variable such as "weekly@sun 03:30", is still listed as one more
+#: choice, so it is never changed silently).
+RESCAN_CHOICES: Tuple[Tuple[str, str], ...] = (("every 6h", "Every 6 hours"), ("every 12h", "Every 12 hours"),
+                                               (CHOICE_DAILY, "Daily"))
+#: The clean-up of finished records: the period is also how old a record must be (Daily 1 day, Weekly 7, Monthly 30).
+CLEAN_CHOICES: Tuple[Tuple[str, str], ...] = ((CHOICE_OFF, "Off"), (CHOICE_DAILY, "Daily"), (CHOICE_WEEKLY, "Weekly"),
+                                              (CHOICE_MONTHLY, "Monthly"))
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 DEFAULT_AT = (3, 30)                    # the time a schedule switched to Weekly or Daily starts from
+DEFAULT_AT_BY_JOB = {"clean-records": (5, 30)}      # ... after the rescan (03:30) and the find pass (04:30)
 DEFAULT_WEEKDAY = 6                     # ... and the day (Sunday) a Weekly one starts from
+DEFAULT_MONTHDAY = 1                    # ... and the day of the month a Monthly one starts from
 
 
 @dataclass(frozen=True)
@@ -433,11 +444,15 @@ class ScheduleChoice:
     weekday: int = DEFAULT_WEEKDAY
     hour: int = DEFAULT_AT[0]
     minute: int = DEFAULT_AT[1]
+    monthday: int = DEFAULT_MONTHDAY
 
     def text(self) -> str:
-        """The canonical schedule text to store (``weekly@sun 03:30``, ``daily@03:30``, ``every 12h``, ``off``)."""
+        """The canonical schedule text to store (``monthly@1 05:30``, ``weekly@sun 03:30``, ``daily@03:30``,
+        ``every 12h``, ``off``)."""
         from ..headless.schedule import WEEKDAYS
 
+        if self.choice == CHOICE_MONTHLY:
+            return f"monthly@{self.monthday} {self.hour:02d}:{self.minute:02d}"
         if self.choice == CHOICE_WEEKLY:
             return f"weekly@{WEEKDAYS[self.weekday]} {self.hour:02d}:{self.minute:02d}"
         if self.choice == CHOICE_DAILY:
@@ -447,30 +462,41 @@ class ScheduleChoice:
 
 def schedule_choices(job: str, current: str) -> List[Tuple[str, str]]:
     """(choice, label) for *job*'s dropdown; *current* (canonical text) is added when it is none of them."""
-    out = list(SCHEDULE_CHOICES)
-    if job == "downloads":
-        out.insert(0, HOURLY_CHOICE)
-    choice = choice_of(current).choice
+    if job == "rescan":
+        out = list(RESCAN_CHOICES)
+    elif job == "clean-records":
+        out = list(CLEAN_CHOICES)
+    else:
+        out = list(SCHEDULE_CHOICES)
+        if job == "downloads":
+            out.insert(0, HOURLY_CHOICE)
+    choice = choice_of(current, job).choice
     if choice not in {c for c, _l in out}:
-        out.insert(len(out) - 1, (choice, f"{schedule_text(choice)[:1].upper()}{schedule_text(choice)[1:]}"))
+        extra = (choice, f"{schedule_text(choice)[:1].upper()}{schedule_text(choice)[1:]}")
+        at = next((i for i, (c, _l) in enumerate(out) if c == CHOICE_OFF), len(out))      # Off stays last
+        out.insert(at, extra)
     return out
 
 
-def choice_of(canonical: str) -> ScheduleChoice:
-    """The controls' state for a canonical schedule text (what :func:`schedule_entries` gives)."""
-    from ..headless.schedule import DailyAt, WeeklyAt, parse_schedule
+def choice_of(canonical: str, job: Optional[str] = None) -> ScheduleChoice:
+    """The controls' state for a canonical schedule text (what :func:`schedule_entries` gives). Off starts Weekly /
+    Daily / Monthly from *job*'s usual time."""
+    from ..headless.schedule import DailyAt, MonthlyAt, WeeklyAt, parse_schedule
 
+    hour, minute = DEFAULT_AT_BY_JOB.get(job or "", DEFAULT_AT)
     try:
         parsed = parse_schedule(canonical)
     except ValueError:
         return ScheduleChoice(canonical)                    # not understood: shown as it is
     if parsed is None:
-        return ScheduleChoice(CHOICE_OFF)
+        return ScheduleChoice(CHOICE_OFF, hour=hour, minute=minute)
+    if isinstance(parsed, MonthlyAt):
+        return ScheduleChoice(CHOICE_MONTHLY, hour=parsed.hour, minute=parsed.minute, monthday=parsed.day)
     if isinstance(parsed, WeeklyAt):
         return ScheduleChoice(CHOICE_WEEKLY, parsed.weekday, parsed.hour, parsed.minute)
     if isinstance(parsed, DailyAt):
         return ScheduleChoice(CHOICE_DAILY, hour=parsed.hour, minute=parsed.minute)
-    return ScheduleChoice(parsed.describe())
+    return ScheduleChoice(parsed.describe(), hour=hour, minute=minute)
 
 
 @dataclass(frozen=True)
@@ -485,7 +511,10 @@ class ScheduleEntry:
 
 def schedule_text(described: str) -> str:
     """``weekly@sun 03:30`` -> ``every Sunday 03:30``; ``daily@03:30`` -> ``daily 03:30``; ``every 1h`` -> ``every hour``;
-    ``every 12h`` -> ``every 12 hours``."""
+    ``every 12h`` -> ``every 12 hours``; ``monthly@1 05:30`` -> ``the 1st of each month 05:30``."""
+    if described.startswith("monthly@"):
+        day, _sp, at = described[len("monthly@"):].partition(" ")
+        return f"the {_ordinal(day)} of each month {at}"
     if described.startswith("weekly@"):
         from ..headless.schedule import WEEKDAYS
 
@@ -498,6 +527,18 @@ def schedule_text(described: str) -> str:
         hours = described[len("every "):-1]
         return "every hour" if hours in ("1", "1.0") else f"every {hours} hours"
     return described
+
+
+#: How old a finished record must be, in words, per period (``headless.records_job.PERIOD_DAYS``).
+RECORD_AGE_TEXT = {CHOICE_DAILY: "a day", CHOICE_WEEKLY: "a week", CHOICE_MONTHLY: "a month"}
+
+
+def _ordinal(day: str) -> str:
+    try:
+        n = int(day)
+    except ValueError:
+        return day
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 
 
 def schedule_entries(db, env: Optional[Mapping[str, str]] = None) -> List[ScheduleEntry]:
@@ -522,6 +563,8 @@ def schedule_entries(db, env: Optional[Mapping[str, str]] = None) -> List[Schedu
             when += " (and Check downloads now)"
         elif job == "dispatch-batch" and parsed is not None:
             when += " (and Find now)"
+        if job == "clean-records" and parsed is not None:
+            when += f" (records older than {RECORD_AGE_TEXT.get(choice_of(canonical, job).choice, 'the period')})"
         rows.append(ScheduleEntry(job, spec.label, canonical, when, choice.source, True))
     return rows
 

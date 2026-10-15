@@ -14,7 +14,7 @@ from ._common import (
     CHAPTER_LABELS, EXTRA_WORDS, NOT_CHAPTER_LABELS, UNIT, clean_title, encloses_whole, split_extension,
     trailing_bracket,
 )
-from .heads import SeriesHead, name_key
+from .heads import SeriesHead, name_key, unit_number
 from .model import Kind, Layer, ParsedName, UnitRange
 from .template import Template, compile_template
 
@@ -302,7 +302,7 @@ def parse_release(name: str, series_title: Optional[str] = None,
 _COMICS_EXTRA = re.compile(
     r"""^(?:(?P<series>.*?\S)(?:\s+-\s+|[\s_]+))?
     (?P<marker>(?:annual|fcbd|free\s+comic\s+book\s+day)(?:\s*\#?\s*(?P<n>\d{1,4}(?:\.\d{1,3})?))?
-      | (?:specials?|one-?shots?)\s*\#?\s*\d{1,4}(?:\.\d{1,3})?)
+      | (?:specials?|one-?shots?)\s*\#?\s*(?P<n2>\d{1,4}(?:\.\d{1,3})?))
     (?:\s+-\s+(?P<sub>[^()\[\]]*?[^\s()\[\]]))?
     (?P<tags>(?:\s*(?:\([^()]*\)|\[[^\[\]]*\]))*)
     \s*$""",
@@ -312,9 +312,13 @@ _HAS_VOLUME_TOKEN = re.compile(rf"(?<![^\W\d_]){_VP}\d", re.IGNORECASE)
 
 def parse_comics_extra(name: str) -> Optional[ParsedName]:
     """Layer 3 (comics): ``<Title> Annual 2``, ``<Title> Special #1``, ``<Title> One-Shot 1``, ``<Title> FCBD 2019``
-    - an extra outside the issue numbering, so a chapter without a chapter number (``is_extra``; the marker is the
-    title): before, the bare number was guessed to be chapter 2 / 1 and collided with the real chapter. A name with a
-    volume or chapter token is left to the other layers."""
+    - an extra outside the issue numbering. As in MangaPixer 1.42.0 (``AutoMatchText.UnitsOf``; owner, 2026-10-15:
+    "No, parity with MangaPixer") the marker's own number is the chapter, flagged extra: ``Annual 2`` is chapter 2
+    with ``is_extra`` (``Annual 2.005`` is 2.5, the padded sub-number), ``Annual`` / ``FCBD`` alone and ``FCBD 2019``
+    (a year) have no chapter number. Like MangaPixer's extra, such a chapter never fills or opens a gap: the inventory
+    files it as an ``extra`` row (:func:`mangalist.inventory.units_from_parsed`), so ``Annual 2`` never stands in for
+    a missing chapter 2, and the renamer leaves it as it is (the scheme would name it ``Ch. 0002.00`` - chapter 2).
+    The marker is the title. A name with a volume or chapter token is left to the other layers."""
     stem, _ = split_extension(name)
     m = _COMICS_EXTRA.match(stem)
     if m is None or any(detect_tokens(name)):
@@ -325,9 +329,13 @@ def parse_comics_extra(name: str) -> Optional[ParsedName]:
     group, year, edition, fix, _tag_volume, tags = _read_tags(m.group("tags"))
     marker = " ".join(m.group("marker").split())
     title = f"{marker} - {m.group('sub')}" if m.group("sub") else marker
+    own = m.group("n") or m.group("n2")
+    chapter = None if own is None or _YEAR.match(own) else UnitRange.of(unit_number(own))
+    note = (f"a comics extra {marker!r}: chapter {chapter}, an extra (never counted as that chapter)" if chapter
+            else f"a comics extra {marker!r}: no chapter number")
     return ParsedName(
-        name=name, kind=Kind.CHAPTER, layer=Layer.RELEASE, is_extra=True, title=title, group=group, series=series,
-        year=year, edition=edition, fix=fix, tags=tuple(tags), notes=(f"a comics extra {marker!r}: no chapter number",))
+        name=name, kind=Kind.CHAPTER, layer=Layer.RELEASE, chapter=chapter, is_extra=True, title=title, group=group,
+        series=series, year=year, edition=edition, fix=fix, tags=tuple(tags), notes=(note,))
 
 
 def _read_tags(text: str):

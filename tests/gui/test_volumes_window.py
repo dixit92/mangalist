@@ -17,7 +17,7 @@ from mangalist.models import FileHit, MangaEntry  # noqa: E402
 from mangalist.states import InventorySnapshot  # noqa: E402
 
 from ..states.helpers import TODAY, item  # noqa: E402
-from .conftest import FakeBackend, qapp, record, wait_until  # noqa: E402,F401
+from .conftest import FakeBackend, qapp, record, settle_states, wait_until  # noqa: E402,F401
 
 QUEST = "Example Quest"        # MangaPixer-matched, holds volume 1: volumes 2-3 are out and missing
 REVIEW = "Review Series"       # MangaPixer: needs review
@@ -61,6 +61,7 @@ def make_window(qapp, monkeypatch):
             knowledge_for=lambda e: KNOWLEDGE[e.title]() if e.title in KNOWLEDGE else None,
             inventory_for=lambda e: InventorySnapshot(held_volumes=HELD[e.title]),
             needs_kind_for=lambda e: False, today=TODAY)
+        settle_states(win)                      # the states are computed in the background, as in the app
         return win
 
     yield make

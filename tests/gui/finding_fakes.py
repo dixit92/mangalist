@@ -104,6 +104,10 @@ class FakeFindingBackend(FakeChapterBackend):
     def own_series_mode(self, series_id):
         return self.own_modes.get(series_id)
 
+    def own_series_modes(self, series_ids):
+        self.own_modes_reads = getattr(self, "own_modes_reads", 0) + 1
+        return {int(i): self.own_modes.get(int(i)) for i in series_ids}
+
     def set_series_mode(self, series_ids, mode):
         self.mode_calls.append((tuple(series_ids), mode))
         for sid in series_ids:

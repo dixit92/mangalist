@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
+from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, QTimer, Signal
@@ -67,6 +68,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..classifier import parse_folder_name
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .. import config
 from .background import describe_error, start_call
@@ -231,6 +233,7 @@ class DownloadTab(QWidget):
         self._by_folder: Dict[str, WantedSeries] = {}
         self._series_ids: Dict[str, Optional[int]] = {}
         self._checked: set = set()
+        self._by_hand: set = set()          # folders the owner asked to search by hand (a declared edition's volumes)
         # One group at a time, picked with the chips above the list (owner, 2026-10-09: "I shouldn't need to scroll down
         # to get to 'upgrades'"); remembered, like the panel's width.
         cfg = config.load()                 # read once: the group, the sort and the panels' sizes (_build_ui)
@@ -398,6 +401,7 @@ class DownloadTab(QWidget):
                                       downloads_for=lambda sid: [r for r in self._records.get(sid, ())
                                                                  if not r.is_chapters])
         self.releases.search_again.connect(self._search_again)
+        self.releases.search_by_hand.connect(self._search_by_hand)
         self.releases.sent.connect(self._on_sent)
         self.releases.settings_requested.connect(self.settings_requested)
         self.releases.series_menu_requested.connect(self._on_panel_menu)
@@ -493,6 +497,7 @@ class DownloadTab(QWidget):
                 self._chapter_lookups.pop(folder, None)
                 self._chapter_states.pop(folder, None)
         self._checked &= set(self._by_folder)
+        self._by_hand &= set(self._by_folder)
         self._queue = deque(f for f in self._queue if f in self._by_folder)
         if self._automation:                            # the findings' series names come from this list
             self._found_names = self.found_names()
@@ -823,8 +828,10 @@ class DownloadTab(QWidget):
         self.panels.setCurrentIndex(PANEL_RELEASES)
         self._current = folder
         self._delay.stop()
-        reason = not_findable_reason(series)
+        reason = self._reason(series)
         self._show_upgrade_note(folder if not reason else None)
+        if not reason and series.by_hand:
+            self._show_by_hand_note(series)
         if reason:
             self._show_unavailable(series, reason)
             return
@@ -1125,13 +1132,51 @@ class DownloadTab(QWidget):
         self.releases.show_message(series.title, reason, "Open Settings" if needs_suwayomi else None,
                                    SECTION_SERVICES if needs_suwayomi else None)
         self.releases.subtitle_label.setText(f"Wanted: {series.gaps}")
+        if series.by_hand and series.group in (GROUP_VOLUMES, GROUP_UPGRADES):
+            self.releases.offer_search_by_hand(self._target_for(series) is not None)
+
+    # --- a search by hand (a declared edition's volumes; owner, 2026-10-15) ----------------------------------------
+
+    def _reason(self, series: WantedSeries) -> str:
+        """Why *series* cannot be searched now ('' when it can): :func:`not_findable_reason`, except for volumes the
+        owner chose to search by hand (a declared edition's - never searched automatically)."""
+        reason = not_findable_reason(series)
+        if reason and series.by_hand and series.folder in self._by_hand:
+            return ""
+        return reason
+
+    def search_by_hand(self, folder: Optional[str] = None) -> bool:
+        """Search nyaa for a series whose volumes are not searched automatically (a declared edition's): the owner's
+        "Search nyaa by hand". The releases show as usual, with a line that this edition numbers its volumes its own
+        way; the owner decides. False for a series that does not allow it."""
+        folder = folder or self._current
+        series = self._by_folder.get(folder) if folder else None
+        if series is None or not series.by_hand:
+            return False
+        _log.info("Download tab: searching nyaa by hand for %s (%s)", series.title, series.gaps)
+        self._by_hand.add(folder)
+        if self._current != folder:
+            self.focus(folder)
+        else:
+            self._show_series(folder, now=True)
+        return True
+
+    def _search_by_hand(self) -> None:
+        self.search_by_hand()
+
+    def _show_by_hand_note(self, series: WantedSeries) -> None:
+        edition = series.reason.split(":", 1)[0].strip() if ":" in series.reason else "This edition"
+        self.upgrade_label.setText(f"Searched by hand: the {edition} numbers its volumes its own way, and nyaa's "
+                                   "releases mostly follow the regular edition - check that a release really is this "
+                                   "edition's volume before you send it.")
+        self.upgrade_label.setVisible(True)
 
     def _search_selected(self) -> None:
         folder = self._current
         if folder is None or folder in self._results or self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
             return
         series = self._by_folder.get(folder)
-        if series is None or not_findable_reason(series) or self._target_for(series) is None:
+        if series is None or self._reason(series) or self._target_for(series) is None:
             return
         self._enqueue(folder, front=True)
 
@@ -1272,7 +1317,9 @@ class DownloadTab(QWidget):
     # --- automatic downloads: Found, Find now, the bulk find ----------------------------------------------------
 
     def found_names(self) -> Dict[int, str]:
-        """series id -> its name, for the findings: the "To get" titles, else what the backend calls it."""
+        """series id -> its name, for the findings: the "To get" titles; for a series with no gaps any more (owner,
+        2026-10-15: name it, not "Series #N") what the backend calls it, else the name of its folder as the List knows
+        it (the series host). "Series #id" stands in only when neither knows the series."""
         names = {sid: self._by_folder[f].title for f, sid in self._series_ids.items()
                  if sid is not None and f in self._by_folder}
         missing = {f.series_id for f in self._findings} - set(names)
@@ -1280,8 +1327,18 @@ class DownloadTab(QWidget):
         if missing and callable(titles_fn):
             try:
                 names.update({int(k): v for k, v in dict(titles_fn(missing)).items() if v})
-            except Exception:  # noqa: BLE001 - names only: "Series #id" stands in
+            except Exception:  # noqa: BLE001 - names only: the host's or "Series #id" stands in
                 _log.warning("Reading series names for the findings failed", exc_info=True)
+        missing -= set(names)
+        folder_fn = getattr(self._host, "folder_for_series", None)
+        for sid in sorted(missing) if callable(folder_fn) else ():
+            try:
+                folder = folder_fn(sid)
+            except Exception:  # noqa: BLE001 - names only
+                _log.warning("Looking up the folder of series %s failed", sid, exc_info=True)
+                continue
+            if folder:
+                names[sid] = parse_folder_name(Path(folder).name)[0] or Path(folder).name
         return names
 
     def reload_found(self) -> None:

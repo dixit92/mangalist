@@ -12,6 +12,7 @@ daylight-saving changes:
 
 Text forms (environment variables, settings):
 
+    monthly@1 05:30    monthly 1 05:30      -> MonthlyAt(1, 5, 30)    (day of the month 1 ... 28)
     weekly@sun 03:30   weekly sunday 03:30  -> WeeklyAt(6, 3, 30)    (days: mon ... sun, Monday = 0)
     daily@03:30   daily 03:30   03:30      -> DailyAt(3, 30)
     every 12h     every:12h     12h        -> EveryHours(12)
@@ -109,6 +110,38 @@ class WeeklyAt:
 
 
 @dataclass(frozen=True)
+class MonthlyAt:
+    """Once a month, on ``day`` (1 to 28, so every month has it) at ``hour:minute`` local (wall-clock) time. Only the
+    clean-up of finished download records uses it (owner, 2026-10-15: "Daily, Weekly, Monthly")."""
+
+    day: int
+    hour: int
+    minute: int = 0
+
+    def __post_init__(self) -> None:
+        if not (1 <= self.day <= 28):
+            raise ValueError(f"invalid day of the month {self.day}")
+        if not (0 <= self.hour <= 23 and 0 <= self.minute <= 59):
+            raise ValueError(f"invalid time of day {self.hour}:{self.minute}")
+
+    def next_after(self, after: datetime, tz: tzinfo) -> datetime:
+        """The first run strictly after ``after`` (UTC)."""
+        _require_aware(after)
+        at = time(self.hour, self.minute)
+        local = after.astimezone(tz).date()
+        year, month = local.year, local.month
+        for _ in range(3):                  # this month's slot, else next month's; one spare around a DST change
+            candidate = resolve_local(date(year, month, self.day), at, tz)
+            if candidate > after:
+                return candidate
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+        raise AssertionError("unreachable: a monthly slot exists within two months")
+
+    def describe(self) -> str:
+        return f"monthly@{self.day} {self.hour:02d}:{self.minute:02d}"
+
+
+@dataclass(frozen=True)
 class EveryHours:
     """Every ``hours`` hours of elapsed time, counted from the previous run."""
 
@@ -131,9 +164,10 @@ class EveryHours:
         return f"every {h}h"
 
 
-Schedule = Union[WeeklyAt, DailyAt, EveryHours]
+Schedule = Union[MonthlyAt, WeeklyAt, DailyAt, EveryHours]
 
 _OFF = {"", "off", "none", "never", "disabled", "disable", "0", "false", "no"}
+_MONTHLY = re.compile(r"^monthly\s*[@: ]\s*(\d{1,2})\s+(\d{1,2}):(\d{2})$")
 _WEEKLY = re.compile(r"^weekly\s*[@: ]\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+(\d{1,2}):(\d{2})$")
 _DAILY = re.compile(r"^(?:daily\s*[@: ]\s*)?(\d{1,2}):(\d{2})$")
 _EVERY = re.compile(r"^(?:every\s*[: ]?\s*)?(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours)$")
@@ -148,6 +182,9 @@ def parse_schedule(text: Optional[str]) -> Optional[Schedule]:
     value = (text or "").strip().lower()
     if value in _OFF:
         return None
+    m = _MONTHLY.match(value)
+    if m:
+        return MonthlyAt(int(m.group(1)), int(m.group(2)), int(m.group(3)))
     m = _WEEKLY.match(value)
     if m:
         return WeeklyAt(WEEKDAYS.index(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -158,7 +195,8 @@ def parse_schedule(text: Optional[str]) -> Optional[Schedule]:
     if m:
         return EveryHours(float(m.group(1)))
     raise ValueError(
-        f"unrecognised schedule {text!r}; use e.g. 'weekly@sun 03:30', 'daily@03:30', 'every 12h' or 'off'")
+        f"unrecognised schedule {text!r}; use e.g. 'monthly@1 03:30', 'weekly@sun 03:30', 'daily@03:30', 'every 12h' or "
+        "'off'")
 
 
 MIN_EVERY_HOURS = 0.25      # the settings refuse "every 1m": a rescan or a MangaPixer sync that often helps nobody
@@ -166,7 +204,7 @@ MIN_EVERY_HOURS = 0.25      # the settings refuse "every 1m": a rescan or a Mang
 
 def validate_schedule(text: Optional[str]) -> str:
     """The text a user typed in Settings > Automation, checked and rewritten in the canonical form for storing
-    (``weekly@sun 03:30``, ``daily@03:30``, ``every 12h`` or ``off``).
+    (``monthly@1 03:30``, ``weekly@sun 03:30``, ``daily@03:30``, ``every 12h`` or ``off``).
 
     Accepts everything :func:`parse_schedule` does (so ``03:30``, ``daily 3:30``, ``12h`` work); raises ValueError with
     a message to show as it is. An empty entry is refused (it is easy to clear a field by accident: write ``off``).
@@ -186,8 +224,8 @@ def validate_schedule(text: Optional[str]) -> str:
     return parsed.describe()
 
 
-_BAD_SCHEDULE = ("Not understood. Write weekly@sun 03:30 (Sundays at 03:30), daily@03:30 (every day at 03:30, 24-hour "
-                 "clock), every 12h (every 12 hours) or off.")
+_BAD_SCHEDULE = ("Not understood. Write monthly@1 03:30 (the 1st of each month at 03:30), weekly@sun 03:30 (Sundays at "
+                 "03:30), daily@03:30 (every day at 03:30, 24-hour clock), every 12h (every 12 hours) or off.")
 
 
 def is_missed(next_run: Optional[datetime], now: datetime) -> bool:

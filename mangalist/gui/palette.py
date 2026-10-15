@@ -10,10 +10,13 @@ Owner, 2026-10-13: "we need a dark mode option. Switching from animefetch to Man
 - **Dark** comes from MangaPixer's dark theme (``web/src/styles.scss`` ``:root``, 1.40.0), so the three apps read as one
   family: its page, surfaces, text ramp and status colours as they are; borders, hover fills and badge backgrounds are
   MangaPixer's ink / status colours over the surface at the alphas its components use (``rgb(var(--mp-ink-rgb) / a)``),
-  flattened to solid colours here. The accent is MangaPixer's **blue** accent (``themes/_accents.scss``, dark family),
-  not its default violet: MangaList is blue in Light, and animefetch's dark accent is blue too. Violet stays for the
-  Wanted badge, which was already MangaList's violet. Every text token reads at WCAG AA (4.5:1) on the surfaces it is
-  drawn on (``tests/test_palette.py``).
+  flattened to solid colours here. The accent is MangaPixer's default **violet** (``--mp-accent`` / ``-strong`` /
+  ``-soft`` of its dark ``:root``), so a MangaPixer left on violet and MangaList's Dark look alike (owner, 2026-10-15:
+  "Yes" to taking violet over the blue Dark first shipped with). Light keeps MangaList's blue. Every text token reads
+  at WCAG AA (4.5:1) on the surfaces it is drawn on (``tests/test_palette.py``).
+- **Not tracked** (Track completion off in MangaPixer) has its own badge colour in both palettes (owner, 2026-10-15:
+  "a new color ... Theme sensitive"): MangaPixer's teal, which no other state uses, so it no longer reads as the quiet
+  grey of Up to date.
 """
 
 from __future__ import annotations
@@ -80,6 +83,8 @@ class Palette:
     quiet_text: str
     wanted_bg: str              # the Wanted states (empty folders)
     wanted_text: str
+    untracked_bg: str           # Not tracked (Track completion off in MangaPixer)
+    untracked_text: str
     # the semantic colours outside badges
     warn_line: str              # the edge of the "missing" button
     warn_hover: str             # the "missing" button under the mouse
@@ -91,7 +96,7 @@ class Palette:
 
     def badge(self, kind: str) -> Tuple[str, str]:
         """(background, text) of a badge kind: ``ok`` / ``warn`` / ``bad`` / ``info`` / ``neutral`` / ``quiet`` /
-        ``wanted``."""
+        ``wanted`` / ``untracked``."""
         return getattr(self, f"{kind}_bg"), getattr(self, f"{kind}_text")
 
     def tokens(self) -> Dict[str, str]:
@@ -116,6 +121,7 @@ LIGHT = Palette(
     ok_bg="#e7f3ec", ok_text="#1d5e36", warn_bg="#fdf0e3", warn_text="#8a3f00", bad_bg="#fbeaea", bad_text="#8b1d1d",
     info_bg="#e8eefb", info_text="#1f4fb8", neutral_bg="#ededea", neutral_text="#4a4a47", quiet_bg="#eef0f2",
     quiet_text="#3a3f45", wanted_bg="#f1ecfa", wanted_text="#5a2d91",
+    untracked_bg="#e3f2ef", untracked_text="#00655a",       # added 2026-10-15: MangaPixer's light-base teal
     warn_line="#e8c9a4", warn_hover="#fae4cc", bad_fill="#8b1d1d", bad_fill_hover="#6e1616", bad_line="#d9a3a3",
     caution_text="#9a5b00", error_text="#b71c1c",
 )
@@ -166,12 +172,18 @@ MP_TEXT_DIM = "#8a8a99"             # --mp-text-dim
 MP_TEXT_DIM_LIFTED = "#90909f"
 MP_TEXT_FAINT = "#777777"           # --mp-text-faint
 MP_TEXT_FAINT_BLACK = "#808080"     # --mp-text-faint on the black base (lifted a step for contrast)
+# The blue accent (the accent of Dark until 2026-10-15) stays for the info badge (Upgrade available), as in Light
+# where the info badge is MangaList's blue.
 MP_BLUE = "#9ecaff"                 # --mp-accent, blue accent (tone 80)
 MP_BLUE_STRONG = "#0075c4"          # --mp-accent-strong, blue (tone 48: white on it 4.8:1)
-MP_BLUE_40 = "#0061a4"              # the blue primary palette's tone 40
-MP_BLUE_SOFT = "#d1e4ff"            # --mp-accent-soft, blue (tone 90)
 MP_VIOLET = "#b39dff"               # --mp-accent (the default violet)
-MP_VIOLET_STRONG = "#7c4dff"        # --mp-accent-strong (violet)
+MP_VIOLET_STRONG = "#7c4dff"        # --mp-accent-strong (violet: white on it 4.8:1)
+MP_VIOLET_SOFT = "#d8ccff"          # --mp-accent-soft (violet)
+# --mp-accent of the light base (violet): the deeper violet a primary button darkens to under the mouse, as blue's
+# tone 40 did (white on it 7.6:1).
+MP_VIOLET_DEEP = "#5b33c9"
+MP_TEAL = "#80cbc4"                 # --mp-teal
+MP_TEAL_LIGHT = "#00655a"           # --mp-teal on the light base
 MP_WARN = "#ffcc80"                 # --mp-warn
 MP_WARN_STRONG = "#ffb300"          # --mp-warn-strong
 MP_CAUTION = "#ffb74d"              # --mp-caution
@@ -188,16 +200,16 @@ _ON = MP_SURFACE_RAISED             # the panels: what the tints and lines are f
 DARK = Palette(
     name="dark", dark=True,
     background=MP_PAGE, surface=MP_SURFACE_RAISED, surface_subtle=MP_SURFACE, raised=MP_SURFACE_HIGH,
-    hover=mix(MP_INK, _ON, 0.05), pressed=MP_SURFACE_HIGH, selected=mix(MP_BLUE_STRONG, _ON, 0.16),
+    hover=mix(MP_INK, _ON, 0.05), pressed=MP_SURFACE_HIGH, selected=mix(MP_VIOLET_STRONG, _ON, 0.16),
     text=MP_TEXT, text_2=MP_TEXT_SECONDARY, muted=MP_TEXT_MUTED, muted_2=MP_TEXT_DIM_LIFTED, disabled=MP_TEXT_FAINT,
     faint=MP_TEXT_FAINT_BLACK,
     border=mix(MP_INK, _ON, 0.13), border_soft=mix(MP_INK, _ON, 0.09), row_rule=mix(MP_INK, _ON, 0.06),
     control=mix(MP_INK, _ON, 0.22), control_strong=mix(MP_INK, _ON, 0.36), shadow="#000000",
     arrow_off=mix(MP_INK, _ON, 0.25),
-    accent=MP_BLUE, accent_fill=MP_BLUE_STRONG, accent_text="#ffffff", accent_hover=MP_BLUE_SOFT,
-    accent_fill_hover=MP_BLUE_40, accent_fill_hover_2=MP_BLUE_40, accent_fill_disabled=mix(MP_BLUE_STRONG, _ON, 0.28),
-    accent_text_disabled=mix(MP_TEXT, _ON, 0.45),
-    accent_tint=mix(MP_BLUE_STRONG, _ON, 0.22), busy_row=mix(MP_BLUE_STRONG, _ON, 0.30),
+    accent=MP_VIOLET, accent_fill=MP_VIOLET_STRONG, accent_text="#ffffff", accent_hover=MP_VIOLET_SOFT,
+    accent_fill_hover=MP_VIOLET_DEEP, accent_fill_hover_2=MP_VIOLET_DEEP,
+    accent_fill_disabled=mix(MP_VIOLET_STRONG, _ON, 0.28), accent_text_disabled=mix(MP_TEXT, _ON, 0.45),
+    accent_tint=mix(MP_VIOLET_STRONG, _ON, 0.22), busy_row=mix(MP_VIOLET_STRONG, _ON, 0.30),
     tooltip_bg=MP_TEXT, tooltip_text=MP_SURFACE,
     ok_bg=mix(MP_SUCCESS_STRONG, _ON, 0.20), ok_text=MP_SUCCESS,
     warn_bg=mix(MP_WARN_STRONG, _ON, 0.16), warn_text=MP_WARN,
@@ -206,6 +218,7 @@ DARK = Palette(
     neutral_bg=MP_SURFACE_HIGH, neutral_text=MP_TEXT_SECONDARY,
     quiet_bg=mix(MP_INFO, _ON, 0.08), quiet_text=MP_TEXT_SECONDARY,
     wanted_bg=mix(MP_VIOLET_STRONG, _ON, 0.22), wanted_text=MP_VIOLET,
+    untracked_bg=mix(MP_TEAL, _ON, 0.16), untracked_text=MP_TEAL,
     warn_line=mix(MP_WARN, _ON, 0.35), warn_hover=mix(MP_WARN_STRONG, _ON, 0.26), bad_fill=MP_ERROR_LIGHT,
     bad_fill_hover=MP_ERROR_STRONG_LIGHT, bad_line=mix(MP_ERROR, _ON, 0.40), caution_text=MP_CAUTION,
     error_text=MP_ERROR,
@@ -225,7 +238,8 @@ TEXT_ON: Dict[str, Tuple[str, ...]] = {
     "tooltip_text": ("tooltip_bg",),
     "ok_text": ("ok_bg", "surface"), "warn_text": ("warn_bg", "surface", "selected"), "bad_text": ("bad_bg", "surface"),
     "info_text": ("info_bg", "surface"), "neutral_text": ("neutral_bg",), "quiet_text": ("quiet_bg",),
-    "wanted_text": ("wanted_bg",), "caution_text": ("surface", "selected"), "error_text": ("surface", "selected"),
+    "wanted_text": ("wanted_bg",), "untracked_text": ("untracked_bg", "surface"), "caution_text": ("surface", "selected"),
+    "error_text": ("surface", "selected"),
 }
 #: White labels on the danger fills (checked separately: ``accent_text`` is the white of every filled button).
 FILL_LABELS: Tuple[Tuple[str, str], ...] = (("accent_text", "bad_fill"), ("accent_text", "bad_fill_hover"))

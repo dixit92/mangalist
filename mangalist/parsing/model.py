@@ -128,7 +128,9 @@ class ParsedName:
     volume: Optional[UnitRange] = None
     chapter: Optional[UnitRange] = None
     number: Optional[UnitRange] = None          # bare number (kind not stated in the name)
-    is_extra: bool = False                      # an extra / special / omake without its own chapter number
+    is_extra: bool = False                      # an extra / special / omake: no chapter number of its own, or a
+                                                # comics extra's ("Annual 2": chapter 2, flagged) that never
+                                                # counts as that chapter (MangaPixer 1.42.0's IsExtra)
     title: Optional[str] = None                 # chapter (or volume) title, never read for numbers
     group: Optional[str] = None                 # scanlation / release group
     index: Optional[int] = None                 # FMD2 numbering index (separate from the chapter number)

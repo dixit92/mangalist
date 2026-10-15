@@ -61,6 +61,8 @@ class WantedSeries:
     titles: Tuple[str, ...] = ()        # the search titles (English / folder names first, as volumes_target.search_titles)
     findable: bool = False              # releases can be searched now (MangaPixer-matched, licensed, downloads on, ...)
     reason: str = ""                    # why not, when not findable (e.g. "needs Suwayomi")
+    by_hand: bool = False               # not searched automatically, but the owner may search nyaa by hand (a declared
+                                        # edition's volumes, owner 2026-10-15) - never by the find pass or a bulk search
 
 
 # --- Settings ---------------------------------------------------------------------------------------------

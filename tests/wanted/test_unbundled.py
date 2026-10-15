@@ -104,3 +104,52 @@ def test_on_a_series_whose_volume_list_maps_no_chapters_wants_nothing_more(lib):
     before = _keyed(lib, wanted.wanted_list(lib.db, today=TODAY))
     UnbundledChapters(lib.db).set([_sid(lib, "Manga/Volume Gaps")], True)      # its list has no chapter ranges
     assert _keyed(lib, wanted.wanted_list(lib.db, today=TODAY)) == before
+
+
+# --- the first chapter to get (owner, 2026-10-15, question 14) -----------------------------------------------------
+
+
+def test_the_first_chapter_to_get_is_stored_with_the_setting_and_forgotten_with_it(lib):
+    from decimal import Decimal
+
+    from mangalist.unbundled import UnbundledChoice, unbundled_choices
+
+    setting = UnbundledChapters(lib.db)
+    gaps = _sid(lib, "Manga/Volume Gaps")
+    assert setting.set_first_chapter(gaps, 40, 5) is False          # off: nothing stored
+    setting.set([gaps], True)
+    assert setting.choice(gaps) == UnbundledChoice() and unbundled_choices(lib.db) == {gaps: UnbundledChoice()}
+    assert setting.set_first_chapter(gaps, "40", "5") is True
+    assert setting.choice(gaps) == UnbundledChoice(Decimal(40), Decimal(5))
+    assert "on_since" in lib.db.get_meta(f"{META_PREFIX}{gaps}")      # the switch time is kept
+    with pytest.raises(ValueError):
+        setting.set_first_chapter(gaps, "zero", 5)
+    setting.set([gaps], False)
+    setting.set([gaps], True)
+    assert setting.choice(gaps) == UnbundledChoice()                 # asked again after off / on
+    assert setting.choice(None) is None and setting.choice(10_000) is None
+
+
+def test_an_unreadable_value_reads_as_on_without_an_answer(caplog):
+    from mangalist.unbundled import UnbundledChoice, choice_of
+
+    assert choice_of("{not json") == UnbundledChoice() and "unreadable" in caplog.text
+    assert choice_of('{"first_chapter": "-3", "for_volume": "2"}') == UnbundledChoice()
+    assert choice_of('["a list"]') == UnbundledChoice()
+
+
+def test_the_wanted_list_asks_for_the_chapters_from_the_answer(lib):
+    sid = _sid(lib, "Manga/Volume Gaps")                             # volumes 1, 3, 5 held; the list maps none
+    view = UnbundledFolders(lib.db)
+    folder = lib.folders["Manga/Volume Gaps"]
+    before = _keyed(lib, wanted.wanted_list(lib.db, today=TODAY))
+    view.set([folder], True)
+    states = {v.row.id: v.state for v in wanted.library_states(lib.db, today=TODAY)}
+    assert states[sid].unbundled_ask.needed and states[sid].unbundled_ask.volume == "5"
+    assert view.choice(folder) is not None and not view.choice(folder).first_chapter
+    assert view.set_first_chapter(folder, 40, "5") and view.choice(folder).first_chapter == 40
+    after = _keyed(lib, wanted.wanted_list(lib.db, today=TODAY))
+    assert after[("Manga/Volume Gaps", GROUP_CHAPTERS)].missing == ("40", "41")
+    assert {k: v for k, v in after.items() if k[0] != "Manga/Volume Gaps"} == \
+        {k: v for k, v in before.items() if k[0] != "Manga/Volume Gaps"}
+    assert not view.set_first_chapter("/not/a/library/folder", 3, 1)

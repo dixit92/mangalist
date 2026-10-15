@@ -22,7 +22,7 @@ from mangalist.models import FileHit, MangaEntry  # noqa: E402
 from mangalist.states import InventorySnapshot  # noqa: E402
 
 from ..states.helpers import TODAY, item  # noqa: E402
-from .conftest import FakeBackend, qapp, wait_until  # noqa: E402,F401
+from .conftest import FakeBackend, qapp, settle_states, wait_until  # noqa: E402,F401
 
 LIB = Path("/lib")
 QUEST, TWIN_A, TWIN_B, PLAIN = "Example Quest", "Twin Series", "Twin Series (old)", "Plain Series"
@@ -113,6 +113,7 @@ def make_window(qapp, monkeypatch):
             win._on_scan_finished([_entry(QUEST), _entry(TWIN_A, mu="Twin"), _entry(TWIN_B, mu="twin "),
                                    _entry(PLAIN)])
             win._stop_signatures()
+            settle_states(win)                  # the states are computed in the background, as in the app
             win._refresh_derived()
         return win
 
@@ -455,3 +456,19 @@ def test_open_folder_without_a_file_manager_copies_the_path(make_window, monkeyp
     win._open_in_explorer(LIB / QUEST)
     assert QApplication.clipboard().text() == str(LIB / QUEST)
     assert "folder path copied" in win._status_label.text()
+
+
+def test_a_scan_of_a_library_that_is_now_empty_says_library_empty(make_window, tmp_path):
+    """Owner, 2026-10-15: a folder scan of a library whose last series left is "Library Empty", not "Scan failed"."""
+    from mangalist.scanner import LibraryScan, RootScan
+
+    win = make_window()
+    empty = RootScan(root_id=1, root_name="Reading", folder=tmp_path, empty=True)
+    win._on_root_scanned(empty, [])
+    assert win._status_label.text() == "Reading: Library Empty"
+    win._on_scan_finished(LibraryScan(roots=[empty]))
+    assert win._status_label.text().startswith("Reading: Library Empty")
+    assert "Scan failed" not in win._status_label.text()
+    other = RootScan(root_id=2, root_name="Archive", folder=tmp_path, entries=[_entry(QUEST)])
+    win._on_scan_finished(LibraryScan(roots=[other, empty]))
+    assert "Reading: Library Empty" in win._status_label.text() and win._status_label.text().startswith("Scanned 1")
