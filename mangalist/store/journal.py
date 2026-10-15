@@ -65,9 +65,11 @@ moves (an older build reads them as moves), with these specifics:
   locks already taken are released).
 - A step is ONE rename of the folder: its source must be a real folder (not a symlink), the destination's parent must
   exist (no folders are created), the destination must not exist (no-replace).
-- Across filesystems a rename fails with ``EXDEV``: refused when planning if the two sides' devices differ
-  (:class:`AcrossFilesystems`), and a step whose rename still meets ``EXDEV`` (a FUSE or SMB share that reports one device
-  but cannot rename between its shares) fails with :data:`ACROSS_FILESYSTEMS` - nothing is copied, nothing deleted.
+- Across filesystems the rename is TRIED (owner, 2026-10-15: "MangaList should attempt to move it and raise an error to
+  the user to make them move it themselves if refused by the system"): the two sides' devices are not compared when
+  planning; a step whose rename meets ``EXDEV`` (another filesystem, or a FUSE / SMB share that cannot rename between its
+  shares) fails with :data:`ACROSS_FILESYSTEMS` - nothing is copied, nothing deleted. (:class:`AcrossFilesystems` is no
+  longer raised; kept for callers that still catch it.)
 """
 
 from __future__ import annotations
@@ -106,7 +108,7 @@ class ContentAndPathChange(StepRefused):
 
 class AcrossFilesystems(StepRefused):
     """A cross-root step whose two sides lie on different filesystems: a rename cannot do it (MangaList never copies +
-    deletes)."""
+    deletes). No longer raised when planning since 2026-10-15 (the rename is tried; ``EXDEV`` fails the step)."""
 
 
 class PlanStateError(JournalError):
@@ -517,7 +519,8 @@ class Journal:
         """Check *moves* - whole folders, each from inside one of *roots* into another place inside one of them (Move to
         library: a series folder from one library root into another) - and record them as one plan that holds every
         root's lock while it applies or undoes (see "Cross-root plans" above). Raises :class:`StepRefused` (nothing
-        recorded) for the first step that is not allowed; :class:`AcrossFilesystems` when a rename cannot reach."""
+        recorded) for the first step that is not allowed. The two sides' devices are not compared: the rename is tried
+        when the plan applies, and a refusal (``EXDEV`` or another) fails that step with nothing moved."""
         plan_roots = sorted({_norm(r) for r in roots}, key=os.path.normcase)
         if len(plan_roots) < 2:
             raise StepRefused("a cross-root plan needs two library roots")
@@ -559,12 +562,6 @@ class Journal:
             problem = windows_name_problem(name)
             if problem:
                 raise StepRefused(f"{where}: {name!r}: {problem}")
-            try:
-                across = _device(src) != _device(parent)
-            except OSError as exc:
-                raise StepRefused(f"{where}: cannot read the folders: {exc}") from None
-            if across:
-                raise AcrossFilesystems(f"{where}: {ACROSS_FILESYSTEMS}")
             sources.append(src)
             taken[os.path.normcase(dst)] = True
             rows.append((i, src, dst))
@@ -1110,11 +1107,6 @@ class MoveFollower:
 
 def _key(p) -> str:
     return os.path.normcase(_norm(p))
-
-
-def _device(path: str) -> int:
-    """The device *path* lies on (a rename cannot leave it)."""
-    return os.stat(path).st_dev
 
 
 def _ident(path: str) -> Optional[str]:

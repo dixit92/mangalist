@@ -491,6 +491,17 @@ class DownloadLedger:
                                expect=(DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED),
                                error="cancelled by the owner")
 
+    def dismiss(self, record_id: int) -> DownloadRecord:
+        """The owner dismissed a FAILED download (the In progress list's "Dismiss", owner 2026-10-15): it is marked
+        cancelled - out of In progress, under Show finished - and nothing else changes (a torrent still in the client
+        is left alone and, as for any cancelled record, is the owner's from then on: it no longer counts against the
+        download budget). Only a FAILED record can be dismissed (:meth:`cancel` keeps refusing one); the failure stays
+        readable in ``error``."""
+        record = self.get(record_id)
+        why = (record.error or "failed") if record is not None else "failed"
+        return self.set_status(record_id, DownloadStatus.CANCELLED, expect=(DownloadStatus.FAILED,),
+                               error=f"dismissed by the owner (it had failed: {why})")
+
     # --- clearing finished records -------------------------------------------------------------------
 
     def clear_finished(self, older_than_days: float, *, now: Optional[datetime] = None,

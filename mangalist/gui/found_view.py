@@ -24,6 +24,11 @@ or the one in Settings > Automation. Each row's **⋯** opens the series' menu (
 :mod:`.series_actions`: Show in To get, Show in List, Open folder, Automatic downloads, Skip all of this series, and
 Change source… for a series with nothing to send).
 
+**Keyboard** (owner, 2026-10-15: Send and Skip are painted, so Tab no longer reaches them): on the selected finding
+**Enter** is Send (Change source… for one with nothing to send) and **Delete** is Skip; on a series header Enter folds or
+unfolds it. The arrow keys move between rows. After a skip the selection moves to the finding that took its place (else
+the one above), so Delete can be pressed again; the list taking the focus selects its first finding.
+
 Sends run one at a time (a pack may take a while: its file list is read to narrow it). **Send** while one runs queues the
 finding - its button says "Queued", its status "Queued · 1st" - and the queue is worked through in order (owner,
 2026-10-12: "Am I not able to queue sends?"); Skip and Change source stay usable meanwhile, and skipping a queued finding
@@ -113,8 +118,8 @@ PART_REASON = "reason"          # tooltip only: why it waits
 PART_STATUS = "status"          # tooltip only: the status chip
 
 SEND_TIP = ("Send it now: a torrent goes to qBittorrent (or waits in the queue past the download budget), chapters to "
-            "Suwayomi")
-SKIP_TIP = "Do not get it: it leaves the list and is not offered again"
+            "Suwayomi (Enter on the selected row)")
+SKIP_TIP = "Do not get it: it leaves the list and is not offered again (Delete on the selected row)"
 SOURCE_TIP = ("Open the series in Missing chapters to pick where its chapters come from: MangaDex or your other Suwayomi "
               "sources. Remembered for the series")
 MORE_TIP = ("This series: Show in To get (its other releases or chapters), Show in List, Open folder, Automatic "
@@ -718,11 +723,16 @@ class FoundDelegate(QStyledItemDelegate):
 
 class FoundList(QListView):
     """The list the delegate paints in: the mouse is tracked for the hover, and the hover / press are cleared when the
-    mouse leaves."""
+    mouse leaves. Enter and Delete on the selected row are :attr:`key_part` (Send / Skip); taking the focus without a
+    finding selected is :attr:`focused`."""
+
+    key_part = Signal(str)          # PART_ACTION (Enter) / PART_SKIP (Delete) on the current row
+    focused = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("foundList")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self.setUniformItemSizes(False)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -752,6 +762,22 @@ class FoundList(QListView):
             if isinstance(delegate, FoundDelegate):
                 delegate.set_hover(self, None)
         return super().viewportEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier:
+            self.key_part.emit(PART_ACTION)
+            event.accept()
+            return
+        if key == Qt.Key.Key_Delete and not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier:
+            self.key_part.emit(PART_SKIP)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        self.focused.emit()
 
     def mouseReleaseEvent(self, event) -> None:
         super().mouseReleaseEvent(event)
@@ -787,6 +813,7 @@ class FoundView(QWidget):
         self._needle = ""                           # the filter box's text, case-folded
         self._modes: Dict[int, Tuple[str, str]] = {}    # series id -> its header's mode chip (text, tooltip), read once
         self._dirty = True                          # the list has not caught up with the findings (hidden meanwhile)
+        self._refocus: Optional[int] = None         # a key skipped the finding at this row: select the one in its place
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -858,6 +885,8 @@ class FoundView(QWidget):
         self.list = FoundList()
         self.list.setModel(self.model)
         self.list.setItemDelegate(self.delegate)
+        self.list.key_part.connect(self.key_action)
+        self.list.focused.connect(self._select_first_if_none)
         self.box = QFrame()
         self.box.setObjectName("foundBox")
         self.box.setProperty("card", "true")        # the bordered, rounded box of the mockup
@@ -1027,6 +1056,65 @@ class FoundView(QWidget):
             return
         self._dirty = False
         self.model.set_lines(self._lines())
+        if self._refocus is not None and self._finding(self._refocus_id) is None:
+            row, self._refocus = self._refocus, None
+            self._select_near(row)
+
+    # --- the keyboard --------------------------------------------------------------------------------
+
+    _refocus_id: Optional[int] = None
+    _last_skipped: Optional[int] = None
+
+    def current_line(self) -> Optional[FoundLine]:
+        """The selected row (a finding or a series header), None when none is."""
+        index = self.list.currentIndex()
+        return self.model.line_at(index.row()) if index.isValid() else None
+
+    def select(self, finding_id: int) -> bool:
+        """Select a finding's row (as the arrow keys would); False when it is not shown."""
+        self._sync()
+        row = self.model.row_of(("finding", finding_id))
+        if row is None:
+            return False
+        index = self.model.index(row)
+        self.list.setCurrentIndex(index)
+        self.list.scrollTo(index)
+        return True
+
+    def _select_near(self, row: int) -> None:
+        """Select the finding at *row* or the next one below it, else the nearest above (after a skip)."""
+        lines = self.model.lines()
+        below = [i for i in range(max(row, 0), len(lines)) if not lines[i].is_series]
+        above = [i for i in range(min(row, len(lines)) - 1, -1, -1) if not lines[i].is_series]
+        pick = below[0] if below else above[0] if above else None
+        if pick is not None:
+            self.list.setCurrentIndex(self.model.index(pick))
+            self.list.scrollTo(self.model.index(pick))
+
+    def _select_first_if_none(self) -> None:
+        line = self.current_line()
+        if line is None or line.is_series:
+            self._sync()
+            current = self.list.currentIndex()
+            self._select_near(current.row() if current.isValid() else 0)
+
+    def key_action(self, part: str) -> None:
+        """Enter (``action``) / Delete (``skip``) on the selected row: Send / Skip a finding as its painted buttons do
+        (only when they can be clicked now); Enter on a series header folds or unfolds it."""
+        line = self.current_line()
+        if line is None:
+            return
+        if line.is_series:
+            if part == PART_ACTION:
+                self.fold(line.series_id)
+            return
+        fid = line.finding.id
+        if part == PART_SKIP:
+            self._refocus, self._refocus_id = self.model.row_of(line.key), fid
+            self._last_skipped = None
+        self.click(fid, part)
+        if part == PART_SKIP and self._last_skipped != fid:
+            self._refocus = None                    # not skipped (a pass runs, it is being sent, refused): it stays
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1054,21 +1142,28 @@ class FoundView(QWidget):
         return out
 
     def _mode_chips(self, series_ids: Sequence[int]) -> Dict[int, Tuple[str, str]]:
-        """series id -> its header's mode chip, read for the series not read yet (one read of the modes and one of
-        the defaults for all of them); {} without automatic downloads."""
-        if not callable(getattr(self._backend, "series_modes", None)):
+        """series id -> its header's mode chip, read for the series not read yet: ONE read of their own modes and one
+        of their defaults for all of them (owner, 2026-10-15: the chip shows a series' own mode exactly, also when it
+        equals the default); {} without automatic downloads. A backend without ``own_series_modes`` gives the mode in
+        force, which tells an own mode from the default only where they differ."""
+        own_fn = getattr(self._backend, "own_series_modes", None)
+        if not callable(own_fn) and not callable(getattr(self._backend, "series_modes", None)):
             return {}
         missing = [sid for sid in series_ids if sid not in self._modes]
         if missing:
             try:
-                in_force = dict(self._backend.series_modes(missing))
                 defaults = defaults_of(self._backend, missing)
+                if callable(own_fn):
+                    own = dict(own_fn(missing))
+                else:
+                    in_force = dict(self._backend.series_modes(missing))
+                    own = {sid: m for sid, m in in_force.items() if m != defaults.get(sid, ("", False))[0]}
             except Exception as exc:  # noqa: BLE001 - the chips stay off; nothing else depends on them
                 _log.warning("Found: the modes could not be read: %s", describe_error(exc))
                 return dict(self._modes)
             for sid in missing:
                 default, library = defaults.get(sid, ("", False))
-                self._modes[sid] = mode_chip(in_force.get(sid), default, library) if default else ("", "")
+                self._modes[sid] = mode_chip(own.get(sid), default, library) if default else ("", "")
         return dict(self._modes)
 
     def set_series_menu_enabled(self, on: bool) -> None:
@@ -1233,6 +1328,7 @@ class FoundView(QWidget):
             self.say(f"Could not skip it: {describe_error(exc)}", "bad")
             return False
         _log.info("Found: skipped finding %s (%s, %s)", finding.id, finding.kind, gets_text(finding))
+        self._last_skipped = finding_id
         self.say(f"Skipped {gets_text(finding)} of {name}: it is not offered again.")
         self.changed.emit()
         return True

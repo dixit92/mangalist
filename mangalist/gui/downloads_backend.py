@@ -30,8 +30,9 @@ one existing piece:
 
 Optional extras (the Download tab and Settings use them when the backend has them, via ``getattr``):
 ``nyaa_options()`` / ``set_nyaa_options(options)`` (the nyaa source's switches), ``set_remove_completed(on)``,
-``series_titles(series_ids)`` (names for the downloads list) and ``next_check()`` (the next scheduled downloads
-check, ISO 8601 UTC, or None).
+``series_titles(series_ids)`` (names for the downloads list), ``next_check()`` (the next scheduled downloads
+check, ISO 8601 UTC, or None) and ``dismiss_downloads(record_ids)`` (the In progress list's "Dismiss" of failed rows:
+marks them cancelled, returns how many).
 
 Partial downloads (only a pack's missing volumes) add four more, all optional - a backend without ``inspect_pack`` simply
 never shows the "Only the missing volumes" box: ``inspect_pack(candidate, wanted_volumes)`` (blocking; reads the release's
@@ -80,6 +81,7 @@ available:
                                           skip it (quick; never offered again; ``BackendError`` when not waiting).
 ``series_modes(ids)``                     quick: series id -> the Off / Notify / Auto mode in force.
 ``own_series_mode(id)``                   quick: the series' own mode (None: follows the default).
+``own_series_modes(ids)``                 quick (optional): series id -> its own mode or None, in one read.
 ``set_series_mode(ids, mode)``            quick: set the series' own mode (None: back to the default).
 ``default_mode()`` / ``set_default_mode`` quick: the default mode (Notify unless changed).
 ``default_for(id)``                       quick (optional): (the mode a series without its own follows, True when it is

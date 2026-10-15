@@ -149,6 +149,19 @@ class FakeBackend:
                                        error="removed by you (Remove now)")
         return self.record_list[i]
 
+    def dismiss_downloads(self, record_ids):
+        """Dismiss: FAILED records become CANCELLED (the In progress list's row action, 2026-10-15)."""
+        from dataclasses import replace as _replace
+
+        self.threads.append(threading.get_ident())
+        self.dismissed = getattr(self, "dismissed", []) + [tuple(record_ids)]
+        n = 0
+        for i, r in enumerate(self.record_list):
+            if r.id in record_ids and r.status == DownloadStatus.FAILED:
+                self.record_list[i] = _replace(r, status=DownloadStatus.CANCELLED, error="dismissed by the owner")
+                n += 1
+        return n
+
     def check_now(self):
         self.threads.append(threading.get_ident())
         self.checks += 1

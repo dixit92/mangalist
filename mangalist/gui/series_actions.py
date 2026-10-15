@@ -80,8 +80,8 @@ CHECK_NEW_TIP = ("Ask the series' Suwayomi source for chapters newer than the ne
                  "MangaUpdates lists them")
 CHANGE_SOURCE_TIP = ("Open the series' chapters and pick where they come from: MangaDex or your other Suwayomi sources. "
                      "Remembered for the series")
-BEHIND_DONE_TIP = ("Treat the series as up to date: the List shows it Up to date, and scheduled find passes and Find now "
-                   "skip it (it stays listed in To get, as in the List's Gaps)")
+BEHIND_DONE_TIP = ("Treat the series as up to date: the List shows it Up to date, it leaves To get, and find passes skip "
+                   "it (Clear 'up to date' override in the List brings it back)")
 
 
 MOVE_MENU = "Move to library"

@@ -3,8 +3,10 @@
 library feature now"). No Qt: the List's row menu (:mod:`mangalist.gui.main_window`, the shared series menu) asks and
 shows; everything that reads or writes is here.
 
-**What moves.** Each series folder as a whole, into the TOP of the target library under its own name: ONE rename per
-series, all of them in one cross-root journal plan (:meth:`mangalist.store.journal.Journal.plan_across_roots`) - moves
+**What moves.** Each series folder as a whole, under its own name, into the TOP of the target library - or, chosen in
+the confirmation, into a folder at the top of it (owner, 2026-10-15: "OK default, user settable location"; e.g. a
+franchise parent, where the series becomes one of its subseries): ONE rename per series, all of them in one cross-root
+journal plan (:meth:`mangalist.store.journal.Journal.plan_across_roots`) - moves
 only, never deletes, write-ahead, crash recovery, no-replace, undo. Before that hand-made moves were recognised at the next
 scan by the archives' content signatures (:mod:`mangalist.identity.moves`); now the identity follows directly
 (:func:`mangalist.identity.carry.follow_folder_move` and the archive rows' re-point): the series keeps its id - and so
@@ -15,18 +17,25 @@ and path; its MangaUpdates link and examined mark are re-keyed to the new folder
 **Refused, with the reason** (:func:`check_move`; nothing moves for that series, the others still can):
 
 - a series with a download in progress - queued, sent or downloaded but not filed yet - since filing targets its current
-  folder; and one whose replaced chapter files wait for the owner's confirmation (they are listed by the current path);
+  folder; one whose replaced chapter files wait for the owner's confirmation (they are listed by the current path); and
+  one whose replaced chapters are HELD in the holding folder (owner, 2026-10-15: "Refuse until emptied" - Restore puts
+  them back by the old path, which the move would leave behind): empty or restore them first;
 - a folder that is missing, not in a library folder, or not scanned into the library yet;
 - a target library that already has a folder of that name (no-replace), still remembers a missing series there (the
   Missing series list decides that one first), or excludes that name (the series would leave the list);
+- into a folder of the target (not its top): a folder that holds subseries of its own (they would lie too deep for a
+  scan), or whose name reads as a part of the folder it would go into (``Season 2``, ``Volumes``, ``Extras``: the scan
+  would take it for a unit of that series, not a series);
 - the whole move while a library scan runs (here or in the container: the scan lock) or another MangaList instance
   writes one of the two libraries (their ``.mangalist.lock``); the headless runner's filing, renaming and scanning wait
   for the move the same way (it takes the scan lock and both roots' locks before anything moves).
 
-**Different drives / shares.** A rename cannot cross filesystems (``EXDEV``): refused when planning when the two sides'
-devices differ, and when the rename itself still answers ``EXDEV`` - Unraid's ``/mnt/user`` is one FUSE mount (one
-device) whose user shares may still refuse a rename between them - the plan fails before anything moved. MangaList never
-copies + deletes; the message says to move it with a file manager - the next scan recognises the move by the archives.
+**Different drives / shares** (owner, 2026-10-15: "MangaList should attempt to move it and raise an error to the user to
+make them move it themselves if refused by the system"). Nothing is refused up front for the two sides' devices: the
+rename is tried. When the system refuses it - ``EXDEV`` (another filesystem, or one of Unraid's user shares that will not
+rename into another under the one ``/mnt/user`` mount) or any other refusal of the rename (permissions, a read-only
+share) - that step fails with nothing moved and the owner is told plainly to move the folder with a file manager; the
+next scan recognises the move by the archives. MangaList never copies + deletes.
 
 **MangaPixer** resolves its item by root + folder: after the move the series shows as a fresh folder of the target
 library until MangaPixer has rescanned that library (MangaPixer has its own carry-over); MangaPixer's ``carriedFrom``
@@ -45,6 +54,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .store.journal import ACROSS_FILESYSTEMS, AcrossFilesystems, Journal, PlanStateError, StepRefused
+
+#: The journal's error for a rename the system refused for another reason than ``EXDEV`` (``Journal._apply_step``).
+_RENAME_FAILED = "rename failed: "
 from .store.lock import LockBusy, LockError
 
 _log = logging.getLogger(__name__)
@@ -52,8 +64,14 @@ _log = logging.getLogger(__name__)
 MOVE_REASON = "move to library"
 SCAN_WAIT = 2.0             # seconds the move waits for the scan lock before it says a scan is running
 
-EXDEV_TEXT = ("These library folders are on different drives/shares, so MangaList cannot move a folder between them "
-              "(it never copies + deletes). Move it with a file manager - MangaList will recognise it at the next scan.")
+EXDEV_TEXT = ("The system refused to move the folder between these library folders (they are on different drives or "
+              "shares). MangaList never copies + deletes: please move it yourself with a file manager - MangaList "
+              "recognises it at the next scan.")
+#: Any other refusal of the rename by the system ({name}, {error}).
+REFUSED_TEXT = ("The system refused to move {name} ({error}). Nothing was moved. Please move it yourself with a file "
+                "manager - MangaList recognises it at the next scan.")
+HELD_REASON = ("its replaced chapters are held in the holding folder (Restore puts them back by the current folder) - "
+               "empty or restore them first (Download tab > Replaced chapters)")
 SCAN_RUNNING = "A library scan is running (here or in the container) - try again when it has finished."
 UNDO_HINT = "Undo: Move to library > Undo last move."
 
@@ -71,6 +89,7 @@ class MoveItem:
     root_id: int
     rel_path: str
     own_mode: Optional[str] = None      # its own automatic-download mode (None: it follows a default)
+    new_rel: str = ""                   # its folder inside the target library afterwards ("Name" or "Parent/Name")
 
 
 @dataclass
@@ -78,6 +97,8 @@ class MoveCheck:
     """What a move to *target* would do: the series that move, those refused (title, why) and those already there."""
 
     target: object                                              # store.Root
+    into: str = ""                                              # a folder at the top of the target ('' = its top)
+    asked: List[Tuple[str, str]] = field(default_factory=list)  # the (folder, title) pairs asked about (to re-check)
     items: List[MoveItem] = field(default_factory=list)
     refused: List[Tuple[str, str]] = field(default_factory=list)
     already: List[str] = field(default_factory=list)            # titles already in the target library
@@ -85,7 +106,6 @@ class MoveCheck:
     defaults_now: List[Tuple[str, bool]] = field(default_factory=list)   # (mode, library's) of each series on a default
     target_default: Tuple[str, bool] = ("notify", False)       # the target's default: (mode, True when the library's)
     renames_automatically: bool = False
-    held_replacements: int = 0                                  # replaced chapter files held for these series
 
     @property
     def follows_default(self) -> int:
@@ -94,6 +114,15 @@ class MoveCheck:
     @property
     def own_modes(self) -> int:
         return sum(1 for it in self.items if it.own_mode is not None)
+
+    @property
+    def destination(self) -> str:
+        """The folder the series go into: the target library's, or the chosen folder inside it."""
+        return str(Path(self.target.path) / self.into) if self.into else str(self.target.path)
+
+    @property
+    def destination_name(self) -> str:
+        return f"{self.target.name} / {self.into}" if self.into else str(self.target.name)
 
 
 @dataclass
@@ -160,8 +189,8 @@ def _count(con, sql: str, ids: Sequence[int], extra: Sequence = ()) -> int:
 
 
 def _busy_reason(con, ids: Sequence[int]) -> Optional[str]:
-    """Why these series (a folder and its subseries) cannot move now: a download that still files into the folder, or
-    replaced chapters waiting for the owner's confirmation."""
+    """Why these series (a folder and its subseries) cannot move now: a download that still files into the folder,
+    replaced chapters waiting for the owner's confirmation, or replaced chapters held in the holding folder."""
     marks = ",".join("?" * len(IN_PROGRESS))
     if _count(con, "SELECT COUNT(*) FROM ledger WHERE series_id IN ({ids}) AND status IN (" + marks + ")", ids,
               IN_PROGRESS):
@@ -170,23 +199,60 @@ def _busy_reason(con, ids: Sequence[int]) -> Optional[str]:
     try:
         if _count(con, "SELECT COUNT(*) FROM replacements WHERE series_id IN ({ids}) AND status = 'pending'", ids):
             return "replaced chapter files wait for your confirmation (Download tab) - confirm or decline them first"
+        if _count(con, "SELECT COUNT(*) FROM replacements WHERE series_id IN ({ids}) AND status = 'held'", ids):
+            return HELD_REASON
     except Exception:  # noqa: BLE001 - an older database without the table
         pass
     return None
 
 
-def check_move(db, folders: Sequence[Tuple[str, str]], target_root_id: int) -> MoveCheck:
+def place_choices(db, target_root_id: int) -> List[str]:
+    """The folders at the top of the library *target_root_id* a move can go into (besides its top): its direct child
+    folders, by name - not hidden ones, symbolic links or excluded ones. One directory read."""
+    target = _roots_by_id(db).get(target_root_id)
+    if target is None:
+        return []
+    excl = target.exclusion_set()
+    try:
+        with os.scandir(target.path) as it:
+            names = [e.name for e in it if not e.name.startswith(".") and e.is_dir(follow_symlinks=False)]
+    except OSError:
+        return []
+    return sorted((n for n in names if not excl.excludes(n, True)), key=lambda n: (n.casefold(), n))
+
+
+def _into_problem(target, into: str) -> Optional[str]:
+    """Why *into* cannot take a move (None: it can): one folder directly at the top of the target library, there now."""
+    if not into:
+        return None
+    if into in (".", "..") or "/" in into or "\\" in into:
+        return f"{into!r} is not a folder at the top of {target.name}"
+    path = Path(target.path) / into
+    if os.path.islink(path) or not os.path.isdir(path):
+        return f"{target.name} has no folder named {into!r}"
+    if target.exclusion_set().excludes(into, True):
+        return f"{target.name} excludes {into!r} (Settings > Library), so the series would leave the list"
+    return None
+
+
+def check_move(db, folders: Sequence[Tuple[str, str]], target_root_id: int, into: str = "") -> MoveCheck:
     """What moving *folders* (``(folder, title)``, as the List shows them) into the library *target_root_id* would do:
-    the series that can move (each into the top of the target under its folder's name) and the reasons for those that
-    cannot. Reads only."""
+    the series that can move (each under its folder's name into the top of the target, or into the folder *into* at its
+    top) and the reasons for those that cannot. Reads only."""
     roots = _roots_by_id(db)
     target = roots.get(target_root_id)
     if target is None:
         raise ValueError("that library folder is no longer configured")
-    check = MoveCheck(target=target)
+    into = (into or "").strip()
+    check = MoveCheck(target=target, into=into, asked=[(str(f), t) for f, t in folders])
     if not os.path.isdir(target.path):
         check.refused = [(title, f"{target.name}'s folder is not reachable ({target.path})") for _f, title in folders]
         return check
+    problem = _into_problem(target, into)
+    if problem:
+        check.refused = [(title, problem) for _f, title in folders]
+        return check
+    from .scanner import _is_unit_subfolder
     from .store.findings import FindingStore
 
     modes = FindingStore(db)
@@ -203,6 +269,7 @@ def check_move(db, folders: Sequence[Tuple[str, str]], target_root_id: int) -> M
             if not any(o != loc and o[0] == loc[0] and loc[1].startswith(o[1].rstrip("/") + "/") for _f, _t, o in located)]
     taken = set()
     sources = []
+    where = check.destination_name
     with db.connect() as con:
         for folder, title, (root_id, rel) in tops:
             root = roots.get(root_id)
@@ -213,7 +280,8 @@ def check_move(db, folders: Sequence[Tuple[str, str]], target_root_id: int) -> M
                               (root_id, rel)).fetchone()
             src = _under(db, root, rel)
             name = rel.rsplit("/", 1)[-1]
-            dst = str(Path(target.path) / name)
+            new_rel = f"{into}/{name}" if into else name
+            dst = str(Path(target.path).joinpath(*new_rel.split("/")))
             if row is None:
                 check.refused.append((title, "it is not scanned into the library yet - rescan first"))
                 continue
@@ -221,29 +289,32 @@ def check_move(db, folders: Sequence[Tuple[str, str]], target_root_id: int) -> M
                 check.refused.append((title, f"its folder is missing ({src})"))
                 continue
             if os.path.lexists(dst) or os.path.normcase(dst) in taken:
-                check.refused.append((title, f"{target.name} already has a folder named {name!r} (nothing is replaced)"))
+                check.refused.append((title, f"{where} already has a folder named {name!r} (nothing is replaced)"))
                 continue
-            if con.execute("SELECT 1 FROM series WHERE root_id = ? AND rel_path = ?", (target.id, name)).fetchone():
-                check.refused.append((title, f"{target.name} still remembers a missing series named {name!r} - forget "
+            if con.execute("SELECT 1 FROM series WHERE root_id = ? AND rel_path = ?", (target.id, new_rel)).fetchone():
+                check.refused.append((title, f"{where} still remembers a missing series named {name!r} - forget "
                                              "or re-attach it in Missing series first"))
                 continue
-            if excl.excludes(name, True):
-                check.refused.append((title, f"{target.name} excludes {name!r} (Settings > Library), so it would leave "
-                                             "the list"))
+            if excl.excludes(new_rel, True):
+                check.refused.append((title, f"{target.name} excludes {new_rel!r} (Settings > Library), so it would "
+                                             "leave the list"))
                 continue
             ids = _series_ids_under(con, root_id, rel)
+            if into and len(ids) > 1:
+                check.refused.append((title, f"it holds subseries of its own, which inside {into!r} would lie too deep "
+                                             f"for a scan - move it to the top of {target.name}"))
+                continue
+            if into and _is_unit_subfolder(name):
+                check.refused.append((title, f"inside {into!r} a folder named {name!r} reads as a part of {into!r} "
+                                             f"(not a series) - move it to the top of {target.name}"))
+                continue
             why = _busy_reason(con, ids)
             if why:
                 check.refused.append((title, why))
                 continue
-            try:
-                check.held_replacements += _count(con, "SELECT COUNT(*) FROM replacements WHERE series_id IN ({ids})"
-                                                       " AND status = 'held'", ids)
-            except Exception:  # noqa: BLE001
-                pass
             own = row["auto_mode"] if row["auto_mode"] in _MODE_LABELS else None
             check.items.append(MoveItem(title=title, folder=src, target=dst, series_id=int(row["id"]), root_id=root_id,
-                                        rel_path=rel, own_mode=own))
+                                        rel_path=rel, own_mode=own, new_rel=new_rel))
             taken.add(os.path.normcase(dst))
             if root.name not in sources:
                 sources.append(root.name)
@@ -267,11 +338,11 @@ def confirm_text(check: MoveCheck, *, show_modes: bool = True) -> Tuple[str, str
     target = check.target
     n = len(check.items)
     listed = check.items[:12]
-    lines = [f"Move {_series(n)} from {' / '.join(check.source_names)} to {target.name}?", ""]
+    lines = [f"Move {_series(n)} from {' / '.join(check.source_names)} to {check.destination_name}?", ""]
     lines += [f"    {it.title}" for it in listed]
     if n > len(listed):
         lines.append(f"    ... and {n - len(listed)} more")
-    lines += ["", f"Into the folder: {target.path}", "",
+    lines += ["", f"Into the folder: {check.destination}" + ("" if check.into else " (the top of the library)"), "",
               "Each series folder moves as a whole (one rename - nothing is copied or deleted) and keeps its "
               f"MangaUpdates link, settings and download history. {UNDO_HINT}"]
     changes = []
@@ -291,9 +362,6 @@ def confirm_text(check: MoveCheck, *, show_modes: bool = True) -> Tuple[str, str
                        "naming scheme.")
     if changes:
         lines += ["", f"In {target.name}:"] + changes
-    if check.held_replacements:
-        lines += ["", f"{check.held_replacements} replaced chapter file(s) of these series wait in the holding folder; "
-                      "Restore can no longer put them back after the move."]
     lines += ["", f"MangaPixer shows them under {target.name} once it has rescanned it."]
     if check.already:
         lines += ["", f"Already in {target.name} (left as they are): {', '.join(check.already[:6])}"
@@ -339,7 +407,7 @@ def move_series(db, check: MoveCheck, *, journal: Optional[Journal] = None, scan
                 try:
                     plan = journal.plan_across_roots(MOVE_REASON, [(it.folder, it.target) for it in check.items],
                                                      plan_roots, note=f"{_series(len(check.items))} to {target.name}")
-                except AcrossFilesystems:
+                except AcrossFilesystems:   # no longer raised when planning (the rename is tried); kept for safety
                     return MoveResult(status="failed", message=EXDEV_TEXT, target_name=target.name)
                 except StepRefused as exc:
                     return _refusal(f"{exc}")
@@ -353,8 +421,9 @@ def move_series(db, check: MoveCheck, *, journal: Optional[Journal] = None, scan
         _log.info("Move to library: plan %d moved %d series to %s", plan.id, len(moved), target.name)
         return res
     failed = next((s for s in plan.steps if s.state == "failed"), None)
-    why = EXDEV_TEXT if failed is not None and failed.error == ACROSS_FILESYSTEMS else (
-        f"{os.path.basename(failed.src)}: {failed.error}" if failed is not None else f"the plan is {plan.status}")
+    refused = refusal_text(failed)
+    why = refused or (f"{os.path.basename(failed.src)}: {failed.error}" if failed is not None
+                      else f"the plan is {plan.status}")
     _log.warning("Move to library: plan %d %s after %d of %d folders: %s", plan.id, plan.status, len(moved),
                  len(plan.steps), why)
     if moved:
@@ -362,8 +431,20 @@ def move_series(db, check: MoveCheck, *, journal: Optional[Journal] = None, scan
         res.message = f"Moved {len(moved)} of {_series(len(plan.steps))} to {target.name}; then: {why} {UNDO_HINT}"
     else:
         res.status = "failed"
-        res.message = why if why == EXDEV_TEXT else f"Move to library: nothing moved - {why}"
+        res.message = why if refused else f"Move to library: nothing moved - {why}"
     return res
+
+
+def refusal_text(step) -> Optional[str]:
+    """What to tell the owner when the system refused a step's rename (None: the step did not fail that way): EXDEV
+    (another drive or share) or any other refusal of the rename (permissions, a read-only share) - move it yourself."""
+    if step is None or not step.error:
+        return None
+    if step.error == ACROSS_FILESYSTEMS:
+        return EXDEV_TEXT
+    if step.error.startswith(_RENAME_FAILED):
+        return REFUSED_TEXT.format(name=os.path.basename(step.src), error=step.error[len(_RENAME_FAILED):])
+    return None
 
 
 def last_move(db) -> Optional[MoveRecord]:
@@ -435,5 +516,5 @@ def undo_move(db, plan_id: int, *, journal: Optional[Journal] = None, scan_wait:
     return res
 
 
-__all__ = ["MOVE_REASON", "EXDEV_TEXT", "SCAN_RUNNING", "IN_PROGRESS", "MoveItem", "MoveCheck", "MoveResult", "MoveRecord",
-           "check_move", "confirm_text", "refused_lines", "move_series", "last_move", "undo_move"]
+__all__ = ["MOVE_REASON", "EXDEV_TEXT", "REFUSED_TEXT", "HELD_REASON", "SCAN_RUNNING", "IN_PROGRESS", "MoveItem", "MoveCheck", "MoveResult", "MoveRecord",
+           "check_move", "place_choices", "confirm_text", "refused_lines", "move_series", "last_move", "undo_move"]
