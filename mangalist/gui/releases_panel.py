@@ -31,12 +31,21 @@ others wait in the queue): one question that names the usage, the cap and the si
 offers **Send anyway (past the cap)** or Cancel (the default) - never silently refused, never silently sent. The send
 itself tells the backend the choice (``over_cap``) and the size; the backend checks the budget again and returns a SENT
 or a QUEUED record, and the status line says which.
+
+**Sends are queued** (owner, 2026-10-15: "I shouldn't have to wait while the previous item was being sent to
+qbittorrent. It should be queued."). One send runs at a time (with "Only the missing volumes" the backend adds the
+torrent and waits for its file list, which can take a while); Send while one runs - for this series or another - queues
+the release with exactly what was chosen at the click (the volumes, the folder, the budget answer, the box) and the
+queue is worked through in order, like the Found list's. The status line is per series: switching series shows that
+series' own state (sending, "Queued to send (1st)", sent, or why it failed), never another series' "Sending...". A
+failed send does not stop the queue; closing the panel (:meth:`ReleasesPanel.stop`) drops what is still queued.
 """
 
 from __future__ import annotations
 
 import html
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from pathlib import PurePath
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -62,6 +71,7 @@ from ..downloads.budget import (
     TOO_BIG,
     BudgetState,
     gb_text,
+    ordinal,
     over_cap_text,
     place_text,
     too_big_text,
@@ -78,6 +88,8 @@ from .tables import resizable_columns
 from .volumes_target import VolumeTarget, numbers_text, volume_label
 from .links import open_link
 from .series_actions import below, menu_button
+
+_log = logging.getLogger(__name__)
 
 ConfirmFn = Callable[[QWidget, str], bool]
 #: The over-the-cap question: (parent, kind, text) -> "queue" | "send" | "cancel"; kind is "over" (queue it, send it now
@@ -209,6 +221,21 @@ class SearchOutcome:
     error: Optional[str] = None
 
 
+@dataclass
+class SendJob:
+    """One click of Send, with everything chosen at the click: it is sent exactly so when its turn comes."""
+
+    series_id: int
+    candidate: NyaaCandidate
+    wanted: Tuple[str, ...]
+    target_dir: str
+    extra: dict = field(default_factory=dict)       # the budget answer (size_bytes, over_cap) and only_missing
+    fits: bool = True                               # False: the budget said it would be queued there ("Queueing...")
+
+    def same(self, series_id: int, info_hash: str) -> bool:
+        return self.series_id == series_id and self.candidate.info_hash == info_hash
+
+
 def _mono(text: str) -> str:
     return f"<span style=\"font-family: {FONT_MONO.replace(chr(34), '')}\">{html.escape(text)}</span>"
 
@@ -238,7 +265,9 @@ class ReleasesPanel(QWidget):
         self._placement_error: Optional[str] = None
         self._search_state = "idle"          # idle | searching | done | error
         self._calls: List[BackgroundCall] = []
-        self._sending = False
+        self._sending: Optional[SendJob] = None              # the send running now
+        self._send_queue: List[SendJob] = []                # ... and the ones clicked meanwhile, in order
+        self._send_outcomes: Dict[int, Tuple[str, str]] = {}  # series id -> its last send's (text, tone)
         self._sent_hashes = set()
         self._downloads_for = downloads_for                 # series id -> its download records (the host's)
         self._background: List[str] = []                   # numberless packs still to read, by info hash
@@ -460,9 +489,7 @@ class ReleasesPanel(QWidget):
         self.folder_combo.blockSignals(True)
         self.folder_combo.clear()
         self.folder_combo.blockSignals(False)
-        if not self._sending:
-            self.status_label.setText("")
-            set_tone(self.status_label, "")
+        self._show_send_status()                         # this series' own sends (none: an empty line)
 
     def _begin_target_view(self) -> None:
         target = self.target
@@ -706,8 +733,6 @@ class ReleasesPanel(QWidget):
         """Why Send is disabled right now (None when it can go)."""
         if self.target is None:
             return "Select a series."
-        if self._sending:
-            return "Sending..."
         if self._placement is None:
             return ("The target folder could not be worked out." if self._placement_error
                     else "Still looking up the target folder.")
@@ -716,6 +741,11 @@ class ReleasesPanel(QWidget):
         candidate = self.selected_candidate()
         if candidate is None:
             return "Select a release."
+        sid = self.target.series_id
+        if self._sending is not None and self._sending.same(sid, candidate.info_hash):
+            return "This release is being sent to qBittorrent now."
+        if any(job.same(sid, candidate.info_hash) for job in self._send_queue):
+            return "This release is already queued to send; it is not queued twice."
         existing = self._in_qbittorrent(candidate)
         if candidate.info_hash in self._sent_hashes and (existing is None or existing.status != DownloadStatus.QUEUED):
             return "This release was already sent."
@@ -734,7 +764,9 @@ class ReleasesPanel(QWidget):
     def _update_send(self, *_args) -> None:
         blocker = self.send_blocker()
         self.btn_send.setEnabled(blocker is None)
-        self.btn_send.setToolTip(blocker or "Add the selected release to qBittorrent")
+        busy = ("Queue the selected release: MangaList sends it to qBittorrent after the send before it"
+                if self._sending is not None else "Add the selected release to qBittorrent")
+        self.btn_send.setToolTip(blocker or busy)
         self.btn_page.setEnabled(self.selected_candidate() is not None)
 
     # --- only the missing volumes ------------------------------------------------------------------------
@@ -994,6 +1026,8 @@ class ReleasesPanel(QWidget):
         return None
 
     def send_selected(self) -> bool:
+        """Send the selected release (after the confirmation / the budget question, asked now). While another send
+        runs it is queued, with everything chosen now, and sent after the ones before it."""
         if self.send_blocker() is not None:
             return False
         candidate = self.selected_candidate()
@@ -1004,37 +1038,73 @@ class ReleasesPanel(QWidget):
         extra = self._budget_choice(candidate, wanted, target_dir)
         if extra is None:
             return False
-        self._sending = True
-        self._update_send()
-        set_tone(self.status_label, "")
-        self.status_label.setText("Sending to qBittorrent..." if extra.get("over_cap") != OVER_CAP_QUEUE
-                                  or self._fits_now(candidate) else "Queueing...")
-        series_id = self.target.series_id
         if self.partial_requested():
             extra["only_missing"] = True
-        self._spawn(lambda: self._backend.send(series_id, candidate, wanted, target_dir, **extra),
-                    lambda record, c=candidate: self._on_sent(c, record), self._on_send_error)
+        job = SendJob(self.target.series_id, candidate, wanted, target_dir, extra,
+                      fits=extra.get("over_cap") != OVER_CAP_QUEUE or self._fits_now(candidate))
+        if self._sending is not None:
+            self._send_queue.append(job)
+            _log.info("Releases: %s queued to send (%d waiting)", candidate.title, len(self._send_queue))
+            self._show_send_status()
+            self._update_send()
+            return True
+        self._start_send(job)
         return True
+
+    def _start_send(self, job: SendJob) -> None:
+        self._sending = job
+        _log.info("Releases: sending %s (series %s)", job.candidate.title, job.series_id)
+        self._show_send_status()
+        self._update_send()
+        backend = self._backend
+        self._spawn(lambda: backend.send(job.series_id, job.candidate, job.wanted, job.target_dir, **job.extra),
+                    lambda record, j=job: self._on_sent(j, record),
+                    lambda message, j=job: self._on_send_error(j, message))
 
     def _fits_now(self, candidate: NyaaCandidate) -> bool:
         state = self.budget_status()
         return state is None or state.verdict(self.send_size(candidate)) == FITS
 
-    def _on_sent(self, candidate: NyaaCandidate, record: DownloadRecord) -> None:
-        self._sending = False
+    def queued_sends(self) -> List[SendJob]:
+        """The sends waiting for their turn, in order (not the one running)."""
+        return list(self._send_queue)
+
+    def _show_send_status(self) -> None:
+        """The status line: the shown series' sends - the one running, its queued ones with their place, then how its
+        last send went (empty when it has none)."""
+        lines, tone = [], ""
+        sid = self.target.series_id if self.target is not None else None
+        job = self._sending
+        if job is not None and job.series_id == sid:
+            more = len(self._send_queue)
+            lines.append(("Sending to qBittorrent: " if job.fits else "Queueing under the download budget: ")
+                         + f"{job.candidate.title}..." + (f" ({more} more queued)" if more else ""))
+        for place, waiting in enumerate(self._send_queue, 1):
+            if waiting.series_id == sid:
+                lines.append(f"Queued to send ({ordinal(place)}): {waiting.candidate.title} - MangaList sends it "
+                             "after the one before it.")
+        outcome = self._send_outcomes.get(sid) if sid is not None else None
+        if outcome is not None:
+            text, outcome_tone = outcome
+            lines.append(text)
+            tone = outcome_tone if len(lines) == 1 or outcome_tone == "bad" else ""
+        set_tone(self.status_label, tone)
+        self.status_label.setText("\n".join(lines))
+
+    def _on_sent(self, job: SendJob, record: DownloadRecord) -> None:
+        candidate = job.candidate
         self._sent_hashes.add(candidate.info_hash)
         self.sent_records.append(record)
-        if self.target is not None and self.target.series_id == record.series_id:     # not after a switch of series
-            if record.status == DownloadStatus.QUEUED:
-                set_tone(self.status_label, "")
-                self.status_label.setText(
-                    f"Queued: {candidate.title} ({place_text(record.queue_position)}). MangaList sends it to qBittorrent "
-                    "when there is room under the download budget (Settings > Download sources); right-click it in "
-                    "the In progress list to send it now.")
-            else:
-                set_tone(self.status_label, "ok")
-                self.status_label.setText(f"Sent to qBittorrent: {candidate.title}. {self._sent_what(candidate)}"
-                                          "MangaList files the volumes when the download has finished.")
+        if record.status == DownloadStatus.QUEUED:
+            self._send_outcomes[job.series_id] = (
+                f"Queued: {candidate.title} ({place_text(record.queue_position)}). MangaList sends it to qBittorrent "
+                "when there is room under the download budget (Settings > Download sources); right-click it in "
+                "the In progress list to send it now.", "")
+        else:
+            self._send_outcomes[job.series_id] = (
+                f"Sent to qBittorrent: {candidate.title}. {self._sent_what(candidate)}"
+                "MangaList files the volumes when the download has finished.", "ok")
+        self._send_finished()
         self.refresh_downloads()                # the "Already ..." line names it now, before the host reloads
         self.sent.emit(record)
 
@@ -1048,16 +1118,30 @@ class ReleasesPanel(QWidget):
             return f"Only the missing volumes are downloaded ({describe(outcome.selection)}). "
         return f"The whole pack is downloaded{f' ({outcome.note})' if outcome.note else ''}. "
 
-    def _on_send_error(self, message: str) -> None:
-        self._sending = False
-        set_tone(self.status_label, "bad")
-        self.status_label.setText(f"Could not send it: {message}")
-        self._update_send()
+    def _on_send_error(self, job: SendJob, message: str) -> None:
+        _log.warning("Releases: could not send %s: %s", job.candidate.title, message)
+        self._send_outcomes[job.series_id] = (f"Could not send {job.candidate.title}: {message}", "bad")
+        self._send_finished()
+
+    def _send_finished(self) -> None:
+        """One send is done (sent or failed): the next queued one goes, exactly as it was clicked."""
+        self._sending = None
+        if self._send_queue:
+            self._start_send(self._send_queue.pop(0))
+        else:
+            self._show_send_status()
+            self._update_send()
 
     # --- closing ---------------------------------------------------------------------------------------
 
     def stop(self) -> None:
-        """Abandon the calls in flight (their results are dropped)."""
+        """Abandon the calls in flight (their results are dropped) and drop the sends still queued (said in the log;
+        a send already running may still reach qBittorrent - its answer is dropped)."""
+        if self._send_queue:
+            _log.info("Releases: the panel closed; %d queued send(s) dropped: %s", len(self._send_queue),
+                      "; ".join(job.candidate.title for job in self._send_queue))
+        self._send_queue.clear()
+        self._sending = None
         self._pack_timer.stop()
         self._background = []
         for call in list(self._calls):

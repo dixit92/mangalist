@@ -168,7 +168,7 @@ def test_send_error_is_shown_and_send_stays_available(qapp):
     dlg = _open(qapp, backend)
     assert dlg.send_selected()
     wait_until(qapp, lambda: not dlg._sending)
-    assert "Could not send it: qBittorrent refused the login" in dlg.status_label.text()
+    assert "Could not send Example Series v03-05 (Digital) (Group): qBittorrent refused the login" in dlg.status_label.text()
     assert dlg.btn_send.isEnabled() and not dlg.sent_records
 
 
