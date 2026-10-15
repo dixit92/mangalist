@@ -30,6 +30,18 @@
   id and name, the manga's id and title, the batch it was sent in), the same statuses (SENT = in Suwayomi's queue,
   DOWNLOADED = Suwayomi has the CBZ, FILED = in the library, REMOVED = Suwayomi's copy deleted). Chapter downloads
   are outside the download budget (:mod:`mangalist.downloads.budget`: torrents only).
+- **Clearing finished records** (2026-10-15, owner: "Setting, user clearable, scheduled task to clear [Daily, Weekly,
+  Monthly]"; :meth:`DownloadLedger.clear_finished`). Only the records the Download tab calls finished - REMOVED
+  (the torrent left at its seed goal / Suwayomi's copy deleted) and CANCELLED - and only those not touched for the
+  chosen period. Never cleared: a record that is still in progress (queued, sent, downloaded), a FILED one (its
+  torrent still seeds and counts against the download budget; Remove Completed turns it REMOVED first), a FAILED one
+  (it wants a look, and may still count against the budget), the newest record (SQLite reuses the largest id once its
+  row is gone; ``replacements.download_id`` and ``upgrades.first_download`` go by id), a REMOVED record the
+  replaced-chapters pass has not looked at yet, and a record whose replaced-chapters batch still waits for the owner
+  (pending / held). What a cleared record used to tell other features is kept where it matters: a cleared torrent's
+  info hash stays in ``meta`` (``downloads.cleared_releases``), so the find pass still never picks the same release
+  twice. Findings keep their ``record_id`` (a plain number, never joined) and a settled replaced-chapters batch keeps
+  its ``download_id``; the series' "Filed v03 - done" chip reads the newest record, so it goes when that record does.
 - **Suwayomi's connection** (:class:`SuwayomiSettings`): address, optional basic-auth login and the folder MangaList
   reads Suwayomi's downloads from, in the ``meta`` table (key ``suwayomi.connection``) - not in ``settings``, which
   ``config.load()`` / ``config.save()`` copy around - and the per-series choices (the matched Suwayomi manga, the
@@ -45,7 +57,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..downloads.budget import SIZE_RELEASE
@@ -77,6 +90,38 @@ DEFAULT_REMOVE_COMPLETED = True
 ACTIVE = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.FILED)
 #: ... and every status that means "MangaList has this release in hand": the same torrent is never queued or sent twice.
 TRACKED = (DownloadStatus.QUEUED, *ACTIVE)
+
+
+#: The records the Download tab's "Show finished" lists (``gui.download_rules.FINISHED``) - the only ones that may be cleared.
+FINISHED = (DownloadStatus.REMOVED, DownloadStatus.CANCELLED)
+#: Replaced-chapters batch states that still point at their download (the owner has something to confirm or restore).
+HOLDING_BATCH = ("pending", "held")
+META_CLEARED_RELEASES = "downloads.cleared_releases"
+
+
+@dataclass
+class ClearReport:
+    """What :meth:`DownloadLedger.clear_finished` did (or, for a dry run, would do), and what it kept and why."""
+
+    finished: int = 0                   # finished records looked at
+    cleared: int = 0
+    kept_recent: int = 0                # changed within the period
+    kept_newest: int = 0                # the newest record of the ledger (its id must not be reused)
+    kept_unexamined: int = 0            # removed, but the replaced-chapters pass has not looked at it yet
+    kept_waiting_chapters: int = 0      # a replaced-chapters batch of it waits for the owner
+
+    @property
+    def kept(self) -> int:
+        return self.finished - self.cleared
+
+    def summary(self) -> str:
+        if not self.finished:
+            return "no finished records"
+        out = f"cleared {self.cleared} of {self.finished} finished records"
+        why = [f"{n} {text}" for n, text in ((self.kept_recent, "newer than the period"),
+                                             (self.kept_newest + self.kept_unexamined + self.kept_waiting_chapters,
+                                              "still needed")) if n]
+        return out + (f" (kept {', '.join(why)})" if why else "")
 
 
 class DownloadError(ValueError):
@@ -445,6 +490,75 @@ class DownloadLedger:
         return self.set_status(record_id, DownloadStatus.CANCELLED,
                                expect=(DownloadStatus.QUEUED, DownloadStatus.SENT, DownloadStatus.DOWNLOADED),
                                error="cancelled by the owner")
+
+    # --- clearing finished records -------------------------------------------------------------------
+
+    def clear_finished(self, older_than_days: float, *, now: Optional[datetime] = None,
+                       dry_run: bool = False) -> "ClearReport":
+        """Delete the finished records (REMOVED, CANCELLED) not changed for *older_than_days* days, except the ones a
+        feature still relies on (see the module docstring); the info hashes of the torrents among them are remembered.
+        ``dry_run`` only counts. Works on every tool's records whatever this ledger's tool (it is housekeeping of the
+        one table). *older_than_days* of 0 or less clears every finished record that is safe to clear."""
+        when = now or datetime.now(timezone.utc)
+        cutoff = (when - timedelta(days=max(0.0, float(older_than_days)))).replace(microsecond=0).isoformat()
+        report = ClearReport()
+        with self.connect(durable=True) as con:
+            con.execute("BEGIN IMMEDIATE")
+            newest = con.execute("SELECT COALESCE(MAX(id), 0) FROM ledger").fetchone()[0]
+            first = int(self._meta(con, "upgrades.first_download") or 0)
+            rows = con.execute("SELECT id, tool, series_id, external_ref, status, updated_at FROM ledger"
+                               f" WHERE status IN ({','.join('?' * len(FINISHED))}) ORDER BY id", FINISHED).fetchall()
+            batches = {}
+            try:
+                batches = {r[0]: r[1] for r in con.execute("SELECT download_id, status FROM replacements")}
+            except sqlite3.OperationalError:        # a database from before the upgrades schema
+                pass
+            clear: List[sqlite3.Row] = []
+            for r in rows:
+                report.finished += 1
+                if r["updated_at"] > cutoff:
+                    report.kept_recent += 1
+                elif r["id"] == newest:
+                    report.kept_newest += 1
+                elif batches.get(r["id"]) in HOLDING_BATCH:
+                    report.kept_waiting_chapters += 1
+                elif r["status"] == DownloadStatus.REMOVED and r["id"] > first and r["id"] not in batches:
+                    report.kept_unexamined += 1
+                else:
+                    clear.append(r)
+            report.cleared = len(clear)
+            if clear and not dry_run:
+                remembered = _loads(self._meta(con, META_CLEARED_RELEASES), {})
+                for r in clear:
+                    if r["tool"] == TOOL_QBITTORRENT and r["series_id"] is not None and r["external_ref"]:
+                        mine = remembered.setdefault(str(r["series_id"]), [])
+                        if r["external_ref"].lower() not in mine:
+                            mine.append(r["external_ref"].lower())
+                con.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                            (META_CLEARED_RELEASES, json.dumps(remembered)))
+                ids = [r["id"] for r in clear]
+                for i in range(0, len(ids), 500):
+                    chunk = ids[i:i + 500]
+                    con.execute(f"DELETE FROM ledger WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+        return report
+
+    @staticmethod
+    def _meta(con, key: str) -> Optional[str]:
+        row = con.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return None if row is None else row[0]
+
+    def cleared_releases(self) -> Dict[int, Set[str]]:
+        """series id -> info hashes of the torrents whose records were cleared (lowercase): releases already sent once,
+        which the find pass must not pick again."""
+        with self.connect() as con:
+            raw = _loads(self._meta(con, META_CLEARED_RELEASES), {})
+        out: Dict[int, Set[str]] = {}
+        for key, hashes in raw.items():
+            try:
+                out[int(key)] = {str(h).lower() for h in hashes}
+            except (TypeError, ValueError):
+                continue
+        return out
 
     # --- the qBittorrent connection ------------------------------------------------------------------
 

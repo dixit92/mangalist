@@ -211,6 +211,21 @@ def test_a_release_the_series_has_a_record_for_is_not_picked_again(db, w):
     assert findings(db) == []
 
 
+def test_a_release_whose_finished_record_was_cleared_is_not_picked_again(db, w):
+    """Clearing finished download records (Settings > Scheduled tasks) must not make the find pass send a release twice."""
+    old = single_release(1, w.qbt, "2")
+    ledger = w.backend.ledger
+    rec = ledger.create(w.series_id, old, ["2"], str(w.folder))
+    ledger.set_status(rec.id, DownloadStatus.CANCELLED, expect=(DownloadStatus.SENT,), error="made up")
+    newest = ledger.create(w.series_id, single_release(2, w.qbt, "3"), ["3"], str(w.folder))   # the newest one stays
+    ledger.set_status(newest.id, DownloadStatus.FAILED, expect=(DownloadStatus.SENT,), error="made up")
+    assert ledger.clear_finished(0).cleared == 1 and ledger.get(rec.id) is None
+    w.search.results = [old]
+    w.entries = wanted(w.series_id, w.folder, volumes=["2"])
+    run(db, w)
+    assert findings(db) == []
+
+
 # --- findings: skipped, retired, refreshed --------------------------------------------------------------------------
 
 def test_a_skipped_pick_is_never_offered_or_sent_again(db, w):

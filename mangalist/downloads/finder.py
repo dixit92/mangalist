@@ -364,11 +364,14 @@ def _run(ctx: _Context, series_ids: Optional[Sequence[int]], wanted: Wanted, sho
         _log.info("Find pass %d: %d series marked up to date are not searched", ctx.run_id, len(done))
     if only is None:
         _retire_left(ctx, by_series)
-    records = DownloadLedger(ctx.db, tool=None).all_records()
+    ledger = DownloadLedger(ctx.db, tool=None)
+    records = ledger.all_records()
     in_flight = {r.series_id for r in records if r.status in IN_FLIGHT}
     for r in records:
         if not r.is_chapters:
             ctx.record_hashes.setdefault(r.series_id, set()).add(r.info_hash.lower())
+    for sid, hashes in ledger.cleared_releases().items():       # releases whose finished records were cleared
+        ctx.record_hashes.setdefault(sid, set()).update(hashes)
     modes = ctx.store.modes(by_series)
     for sid, group in by_series.items():
         if should_stop():
