@@ -134,7 +134,12 @@ python -m mangalist          # --version, or --smoke-test for a headless start c
 python -m pytest -q
 ```
 
-Folder names may be `Title`, `English Title` or `Romanized Title [English Title]`.
+The tests never touch the network. A few optional live checks against the real MangaUpdates API (public titles from
+the golden set only) run with `MANGALIST_LIVE_MU=1 python -m pytest -q tests/golden/test_live_mangaupdates.py`.
+
+Series folders are named `Romanized Title [English Title]` - MangaUpdates' title, then the English title in brackets
+when MangaList knows it (just `Romanized Title` otherwise), like animefetch's show folders. Add series proposes that
+name; the Renamer lists a folder named differently as Rename pending and renames it only when you press Rename.
 
 ## MangaUpdates matching
 

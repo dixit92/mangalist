@@ -160,11 +160,14 @@ def test_unit_subfolder_row_is_not_matched():
 
 
 def test_candidate_titles_deduplicated():
-    entry = _entry("Berserk", [f"Berserk v{i:02d}.cbz" for i in range(1, 6)])
-    match, _ = _match(entry)
-    titles = mu_match.candidate_titles(match.top.candidate)
-    assert titles[0] == "Berserk"
-    assert len(titles) == len(set(titles))
+    # A made-up record (owner, 2026-10-15, answer 24: no real MangaUpdates title here; the live check of real searches
+    # is tests/golden/test_live_mangaupdates.py, skipped unless MANGALIST_LIVE_MU=1).
+    record = {"series_id": 4242, "title": "Made Up Saga", "type": "Manga",
+              "associated": [{"title": "Made Up Saga"}, {"title": "The Made Up Saga"}, {"title": "MADE UP SAGA"},
+                             {"title": "The Made Up Saga"}, {"title": ""}]}
+    titles = mu_match.candidate_titles(map_series(record, "4242"))
+    assert titles[0] == "Made Up Saga"
+    assert len(titles) == len(set(titles)) and "The Made Up Saga" in titles
 
 
 # --- display helpers ------------------------------------------------------------------------

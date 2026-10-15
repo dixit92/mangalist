@@ -24,7 +24,10 @@ NAMING_TITLE = "File naming"
 NAMING_TEXT = ("Every library uses MangaList's naming scheme: chapters as \"Ch. 0102.00 Vol. 012 (chapter title) [group]\", "
                "volumes as \"Series title - Vol. 001 [group]\" (each part only when known). Edit a library to choose what "
                "happens to files named differently: Off, Ask before renaming, or Rename automatically. To rename, "
-               "right-click a series in the List and choose \"Rename to the scheme…\", or use \"Rename library…\".")
+               "right-click a series in the List and choose \"Rename to the scheme…\", or use \"Rename library…\". "
+               "Series folders are named \"<romaji> [<English>]\" (MangaUpdates' title, then the English title when "
+               "known). Folder names and series-title changes wait for your Rename in that window - never "
+               "automatically, even in a library set to Rename automatically; everything else is automatic.")
 SERVER_TEXT = ("Windows server name (optional). If you open these files from a Windows PC over the network "
                "(\\\\SERVER\\share\\...), enter the server's name as Windows shows it, e.g. MYSERVER. Windows cannot open "
                "a path longer than 259 characters, so MangaList then shortens long chapter titles (and after them long "

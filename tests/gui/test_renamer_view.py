@@ -473,3 +473,61 @@ def test_the_first_library_rename_asks_once_to_rename_automatically(qapp, db, ma
         assert asked == ["Manga"]                                   # asked once per library, whatever the answer
     finally:
         again.deleteLater()
+
+
+def test_a_series_folder_not_in_the_scheme_is_shown_and_renamed_by_the_owners_rename(qapp, db, tmp_path):
+    # owner, 2026-10-15 (answer 6): "Folders not in this scheme are rename candidates"
+    library = tmp_path / "folders" / "Manga"
+    library.mkdir(parents=True)
+    root = make_library(db, library, {"Old Made Up Folder": {"Ch. 0001.00 [G].cbz": payload("f1")}})
+    hooks = Recorder()
+    r = Renamer(db, namer=FakeNamer(), rescan=hooks.rescan, request_scans=hooks.request_scans,
+                title_for=lambda root_, series: ("Made Up Romaji", ("The Made Up English",))
+                if series.rel_path in ("Old Made Up Folder", "Made Up Romaji") else None)
+    win = _window(qapp, r, Scope.root(root.id, "Manga"))
+    try:
+        assert "1 series folder not named" in win.summary_label.text()
+        assert win.btn_apply.text() == "Rename 1 folder…" and win.btn_apply.isEnabled()
+        assert "folder renamed" in win.series_list.item(0).data(ROLE_SUB)
+        rows = _preview_rows(win)
+        assert rows[0] == ("Old Made Up Folder/", "Made Up Romaji/", RENAME)        # the folder's own row, first
+        assert "keeps its data" in win.preview.topLevelItem(0).text(2)
+        assert rn.FOLDER_NOTE in win.warning_label.text()
+        win.apply()
+        title, text = win.asked[0]
+        assert title == "Rename 1 folder?" and "Old Made Up Folder  ->  Made Up Romaji" in text
+        assert (library / "Made Up Romaji").is_dir() and not (library / "Old Made Up Folder").exists()
+        assert "1 series folder renamed to the scheme." in win.result_label.text()
+        assert not win.dry_run.folders_to_rename and not win.btn_apply.isEnabled()  # looked again: in the scheme
+        win.undo_last()
+        assert (library / "Old Made Up Folder").is_dir()
+    finally:
+        win.deleteLater()
+
+
+def test_the_automatic_mode_texts_say_folders_are_never_renamed_automatically():
+    from mangalist.gui.renamer_view import LEAD, automatic_text
+    from mangalist.gui.roots_dialog import ENFORCE_TIP
+
+    for text in (LEAD, automatic_text("Manga"), ENFORCE_TIP):
+        assert "never" in text and "<romaji> [<English>]" in text
+        assert "Folder names and series-title changes wait for your Rename" in text
+
+
+def test_title_changes_are_marked_in_the_preview_and_listed_to_check(qapp, db, tmp_path):
+    library = tmp_path / "titled" / "Manga"
+    library.mkdir(parents=True)
+    root = make_library(db, library, {"Vol Romaji [Vol English]": {"Vol Romaji - Vol. 001.cbz": payload("t1")}})
+    r = Renamer(db, rescan=None, request_scans=None,
+                title_for=lambda root_, series: ("Vol Romaji", ()) if series.rel_path.startswith("Vol Romaji") else None)
+    win = _window(qapp, r, Scope.root(root.id, "Manga"))
+    try:
+        row = [win.preview.topLevelItem(i) for i in range(win.preview.topLevelItemCount())
+               if win.preview.topLevelItem(i).text(0) == "Vol Romaji - Vol. 001.cbz"][0]
+        assert row.text(1) == "Vol Romaji [Vol English] - Vol. 001.cbz" and "new series title" in row.text(2)
+        assert win.notes.topLevelItem(0).text(0).startswith("New series title")
+        win.apply()
+        assert "renamed only because of the new series title" in win.asked[0][1]
+        assert (library / "Vol Romaji [Vol English]" / "Vol Romaji [Vol English] - Vol. 001.cbz").exists()
+    finally:
+        win.deleteLater()

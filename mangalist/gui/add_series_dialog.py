@@ -3,11 +3,18 @@ pick the library and the folder name; MangaList makes the empty folder and recor
 (:mod:`mangalist.add_series` does the work; this file only asks and shows). Everything that touches a network or the
 disk runs off the UI thread (:func:`~mangalist.gui.background.start_call`).
 
+The folder name offered first is the library's folder scheme ``<romaji> [<English>]`` (owner, 2026-10-15, answer 6;
+:mod:`mangalist.folder_scheme`), so a new folder is never a rename candidate. A typed title's MangaUpdates results
+leave doujinshi and artbooks out unless "Show doujinshi and artbooks" is ticked (answer 7). After Add the dialog's
+finish step offers the first download at once (answer 5): "Find releases now" (the Download tab's find pass for the new
+series) or "Open in Download" (the series selected there), or Done.
+
 For the main window::
 
-    dlg = AddSeriesDialog(LiveBackend(db), roots, parent=self, current_root_id=picked_library)
+    dlg = AddSeriesDialog(LiveBackend(db), roots, parent=self, current_root_id=picked_library,
+                          next_steps=(NEXT_FIND, NEXT_OPEN))
     if dlg.exec() == AddSeriesDialog.Accepted:
-        rescan(dlg.root)        # dlg.outcome: the AddResult (folder, series id, notes)
+        rescan(dlg.root)        # dlg.outcome: the AddResult (folder, series id, notes); dlg.next_step: what next
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -38,6 +46,10 @@ from .palette import current
 _log = logging.getLogger(__name__)
 
 NAME_CHECK_DELAY_MS = 300
+NEXT_FIND, NEXT_OPEN = "find", "open"       # the finish step's choices (dlg.next_step; None: Done)
+FOLDER_HINT = ("Named like the rest of the library: \"<romaji> [<English>]\" - MangaUpdates' title, then the English "
+               "title when MangaList knows it. Pick another form or edit it if you like (a folder named differently "
+               "shows as Rename pending).")
 
 
 class LiveBackend:
@@ -46,8 +58,8 @@ class LiveBackend:
     def __init__(self, db):
         self.db = db
 
-    def lookup(self, text: str) -> core.Lookup:
-        return _readable(core.lookup, text)
+    def lookup(self, text: str, show_all: bool = False) -> core.Lookup:
+        return _readable(core.lookup, text, show_all=show_all)
 
     def with_mu_record(self, look: core.Lookup, record: Dict[str, Any]) -> core.SeriesInfo:
         return _readable(core.with_mu_record, look, record)
@@ -90,7 +102,7 @@ class AddSeriesDialog(QDialog):
     folder it was made in) are set."""
 
     def __init__(self, backend, roots: Sequence[Any], parent: Optional[QWidget] = None,
-                 current_root_id: Optional[int] = None):
+                 current_root_id: Optional[int] = None, next_steps: Sequence[str] = (NEXT_FIND, NEXT_OPEN)):
         super().__init__(parent)
         self.setObjectName("addSeriesDialog")
         self.setWindowTitle("Add a series")
@@ -109,6 +121,9 @@ class AddSeriesDialog(QDialog):
         self._problem: Optional[str] = None
         self._adding = False
         self._closed = False
+        self._looked_for = ""                   # the text of the last lookup (ticking "Show doujinshi..." repeats it)
+        self.next_steps = tuple(n for n in next_steps if n in (NEXT_FIND, NEXT_OPEN))
+        self.next_step: Optional[str] = None    # the finish step's choice
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(20, 18, 20, 16)
@@ -139,7 +154,12 @@ class AddSeriesDialog(QDialog):
         self.candidates.itemActivated.connect(self._picked)
         self.candidates.itemClicked.connect(self._picked)
         self.pick_hint = label("", "muted", wrap=True)
-        lay = vbox(self.pick_title, self.candidates, self.pick_hint, spacing=6, margins=(14, 12, 14, 12))
+        self.show_all = QCheckBox("Show doujinshi and artbooks")
+        self.show_all.setObjectName("addSeriesShowAll")
+        self.show_all.setToolTip("MangaUpdates' search leaves doujinshi and artbooks out; tick to list them too")
+        self.show_all.toggled.connect(self._show_all_toggled)
+        lay = vbox(self.pick_title, self.candidates, self.pick_hint, self.show_all, spacing=6,
+                   margins=(14, 12, 14, 12))
         self.pick_box.setLayout(lay)
         self.pick_box.setVisible(False)
         outer.addWidget(self.pick_box)
@@ -178,10 +198,32 @@ class AddSeriesDialog(QDialog):
         self.form_box.setLayout(vbox(
             label("Library", "h3"), self.library,
             label("Folder name", "h3"), self.folder,
-            label("The English title first; edit it if the library names this series differently.", "muted", wrap=True),
+            label(FOLDER_HINT, "muted", wrap=True),
             self.folder_problem, spacing=8, margins=(14, 12, 14, 14)))
         self.form_box.setVisible(False)
         outer.addWidget(self.form_box)
+
+        # the finish step: the folder is made - what next? (owner, 2026-10-15, answer 5)
+        self.done_box = card()
+        self.done_box.setObjectName("addSeriesDone")
+        self.done_title = label("", "h3", wrap=True)
+        self.done_text = label("", wrap=True)
+        self.done_notes = label("", wrap=True)
+        set_tone(self.done_notes, "warn")
+        self.btn_find = button("Find releases now", primary=True,
+                               tip="Run the Download tab's find pass for this series now; what it finds waits under "
+                                   "Found (nothing is sent by itself)")
+        self.btn_open = button("Open in Download", tip="Show the series in the Download tab, where you pick what to get")
+        self.btn_done = button("Done", tip="Close; the series shows up as missing in the List and the Download tab")
+        self.btn_find.clicked.connect(lambda: self.finish(NEXT_FIND))
+        self.btn_open.clicked.connect(lambda: self.finish(NEXT_OPEN))
+        self.btn_done.clicked.connect(lambda: self.finish(None))
+        row = QWidget()
+        row.setLayout(hbox(self.btn_find, self.btn_open, None, self.btn_done, spacing=8))
+        self.done_box.setLayout(vbox(self.done_title, self.done_text, self.done_notes, row, spacing=8,
+                                     margins=(14, 12, 14, 14)))
+        self.done_box.setVisible(False)
+        outer.addWidget(self.done_box)
         outer.addStretch(1)
 
         self.buttons = QDialogButtonBox()
@@ -218,7 +260,15 @@ class AddSeriesDialog(QDialog):
             return
         self._clear_series()
         self._say("Looking it up...", "")
-        self._run(lambda: self.backend.lookup(text), self._looked_up)
+        self._looked_for = text
+        show_all = self.show_all.isChecked()
+        self._run(lambda: self.backend.lookup(text, show_all=show_all), self._looked_up)
+
+    def _show_all_toggled(self, _on: bool) -> None:
+        """Doujinshi and artbooks shown or hidden: the same search again."""
+        if self._looked_for and not self._busy and self.outcome is None:
+            self.input.setText(self._looked_for)
+            self.look_up()
 
     def _looked_up(self, look: core.Lookup) -> None:
         self.look = look
@@ -339,14 +389,47 @@ class AddSeriesDialog(QDialog):
             return
         source = self.source
         self._say(f"Making “{name}”...", "")
+        self._adding = True                                 # closing waits until the folder is made
         self._run(lambda: self.backend.add(root, name, info, source), lambda res: self._added(root, res))
 
     def _added(self, root, res: core.AddResult) -> None:
+        self._adding = False
         self.outcome, self.root = res, root
         _log.info("Added the series folder %s (%d note(s))", res.folder.name, len(res.notes))
-        if res.notes:
-            QMessageBox.information(self, "Series added", f"“{res.folder.name}” was made, but:\n\n"
-                                    + "\n".join(res.notes))
+        if not self.next_steps:
+            if res.notes:
+                QMessageBox.information(self, "Series added", f"“{res.folder.name}” was made, but:\n\n"
+                                        + "\n".join(res.notes))
+            self.accept()
+            return
+        self._show_finish(root, res)
+
+    def _show_finish(self, root, res: core.AddResult) -> None:
+        """The finish step: the series is added; offer the first download right away."""
+        for box in (self.pick_box, self.series_box, self.form_box):
+            box.setVisible(False)
+        self.input.setEnabled(False)
+        self.btn_lookup.setVisible(False)
+        self.btn_add.setVisible(False)
+        self.btn_cancel.setVisible(False)
+        self._say("", "")
+        self.done_title.setText(f"Added “{res.folder.name}” to {root.name}")
+        self.done_text.setText("The folder is made and the library is rescanned when you close this, so the series "
+                               "shows up as missing. Get it now?")
+        self.done_notes.setText("Not everything was saved:\n" + "\n".join(res.notes) if res.notes else "")
+        self.done_notes.setVisible(bool(res.notes))
+        self.btn_find.setVisible(NEXT_FIND in self.next_steps)
+        self.btn_open.setVisible(NEXT_OPEN in self.next_steps)
+        if NEXT_OPEN in self.next_steps and NEXT_FIND not in self.next_steps:
+            self.btn_open.setProperty("primary", True)
+        self.done_box.setVisible(True)
+        (self.btn_find if NEXT_FIND in self.next_steps else self.btn_open).setFocus()
+
+    def finish(self, step: Optional[str]) -> None:
+        """The finish step's choice: *step* (:data:`NEXT_FIND`, :data:`NEXT_OPEN`, None for Done), then close."""
+        if self.outcome is None:
+            return
+        self.next_step = step if step in self.next_steps else None
         self.accept()
 
     # --- plumbing -------------------------------------------------------------------------------------
@@ -374,6 +457,9 @@ class AddSeriesDialog(QDialog):
         self._calls.append(call)
 
     def reject(self) -> None:
+        if self.outcome is not None:                        # added: Escape / the close button is "Done"
+            self.finish(None)
+            return
         if not self._adding:                                # the folder is being made: let that finish
             super().reject()
 
@@ -390,4 +476,4 @@ def _leaf(path: str) -> str:
     return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
 
 
-__all__ = ["AddSeriesDialog", "LiveBackend"]
+__all__ = ["AddSeriesDialog", "LiveBackend", "NEXT_FIND", "NEXT_OPEN"]

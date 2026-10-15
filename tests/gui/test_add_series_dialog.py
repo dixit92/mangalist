@@ -37,12 +37,14 @@ class FakeBackend:
         self.source = source or core.SourceLookup(None, "Suwayomi is not set up.")
         self.looks: Dict[str, core.Lookup] = look or {}
         self.lookups: List[str] = []
+        self.show_all: List[bool] = []          # "Show doujinshi and artbooks" as each lookup was asked
         self.sources_asked: List[str] = []
         self.added: List[tuple] = []
         self.fail_add = fail_add
 
-    def lookup(self, text):
+    def lookup(self, text, show_all=False):
         self.lookups.append(text)
+        self.show_all.append(show_all)
         if text not in self.looks:
             raise ui.BackendError("MangaUpdates found nothing.")
         return self.looks[text]
@@ -93,7 +95,7 @@ def dialogs():
 def open_dialog(dialogs, qapp, libs, backend=None, **kw):
     db, roots, _ = libs
     backend = backend or FakeBackend(db)
-    dlg = AddSeriesDialog(backend, roots, current_root_id=kw.pop("current_root_id", None))
+    dlg = AddSeriesDialog(backend, roots, current_root_id=kw.pop("current_root_id", None), **kw)
     dialogs.append(dlg)
     dlg.show()
     qapp.processEvents()
@@ -132,7 +134,9 @@ def test_a_mangaupdates_link_shows_the_series_and_adds_it(qapp, dialogs, libs):
 
     dlg.add()
     wait_until(qapp, lambda: dlg.outcome is not None)
-    assert dlg.result() == QDialog.DialogCode.Accepted and dlg.root.name == "Manga"
+    assert not dlg.done_box.isHidden() and dlg.isVisible()                  # the finish step, not closed yet
+    dlg.finish(None)
+    assert dlg.result() == QDialog.DialogCode.Accepted and dlg.root.name == "Manga" and dlg.next_step is None
     assert backend.added == [("Manga", "Made Up Series", 1000, None)]
     assert (base / "Manga" / "Made Up Series").is_dir() and dlg.outcome.series_id is not None
     assert mu_cache.load_entry(dlg.outcome.folder)["mu_confirmed"] is True
@@ -161,9 +165,9 @@ def test_a_mangadex_link_asks_suwayomi_and_passes_the_source_on(qapp, dialogs, l
     look_up(qapp, dlg, UUID)
     assert backend.sources_asked == [UUID]
     assert "MangaDex (EN)" in dlg.series_source.text() and "Made Up English" in dlg.series_source.text()
-    assert dlg.folder_name() == "Made Up English"                            # the English title first
+    assert dlg.folder_name() == "Made Up Series [Made Up English]"          # the folder scheme "<romaji> [<English>]"
     names = [dlg.folder.itemText(i) for i in range(dlg.folder.count())]
-    assert "Made Up Series" in names and "Made Up Series [Made Up English]" in names
+    assert "Made Up Series" in names and "Made Up English" in names
     dlg.add()
     wait_until(qapp, lambda: dlg.outcome is not None)
     assert backend.added[0][3] == choice
@@ -187,7 +191,8 @@ def test_a_mangadex_series_without_a_mangaupdates_page_can_be_picked_or_added_ba
     dlg._picked(dlg.candidates.item(1))                                      # pick "Eight": its record is read
     settle(qapp, dlg)
     assert dlg.info.mu_id == 8 and dlg.info.mangadex_id == UUID and dlg.series_name.text() == "Eight"
-    assert dlg.folder_name() == "Made Up English"                            # still MangaDex's English title
+    assert dlg.folder_name() == "Eight"                                      # MangaUpdates' title is the romaji
+    assert "Made Up English" in [dlg.folder.itemText(i) for i in range(dlg.folder.count())]
     dlg.add()
     wait_until(qapp, lambda: dlg.outcome is not None)
     assert backend.added[0][2] == 8
@@ -298,7 +303,70 @@ def test_notes_after_the_folder_exists_are_shown(qapp, dialogs, libs, monkeypatc
     look_up(qapp, dlg, MU_URL)
     dlg.add()
     wait_until(qapp, lambda: dlg.outcome is not None)
+    assert shown == [] and not dlg.done_notes.isHidden()                     # on the finish step, no extra box
+    assert "Suwayomi source was not saved" in dlg.done_notes.text()
+
+
+def test_without_next_steps_notes_are_a_message_and_the_dialog_closes(qapp, dialogs, libs, monkeypatch):
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda parent, title, text: shown.append(text))
+    backend = FakeBackend(libs[0], look={MU_URL: mu_look()})
+    real_add = backend.add
+
+    def add_with_note(*a):
+        res = real_add(*a)
+        res.notes.append("The Suwayomi source was not saved.")
+        return res
+
+    backend.add = add_with_note
+    dlg, _ = open_dialog(dialogs, qapp, libs, backend, next_steps=())
+    look_up(qapp, dlg, MU_URL)
+    dlg.add()
+    wait_until(qapp, lambda: dlg.outcome is not None)
     assert len(shown) == 1 and "Suwayomi source was not saved" in shown[0]
+    assert dlg.result() == QDialog.DialogCode.Accepted and dlg.next_step is None
+
+
+# --- the finish step (owner, 2026-10-15, answer 5: offer the first download right away) ---------------------------
+
+def test_the_finish_step_offers_finding_or_opening_the_series(qapp, dialogs, libs):
+    for choice in (ui.NEXT_FIND, ui.NEXT_OPEN, None):
+        db, roots, base = libs
+        backend = FakeBackend(db, look={MU_URL: mu_look()})
+        dlg, _ = open_dialog(dialogs, qapp, libs, backend)
+        look_up(qapp, dlg, MU_URL)
+        dlg.folder.setEditText(f"Made Up Series {choice}")
+        dlg.add()
+        wait_until(qapp, lambda: dlg.outcome is not None)
+        assert dlg.series_box.isHidden() and dlg.form_box.isHidden() and dlg.btn_add.isHidden()
+        assert f"Added “Made Up Series {choice}” to Manga" == dlg.done_title.text()
+        assert not dlg.btn_find.isHidden() and not dlg.btn_open.isHidden() and not dlg.btn_done.isHidden()
+        {ui.NEXT_FIND: dlg.btn_find, ui.NEXT_OPEN: dlg.btn_open, None: dlg.btn_done}[choice].click()
+        assert dlg.result() == QDialog.DialogCode.Accepted and dlg.next_step == choice
+
+
+def test_closing_the_finish_step_is_done_and_keeps_the_outcome(qapp, dialogs, libs):
+    backend = FakeBackend(libs[0], look={MU_URL: mu_look()})
+    dlg, _ = open_dialog(dialogs, qapp, libs, backend, next_steps=(ui.NEXT_OPEN,))
+    look_up(qapp, dlg, MU_URL)
+    dlg.add()
+    wait_until(qapp, lambda: dlg.outcome is not None)
+    assert dlg.btn_find.isHidden() and not dlg.btn_open.isHidden()          # only what the window can do
+    dlg.reject()                                                             # Escape
+    assert dlg.result() == QDialog.DialogCode.Accepted and dlg.next_step is None and dlg.outcome is not None
+
+
+# --- doujinshi and artbooks (owner, 2026-10-15, answer 7) ---------------------------------------------------------
+
+def test_show_doujinshi_and_artbooks_repeats_the_search_with_them(qapp, dialogs, libs):
+    backend = FakeBackend(libs[0], look={"made up": core.Lookup(candidates=[mu_record(3, "Three")])})
+    dlg, _ = open_dialog(dialogs, qapp, libs, backend)
+    look_up(qapp, dlg, "made up")
+    assert backend.show_all == [False] and not dlg.show_all.isChecked() and not dlg.show_all.isHidden()
+    dlg.show_all.setChecked(True)
+    settle(qapp, dlg)
+    assert backend.lookups == ["made up", "made up"] and backend.show_all == [False, True]
+    assert dlg.candidates.count() == 1 and not dlg.pick_box.isHidden()
 
 
 def test_without_a_library_folder_nothing_can_be_added(qapp, dialogs):
@@ -359,6 +427,7 @@ def test_the_top_bar_button_opens_the_dialog_and_rescans_the_library_it_was_adde
         look_up(qapp, self, MU_URL)
         self.add()
         wait_until(qapp, lambda: self.outcome is not None)
+        self.finish(None)
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(ui, "LiveBackend", lambda database: backend)
@@ -372,6 +441,46 @@ def test_the_top_bar_button_opens_the_dialog_and_rescans_the_library_it_was_adde
     (names, scopes), = scans
     assert names == ["Comics"] and list(scopes) == [roots[1].id]              # only the library that got the folder
     assert len(scopes[roots[1].id]) == 1                                     # ... and in it only the new folder
+
+
+def test_find_releases_now_runs_after_the_rescan(qapp, window, libs, monkeypatch):
+    db, roots, base = libs
+    backend = FakeBackend(db, look={MU_URL: mu_look()})
+
+    def fake_exec(self):
+        assert self.next_steps == (ui.NEXT_FIND, ui.NEXT_OPEN)
+        look_up(qapp, self, MU_URL)
+        self.add()
+        wait_until(qapp, lambda: self.outcome is not None)
+        self.finish(ui.NEXT_FIND)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(ui, "LiveBackend", lambda database: backend)
+    monkeypatch.setattr(AddSeriesDialog, "exec", fake_exec)
+    window._start_scan = lambda roots=None, scopes=None: None
+    found, opened = [], []
+    window._download_tab.find_for = lambda ids: found.append(list(ids)) or True
+    window.get_missing = lambda folder: opened.append(folder) or True
+    window._top.btn_add_series.click()
+    assert found == [] and window._after_add[0] == ui.NEXT_FIND             # nothing before the rescan
+    series_id = window._after_add[2]
+    window._run_after_add()                                                  # what the rescan's end calls
+    assert found == [[series_id]] and opened == [] and window._after_add is None
+    window._run_after_add()                                                  # once only
+    assert found == [[series_id]]
+
+
+def test_open_in_download_and_a_find_that_cannot_run_select_the_series(qapp, window, libs):
+    opened = []
+    window.get_missing = lambda folder: opened.append(folder) or True
+    window._after_add = (ui.NEXT_OPEN, "/lib/Made Up", 5)
+    window._run_after_add()
+    window._download_tab.find_for = lambda ids: False                        # no automation set up
+    window._after_add = (ui.NEXT_FIND, "/lib/Made Up Two", 6)
+    window._run_after_add()
+    window._after_add = (None, "/lib/Done", 7)                               # Done: nothing
+    window._run_after_add()
+    assert opened == ["/lib/Made Up", "/lib/Made Up Two"]
 
 
 def test_cancelling_the_dialog_rescans_nothing(qapp, window, libs, monkeypatch):
