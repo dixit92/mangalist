@@ -1511,6 +1511,7 @@ class MainWindow(QMainWindow):
         if self._duplicates_view is not None and self._list.current_filter() == DUPLICATES:
             self._duplicates_view.refresh()
         self._start_signatures()
+        self._run_after_add()
 
         if self._cfg.get("mu_autostart"):
             self._start_mu_lookup(list(entries))
@@ -1579,13 +1580,30 @@ class MainWindow(QMainWindow):
 
     def _on_add_series(self) -> None:
         """The top bar's Add series...: paste a link, make the empty folder, rescan its library (add_series_dialog.py)."""
-        from .add_series_dialog import AddSeriesDialog, LiveBackend
+        from .add_series_dialog import NEXT_FIND, NEXT_OPEN, AddSeriesDialog, LiveBackend
 
-        dlg = AddSeriesDialog(LiveBackend(self._db), self._roots(), self, current_root_id=self._library)
+        steps = (NEXT_FIND, NEXT_OPEN) if self._download_tab is not None else ()
+        dlg = AddSeriesDialog(LiveBackend(self._db), self._roots(), self, current_root_id=self._library,
+                              next_steps=steps)
         dlg.exec()
         if dlg.outcome is not None and dlg.root is not None:
+            # the finish step's "Find releases now" / "Open in Download" runs once the rescan shows the series
+            self._after_add = (getattr(dlg, "next_step", None), str(dlg.outcome.folder), dlg.outcome.series_id)
             scopes = folder_scopes([dlg.root], [dlg.outcome.folder]) if getattr(dlg.outcome, "folder", None) else {}
             self._start_scan([dlg.root], scopes or None)          # the new folder only
+
+    def _run_after_add(self) -> None:
+        """After the rescan that follows Add series: the finish step's choice (lane A, owner 2026-10-15, answer 5)."""
+        step, self._after_add = getattr(self, "_after_add", None), None
+        if not step or not step[0] or self._download_tab is None:
+            return
+        what, folder, series_id = step
+        if what == "find" and series_id is not None and callable(getattr(self._download_tab, "find_for", None)):
+            self._rebuild_wanted()
+            self.show_tab(TAB_DOWNLOAD)
+            if self._download_tab.find_for([series_id]):
+                return
+        self.get_missing(folder)
 
     def _on_missing(self) -> None:
         dlg = self._make_missing_dialog()

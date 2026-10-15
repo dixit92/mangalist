@@ -8,7 +8,8 @@ MangaList then
 1. reads the series (:func:`lookup`): MangaUpdates' own record for a MangaUpdates link; MangaDex's public record
    (``GET /manga/<id>``, read only, no login) for a MangaDex link, which also names the series' MangaUpdates page when
    MangaDex lists one (else the owner picks it from MangaUpdates' search, or adds the series without a match);
-2. proposes the folder name (:func:`propose_names`: the English title first, Windows-safe, editable);
+2. proposes the folder name (:func:`propose_names`: the library's folder scheme ``<romaji> [<English>]`` first -
+   :mod:`mangalist.folder_scheme`, owner 2026-10-15, answer 6 - then other forms; editable);
 3. creates the EMPTY folder (:func:`create_series_folder`): only inside a configured library folder, one component, a
    Windows-safe name, never over a path that exists (case-insensitively too, the library is shared over SMB), never
    under a name the library excludes, under the library's ``.mangalist.lock``, owned by the user MangaList runs as;
@@ -50,6 +51,9 @@ KIND_MANGAUPDATES = "mangaupdates"
 KIND_MANGADEX = "mangadex"
 
 MANGADEX_API = "https://api.mangadex.org"
+#: MangaUpdates types a title search hides unless the owner asks for them (owner, 2026-10-15, answer 7: "Yes, with the
+#: option to enable them in the search").
+HIDDEN_TYPES = ("Doujinshi", "Artbook")
 MAX_ASSOCIATED_PROPOSALS = 6        # other Latin-script titles offered besides the main ones
 MAX_SEARCH_RESULTS = 15
 
@@ -137,6 +141,7 @@ class MangaDexSeries:
     id: str
     title: str                              # English when MangaDex has one, else its main title
     english_title: Optional[str] = None
+    romaji_title: Optional[str] = None      # the romanised original title (the folder scheme's romaji), else the main
     alt_titles: List[str] = field(default_factory=list)
     mu_id: Optional[int] = None             # from links.mu (a base-36 token), when MangaDex lists it
     year: Optional[int] = None
@@ -166,19 +171,33 @@ def mangadex_from_record(body: Mapping[str, Any]) -> MangaDexSeries:
     attrs = data.get("attributes") if isinstance(data.get("attributes"), Mapping) else {}
     titles = attrs.get("title") if isinstance(attrs.get("title"), Mapping) else {}
     alts: List[str] = []
-    english = titles.get("en") if isinstance(titles.get("en"), str) else None
+    alt_english: Optional[str] = None
+    romanised: Optional[str] = None
     for alt in attrs.get("altTitles") or ():
         if not isinstance(alt, Mapping):
             continue
         for lang, text in alt.items():
             if not isinstance(text, str) or not text.strip():
                 continue
-            if lang == "en" and english is None:
-                english = text
+            if lang == "en" and alt_english is None:
+                alt_english = text.strip()
+            if isinstance(lang, str) and lang.endswith("-ro") and romanised is None:
+                romanised = text.strip()
             alts.append(text.strip())
-    main = next((t for t in ([english] + list(titles.values())) if isinstance(t, str) and t.strip()), None)
-    if main is None:
+    own = next(((lang, t.strip()) for lang, t in titles.items() if isinstance(t, str) and t.strip()), None)
+    if own is None and alt_english is None:
         raise AddSeriesError("MangaDex lists no title for this series.")
+    # MangaDex often keeps the romanised title under "en" and the English one among the alternatives; a main title
+    # under "en" is the English title only when a romanised alternative says what the original is called.
+    own_lang, own_title = own if own is not None else ("en", alt_english)
+    english = alt_english
+    if own_lang == "en" and romanised and not _same(own_title, romanised):
+        english, romaji = own_title, romanised
+    else:
+        romaji = own_title
+    if english is not None and _same(english, romaji):
+        english = None
+    main = english or own_title
     links = attrs.get("links") if isinstance(attrs.get("links"), Mapping) else {}
     mu_id: Optional[int] = None
     if isinstance(links.get("mu"), str):
@@ -189,10 +208,16 @@ def mangadex_from_record(body: Mapping[str, Any]) -> MangaDexSeries:
     year = attrs.get("year")
     return MangaDexSeries(
         id=data["id"].lower(), title=main.strip(), english_title=english.strip() if english else None,
-        alt_titles=list(dict.fromkeys(alts)), mu_id=mu_id,
+        romaji_title=romaji, alt_titles=list(dict.fromkeys(alts)), mu_id=mu_id,
         year=year if isinstance(year, int) and not isinstance(year, bool) else None,
         status=attrs.get("status") if isinstance(attrs.get("status"), str) else None,
         original_language=attrs.get("originalLanguage") if isinstance(attrs.get("originalLanguage"), str) else None)
+
+
+def _same(a: Optional[str], b: Optional[str]) -> bool:
+    from .folder_scheme import same_title
+
+    return same_title(a, b)
 
 
 def fetch_mangadex(manga_id: str, *, get: Callable[[str], Dict[str, Any]] = _http_get_json) -> MangaDexSeries:
@@ -225,10 +250,22 @@ class SeriesInfo:
     mangadex_id: Optional[str] = None
     mangadex_title: Optional[str] = None
     detail: Optional[Dict[str, Any]] = None  # MangaUpdates' full record, for the progress fields
+    mangadex_romaji: Optional[str] = None    # MangaDex's romanised title (a series without a MangaUpdates match)
 
     @property
     def matched(self) -> bool:
         return self.mu_id is not None
+
+    @property
+    def romaji(self) -> str:
+        """The folder scheme's romaji: MangaUpdates' title, else MangaDex's romanised (or main) title."""
+        return self.mu_title or self.mangadex_romaji or self.title
+
+    def scheme_name(self) -> Optional[str]:
+        """The library's folder name for the series, ``<romaji> [<English>]`` (:mod:`mangalist.folder_scheme`)."""
+        from .folder_scheme import scheme_name
+
+        return scheme_name(self.romaji, self.english_title)
 
     def summary(self) -> List[str]:
         """The lines the dialog shows under the title."""
@@ -269,13 +306,14 @@ def info_from_mu(detail: Mapping[str, Any], mangadex: Optional[MangaDexSeries] =
         latest_chapter=latest, associated=list(dict.fromkeys(assoc)),
         english_title=mangadex.english_title if mangadex else None,
         mangadex_id=mangadex.id if mangadex else None, mangadex_title=mangadex.title if mangadex else None,
-        detail=dict(detail))
+        mangadex_romaji=mangadex.romaji_title if mangadex else None, detail=dict(detail))
 
 
 def info_from_mangadex(md: MangaDexSeries) -> SeriesInfo:
     """A series with no MangaUpdates match (yet): MangaDex's own facts."""
     return SeriesInfo(title=md.title, year=str(md.year) if md.year else None, associated=list(md.alt_titles),
-                      english_title=md.english_title, mangadex_id=md.id, mangadex_title=md.title)
+                      english_title=md.english_title, mangadex_id=md.id, mangadex_title=md.title,
+                      mangadex_romaji=md.romaji_title)
 
 
 @dataclass
@@ -299,27 +337,38 @@ def _get_mu(mu_id: int, get: Callable[[int], Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def search_mu(query: str,
-              search: Callable[..., List[Dict[str, Any]]] = mu_client.search_series) -> List[Dict[str, Any]]:
-    """MangaUpdates' search records for *query* (no type filter: the owner picks)."""
+              search: Callable[..., List[Dict[str, Any]]] = mu_client.search_series, *,
+              show_all: bool = False) -> List[Dict[str, Any]]:
+    """MangaUpdates' search records for *query*. Doujinshi and artbooks (:data:`HIDDEN_TYPES`) are left out - asked of
+    MangaUpdates, so the page holds real series - unless *show_all* (the dialog's "Show doujinshi and artbooks")."""
     try:
-        return [item["record"] for item in search(query, page_size=MAX_SEARCH_RESULTS) if "record" in item]
+        if show_all:
+            found = search(query, page_size=MAX_SEARCH_RESULTS)
+        else:
+            found = search(query, page_size=MAX_SEARCH_RESULTS, filter_types=list(HIDDEN_TYPES))
     except Exception as exc:  # noqa: BLE001
         _log.info("Add a series: MangaUpdates search failed (%s)", type(exc).__name__)
         raise AddSeriesError("MangaUpdates could not be reached or did not answer.") from None
+    records = [item["record"] for item in found if "record" in item]
+    if not show_all:
+        hidden = {t.casefold() for t in HIDDEN_TYPES}
+        records = [r for r in records if str(r.get("type") or "").casefold() not in hidden]
+    return records
 
 
 def lookup(text: str, *, mu_get: Callable[[int], Dict[str, Any]] = mu_client.get_series,
            mu_search: Callable[..., List[Dict[str, Any]]] = mu_client.search_series,
-           mangadex_get: Callable[[str], Dict[str, Any]] = _http_get_json) -> Lookup:
+           mangadex_get: Callable[[str], Dict[str, Any]] = _http_get_json, show_all: bool = False) -> Lookup:
     """Read what the owner pasted. A MangaUpdates link: its record. A MangaDex link: MangaDex's record and, when
     MangaDex lists the series' MangaUpdates page, that record too; else MangaUpdates' search results for MangaDex's
-    title (``candidates``) and ``info`` as a series without a match. A title: the search results only."""
+    title (``candidates``) and ``info`` as a series without a match. A title: the search results only. A search leaves
+    doujinshi and artbooks out unless *show_all*."""
     link = parse_link(text)
     if link is None:
         query = (text or "").strip()
         if not query:
             raise AddSeriesError("Paste a MangaUpdates or MangaDex link, or type a title.")
-        out = Lookup(candidates=search_mu(query, mu_search))
+        out = Lookup(candidates=search_mu(query, mu_search, show_all=show_all))
         if not out.candidates:
             out.notes.append("MangaUpdates found nothing for that title.")
         return out
@@ -337,7 +386,7 @@ def lookup(text: str, *, mu_get: Callable[[int], Dict[str, Any]] = mu_client.get
         out.notes.append("MangaDex lists no MangaUpdates page for this series.")
     out.info = info_from_mangadex(md)
     try:
-        out.candidates = search_mu(md.english_title or md.title, mu_search)
+        out.candidates = search_mu(md.english_title or md.title, mu_search, show_all=show_all)
     except AddSeriesError as exc:
         out.notes.append(str(exc))
     return out
@@ -380,27 +429,39 @@ def _latin(text: str) -> bool:
 
 
 def propose_names(info: SeriesInfo) -> List[str]:
-    """Folder names for the series, best first, each cleaned: the English title (MangaDex's), MangaUpdates' title,
-    MangaDex's main title, the library's ``<title> [<English title>]`` form when the two differ, then other Latin-script titles
-    MangaUpdates knows. The owner may edit the choice."""
-    english = info.english_title
-    main = info.mu_title or info.title
+    """Folder names for the series, best first. First the library's folder scheme ``<romaji> [<English>]``
+    (:mod:`mangalist.folder_scheme`: MangaUpdates' title, then MangaDex's English title when the link came from there;
+    just ``<romaji>`` when no English title is known) - the name the Renamer keeps folders at, so the new folder is never
+    a rename candidate. Then the same scheme with each alternative title that reads as English (MangaUpdates does not
+    say which one is the licensed title), the romaji and the English title alone, MangaDex's main title and other
+    Latin-script titles MangaUpdates knows (cleaned like any folder name). The owner may edit the choice."""
+    from .folder_scheme import english_candidates, scheme_name
+
+    romaji, english = info.romaji, info.english_title
+    schemed: List[str] = []
+    first = scheme_name(romaji, english)
+    if first:
+        schemed.append(first)
+    for alt in english_candidates(info.associated, romaji, limit=MAX_ASSOCIATED_PROPOSALS):
+        name = scheme_name(romaji, alt)
+        if name:
+            schemed.append(name)
+    plain = scheme_name(romaji)
+    if plain:
+        schemed.append(plain)
     ordered: List[str] = []
     if english:
         ordered.append(english)
-    ordered.append(main)
+    ordered.append(info.mu_title or info.title)
     if info.mangadex_title:
         ordered.append(info.mangadex_title)
-    if english and _plain(english) != _plain(main):
-        ordered.append(f"{main} [{english}]")
     ordered += [a for a in info.associated if _latin(a)][:MAX_ASSOCIATED_PROPOSALS]
     out: List[str] = []
     seen = set()
-    for name in ordered:
-        cleaned = clean_folder_name(name)
-        if cleaned and _plain(cleaned) not in seen:
-            seen.add(_plain(cleaned))
-            out.append(cleaned)
+    for name in schemed + [clean_folder_name(n) for n in ordered]:
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
     return out
 
 

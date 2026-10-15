@@ -52,7 +52,11 @@ ENFORCE_TIP = ("What happens to files whose names do not follow the naming schem
                "Off - never renamed, never listed.\n"
                "Ask before renaming - listed as \"Rename pending\"; you rename them (with a preview) from the List.\n"
                "Rename automatically - the scheduled rescan renames them, once you have started this library's "
-               "conversion in the Renamer window (List > Rename library…). Every batch is logged and can be undone.")
+               "conversion in the Renamer window (List > Rename library…). Every batch is logged and can be undone.\n"
+               "Folder names and series-title changes wait for your Rename, whatever this setting: a series folder "
+               "not named \"<romaji> [<English>]\", or a volume whose name changes only with the series title, shows "
+               "as \"Rename pending\" and is renamed only when you press Rename in the Renamer window - never "
+               "automatically; everything else is automatic.")
 PREVIEW_LIMIT = 500
 AUTO_TIP = ("Automatic downloads for this library's series that have no mode of their own (set one per series in the "
             "List's row menu):\n" + "\n".join(f"{MODE_LABELS[m]} - {MODE_HELP[m]}" for m in AUTO_MODES) +

@@ -6,6 +6,8 @@ marks in MangaPixer), or "Rename library…" (the library picked, or every libra
 - the dry run's summary: how many files would be renamed, are already named by the scheme, are left alone, collide;
   how many names of each pattern were found; the plain warning about MangaPixer's read state;
 - per series, old -> new for every file, coloured: renamed (blue), unchanged (grey), left alone (amber), collision (red);
+  the series folder itself on the first row when it is not named ``<romaji> [<English>]`` (owner, 2026-10-15; it is
+  renamed only by this window's Rename, never automatically);
 - "To check": the files left alone, the name collisions (with "Review duplicates…"), the titles the length rule would
   shorten and the titles that hold a volume or chapter word;
 - Apply (a confirmation naming the counts first), a busy state while it works, the result, and "Undo last batch".
@@ -50,6 +52,7 @@ from PySide6.QtWidgets import (
 
 from ..renamer import (
     COLLISION,
+    FOLDER_NO_TITLE,
     LEFT_ALONE,
     RENAME,
     UNCHANGED,
@@ -99,8 +102,10 @@ STATUS_TEXT = {RENAME: "will be renamed", UNCHANGED: "already named by the schem
 PATTERN_LABELS = {"scheme": "already in a scheme", "fmd2": "FMD2 names", "release": "release names",
                   "generic": "other chapter / volume names", "bare": "bare numbers", "none": "unreadable"}
 
-LEAD = ("Only file names change - never a file's contents - so MangaPixer can keep its read marks. Renames are made in "
-        "batches; each batch can be undone. Folders are not renamed.")
+LEAD = ("Only names change - never a file's contents - so MangaPixer can keep its read marks. Renames are made in "
+        "batches; each batch can be undone. A series folder not named \"<romaji> [<English>]\" is renamed too, as one "
+        "step (the series keeps its data). Folder names and series-title changes wait for your Rename here - never "
+        "automatically; everything else a library set to Rename automatically renames by itself.")
 PILOT_SERIES = ("Start here: rename this one series, then open it in MangaPixer and check that its read marks are still "
                 "there. If they are, rename its whole library.")
 PILOT_LIBRARY = ("Tip: rename one series first (right-click it in the List > Rename to the scheme…) and check its read "
@@ -213,7 +218,10 @@ AUTOMATIC_TITLE = "Keep this library in the scheme?"
 def automatic_text(name: str) -> str:
     return (f"{name} is being renamed to the naming scheme. Rename its new files automatically from now on?\n\n"
             "Downloaded volumes are then filed under the scheme's names, and the scheduled rescan renames anything else "
-            "named differently (each batch can be undone). You can change this later in Settings > Library.")
+            "named differently (each batch can be undone). Folder names and series-title changes wait for your Rename: "
+            "a folder not named \"<romaji> [<English>]\", or a volume whose name changes only with the series title, "
+            "shows as Rename pending until you rename it here - never automatically; everything else is automatic. You "
+            "can change this later in Settings > Library.")
 
 
 def _thread_runner(fn, on_done, on_error):
@@ -222,10 +230,34 @@ def _thread_runner(fn, on_done, on_error):
     return start_call(fn, on_done, on_error)
 
 
+FOLDER_TEXT = {RENAME: "the series folder will be renamed - the series keeps its data (one step, undoable)",
+               UNCHANGED: "the series folder is named by the scheme",
+               LEFT_ALONE: "the series folder keeps its name",
+               COLLISION: "the series folder keeps its name: name collision"}
+
+
 def _in_scheme(s: SeriesPreview) -> bool:
-    """Every file of the series is already named by the scheme: nothing to rename, check or decide."""
+    """Every file of the series - and its folder - is already named by the scheme: nothing to rename, check or
+    decide (a folder left alone for want of a title is not a reason to show the series)."""
     c = s.counts()
-    return not (c[RENAME] or c[COLLISION] or c[LEFT_ALONE] or s.error)
+    return not (c[RENAME] or c[COLLISION] or c[LEFT_ALONE] or s.error or s.folder_status in (RENAME, COLLISION))
+
+
+def _folder_untitled(s: SeriesPreview) -> bool:
+    """The folder was left alone only for want of a MangaUpdates title (not worth a row of its own)."""
+    return s.folder_status == LEFT_ALONE and s.folder_reason == FOLDER_NO_TITLE
+
+
+def _folder_row_shown(s: SeriesPreview, show_all: bool) -> bool:
+    if s.folder_status is None or _folder_untitled(s):
+        return False
+    return s.folder_status != UNCHANGED or show_all
+
+
+def _changes_text(files: int, folders: int) -> str:
+    parts = ([_plural(files, "file")] if files or not folders else []) + (
+        [_plural(folders, "folder")] if folders else [])
+    return " and ".join(parts)
 
 
 def _plural(n: int, word: str, many: Optional[str] = None) -> str:
@@ -429,8 +461,9 @@ class RenamerWindow(QDialog):
 
     def _update_buttons(self) -> None:
         n = self._dry.count(RENAME) if self._dry is not None else 0
-        self.btn_apply.setText(f"Rename {_plural(n, 'file')}…" if n else "Rename")
-        self.btn_apply.setEnabled(not self._busy and n > 0)
+        folders = len(self._dry.folders_to_rename) if self._dry is not None else 0
+        self.btn_apply.setText(f"Rename {_changes_text(n, folders)}…" if n or folders else "Rename")
+        self.btn_apply.setEnabled(not self._busy and (n > 0 or folders > 0))
         # while the rescan runs, the last batch is not known yet: no undo of an older one
         self.btn_undo.setEnabled(not self._busy and not self._awaiting and self._last is not None)
         if self._last is not None:
@@ -499,10 +532,12 @@ class RenamerWindow(QDialog):
     def _fill(self, dry: DryRun) -> None:
         series = dry.series
         moving = sum(1 for s in series if s.renames)
+        folders = len(dry.folders_to_rename)
         self.summary_label.setText(
             f"{_plural(dry.count(RENAME), 'file')} to rename in {_plural(moving, 'series', 'series')}; "
             f"{dry.count(UNCHANGED)} already named by the scheme; {dry.count(LEFT_ALONE)} left alone; "
             f"{_plural(dry.count(COLLISION), 'name collision')} (not renamed)."
+            + (f" {_plural(folders, 'series folder')} not named \"<romaji> [<English>]\" to rename." if folders else "")
             if series else "Nothing to look at: no series here has been scanned yet.")
         patterns = dry.patterns
         self.patterns_label.setText(
@@ -530,8 +565,14 @@ class RenamerWindow(QDialog):
         self._series: List[SeriesPreview] = [s for s in everything if self.show_done.isChecked() or not _in_scheme(s)]
         for s in self._series:
             c = s.counts()
-            bits = [f"{c[RENAME]} to rename" if c[RENAME] else s.error if s.error
+            bits = [f"{c[RENAME]} to rename" if c[RENAME] else s.error if s.error and not s.folder_rename
+                    else "" if s.folder_rename
                     else "nothing to rename" if (c[COLLISION] or c[LEFT_ALONE]) else "in the scheme"]
+            if s.folder_rename:
+                bits.append("folder renamed")
+            elif s.folder_status == COLLISION:
+                bits.append("folder: name collision")
+            bits = [b for b in bits if b]
             if c[COLLISION]:
                 bits.append(_plural(c[COLLISION], "collision"))
             if c[LEFT_ALONE]:
@@ -598,6 +639,8 @@ class RenamerWindow(QDialog):
             self._update_buttons()
             return
         show_all = self.show_unchanged.isChecked()
+        if _folder_row_shown(s, show_all):
+            self._add_folder_row(s)
         order = {RENAME: 0, COLLISION: 1, LEFT_ALONE: 2, UNCHANGED: 3}
         for f in sorted(s.files, key=lambda f: (order.get(f.status, 9), f.name.casefold())):
             if f.status == UNCHANGED and not show_all:
@@ -608,6 +651,8 @@ class RenamerWindow(QDialog):
                 "(as it is)" if f.status != UNCHANGED else prefix + f.name)
             what = STATUS_TEXT[f.status] + (f": {f.reason}" if f.reason and f.status != COLLISION else
                                             f" - {f.reason}" if f.reason else "")
+            if f.status == RENAME and f.title_held:
+                what += " - new series title (waits for your Rename, never automatic)"
             if f.status == LEFT_ALONE and not f.needs_kind:
                 what += " - right-click to set its chapter or volume"
             flags = [t for t, on in (("title shortened", f.title_cut), ("group shortened", f.group_cut),
@@ -625,9 +670,30 @@ class RenamerWindow(QDialog):
             self.preview.addTopLevelItem(item)
         self._update_buttons()
 
+    def _add_folder_row(self, s: SeriesPreview) -> None:
+        """The series folder's own row (first): old name -> the scheme's ``<romaji> [<English>]``."""
+        status = s.folder_status
+        now = os.path.basename(s.folder) + "/"
+        after = (s.folder_target + "/") if status in (RENAME, COLLISION) and s.folder_target else (
+            now if status == UNCHANGED else "(as it is)")
+        what = FOLDER_TEXT.get(status, "") + (f": {s.folder_reason}" if s.folder_reason else "")
+        item = QTreeWidgetItem([now, after, what])
+        font = item.font(0)
+        font.setBold(True)
+        color = QBrush(QColor(status_colors()[status]))
+        for col in range(3):
+            item.setForeground(col, color)
+            item.setFont(col, font)
+        item.setToolTip(0, s.folder)
+        item.setToolTip(2, what)
+        item.setData(0, Qt.ItemDataRole.UserRole, status)
+        self.preview.addTopLevelItem(item)
+
     def _fill_notes(self, dry: DryRun) -> None:
         self.notes.clear()
         groups = (
+            ("New series title \"<romaji> [<English>]\" (renamed only by your Rename)",
+             lambda f: f.status == RENAME and f.title_held),
             ("Left alone", lambda f: f.status == LEFT_ALONE),
             ("Name collisions (both files keep their names)", lambda f: f.status == COLLISION),
             ("Chapter titles the length rule would shorten", lambda f: f.status == RENAME and f.title_cut),
@@ -650,6 +716,20 @@ class RenamerWindow(QDialog):
                 top.addChild(child)
             self.notes.addTopLevelItem(top)
             top.setExpanded(len(found) <= 20)
+        for title, statuses in (("Series folders with a name collision (not renamed)", (COLLISION,)),
+                                ("Series folders left alone", (LEFT_ALONE,))):
+            folders = [s for s in dry.folders_where(*statuses) if not _folder_untitled(s)]
+            if not folders:
+                continue
+            total += len(folders)
+            top = QTreeWidgetItem([f"{title} ({len(folders)})", ""])
+            for s in folders:
+                child = QTreeWidgetItem([s.title + "/", s.folder_reason])
+                child.setToolTip(0, s.folder)
+                child.setToolTip(1, s.folder_reason)
+                top.addChild(child)
+            self.notes.addTopLevelItem(top)
+            top.setExpanded(len(folders) <= 20)
         self.tabs.setTabText(1, f"To check ({total})" if total else "To check")
 
     # --- one file's numbers ---------------------------------------------------------------------------------------
@@ -713,25 +793,38 @@ class RenamerWindow(QDialog):
         dry = self._dry
         if dry is None:
             return ""
-        batches = self._renamer.batches(dry.series)
-        moving = sum(1 for s in dry.series if s.renames)
-        lines = [f"Rename {_plural(dry.count(RENAME), 'file')} in {_plural(moving, 'series', 'series')} "
+        batches = self._renamer.batches(dry.series, folders=True)
+        moving = sum(1 for s in dry.series if s.renames or s.folder_rename)
+        folders = len(dry.folders_to_rename)
+        lines = [f"Rename {_changes_text(dry.count(RENAME), folders)} in {_plural(moving, 'series', 'series')} "
                  f"({_plural(len(batches), 'batch', 'batches')})?", "",
-                 "Only the names change - every file's contents stay exactly as they are.",
-                 f"{dry.count(LEFT_ALONE)} file(s) are left alone and {_plural(dry.count(COLLISION), 'name collision')} "
-                 "are not renamed.",
-                 "Each batch can be undone with \"Undo last batch\"."]
+                 "Only the names change - every file's contents stay exactly as they are."]
+        if folders:
+            examples = [f"  {os.path.basename(s.folder)}  ->  {s.folder_target}" for s in dry.folders_to_rename[:3]]
+            lines += [f"{_plural(folders, 'series folder')} {'is' if folders == 1 else 'are'} renamed to "
+                      "\"<romaji> [<English>]\" (one step each; the series keeps its data):", *examples]
+            if folders > 3:
+                lines.append(f"  … and {folders - 3} more")
+        held = sum(len(s.held_renames) for s in dry.series)
+        if held:
+            lines.append(f"{_plural(held, 'file')} {'is' if held == 1 else 'are'} renamed only because of the new series "
+                         "title \"<romaji> [<English>]\".")
+        lines += [f"{dry.count(LEFT_ALONE)} file(s) are left alone and {_plural(dry.count(COLLISION), 'name collision')} "
+                  "are not renamed.",
+                  "Each batch can be undone with \"Undo last batch\"."]
         if dry.warnings:
             lines += ["", *dry.warnings]
         return "\n".join(lines)
 
     def apply(self) -> None:
         dry = self._dry
-        if self._busy or dry is None or not dry.count(RENAME):
+        folders = len(dry.folders_to_rename) if dry is not None else 0
+        if self._busy or dry is None or not (dry.count(RENAME) or folders):
             return
-        if not self._confirm(f"Rename {_plural(dry.count(RENAME), 'file')}?", self.confirmation_text()):
+        if not self._confirm(f"Rename {_changes_text(dry.count(RENAME), folders)}?", self.confirmation_text()):
             return
-        batches = self._renamer.batches(dry.series)
+        # the owner's explicit Rename: the series folders too (the automatic pass never renames a folder)
+        batches = self._renamer.batches(dry.series, folders=True)
         root_ids = sorted({b.root_id for b in batches if b.root_id is not None})
         guided = self._scope.kind in (SCOPE_ROOT, SCOPE_ALL)
         renamer = self._renamer
@@ -741,11 +834,13 @@ class RenamerWindow(QDialog):
                 renamer.mark_guided(root_ids)
             return renamer.apply_all(batches)
 
-        self._start(f"Renaming {_plural(dry.count(RENAME), 'file')}…", work, self._applied, changes=True)
+        self._start(f"Renaming {_changes_text(dry.count(RENAME), folders)}…", work, self._applied, changes=True)
 
     def _applied(self, results: Sequence[BatchResult]) -> None:
         renamed = sum(r.renamed for r in results)
-        lines = [f"{_plural(renamed, 'file')} renamed in {_plural(len(results), 'batch', 'batches')}."]
+        folders = sum(getattr(r, "folders", 0) for r in results)
+        lines = [f"{_plural(renamed, 'file')} renamed in {_plural(len(results), 'batch', 'batches')}."
+                 + (f" {_plural(folders, 'series folder')} renamed to the scheme." if folders else "")]
         bad = [r for r in results if r.status not in ("applied", "nothing")]
         for r in bad:
             lines.append(r.message)
@@ -755,12 +850,12 @@ class RenamerWindow(QDialog):
         after = "; ".join(r.after for r in results if r.after)
         if after:
             lines.append(after)
-        if self._scope.kind == SCOPE_SERIES and renamed and not bad:
+        if self._scope.kind == SCOPE_SERIES and (renamed or folders) and not bad:
             lines.append("Now open the series in MangaPixer and check its read marks. All there? Rename its whole "
                          "library next.")
         self.result_label.setProperty("tone", "bad" if bad else "ok")
         self.result_label.setText(" ".join(lines))
-        roots = sorted({rid for r in results if r.renamed for rid in r.root_ids})
+        roots = sorted({rid for r in results if r.renamed or getattr(r, "folders", 0) for rid in r.root_ids})
         if self._scope.kind in (SCOPE_ROOT, SCOPE_ALL) and renamed and not bad:
             self._offer_automatic(roots)
         self._after_change(roots)
@@ -805,7 +900,8 @@ class RenamerWindow(QDialog):
     def _undone(self, result: BatchResult) -> None:
         self.result_label.setProperty("tone", "ok" if result.status == "undone" else "bad")
         self.result_label.setText(result.message + (f" {result.after}" if result.after else ""))
-        self._after_change(sorted(result.root_ids) if result.root_ids and result.renamed else [])
+        self._after_change(sorted(result.root_ids) if result.root_ids and (result.renamed or getattr(result, "folders", 0))
+                           else [])
 
     def _after_change(self, root_ids: Sequence[int]) -> None:
         """Files were renamed or put back. The preview reads the files as the last scan recorded them, so with a host

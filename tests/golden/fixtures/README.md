@@ -34,3 +34,6 @@ API's acceptable use policy asks. The tests replay these files; no test ever con
   cleaned and base title, anatomy, dated doujin parse, matcher integers, creator hints, the one-archive
   folder plan, author name forms, release tags) - names the golden cases do not carry. Printed by a
   throwaway probe test in the same container; `../test_name_probe.py` compares MangaList's port with it.
+- **Optional live checks** (`../test_live_mangaupdates.py`, owner 2026-10-15): a few tests compare these recordings
+  with MangaUpdates' answers today (a recorded search, a recorded series record, Add series' search filter and link
+  id). Skipped unless `MANGALIST_LIVE_MU=1` is set; one request at a time with a 1 s pause; public titles only.
