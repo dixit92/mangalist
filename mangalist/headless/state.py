@@ -41,6 +41,7 @@ def _parse(value: Any) -> Optional[datetime]:
 
 @dataclass
 class JobState:
+    running_since: Optional[datetime] = None   # set while the job runs (cleared at the end and at the runner's start)
     last_run: Optional[datetime] = None        # start of the last run
     last_finished: Optional[datetime] = None
     last_status: Optional[str] = None          # ok | error | skipped | cancelled
@@ -52,7 +53,7 @@ class JobState:
 
     def to_json(self) -> Dict[str, Any]:
         d = asdict(self)
-        for key in ("last_run", "last_finished", "next_run"):
+        for key in ("running_since", "last_run", "last_finished", "next_run"):
             d[key] = _iso(getattr(self, key))
         return d
 
@@ -64,6 +65,7 @@ class JobState:
         except (TypeError, ValueError):
             runs = 0
         return cls(
+            running_since=_parse(d.get("running_since")),
             last_run=_parse(d.get("last_run")),
             last_finished=_parse(d.get("last_finished")),
             last_status=d.get("last_status") if isinstance(d.get("last_status"), str) else None,

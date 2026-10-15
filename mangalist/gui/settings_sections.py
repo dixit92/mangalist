@@ -4,9 +4,10 @@
 supports (English / raw, hide light novels, only trusted uploaders) and two shown fixed because that is how the search
 always works (Digital first, no 0-seeder releases); Suwayomi sources (chapters; needs Suwayomi): the sources Suwayomi has
 installed, read from Suwayomi when the section is shown - which MangaList may use (ticked) and in what order it tries them
-(MangaDex first by default); stored by Suwayomi's source id. **Matching** - where series information comes from. **Automation** - the schedules (editable,
-stored in the database; the container's variables only seed them), Remove Completed, "ask MangaPixer to rescan after
-filing". **Logging** - the level of the log files (and optionally of one area), their size, and the log folder.
+(MangaDex first by default); stored by Suwayomi's source id. **Matching** - where series information comes from.
+**Automation** - Remove Completed, "ask MangaPixer to rescan after filing", the default automatic-download mode and
+replaced chapters (the schedules moved to Scheduled tasks, 2026-10-15). **Logging** - the level of the log files (and
+optionally of one area), their size, and the log folder.
 
 Every switch is stored as soon as it is changed (there is no Save here), in the library database's settings.
 """
@@ -16,19 +17,15 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Dict, Mapping, Optional
 
-from PySide6.QtCore import QTime
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QComboBox,
     QGridLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QRadioButton,
     QSpinBox,
-    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -48,16 +45,7 @@ from ..downloads.options import (
 from .automation_rules import MODE_HELP, MODE_LABELS, MODES, has_automation
 from .background import describe_error, start_call
 from .download_rules import (
-    CHOICE_DAILY,
-    CHOICE_WEEKLY,
-    DAY_NAMES,
-    ScheduleChoice,
-    choice_of,
     held_size_text,
-    reset_schedule_text,
-    save_schedule_text,
-    schedule_choices,
-    schedule_entries,
 )
 from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
@@ -66,18 +54,14 @@ from .downloads_backend import BackendError, DownloadsBackend
 from .links import open_folder as open_folder_default
 from .settings_common import SectionPage
 from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
-from ..headless.settings import SOURCE_STORED
 from .shell import SECTION_SERVICES
 
 SECTION_LOGGING = "logging"
 
 SOURCES_LEAD = "Where releases come from. A source works only when the service it needs is connected."
 MATCHING_LEAD = "Where series information comes from. Not download sources."
-AUTOMATION_LEAD = "What runs on its own in the container."
+AUTOMATION_LEAD = "How automatic downloads and filing behave. When things run is under Scheduled tasks."
 LOGGING_LEAD = "What MangaList writes to its log files, and where they are."
-SCHEDULE_NOTE = ("These times are used by MangaList's background runner in the Docker / Unraid container, in the "
-                 "container's time zone; the desktop app on its own runs nothing on a timer. A change reaches the "
-                 "runner within a minute - no restart.")
 SUWAYOMI_EXPLAIN = ("The sources installed in Suwayomi (from their extensions). Tick the ones MangaList may use, in "
                     "the order it tries them: MangaDex first - it is found by the MangaDex id MangaPixer links; the "
                     "others by title, and you confirm the match once per series. The scanlation group is chosen per "
@@ -85,8 +69,8 @@ SUWAYOMI_EXPLAIN = ("The sources installed in Suwayomi (from their extensions). 
 AUTOMATIC_DOWNLOADS_LEAD = ("Each series is Off, Notify or Auto - set per series wherever it shows (the List, the To get "
                             "list, Found: Automatic downloads), or for a whole library in Library > Edit. Series you "
                             "have not set follow their library's default, else this one.")
-AUTOMATIC_DOWNLOADS_NOTE = ("The find pass runs on the schedule above (and with Find now in the Download tab) and looks "
-                            "only at series with gaps - the Download tab's To get list.")
+AUTOMATIC_DOWNLOADS_NOTE = ("The find pass runs on its schedule under Scheduled tasks (and with Find now in the Download "
+                            "tab) and looks only at series with gaps - the Download tab's To get list.")
 AUTOMATIC_DOWNLOADS_OFF = "Not available: downloads are switched off in this installation."
 FIXED_DIGITAL = "Always on: the ranking puts Digital releases first."
 FIXED_SEEDERS = "Always on: releases nobody is seeding are never shown."
@@ -443,7 +427,6 @@ class AutomationPage(SectionPage):
         self.confirm_empty_all = self._ask_empty_all        # replaceable in tests (answers for the owner)
 
         self._env = env
-        self._build_schedules()
 
         self.remove_check = checkbox("Remove Completed - delete the torrent and its downloaded copy once qBittorrent "
                                      "stops it at its seed goal")
@@ -472,116 +455,6 @@ class AutomationPage(SectionPage):
     HOLDING_DAY_CHOICES = (7, 14, 30, 60, 90, 180, 365)
     HOLDING_HINT = ("Outside every library folder and MangaPixer library, on the same disk share as the library "
                     "(the container's /data). Files keep their folders there, so they can be restored.")
-
-    # Schedules (owner, 2026-10-09: "This should be configurable by the user"): stored in the database, so the runner in
-    # the container re-reads them; the container's variables only seed them.
-    def _build_schedules(self) -> None:
-        """One row per schedule: a choice (Weekly, Daily, Every 12 hours, Every 6 hours, Off - owner, 2026-10-10), the
-        day and the time where the choice needs them, then the reading in words and where it comes from."""
-        grid = QGridLayout()
-        grid.setColumnMinimumWidth(0, 200)
-        grid.setColumnMinimumWidth(1, 160 + 130 + 80 + 16)      # Weekly's three controls, so every row lines up
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(10)
-        self.schedule_modes: Dict[str, QComboBox] = {}
-        self.schedule_days: Dict[str, QComboBox] = {}
-        self.schedule_times: Dict[str, QTimeEdit] = {}
-        self.schedule_reading: Dict[str, QLabel] = {}
-        self.schedule_reset: Dict[str, QPushButton] = {}
-        self.schedule_source: Dict[str, QLabel] = {}
-        for row, entry in enumerate(schedule_entries(self._db, self._env)):
-            mode = QComboBox()
-            mode.setAccessibleName(entry.label)
-            mode.setFixedWidth(160)                             # the same width whether the day / time show or not
-            day = QComboBox()
-            day.setAccessibleName(f"{entry.label}: day")
-            day.setFixedWidth(130)
-            for i, name in enumerate(DAY_NAMES):
-                day.addItem(name, i)
-            at = QTimeEdit()
-            at.setDisplayFormat("HH:mm")
-            at.setAccessibleName(f"{entry.label}: time")
-            reset = button("Use the container's value", link=True,
-                           tip="Forget the time set here; the container's own setting (or the default) applies again")
-            source = label("", "muted", wrap=True)
-            reading = label("", "mono", wrap=True)              # wraps in a narrow window instead of widening it
-            grid.addWidget(label(entry.label), row, 0)
-            grid.addLayout(hbox(mode, day, at, None, spacing=8), row, 1)
-            grid.addLayout(hbox(reading, source, reset, None, spacing=12), row, 2)
-            self.schedule_modes[entry.job] = mode
-            self.schedule_days[entry.job] = day
-            self.schedule_times[entry.job] = at
-            self.schedule_reading[entry.job] = reading
-            self.schedule_source[entry.job] = source
-            self.schedule_reset[entry.job] = reset
-            mode.currentIndexChanged.connect(lambda _i, job=entry.job: self._schedule_edited(job))
-            day.currentIndexChanged.connect(lambda _i, job=entry.job: self._schedule_edited(job))
-            at.editingFinished.connect(lambda job=entry.job: self._schedule_edited(job))
-            reset.clicked.connect(lambda _=False, job=entry.job: self._schedule_reset(job))
-        grid.setColumnStretch(2, 1)
-        self.body.addLayout(grid)
-        self.schedule_status = label("", wrap=True)
-        self.body.addWidget(self.schedule_status)
-        self.body.addWidget(label(SCHEDULE_NOTE, "muted", wrap=True))
-        self._show_schedules()
-
-    def _show_schedules(self) -> None:
-        was, self._loading = self._loading, True               # setting the controls is not an edit
-        try:
-            for entry in schedule_entries(self._db, self._env):
-                job, now = entry.job, choice_of(entry.edit_text)
-                mode, day, at = self.schedule_modes[job], self.schedule_days[job], self.schedule_times[job]
-                mode.clear()
-                for value, text in schedule_choices(job, entry.edit_text):
-                    mode.addItem(text, value)
-                mode.setCurrentIndex(max(0, mode.findData(now.choice)))
-                day.setCurrentIndex(now.weekday)
-                at.setTime(QTime(now.hour, now.minute))
-                self._show_day_time(job)
-                self.schedule_reading[job].setText(entry.when)
-                stored = entry.source == SOURCE_STORED
-                self.schedule_source[job].setText("set here" if stored else "from the container")
-                self.schedule_reset[job].setVisible(stored)
-                set_prop(self.schedule_reading[job], "tone", "" if entry.valid else "bad")
-        finally:
-            self._loading = was
-
-    def _show_day_time(self, job: str) -> None:
-        choice = self.schedule_modes[job].currentData()
-        self.schedule_days[job].setVisible(choice == CHOICE_WEEKLY)
-        self.schedule_times[job].setVisible(choice in (CHOICE_WEEKLY, CHOICE_DAILY))
-
-    def schedule_choice(self, job: str) -> ScheduleChoice:
-        """What *job*'s controls say now."""
-        at = self.schedule_times[job].time()
-        return ScheduleChoice(self.schedule_modes[job].currentData() or "", self.schedule_days[job].currentData() or 0,
-                              at.hour(), at.minute())
-
-    def _say_schedule(self, text: str, tone: str = "") -> None:
-        self.schedule_status.setText(text)
-        set_prop(self.schedule_status, "tone", tone if text else "")
-
-    def _schedule_edited(self, job: str) -> None:
-        if self._loading:
-            return
-        self._show_day_time(job)
-        current = next(e for e in schedule_entries(self._db, self._env) if e.job == job)
-        text = self.schedule_choice(job).text()
-        if text == current.edit_text or (not current.valid and text == choice_of(current.edit_text).choice):
-            return                                              # nothing changed (or the bad value still chosen)
-        try:
-            save_schedule_text(self._db, job, text)
-        except ValueError as exc:
-            self._say_schedule(f"{current.label}: {exc} Nothing was changed.", "bad")
-            self._show_schedules()
-            return
-        self._show_schedules()
-        self._say_schedule(f"{current.label}: saved. The runner uses it within a minute.", "ok")
-
-    def _schedule_reset(self, job: str) -> None:
-        reset_schedule_text(self._db, job)
-        self._show_schedules()
-        self._say_schedule("Back to the container's value.", "ok")
 
     # Automatic downloads (owner decisions 2026-10-10): the default mode; the per-series mode is in the series menus,
     # a library's in Library > Edit (2026-10-13).
@@ -814,7 +687,6 @@ class AutomationPage(SectionPage):
                 self.remove_check.setChecked(False)
         self.scan_note.setVisible(bool(self._cache is not None and scan_forbidden(self._cache)))
         self._refresh_replaced()
-        self._show_schedules()
         self._show_default_mode()
         self._loading = False
 

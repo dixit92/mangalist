@@ -18,6 +18,12 @@ Semantics:
   once: its next run is the new schedule's first slot after "now", logged at INFO; a job switched off is unscheduled.
   ``on_tick`` runs at the same moment (the runner re-reads the logging settings there). Neither may stop the loop:
   a failure is logged once per distinct message and the current schedules stay.
+- **Run now.** ``take_requests`` (the runner passes one that reads the requests the Settings page leaves in the
+  database) names jobs to run right away, outside their schedule: each runs once, keeps its schedule (its next run
+  does not move) and is recorded like any run. With it the loop wakes every ``request_poll`` seconds to look; the
+  schedules are still re-read once a ``max_sleep``.
+- **Running.** A job's state carries ``running_since`` while it runs, so the Settings page can say "running now";
+  every start clears a flag a killed runner left behind.
 - **Clock.** The loop sleeps at most ``max_sleep`` seconds at a time and re-reads the clock, so a
   suspended host or a clock change is noticed within that time.
 """
@@ -45,7 +51,8 @@ class Scheduler:
                  now: Callable[[], datetime] = utc_now, max_sleep: float = 60.0,
                  wait: Optional[Callable[[float], bool]] = None,
                  reload_schedules: Optional[Callable[[], Mapping[str, Optional[Schedule]]]] = None,
-                 on_tick: Optional[Callable[[], None]] = None):
+                 on_tick: Optional[Callable[[], None]] = None,
+                 take_requests: Optional[Callable[[], List[str]]] = None, request_poll: float = 5.0):
         self.registry = registry
         self.store = store
         self.tz = tz
@@ -57,6 +64,8 @@ class Scheduler:
         self._reload = reload_schedules
         self._on_tick = on_tick
         self._tick_problems: Dict[str, str] = {}
+        self._take = take_requests
+        self.request_poll = request_poll
 
     # --- control ----------------------------------------------------------------------------
 
@@ -73,6 +82,8 @@ class Scheduler:
         """Fix every active job's due time at startup (incl. missed-run handling); persist it."""
         now = self._now()
         planned: Dict[str, datetime] = {}
+        for st in self.store.jobs.values():
+            st.running_since = None                 # a runner killed mid-job left its flag behind
         for job in self.registry.active():
             st = self.store.get(job.name)
             desc = job.schedule.describe()  # type: ignore[union-attr]
@@ -174,6 +185,8 @@ class Scheduler:
         st: JobState = self.store.get(job.name)
         started = self._now()
         st.last_run = started
+        st.running_since = started
+        self._save_quietly()
         self.current_job = job.name
         _log.info("%s: starting", job.name)
         try:
@@ -188,6 +201,7 @@ class Scheduler:
         finally:
             self.current_job = None
         finished = self._now()
+        st.running_since = None
         st.last_finished = finished
         st.last_status = result.status
         st.last_message = result.message
@@ -213,14 +227,50 @@ class Scheduler:
             ran += 1
         return ran
 
+    def run_requested(self) -> int:
+        """Run the jobs the owner asked for with "Run now" (``take_requests``); each keeps its schedule. Returns how
+        many ran. A request for a job that does not exist is logged and dropped."""
+        if self._take is None:
+            return 0
+        try:
+            names = list(self._take())
+        except Exception as exc:  # noqa: BLE001 - never stop the runner for this
+            self._problem("requests", "Could not read the Run now requests", exc)
+            return 0
+        self._tick_problems.pop("requests", None)
+        ran = 0
+        for name in names:
+            if self.stopping:
+                break
+            if name not in self.registry:
+                _log.warning("Run now: no job named %r; ignored", name)
+                continue
+            _log.info("%s: run now (asked for in Settings)", name)
+            self.run_job(self.registry.get(name), reschedule=False)
+            ran += 1
+        return ran
+
+    def _save_quietly(self) -> None:
+        try:
+            self.store.save()
+        except OSError:
+            _log.warning("Could not save the scheduler state", exc_info=True)
+
     def run_forever(self) -> None:
         self.plan()
+        last_refresh: Optional[datetime] = None
         while not self.stopping:
-            self.refresh()
+            now = self._now()
+            if (self._take is None or last_refresh is None
+                    or (now - last_refresh).total_seconds() >= self.max_sleep):
+                self.refresh()
+                last_refresh = now
+            self.run_requested()
             self.run_once()
             if self.stopping:
                 break
-            self._wait(self.seconds_until_next())
+            pause = self.seconds_until_next()
+            self._wait(min(pause, self.request_poll) if self._take is not None else pause)
         _log.info("Scheduler stopped")
 
     # --- reporting --------------------------------------------------------------------------

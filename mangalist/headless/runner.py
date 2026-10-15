@@ -10,6 +10,8 @@ Logs go to ``headless.log`` in the normal log folder (a separate file from the G
 INFO up, to standard output (the container log). The file's level, the schedules and the log rotation are
 the owner's settings (Settings > Logging / Automation, stored in the database): the runner re-reads them about
 once a minute, so a change needs no restart; ``MANGALIST_*_SCHEDULE`` / ``MANGALIST_LOG_LEVEL`` only seed them.
+Settings > Scheduled tasks also leaves "Run now" requests in the database; the loop looks for them every few seconds
+(:mod:`mangalist.headless.tasks`).
 """
 
 from __future__ import annotations
@@ -120,6 +122,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     from .scheduler import Scheduler
     from .settings import HeadlessSettings, resolve_schedules
     from .state import STATE_NAME, StateStore
+    from .tasks import take_requests
 
     setup_logging()
     db = _open_database()
@@ -135,7 +138,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     store = StateStore(paths.data_dir() / STATE_NAME).load()
     scheduler = Scheduler(registry, store, settings.tz,
                           reload_schedules=lambda: resolve_schedules(db),
-                          on_tick=(lambda: log_config.apply_stored(db)) if db is not None else None)
+                          on_tick=(lambda: log_config.apply_stored(db)) if db is not None else None,
+                          take_requests=(lambda: take_requests(db)) if db is not None else None)
 
     if args.status:
         for row in scheduler.status():

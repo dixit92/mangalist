@@ -1,5 +1,5 @@
-"""The Settings dialog: one dialog, seven sections on the left (Library, Connected services, Download sources, Matching,
-Automation, Appearance, Logging) - the approved mockup's ``Settings.dc.html``. It absorbs the Roots, MangaPixer and qBittorrent dialogs.
+"""The Settings dialog: one dialog, eight sections on the left (Library, Connected services, Download sources, Matching,
+Automation, Scheduled tasks, Appearance, Logging) - the approved mockup's ``Settings.dc.html``. It absorbs the Roots, MangaPixer and qBittorrent dialogs.
 
 :func:`open_settings` opens it modally and returns what changed (:class:`~mangalist.gui.shell.SettingsResult`) so the
 shell can rescan, re-read MangaPixer's data or reload the Download tab. Switches are stored as they are changed; the
@@ -33,6 +33,7 @@ from .settings_common import SectionPage
 from .settings_library import LibraryPage
 from .settings_sections import SECTION_LOGGING, AutomationPage, LoggingPage, MatchingPage, SourcesPage
 from .settings_services import ServicesPage
+from .settings_tasks import SECTION_TASKS, ScheduledTasksPage
 from .shell import (
     SECTION_AUTOMATION,
     SECTION_LIBRARY,
@@ -48,13 +49,14 @@ NAV = (
     (SECTION_SERVICES, "Connected services", "MangaPixer, qBittorrent, Suwayomi"),
     (SECTION_SOURCES, "Download sources", "nyaa, Suwayomi sources"),
     (SECTION_MATCHING, "Matching", "MangaUpdates"),
-    (SECTION_AUTOMATION, "Automation", "Schedules, Remove Completed"),
+    (SECTION_AUTOMATION, "Automation", "Remove Completed, default modes"),
+    (SECTION_TASKS, "Scheduled tasks", "What runs on its own, and when"),
     (SECTION_APPEARANCE, "Appearance", "Light, Dark or the system's"),
     (SECTION_LOGGING, "Logging", "Level, log files and folder"),
 )
 # The sections of this dialog: the shell's five, then Appearance and Logging (kept here so the shell's list is not
 # changed).
-DIALOG_SECTIONS = (*SECTIONS, SECTION_APPEARANCE, SECTION_LOGGING)
+DIALOG_SECTIONS = (*SECTIONS, SECTION_TASKS, SECTION_APPEARANCE, SECTION_LOGGING)
 
 
 class _NavButton(QFrame):
@@ -142,6 +144,7 @@ class SettingsDialog(QDialog):
             SECTION_SOURCES: SourcesPage(db, backend),
             SECTION_MATCHING: MatchingPage(db),
             SECTION_AUTOMATION: AutomationPage(db, backend, cache, env=env),
+            SECTION_TASKS: ScheduledTasksPage(db, env=env),
             SECTION_APPEARANCE: AppearancePage(db),
             SECTION_LOGGING: LoggingPage(db, env=env),
         }
@@ -200,4 +203,5 @@ def open_settings(parent: Optional[QWidget], db, backend: Optional[DownloadsBack
     return result
 
 
-__all__ = ["SettingsDialog", "open_settings", "NAV", "DIALOG_SECTIONS", "SECTION_APPEARANCE", "SECTION_LOGGING"]
+__all__ = ["SettingsDialog", "open_settings", "NAV", "DIALOG_SECTIONS", "SECTION_APPEARANCE", "SECTION_LOGGING",
+           "SECTION_TASKS"]

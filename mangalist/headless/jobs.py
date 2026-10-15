@@ -15,6 +15,8 @@
   registered but DISABLED unless downloads are turned on. Nothing is ever dispatched on discovery - only in these
   scheduled passes (or the owner's Find now). Settings > Automation calls it "Find and send missing volumes and
   chapters".
+- ``clean-records``: the clean-up of finished download records (:mod:`mangalist.headless.records_job`) - off until
+  the owner picks Daily, Weekly or Monthly in Settings > Scheduled tasks.
 - ``downloads``: the volumes MVP's arrivals pass (:mod:`mangalist.headless.downloads_job`) - file finished
   ``mangalist`` torrents into their series folders and remove completed ones. Enabled only with downloads on.
 
@@ -468,6 +470,9 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
     from .downloads_job import DESCRIPTION as DL_DESCRIPTION, JOB_NAME as DL_JOB, make_downloads_job
     from .mangapixer_job import DESCRIPTION as MP_DESCRIPTION, JOB_NAME as MP_JOB, make_mangapixer_sync
 
+    from .records_job import DESCRIPTION as CLEAN_DESCRIPTION, JOB_NAME as CLEAN_JOB, make_clean_records
+
+    clean_schedule = getattr(settings, "clean_records_schedule", None)
     mp_schedule = getattr(settings, "mangapixer_schedule", None)
     dl_schedule = getattr(settings, "downloads_schedule", None)
     return JobRegistry([
@@ -485,4 +490,7 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
         Job(DL_JOB, make_downloads_job(), dl_schedule,
             enabled=bool(settings.downloads_enabled) and dl_schedule is not None,
             description=DL_DESCRIPTION, catch_up=settings.catch_up, gate=bool(settings.downloads_enabled)),
+        # Last: after the arrivals pass has looked at what was filed (the replaced-chapters look comes with it).
+        Job(CLEAN_JOB, make_clean_records(), clean_schedule, enabled=clean_schedule is not None,
+            description=CLEAN_DESCRIPTION, catch_up=settings.catch_up),
     ])

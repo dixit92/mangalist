@@ -53,11 +53,12 @@ def test_default_settings_rescan_on_downloads_off():
     assert s.catch_up is True
     reg = build_registry(s, ListRoots())
     assert s.mangapixer_schedule == DailyAt(3, 15)  # before the rescan
-    assert reg.names() == ["mangapixer-sync", "rescan", "dispatch-batch", "downloads"]
+    assert reg.names() == ["mangapixer-sync", "rescan", "dispatch-batch", "downloads", "clean-records"]
     assert reg.get("rescan").active
     assert not reg.get("dispatch-batch").enabled
     assert not reg.get("downloads").enabled and s.downloads_schedule == EveryHours(1)
     # The MangaPixer sync is scheduled by default and skips itself while no server is set up.
+    assert not reg.get("clean-records").active and s.clean_records_schedule is None      # off until chosen
     assert [j.name for j in reg.active()] == ["mangapixer-sync", "rescan"]
 
 
