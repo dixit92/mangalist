@@ -80,6 +80,9 @@ from .series_actions import SeriesMenu, SeriesRef
 
 _log = logging.getLogger(__name__)
 
+#: What the status line says about a library whose folder is there but holds nothing (owner, 2026-10-15).
+LIBRARY_EMPTY = "Library Empty"
+
 
 def root_of(path: str, roots: Sequence[Root]) -> Optional[Root]:
     """The library folder *path* is in (the deepest one, when folders nest), else None."""
@@ -1378,6 +1381,8 @@ class MainWindow(QMainWindow):
         self._apply_root_scan(rs, renamed)
         if rs.error:
             self._status_label.setText(f"{rs.root_name}: not reachable")
+        elif rs.empty:
+            self._status_label.setText(f"{rs.root_name}: {LIBRARY_EMPTY}")
         elif rs.scope is not None:
             self._status_label.setText(f"{rs.root_name}: {len(rs.scope)} folder{'' if len(rs.scope) == 1 else 's'}")
         else:
@@ -1471,12 +1476,18 @@ class MainWindow(QMainWindow):
 
         # The counts are in the footer (_update_counts); the message says what else the scan found.
         folders_only = isinstance(result, LibraryScan) and result.folders_only
-        if folders_only:
+        empty_roots = [rs.root_name for rs in result.roots if rs.empty] if isinstance(result, LibraryScan) else []
+        all_empty = bool(empty_roots) and len(empty_roots) == len(result.roots)
+        if all_empty:
+            text = f"{', '.join(empty_roots)}: {LIBRARY_EMPTY}"      # owner, 2026-10-15: not "Scan failed"
+        elif folders_only:
             n = sum(len(rs.scope) for rs in result.roots)
             text = f"Scanned {n} folder{'' if n == 1 else 's'} in " + ", ".join(rs.root_name for rs in result.roots)
         else:
             text = f"Scanned {len(entries)} folder(s)"
-        if partial and isinstance(result, LibraryScan) and not folders_only:
+        if empty_roots and not all_empty:
+            text += f"  —  {', '.join(empty_roots)}: {LIBRARY_EMPTY}"
+        if partial and isinstance(result, LibraryScan) and not folders_only and not all_empty:
             text += " in " + ", ".join(rs.root_name for rs in result.roots)
         tips = []
         if loose:

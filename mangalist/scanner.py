@@ -305,6 +305,15 @@ def is_top_name(name: str) -> bool:
             and (os.altsep is None or os.altsep not in name))
 
 
+def root_is_empty(folder: Path) -> bool:
+    """True for a folder that exists, can be read and has nothing in it (not even a hidden entry): an empty library.
+    False for anything else, including a folder that is missing or cannot be listed - those are errors, not emptiness."""
+    try:
+        return folder.is_dir() and next(iter(folder.iterdir()), None) is None
+    except OSError:
+        return False
+
+
 def scan_root(
     root: Path,
     progress: Optional[Callable[[int, int, str], None]] = None,
@@ -394,6 +403,7 @@ class RootScan:
     error: Optional[str] = None
     loose: List[LooseArchive] = field(default_factory=list)
     scope: Optional[frozenset] = None             # a folder-level scan: the root's direct children read (None: all)
+    empty: bool = False                           # the root is a readable folder with nothing in it: an empty library
 
 
 @dataclass
@@ -452,7 +462,14 @@ def scan_one_root(
     except OSError:
         pass
     scope = None if only is None else frozenset(n for n in only if is_top_name(n))
-    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder, scope=scope)
+    empty = scope is not None and root_is_empty(folder)
+    if empty:
+        # A folder scan of a library whose last series went (moved or deleted; owner, 2026-10-15: "Library Empty"): the
+        # root exists and can be read, so it is an empty library, not an offline share. It is read whole (it is empty),
+        # so the record judges every row of the root, exactly as a full scan of an empty root does. A root that is
+        # missing, not a folder or unreadable still comes back as an error below.
+        scope = None
+    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder, scope=scope, empty=empty)
     loose: List[Path] = []
     prog = progress
     if progress and label:
@@ -471,6 +488,8 @@ def scan_one_root(
     except (OSError, NotADirectoryError) as exc:
         rs.error = str(exc)
         _log.warning("Scan: cannot read the root %s (%s); its series are left as they were", name, exc)
+    if scope is None and not rs.error and not rs.entries and not rs.loose and root_is_empty(folder):
+        rs.empty = True                     # a full scan of a library with nothing in it says so too
     rs.loose = [LooseArchive(rs.root_id, name, p) for p in loose]
     if scope is None:
         _log.debug("Scan: root %s - %d series folders, %d loose archives", name, len(rs.entries), len(rs.loose))

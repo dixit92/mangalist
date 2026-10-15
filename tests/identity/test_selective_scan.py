@@ -228,13 +228,40 @@ def test_a_name_that_is_not_one_folder_is_ignored(tmp_path):
     assert result.roots[0].scope == frozenset() and dump(lib.db) == before
 
 
-def test_an_empty_root_is_not_read_as_every_named_folder_gone(tmp_path):
-    """An offline share leaves its mountpoint empty: a folder scan must not mark the named series missing."""
+def test_a_folder_scan_of_a_library_that_is_now_empty_says_so_and_records_it(tmp_path):
+    """Owner, 2026-10-15: a library whose last series left is "Library Empty", not a failed scan. The root exists and
+    can be read, so it is read whole: every row of it is judged gone, as a full scan of an empty root does."""
     lib = Lib(tmp_path, "lib")
     shutil.rmtree(lib.p("Completed"))
-    lib.p("Completed").mkdir()                          # (a root whose every folder left looks the same: a delay)
+    lib.p("Completed").mkdir()
     result = scan_and_record_folders(lib.root("Completed"), ["Omega"], lib.db)
-    assert result.errors and lib.db.get_series(lib.done.id, "Omega").status == "present"
+    rs = result.roots[0]
+    assert rs.empty and not result.errors and not rs.entries and rs.scope is None and not result.folders_only
+    assert lib.db.get_series(lib.done.id, "Omega").status == "missing"
+    assert lib.db.get_series(lib.done.id, "Sigma").status == "missing"          # not only the named folder
+    assert lib.db.get_series(lib.manga.id, "Alpha").status == "present"         # other libraries are untouched
+
+
+def test_a_full_scan_of_an_empty_library_is_marked_empty_too(tmp_path):
+    lib = Lib(tmp_path, "lib")
+    shutil.rmtree(lib.p("Completed"))
+    lib.p("Completed").mkdir()
+    result = scan_and_record_library([lib.root("Completed")], lib.db)
+    assert result.roots[0].empty and not result.errors
+
+
+def test_a_root_that_is_gone_or_holds_something_is_not_an_empty_library(tmp_path):
+    """The offline-share guard stays for a root that does not exist (or is not a folder): an error, nothing judged."""
+    lib = Lib(tmp_path, "lib")
+    shutil.rmtree(lib.p("Completed"))
+    result = scan_and_record_folders(lib.root("Completed"), ["Omega"], lib.db)
+    assert result.errors and not result.roots[0].empty
+    assert lib.db.get_series(lib.done.id, "Omega").status == "present"
+    full = Lib(tmp_path, "full")
+    assert not scan_and_record_folders(full.root("Manga"), ["Alpha"], full.db).roots[0].empty
+    (tmp_path / "plain").write_text("x")
+    from mangalist.scanner import root_is_empty
+    assert not root_is_empty(tmp_path / "plain") and not root_is_empty(tmp_path / "nowhere")
 
 
 # --- Stage 0: only changed rows are written; last_seen_scan stays exact -------------------------------------------

@@ -455,3 +455,19 @@ def test_open_folder_without_a_file_manager_copies_the_path(make_window, monkeyp
     win._open_in_explorer(LIB / QUEST)
     assert QApplication.clipboard().text() == str(LIB / QUEST)
     assert "folder path copied" in win._status_label.text()
+
+
+def test_a_scan_of_a_library_that_is_now_empty_says_library_empty(make_window, tmp_path):
+    """Owner, 2026-10-15: a folder scan of a library whose last series left is "Library Empty", not "Scan failed"."""
+    from mangalist.scanner import LibraryScan, RootScan
+
+    win = make_window()
+    empty = RootScan(root_id=1, root_name="Reading", folder=tmp_path, empty=True)
+    win._on_root_scanned(empty, [])
+    assert win._status_label.text() == "Reading: Library Empty"
+    win._on_scan_finished(LibraryScan(roots=[empty]))
+    assert win._status_label.text().startswith("Reading: Library Empty")
+    assert "Scan failed" not in win._status_label.text()
+    other = RootScan(root_id=2, root_name="Archive", folder=tmp_path, entries=[_entry(QUEST)])
+    win._on_scan_finished(LibraryScan(roots=[other, empty]))
+    assert "Reading: Library Empty" in win._status_label.text() and win._status_label.text().startswith("Scanned 1")
