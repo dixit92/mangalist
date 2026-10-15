@@ -177,3 +177,13 @@ def test_a_librarys_default_is_named_in_the_list(win):
     backend.own_modes[beta] = "notify"
     win._refresh_auto_modes(force=True)
     assert _chips(win) == {"Beta Days": "Notify"}               # its own mode differs from its library's
+
+
+def test_the_to_get_menu_offers_move_to_library(win):
+    from mangalist.gui.series_actions import MOVE_MENU, NO_OTHER_LIBRARY
+
+    from .test_series_actions import submenu
+
+    menu = _to_get_menu(win, "Alpha Saga")
+    assert texts(menu)[4] == MOVE_MENU
+    assert texts(submenu(menu, MOVE_MENU)) == [NO_OTHER_LIBRARY]           # one library folder here
