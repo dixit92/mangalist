@@ -110,9 +110,12 @@ def test_the_to_get_menu_acts_on_the_list_through_the_window(win, monkeypatch):
     _to_get_menu(win, "Alpha Saga", "Mark Behind as up to date")
     assert win._model.entry_at(alpha).behind_override == "done"
     assert win._model.state_at(alpha).state == State.UP_TO_DATE
-    assert find_action(_to_get_menu(win, "Alpha Saga"), "Clear 'up to date' override").isEnabled()
-    _to_get_menu(win, "Alpha Saga", "Clear 'up to date' override")
+    win._refresh_derived()
+    assert win._wanted_groups(win.test_folders["Alpha Saga"]) == []        # out of To get (owner, 2026-10-15)
+    win.set_behind_done([win.test_folders["Alpha Saga"]], False)           # cleared in the List: back in To get
     assert win._model.entry_at(alpha).behind_override is None
+    win._refresh_derived()
+    assert set(win._wanted_groups(win.test_folders["Alpha Saga"])) == {GROUP_VOLUMES, GROUP_CHAPTERS}
     # Fix MangaUpdates match: the List's own dialog, for that row
     fixed = []
     monkeypatch.setattr(win, "_on_fix_mu_match", lambda row, entry: fixed.append((row, entry.title)))

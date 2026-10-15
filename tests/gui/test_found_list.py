@@ -257,3 +257,71 @@ def test_a_theme_switch_repaints_and_rebuilds_nothing(themed, view):
     v.list.viewport().grab()                                                 # paints in Dark without an error
     theme.apply_theme(themed, "light")
     assert qcolor("surface").name() == current().surface
+
+
+def test_the_mode_chip_shows_the_series_own_mode_exactly_in_one_read(qapp, view):
+    """Owner, 2026-10-15: a series whose own mode equals the default reads its own mode, not "Default (Notify)"; the
+    own modes are read once per refresh for every header, not per row."""
+    v, backend = view(modes={1: "notify", 2: "auto"})
+    heads = v.headers()
+    assert (heads[1].mode, heads[2].mode, heads[3].mode) == ("Notify", "Auto", "Default (Notify)")
+    assert "this series' own - the same as the default" in heads[1].mode_tip
+    assert backend.own_modes_reads == 1
+    v.set_findings(backend.findings(), NAMES, backend.last_run)              # a reload: nothing read again
+    v.headers()
+    assert backend.own_modes_reads == 1
+    v.refresh_mode()                                                         # changed elsewhere: one read again
+    v.headers()
+    assert backend.own_modes_reads == 2
+
+
+def test_the_mode_chip_without_a_batched_own_mode_read_falls_back(qapp, view):
+    backend = FakeFindingBackend(found=FOUND, last_run=find_run(), modes={2: "auto"})
+    backend.own_series_modes = None                                          # an older backend
+    v, _b = view(backend=backend)
+    assert v.headers()[2].mode == "Auto" and v.headers()[1].mode == "Default (Notify)"
+
+
+def _key(v, key):
+    QTest.keyClick(v.list, key)
+    QApplication.processEvents()
+
+
+def test_enter_sends_and_delete_skips_the_selected_row(qapp, view):
+    """Owner, 2026-10-15: keys for the painted Send / Skip - Enter = Send, Delete = Skip on the selected row."""
+    v, backend = view()
+    v.changed.connect(lambda: v.set_findings(backend.findings(), NAMES, backend.last_run))   # the host's reload
+    v.list.setFocus()
+    QApplication.processEvents()
+    assert v.current_line() is not None and v.current_line().key == ("finding", 1)    # focus: the first finding
+    _key(v, Qt.Key.Key_Delete)
+    assert backend.skipped_findings == [1]
+    assert v.current_line().key == ("finding", 2)                            # the one that took its place
+    _key(v, Qt.Key.Key_Return)
+    wait_until(qapp, lambda: backend.sent_findings == [2])
+    wait_until(qapp, lambda: not v.busy())
+    assert v.select(4) and v.current_line().key == ("finding", 4)
+    _key(v, Qt.Key.Key_Delete)                                               # the last one: the one above is picked
+    assert backend.skipped_findings == [1, 4] and v.current_line().key == ("finding", 3)
+
+
+def test_enter_on_a_header_folds_it_and_a_chapter_row_without_source_changes_source(qapp, view):
+    v, backend = view()
+    head = v.model.row_of(("series", 1))
+    v.list.setCurrentIndex(v.model.index(head))
+    _key(v, Qt.Key.Key_Return)
+    assert v.headers()[1].folded and 1 not in v.rows
+    _key(v, Qt.Key.Key_Delete)                                               # Delete on a header does nothing
+    assert backend.skipped_findings == []
+
+
+def test_keys_respect_what_the_buttons_allow(qapp, view):
+    v, backend = view()
+    v.set_busy("Finding…")                                                   # a pass runs: Send / Skip wait
+    assert v.select(3)
+    _key(v, Qt.Key.Key_Delete)
+    _key(v, Qt.Key.Key_Enter)
+    assert backend.skipped_findings == [] and backend.sent_findings == []
+    v.set_busy("")
+    _key(v, Qt.Key.Key_Delete)
+    assert backend.skipped_findings == [3]

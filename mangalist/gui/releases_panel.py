@@ -39,12 +39,18 @@ the release with exactly what was chosen at the click (the volumes, the folder, 
 queue is worked through in order, like the Found list's. The status line is per series: switching series shows that
 series' own state (sending, "Queued to send (1st)", sent, or why it failed), never another series' "Sending...". A
 failed send does not stop the queue; closing the panel (:meth:`ReleasesPanel.stop`) drops what is still queued.
+
+**A queued send can be cancelled** (owner, 2026-10-15: "Yes" to a "Cancel" link in the status line): under the status
+line each of the shown series' queued sends has a **Cancel** link (:meth:`ReleasesPanel.cancel_queued`); it takes the
+send off the queue - nothing was sent - and the release can be sent again. The send already running cannot be called
+back (qBittorrent may have it); it is not offered.
 """
 
 from __future__ import annotations
 
 import html
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import PurePath
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -221,6 +227,9 @@ class SearchOutcome:
     error: Optional[str] = None
 
 
+_JOB_IDS = iter(range(1, 1 << 62))
+
+
 @dataclass
 class SendJob:
     """One click of Send, with everything chosen at the click: it is sent exactly so when its turn comes."""
@@ -231,6 +240,7 @@ class SendJob:
     target_dir: str
     extra: dict = field(default_factory=dict)       # the budget answer (size_bytes, over_cap) and only_missing
     fits: bool = True                               # False: the budget said it would be queued there ("Queueing...")
+    ident: int = field(default_factory=lambda: next(_JOB_IDS))     # names it in its Cancel link
 
     def same(self, series_id: int, info_hash: str) -> bool:
         return self.series_id == series_id and self.candidate.info_hash == info_hash
@@ -245,6 +255,7 @@ class ReleasesPanel(QWidget):
     search_again = Signal()             # managed: "Search again" was pressed, the host runs the search
     settings_requested = Signal(str)
     series_menu_requested = Signal(QPoint)  # the "⋯" in the header: the host opens the series' menu there    # a section of the Settings dialog
+    search_by_hand = Signal()           # "Search nyaa by hand" under a message (a declared edition's volumes)
 
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None,
                  confirm: Optional[ConfirmFn] = None, open_url: Optional[Callable[[str], object]] = None,
@@ -347,9 +358,15 @@ class ReleasesPanel(QWidget):
         self.message_action = button("", primary=True)
         self.message_action.clicked.connect(lambda: self.settings_requested.emit(self._settings_section or ""))
         self.message_action.setVisible(False)
+        self.message_search = button("Search nyaa by hand", primary=True,
+                                     tip="Search nyaa for these volumes now; the releases are shown as usual and you "
+                                         "decide - never searched automatically")
+        self.message_search.setObjectName("searchByHand")
+        self.message_search.clicked.connect(self.search_by_hand)
+        self.message_search.setVisible(False)
         mv.addWidget(self.message_title)
         mv.addWidget(self.message_text)
-        mv.addLayout(hbox(self.message_action, None))
+        mv.addLayout(hbox(self.message_action, self.message_search, None))
         mv.addStretch(1)
         self.stack.addWidget(self.message)
 
@@ -387,6 +404,15 @@ class ReleasesPanel(QWidget):
         self.partial_row.setVisible(False)
         rp.addWidget(self.partial_row)
         self.status_label = label("", wrap=True, selectable=True)
+        # The shown series' queued sends, each with a Cancel link (cancel_queued).
+        self.cancel_label = label("", "muted", wrap=True)
+        self.cancel_label.setObjectName("queuedCancel")
+        self.cancel_label.setTextFormat(Qt.TextFormat.RichText)
+        self.cancel_label.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse
+                                                  | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        self.cancel_label.setToolTip("Take a queued send off the queue - nothing was sent; you can send it again")
+        self.cancel_label.linkActivated.connect(self._on_cancel_link)
+        self.cancel_label.setVisible(False)
         self.footer = QWidget()
         foot = hbox(spacing=12)
         self.footer.setLayout(foot)
@@ -403,6 +429,7 @@ class ReleasesPanel(QWidget):
         rp.addSpacing(4)
         rp.addWidget(self.footer)
         rp.addWidget(self.status_label)
+        rp.addWidget(self.cancel_label)
         rp.addStretch(1)
         self.stack.addWidget(self.results_page)
         outer.addWidget(self.stack, 1)
@@ -438,10 +465,16 @@ class ReleasesPanel(QWidget):
         self._settings_section = section
         self.message_action.setText(action or "")
         self.message_action.setVisible(bool(action))
+        self.message_search.setVisible(False)
         self.search_label.setText("")
         self.stack.setCurrentIndex(PAGE_MESSAGE)
         self._set_chrome(False)
         self._update_send()
+
+    def offer_search_by_hand(self, on: bool = True) -> None:
+        """Under the message: "Search nyaa by hand" (:attr:`search_by_hand`) - for volumes never searched automatically
+        (a declared edition's), which the owner may still look up and judge."""
+        self.message_search.setVisible(on)
 
     def _set_chrome(self, on: bool) -> None:
         """Search again belongs to a series; a message about no series stands alone."""
@@ -497,6 +530,7 @@ class ReleasesPanel(QWidget):
         self.title_label.setText(target.title)
         self.message_title.setVisible(False)
         self.message_action.setVisible(False)
+        self.message_search.setVisible(False)
         self._set_chrome(True)
         self.btn_retry.setEnabled(True)
         self._update_subtitle()
@@ -1090,6 +1124,37 @@ class ReleasesPanel(QWidget):
             tone = outcome_tone if len(lines) == 1 or outcome_tone == "bad" else ""
         set_tone(self.status_label, tone)
         self.status_label.setText("\n".join(lines))
+        links = [f'<a href="cancel:{waiting.ident}">Cancel</a> the queued send ({ordinal(place)}): '
+                 f"{html.escape(waiting.candidate.title)}"
+                 for place, waiting in enumerate(self._send_queue, 1) if waiting.series_id == sid]
+        self.cancel_label.setText("<br>".join(links))
+        self.cancel_label.setVisible(bool(links))
+
+    def cancel_links(self) -> List[str]:
+        """The Cancel links shown now (``cancel:<ident>``), in order."""
+        return re.findall(r'href="(cancel:\d+)"', self.cancel_label.text())
+
+    def _on_cancel_link(self, href: str) -> None:
+        if href.startswith("cancel:"):
+            try:
+                self.cancel_queued(int(href.split(":", 1)[1]))
+            except ValueError:
+                pass
+
+    def cancel_queued(self, ident: int) -> bool:
+        """Take a queued send off the queue (its Cancel link): nothing was sent; the status line says so. False when
+        it is not queued (any more) - the one running cannot be called back."""
+        job = next((j for j in self._send_queue if j.ident == ident), None)
+        if job is None:
+            return False
+        self._send_queue.remove(job)
+        _log.info("Releases: queued send of %s cancelled by the owner (%d still queued)", job.candidate.title,
+                  len(self._send_queue))
+        self._send_outcomes[job.series_id] = (f"Cancelled the queued send of {job.candidate.title}: nothing was sent.",
+                                              "")
+        self._show_send_status()
+        self._update_send()
+        return True
 
     def _on_sent(self, job: SendJob, record: DownloadRecord) -> None:
         candidate = job.candidate

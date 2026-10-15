@@ -27,8 +27,8 @@ and which it has). Missing chapters past the source's last chapter only mean the
 (steady state stays quiet).
 
 **Not searched**: a series on Off, one with a download in flight (queued, sent, downloaded), and - except in a bulk
-find of explicitly selected series - one the owner marked up to date (the List's Behind override "done", which the
-wanted list keeps for parity with the List).
+find of explicitly selected series - one the owner marked up to date (the List's Behind override "done"; since
+2026-10-15 the wanted list leaves such a series out as well, so this is a second guard).
 
 **Findings.** Every pick is recorded (:meth:`FindingStore.offer`); one the owner skipped - or one sent before - is
 never offered or sent again. What a searched series no longer offers is retired (``gone``), and so are the waiting
@@ -398,8 +398,9 @@ def _folder_key(folder: Any) -> str:
 
 
 def up_to_date_folders(db) -> Set[str]:
-    """The series folders the owner marked up to date (the List's Behind override "done"): the wanted list keeps them
-    for parity with the List, but a scheduled pass or Find now never searches them (integrator, 2026-10-11)."""
+    """The series folders the owner marked up to date (the List's Behind override "done"): a scheduled pass or Find now
+    never searches them (integrator, 2026-10-11). The wanted list leaves them out too since 2026-10-15 (owner: marking
+    takes the series out of To get); this stays as a guard for a wanted list read before the mark."""
     try:
         with db.connect() as con:
             rows = con.execute("SELECT folder FROM links_cache WHERE behind_override = 'done'").fetchall()

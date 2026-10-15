@@ -226,12 +226,13 @@ def status_text(finding, state: str = "", queue_pos: int = 0) -> Tuple[str, str]
     return "Waiting", "ready"
 
 
-def mode_chip(in_force: Optional[str], default: str, library: bool = False) -> Tuple[str, str]:
-    """(a Found series header's mode chip, its tooltip): the series' own mode where it differs from the default it
-    follows (as the List's chips), else ``Default (Notify)``."""
-    if in_force in MODES and in_force != default:
-        return mode_label(in_force), f"Automatic downloads: {mode_label(in_force)} (this series' own). " \
-                                     f"{MODE_HELP[in_force]} Click to change it."
+def mode_chip(own: Optional[str], default: str, library: bool = False) -> Tuple[str, str]:
+    """(a Found series header's mode chip, its tooltip): the series' OWN mode exactly - also when it equals the default
+    (owner, 2026-10-15: "Show it exactly") - else ``Default (Notify)`` for a series that follows the default."""
+    if own in MODES:
+        same = " - the same as the default" if own == default else ""
+        return mode_label(own), f"Automatic downloads: {mode_label(own)} (this series' own{same}). " \
+                                f"{MODE_HELP[own]} Click to change it."
     where = "Settings > Library" if library else "Settings > Automation"
     return f"Default ({mode_label(default)})", f"Automatic downloads: {mode_label(default)}, {whose_default(library)} " \
                                                 f"({where}). Click to change it."

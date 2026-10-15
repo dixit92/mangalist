@@ -27,20 +27,22 @@ TODAY = {
     "wanted_text": "#5a2d91", "warn_line": "#e8c9a4", "warn_hover": "#fae4cc", "bad_fill": "#8b1d1d",
     "bad_fill_hover": "#6e1616", "bad_line": "#d9a3a3", "caution_text": "#9a5b00", "error_text": "#b71c1c",
 }
+#: Tokens added after Dark (2026-10-15): Not tracked's own badge.
+ADDED = {"untracked_bg": "#e3f2ef", "untracked_text": "#00655a"}
 
 
 def test_light_is_todays_look_exactly():
-    assert LIGHT.tokens() == TODAY
+    assert LIGHT.tokens() == {**TODAY, **ADDED}
 
 
 def test_every_token_is_in_both_palettes_as_a_colour():
-    assert set(LIGHT.tokens()) == set(DARK.tokens()) == set(TOKEN_NAMES) == set(TODAY)
+    assert set(LIGHT.tokens()) == set(DARK.tokens()) == set(TOKEN_NAMES) == set(TODAY) | set(ADDED)
     for pal in (LIGHT, DARK):
         for name, value in pal.tokens().items():
             assert re.fullmatch(r"#[0-9a-f]{6}", value), (pal.name, name, value)
     assert DARK.dark and not LIGHT.dark
     # the badge kinds the GUI asks for exist in both
-    for kind in ("ok", "warn", "bad", "info", "neutral", "quiet", "wanted"):
+    for kind in ("ok", "warn", "bad", "info", "neutral", "quiet", "wanted", "untracked"):
         assert len(LIGHT.badge(kind)) == len(DARK.badge(kind)) == 2
 
 
@@ -67,7 +69,9 @@ def test_dark_comes_from_mangapixers_theme():
     assert (DARK.background, DARK.surface_subtle, DARK.surface, DARK.raised) == (
         "#121212", "#14141c", "#1c1c26", "#2a2a36")
     assert (DARK.text, DARK.text_2, DARK.muted) == ("#e6e6ee", "#c8c8d4", "#9a9aa8")
-    assert (DARK.accent, DARK.accent_fill) == ("#9ecaff", "#0075c4")         # its blue accent
+    # its default violet accent (owner, 2026-10-15), not the blue Dark first shipped with
+    assert (DARK.accent, DARK.accent_fill, DARK.accent_hover) == ("#b39dff", "#7c4dff", "#d8ccff")
+    assert DARK.info_text == "#9ecaff"                                      # the info badge stays blue
     assert (DARK.ok_text, DARK.warn_text, DARK.bad_text) == ("#81c784", "#ffcc80", "#ff8a80")
     assert palette.mix("#ffffff", "#000000", 0.5) == "#808080"
 
@@ -126,3 +130,10 @@ def test_the_current_palette_starts_light_and_can_be_set():
     finally:
         palette.set_current(LIGHT)
 
+
+def test_not_tracked_has_its_own_badge_in_both_palettes():
+    for pal in (LIGHT, DARK):
+        others = {pal.badge(k) for k in ("ok", "warn", "bad", "info", "neutral", "quiet", "wanted")}
+        assert pal.badge("untracked") not in others, pal.name
+        assert contrast(pal.untracked_text, pal.untracked_bg) >= 4.5, pal.name
+        assert contrast(pal.untracked_text, pal.surface) >= 4.5, pal.name

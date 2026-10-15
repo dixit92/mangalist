@@ -50,6 +50,15 @@ def win(lib):
         return w.test_answer
 
     w._ask = ask
+    w.test_into = ""
+
+    def answer_move(dialog):                    # the move confirmation (move_dialog.MoveDialog)
+        if w.test_into:
+            assert dialog.choose(w.test_into)
+        w.test_asked.append((dialog.windowTitle(), dialog.text(), dialog.move_label()))
+        return w.test_answer
+
+    w.answer_move = answer_move
     w.tell_move = lambda title, text: w.test_told.append((title, text))
     w.test_dirs = {ONGOING: ongoing, CONCLUDED: concluded}
     return w
@@ -93,7 +102,7 @@ def test_one_row_moves_after_the_confirmation_and_the_list_follows(win):
     title, text, label = win.test_asked[-1]
     assert (title, label) == (f"Move to {CONCLUDED}?", "Move 1 series")
     assert text.startswith(f"Move 1 series from {ONGOING} to {CONCLUDED}?\n\n    Amber Tide\n")
-    assert f"Into the folder: {win.test_dirs[CONCLUDED]}" in text
+    assert f"Into the folder: {win.test_dirs[CONCLUDED]} (the top of the library)" in text
     assert "Files not named by the scheme: Rename automatically" in text
     assert "Automatic downloads" not in text                                        # downloads are off here
     assert (win.test_dirs[ONGOING] / "Amber Tide").is_dir() and win.test_scans == []
@@ -146,3 +155,36 @@ def test_one_library_only_says_so(lib):
     lib.scan_synchronously(w)
     sub = submenu(_menu(w, "Lone Reed"), MOVE_MENU)
     assert texts(sub) == [NO_OTHER_LIBRARY] and not sub.actions()[0].isEnabled()
+
+
+def test_the_confirmation_lets_the_owner_choose_a_folder_inside_the_target(win):
+    """Owner, 2026-10-15: "OK default, user settable location"."""
+    shelf = win.test_dirs[CONCLUDED] / "Tide Shelf"
+    shelf.mkdir()
+    win.test_into = "Tide Shelf"
+    _menu(win, "Amber Tide", pick=CONCLUDED)
+    title, text, label = win.test_asked[-1]
+    assert label == "Move 1 series" and text.startswith(f"Move 1 series from {ONGOING} to {CONCLUDED} / Tide Shelf?")
+    assert f"Into the folder: {shelf}" in text
+    assert (shelf / "Amber Tide" / "Amber Tide v01.cbz").is_file() and not (win.test_dirs[ONGOING] / "Amber Tide").exists()
+    assert _library_of(win, "Amber Tide") == CONCLUDED                              # a subseries of "Tide Shelf"
+
+
+def test_the_dialog_rechecks_each_folder_and_offers_only_what_can_move(win, qapp):
+    from mangalist import library_move
+    from mangalist.gui.move_dialog import MoveDialog, top_text
+
+    (win.test_dirs[CONCLUDED] / "Tide Shelf" / "Amber Tide").mkdir(parents=True)      # taken inside that folder
+    root = next(r for r in win._roots() if r.name == CONCLUDED)
+    folder = str(win.test_dirs[ONGOING] / "Amber Tide")
+    check = library_move.check_move(win._db, [(folder, "Amber Tide")], root.id)
+    dialog = MoveDialog(win._db, check, show_modes=False)
+    combo = dialog.into_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == [top_text(root), "Iron Petals", "Tide Shelf"]
+    assert dialog.btn_cancel.isDefault() and dialog.btn_move.isEnabled() and dialog.move_label() == "Move 1 series"
+    assert dialog.choose("Tide Shelf") and not dialog.btn_move.isEnabled()
+    assert "already has a folder named 'Amber Tide'" in dialog.text()
+    assert dialog.ask(lambda d: True) is None                                        # nothing can move there
+    assert dialog.choose("") and dialog.btn_move.isEnabled()
+    assert dialog.ask(lambda d: True).into == "" and dialog.ask(lambda d: False) is None
+    assert not dialog.choose("Nowhere")

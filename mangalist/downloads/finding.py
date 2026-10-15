@@ -32,6 +32,7 @@ except the quick ones; see :mod:`mangalist.gui.downloads_backend` for the table)
     skip_finding(finding_id) -> None                   # quick
     series_modes(series_ids) -> Dict[int, str]         # quick: the mode in force
     own_series_mode(series_id) -> Optional[str]         # quick: None = follows the default
+    own_series_modes(series_ids) -> {id: mode or None}  # quick, optional: the own modes in one read (Found's chips)
     set_series_mode(series_ids, mode_or_None) -> None   # quick
     default_mode() -> str / set_default_mode(mode)      # quick
     default_for(series_id) -> (mode, from_library)      # quick, optional (schema 8: a library's default mode)

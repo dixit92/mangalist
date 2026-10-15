@@ -130,6 +130,15 @@ class FindingStore:
         value = row["auto_mode"] if row is not None else None
         return value if value in AUTO_MODES else None
 
+    def own_modes(self, series_ids: Iterable[int]) -> Dict[int, Optional[str]]:
+        """series id -> its own mode (None when it follows a default), for many series in one read (the Found list's
+        header chips show each series' own mode exactly; 2026-10-15)."""
+        ids = sorted(set(int(i) for i in series_ids))
+        with self.store.connect() as con:
+            rows = [r for chunk in _chunks(ids) for r in con.execute(
+                f"SELECT id, auto_mode FROM series WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall()]
+        return {r["id"]: (r["auto_mode"] if r["auto_mode"] in AUTO_MODES else None) for r in rows}
+
     def mode(self, series_id: int) -> str:
         """The mode in force for the series: its own, else its library's, else the default setting."""
         return self.own_mode(series_id) or self.default_for(series_id)[0]

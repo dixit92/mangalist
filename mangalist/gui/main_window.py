@@ -2294,12 +2294,13 @@ class MainWindow(QMainWindow):
                 held.add(loc[0])
         return [(r.id, r.name, r.path) for r in roots if not (len(held) == 1 and r.id in held)]
 
-    def confirm_move(self, check) -> bool:
-        """Ask before a move to library (tests answer for the owner by replacing this on the window)."""
-        from ..library_move import confirm_text
+    def confirm_move(self, check):
+        """Ask before a move to library, with the folder inside the target library the series go into (its top by
+        default; :mod:`.move_dialog`). The check to move, None for Cancel (tests answer with ``answer_move``)."""
+        from .move_dialog import MoveDialog
 
-        title, text, label = confirm_text(check, show_modes=self._auto_modes is not None)
-        return self._ask(title, text, label)
+        dialog = MoveDialog(self._db, check, show_modes=self._auto_modes is not None, parent=self)
+        return dialog.ask(getattr(self, "answer_move", None))
 
     def confirm_undo_move(self, record) -> bool:
         return self._ask("Undo the last move?", f"Move {record.count} series back from {record.target_name} to "
@@ -2336,7 +2337,8 @@ class MainWindow(QMainWindow):
             lines = library_move.refused_lines(check) or [f"{t} - already in {check.target.name}" for t in check.already]
             self.tell_move(f"Not moved to {check.target.name}", "Nothing can move:\n\n" + "\n".join(lines))
             return f"Move to library: nothing moved ({len(lines)} refused)."
-        if not self.confirm_move(check):
+        check = self.confirm_move(check)
+        if check is None:
             return ""
         result = library_move.move_series(self._db, check)
         return self._after_library_move(result)

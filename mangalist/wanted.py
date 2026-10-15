@@ -198,22 +198,39 @@ def series_wanted(entry: MangaEntry, state: Optional[SeriesState], knowledge: Op
                   held: Sequence[str], series_id: Optional[int], *, downloads: bool = True) -> List[WantedSeries]:
     """What one series adds to "To get" (nothing without gaps). With *downloads* on, volumes and upgrades are
     findable by the nyaa rule (:func:`~mangalist.gui.volumes_target.find_volumes_availability`); off: "downloads are
-    off"."""
+    off".
+
+    A series the owner marked up to date (the List's Behind override "done") adds nothing either (owner, 2026-10-15:
+    "Mark Behind as up to date" also takes the series out of To get) - the List still shows its gaps, and clearing the
+    override in the List brings it back."""
     if entry is None or state is None or not state.gaps:
         return []
+    if getattr(entry, "behind_override", None) == "done":
+        return []
     volumes = None
+    by_hand = False
     if knowledge is not None and knowledge.edition_label and state.missing_volumes:
         # A declared edition's volumes are numbered by that edition, nyaa's releases mostly by the regular one: a
-        # search would take regular volume 3 for the edition's volume 3. Shown in To get, never searched (nor by the
-        # find pass).
+        # search would take regular volume 3 for the edition's volume 3. Shown in To get, never searched automatically
+        # (nor by the find pass or a bulk search) - but the owner may search by hand in the Download tab and judge the
+        # releases himself (owner, 2026-10-15: "Allow a search by hand in the Download tab?" - "Yes").
         volumes = Availability(False, f"{knowledge.edition_label}: nyaa releases are matched by volume number, and "
-                                      "this edition numbers its volumes its own way - not searched")
+                                      "this edition numbers its volumes its own way - not searched automatically")
+        by_hand = downloads
     elif downloads and (state.missing_volumes or state.upgrade_volumes):
         volumes = find_volumes_availability(series_id=series_id, folder=str(entry.folder), title=entry.title,
                                             english_title=entry.english_title, knowledge=knowledge, state=state,
                                             held=held)
-    return wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title, state=state,
-                         knowledge=knowledge, held=held, series_id=series_id, volumes=volumes)
+    items = wanted_series(folder=str(entry.folder), title=entry.title, english_title=entry.english_title, state=state,
+                          knowledge=knowledge, held=held, series_id=series_id, volumes=volumes)
+    if by_hand:
+        from dataclasses import replace
+
+        from .gui.shell import GROUP_UPGRADES, GROUP_VOLUMES
+
+        items = [replace(w, by_hand=True) if w.group in (GROUP_VOLUMES, GROUP_UPGRADES) and not w.findable else w
+                 for w in items]
+    return items
 
 
 # --- the series from the database --------------------------------------------------------------------------------

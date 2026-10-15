@@ -414,8 +414,10 @@ def test_the_trigger_is_checked(db, w):
 def test_backend_modes_and_findings(db, w):
     b = w.backend
     assert b.default_mode() == "notify" and b.own_series_mode(w.series_id) is None
+    assert b.own_series_modes([w.series_id]) == {w.series_id: None}
     b.set_series_mode([w.series_id], "auto")
     assert b.series_modes([w.series_id]) == {w.series_id: "auto"} and b.own_series_mode(w.series_id) == "auto"
+    assert b.own_series_modes([w.series_id, 987654]) == {w.series_id: "auto"}        # one read; unknown ids left out
     b.set_default_mode("off")
     b.set_series_mode([w.series_id], None)
     assert b.series_modes([w.series_id]) == {w.series_id: "off"}

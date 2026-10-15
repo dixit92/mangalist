@@ -144,3 +144,32 @@ def test_the_list_is_logged_without_titles(lib, caplog):
     line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Wanted list:"))
     assert "series with gaps" in line and "Example Quest" not in line
 
+
+
+def test_a_series_marked_up_to_date_is_not_in_to_get(lib):
+    """Owner, 2026-10-15: Mark Behind as up to date also takes the series out of To get (the List keeps its gaps)."""
+    views = {str(v.entry.folder): v for v in wanted.library_states(lib.db, today=TODAY)}
+    done = views[lib.folder("Manga/Behind Done")]
+    assert done.state.gaps and done.entry.behind_override == "done"           # the List still shows the gaps
+    got = _keyed(lib, wanted.wanted_list(lib.db, today=TODAY))
+    assert not any(k[0] == "Manga/Behind Done" for k in got)
+    done.entry.behind_override = None                                         # cleared: it comes back
+    assert wanted.series_wanted(done.entry, done.state, done.knowledge, done.held, done.row.id)
+
+
+def test_a_declared_editions_volumes_are_offered_by_hand_only(lib, monkeypatch):
+    """Owner, 2026-10-15: never searched automatically, but searchable by hand in the Download tab (``by_hand``)."""
+    from dataclasses import replace
+    from decimal import Decimal
+
+    views = {str(v.entry.folder): v for v in wanted.library_states(lib.db, today=TODAY)}
+    v = views[lib.folder("Manga/Example Quest")]
+    edition = replace(v.knowledge, edition="master", edition_volumes=Decimal(6))
+    assert edition.edition_label == "Master edition"
+    items = wanted.series_wanted(v.entry, v.state, edition, v.held, v.row.id)
+    vols = next(w for w in items if w.group == "volumes")
+    assert not vols.findable and vols.by_hand and vols.reason.endswith("not searched automatically")
+    off = wanted.series_wanted(v.entry, v.state, edition, v.held, v.row.id, downloads=False)
+    assert not any(w.by_hand for w in off)                                     # downloads off: nothing by hand
+    plain = wanted.series_wanted(v.entry, v.state, v.knowledge, v.held, v.row.id)
+    assert not any(w.by_hand for w in plain)

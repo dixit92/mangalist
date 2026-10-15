@@ -557,3 +557,25 @@ def test_stop_drops_the_queued_sends_and_says_so_in_the_log(qapp, caplog):
     for _ in range(20):
         qapp.processEvents()
     assert backend.started == [(7, "a" * 40)] and panel.sent_records == []
+
+
+def test_a_queued_send_can_be_cancelled_from_its_link(qapp):
+    """Owner, 2026-10-15: a "Cancel" link in the status line takes a queued send off the queue."""
+    backend, panel = two_series(qapp)
+    assert panel.send_selected()                                                # series B's release: queued
+    assert panel.cancel_links() == [f"cancel:{panel.queued_sends()[0].ident}"]
+    assert "Cancel</a> the queued send (1st): Other Series v01-02 (Digital) (Group)" in panel.cancel_label.text()
+    assert not panel.cancel_label.isHidden()
+    show(qapp, panel, {}, [RELEASE_A, RELEASE_A2])                              # series A: its send runs - no link
+    assert panel.cancel_links() == [] and panel.cancel_label.isHidden()
+    show(qapp, panel, OTHER, [RELEASE_B])
+    panel.cancel_label.linkActivated.emit(panel.cancel_links()[0])               # the owner clicks Cancel
+    assert panel.queued_sends() == [] and panel.cancel_links() == []
+    assert panel.status_label.text() == ("Cancelled the queued send of Other Series v01-02 (Digital) (Group): nothing "
+                                         "was sent.")
+    assert panel.send_blocker() is None                                         # it can be sent again
+    assert not panel.cancel_queued(12345)
+    backend.gates["a" * 40].set()
+    wait_until(qapp, lambda: len(panel.sent_records) == 1)
+    qapp.processEvents()
+    assert backend.started == [(7, "a" * 40)]                                   # the cancelled one never went

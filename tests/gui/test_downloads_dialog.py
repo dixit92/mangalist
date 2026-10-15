@@ -197,3 +197,68 @@ def test_a_record_whose_series_was_forgotten_does_not_stop_the_list(qapp):
     wait_until(qapp, lambda: dlg.records)
     names = sorted(dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount()))
     assert names == ["(series no longer in the library)", "Folder 7"]
+
+
+def _menu_on(dlg, row, pick=None):
+    """Open the row menu of *row*; returns {entry: enabled} (None: no menu) and picks *pick*."""
+    seen = []
+
+    def answer(menu, pos):
+        acts = {a.text(): a for a in menu.actions()}
+        seen.append({t: a.isEnabled() for t, a in acts.items()})
+        return acts.get(pick) if pick else None
+    dlg._exec_menu = answer
+    dlg._on_context_menu(dlg.table.visualItemRect(dlg.table.item(row, 0)).center())
+    return seen[0] if seen else None
+
+
+def test_a_failed_torrent_row_can_be_dismissed(qapp):
+    """Owner, 2026-10-15: "Dismiss" on failed rows - marked cancelled, out of In progress."""
+    backend = FakeBackend(records=[record(1, status=S.FAILED, error="already in the folder"), record(2, status=S.SENT)])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 2)
+    assert _menu_on(dlg, 0) == {"Remove now…": False}                         # a running one: no Dismiss
+    assert _menu_on(dlg, 1, pick="Dismiss") == {"Dismiss": True}
+    wait_until(qapp, lambda: dlg._call is None and dlg.table.rowCount() == 1)
+    assert backend.dismissed == [(1,)] and threading.get_ident() not in backend.threads
+    assert dlg.status_label.text().startswith("Dismissed: Example Series v03-05 (Series #7). It is under Show finished.")
+    dlg.toggle_finished()
+    assert dlg.table.cellWidget(1, 2).findChild(QLabel).text() == "Cancelled"
+
+
+def test_a_failed_chapter_row_dismisses_every_chapter_record_it_shows(qapp):
+    from .chapter_fakes import chapter_record
+
+    failed = [chapter_record(i, 7, str(40 + i), status=S.FAILED, error="already in the folder") for i in (1, 2, 3)]
+    other = chapter_record(4, 7, "44", status=S.FAILED, error="Suwayomi could not download it", batch="b2")
+    backend = FakeBackend(records=failed + [other])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 2)                       # one row per Send and failure
+    row = next(r for r in range(2) if "41-43" in dlg.table.item(r, 1).text())
+    assert _menu_on(dlg, row, pick="Dismiss") == {"Dismiss": True}
+    wait_until(qapp, lambda: dlg._call is None and dlg.table.rowCount() == 1)
+    assert sorted(backend.dismissed[0]) == [1, 2, 3] and backend.record_list[3].status == S.FAILED
+
+
+def test_without_dismiss_in_the_backend_a_failed_row_has_no_menu(qapp, monkeypatch):
+    monkeypatch.delattr(FakeBackend, "dismiss_downloads")
+    backend = FakeBackend(records=[record(1, status=S.FAILED, error="no space left")])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 1)
+    assert _menu_on(dlg, 0) is None and not dlg.dismiss(backend.record_list[0])
+
+
+def test_the_same_known_titles_again_rebuild_nothing(qapp, monkeypatch):
+    """A library switch sends the host's names again: unchanged, the table is not rebuilt (it cost 40-60 ms)."""
+    backend = FakeBackend(records=[record(1, status=S.SENT)])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 1)
+    built = []
+    real = dlg._show
+    monkeypatch.setattr(dlg, "_show", lambda records: built.append(1) or real(records))
+    dlg.set_known_titles({7: "Example Series"})
+    assert built == [1] and dlg.table.item(0, 0).text() == "Example Series"
+    dlg.set_known_titles({7: "Example Series"})                                 # the same names: nothing built
+    assert built == [1]
+    dlg.set_known_titles({7: "Renamed Series"})
+    assert built == [1, 1] and dlg.table.item(0, 0).text() == "Renamed Series"

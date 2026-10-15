@@ -280,3 +280,29 @@ def test_send_while_one_is_sending_queues_it_and_the_queue_runs_in_order(qapp):
     backend.send_gate.set()
     settle(qapp, tab)
     assert backend.sent_findings == [1, 3] and found.queued() == [] and found.rows == {}
+
+
+class _Host:
+    """The series host's folder lookup (the main window's ``folder_for_series``)."""
+
+    def __init__(self, folders):
+        self.folders = folders
+
+    def folder_for_series(self, series_id):
+        return self.folders.get(series_id)
+
+
+def test_a_found_series_with_no_gaps_any_more_is_named_not_numbered(qapp):
+    """Owner, 2026-10-15: "Series #N" -> its real name: the backend's name, else its folder as the List knows it."""
+    backend = FakeFindingBackend(found=FOUND + [finding(4, series_id=8, fills=("6",), title="Delta Shore v06"),
+                                                finding(5, series_id=9, fills=("1",), title="Echo Vale v01"),
+                                                finding(6, series_id=10, fills=("1",), title="Unknown v01")],
+                                 last_run=find_run())
+    backend.series_titles = lambda ids: {8: "Delta Shore"} if 8 in ids else {}
+    tab, _b, _c, _a = make(qapp, backend=backend)
+    tab.set_series_host(_Host({9: "/lib/Echo Vale [Echo Valley]"}))
+    tab.set_wanted(WANTED)                                               # 8, 9 and 10 are not in To get
+    tab.show_group(GROUP_FOUND)
+    names = [tab.tree.topLevelItem(i).text(0) for i in range(1, tab.tree.topLevelItemCount())]
+    assert names == ["Alpha Saga", "Beta Days", "Delta Shore", "Echo Vale", "Gamma Webcomic", "Series #10"]
+    assert tab.found.headers()[9].name == "Echo Vale" and tab.found.headers()[8].name == "Delta Shore"
