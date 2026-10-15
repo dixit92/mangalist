@@ -19,7 +19,7 @@ from mangalist.gui.download_tab import GROUP_FOUND  # noqa: E402
 from mangalist.gui.table_model import COL_TITLE, MangaTableModel  # noqa: E402
 from mangalist.states import State  # noqa: E402
 
-from ..gui.conftest import qapp  # noqa: E402,F401
+from ..gui.conftest import qapp, wait_until  # noqa: E402,F401
 from ..gui.finding_fakes import FakeFindingBackend, find_run  # noqa: E402
 from ..gui.test_dark_mode import themed  # noqa: E402,F401
 from ..gui.test_auto_modes_window import _sync  # noqa: E402
@@ -120,7 +120,9 @@ def test_typing_filters_once_after_the_last_key(win):
     win._proxy.set_text_filter = lambda text: applied.append(text) or original(text)
     QTest.keyClicks(win._filter_edit, "amb")
     assert applied == [] and win._proxy.rowCount() == N_SERIES                 # not on every key
-    QTest.qWait(win._FILTER_DELAY_MS + 100)
+    # waits for the debounce itself, not a fixed time (a slow CI runner fired it after the fixed wait)
+    wait_until(QApplication.instance(), lambda: bool(applied))
+    QTest.qWait(win._FILTER_DELAY_MS)                                           # and nothing more follows
     assert applied == ["amb"] and 0 < win._proxy.rowCount() < N_SERIES
     win._filter_edit.clear()                                                    # clearing applies at once
     assert applied[-1] == "" and win._proxy.rowCount() == N_SERIES
@@ -325,7 +327,8 @@ def test_a_splitter_drag_is_saved_once_it_stops(win, monkeypatch):
     for pos in (500, 510, 520, 530):
         win._list.splitter.splitterMoved.emit(pos, 1)
     assert saved == []
-    QTest.qWait(win._SAVE_DELAY_MS + 150)
+    wait_until(QApplication.instance(), lambda: bool(saved))                   # the debounce, however slow the runner
+    QTest.qWait(win._SAVE_DELAY_MS)                                             # and no second save follows
     assert saved == [{win._CFG_SPLITTER: win._list.splitter.sizes()}]          # that key alone, once
 
 
