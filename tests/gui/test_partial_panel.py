@@ -15,7 +15,7 @@ from mangalist.downloads.partial import PackOutcome, PackSelection, choose_files
 from mangalist.gui import releases_panel  # noqa: E402
 from mangalist.gui.releases_panel import ReleasesPanel  # noqa: E402
 
-from .conftest import FakeBackend, candidate, qapp, record, target, wait_until  # noqa: E402,F401
+from .conftest import BackendError, FakeBackend, candidate, qapp, record, target, wait_until  # noqa: E402,F401
 
 MB = 1024 * 1024
 ROOT = "Example Series v01-08 (Digital)"
@@ -418,3 +418,142 @@ def test_a_torrent_no_longer_in_qbittorrent_is_not_mentioned(qapp):
     panel.open_target(target())
     wait_until(qapp, lambda: panel._search_state == "done" and panel._placement is not None)
     assert not panel.downloads_label.isVisibleTo(panel) and panel.downloads_label.text() == ""
+
+
+# --- queued sends (owner, 2026-10-15: "It should be queued.") -------------------------------------------------------
+
+OTHER = dict(series_id=8, folder="/lib/Other Series", title="Other Series", titles=("Other Series",),
+             missing=("1", "2"), held=())
+
+
+class GatedBackend(PartialBackend):
+    """A backend whose ``send`` of a release waits until its gate is set (so a test can send while another runs); it
+    remembers the order the sends started in and can fail one."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.gates = {}                                 # info hash -> threading.Event its send waits for
+        self.started = []
+        self.fail = {}                                  # info hash -> the error its send raises
+
+    def send(self, series_id, cand, wanted_volumes, target_dir, **kw):
+        self.started.append((series_id, cand.info_hash))
+        gate = self.gates.get(cand.info_hash)
+        if gate is not None:
+            gate.wait(10)
+        if cand.info_hash in self.fail:
+            raise BackendError(self.fail[cand.info_hash])
+        return super().send(series_id, cand, wanted_volumes, target_dir, **kw)
+
+RELEASE_A = candidate(info_hash="a" * 40)
+RELEASE_A2 = candidate("Example Series v09 (Digital) (Group)", info_hash="d" * 40, vol_from="9", vol_to="9",
+                       covers_missing=("9",))
+RELEASE_B = candidate("Other Series v01-02 (Digital) (Group)", info_hash="b" * 40, vol_from="1", vol_to="2",
+                      covers_missing=("1", "2"))
+
+
+def show(qapp, panel, which, results):
+    """Switch the (managed) panel to a series, as the Download tab does when its search is done."""
+    tgt = target(**which)
+    placement = releases_panel.Placement(tgt.folder, tgt.folder, "volumes live in the series folder")
+    panel.show_outcome(releases_panel.SearchOutcome(tgt, placement, None, list(results)))
+    wait_until(qapp, lambda: panel.pack_state() not in ("waiting", "reading"))
+
+
+def two_series(qapp):
+    """Series A's release is being sent (held at its gate); the panel then shows series B."""
+    backend = GatedBackend()
+    backend.gates = {"a" * 40: threading.Event(), "d" * 40: threading.Event(), "b" * 40: threading.Event()}
+    panel = ReleasesPanel(backend, confirm=lambda p, t: True, managed=True)
+    show(qapp, panel, {}, [RELEASE_A, RELEASE_A2])
+    assert panel.send_selected()
+    wait_until(qapp, lambda: backend.started == [(7, "a" * 40)])
+    show(qapp, panel, OTHER, [RELEASE_B])
+    return backend, panel
+
+
+def test_a_send_while_another_runs_is_queued_and_sent_after_it_as_clicked(qapp):
+    backend, panel = two_series(qapp)
+    emitted = []
+    panel.sent.connect(emitted.append)
+    assert panel.send_blocker() is None and panel.btn_send.isEnabled()          # no waiting for series A's send
+    assert "after the send before it" in panel.btn_send.toolTip()
+    assert panel.send_selected()                                                # queued, not refused
+    assert [j.candidate.info_hash for j in panel.queued_sends()] == ["b" * 40]
+    assert panel.status_label.text() == ("Queued to send (1st): Other Series v01-02 (Digital) (Group) - MangaList "
+                                         "sends it after the one before it.")
+    qapp.processEvents()
+    assert backend.started == [(7, "a" * 40)]                                   # one send at a time
+    backend.gates["b" * 40].set()
+    backend.gates["a" * 40].set()
+    wait_until(qapp, lambda: len(panel.sent_records) == 2)
+    assert backend.started == [(7, "a" * 40), (8, "b" * 40)]
+    assert backend.sent[1] == (8, "b" * 40, ("1", "2"), "/lib/Other Series")    # what was chosen at the click
+    assert backend.send_kwargs[1] == {"only_missing": True}
+    assert [r.series_id for r in emitted] == [7, 8] and panel.queued_sends() == []
+    assert panel.status_label.text().startswith("Sent to qBittorrent: Other Series v01-02 (Digital) (Group).")
+
+
+def test_each_series_shows_its_own_send_status(qapp):
+    backend, panel = two_series(qapp)
+    assert panel.status_label.text() == ""                                     # not series A's "Sending..."
+    panel.send_selected()
+    show(qapp, panel, {}, [RELEASE_A, RELEASE_A2])
+    assert panel.status_label.text() == ("Sending to qBittorrent: Example Series v03-05 (Digital) (Group)... "
+                                         "(1 more queued)")
+    show(qapp, panel, OTHER, [RELEASE_B])
+    assert panel.status_label.text().startswith("Queued to send (1st): Other Series")
+    backend.gates["a" * 40].set()
+    wait_until(qapp, lambda: len(panel.sent_records) == 1)
+    assert panel.status_label.text().startswith("Sending to qBittorrent: Other Series v01-02")
+    show(qapp, panel, {}, [RELEASE_A, RELEASE_A2])
+    assert panel.status_label.text().startswith("Sent to qBittorrent: Example Series v03-05 (Digital) (Group).")
+    assert panel.status_label.property("tone") == "ok"
+    backend.gates["b" * 40].set()
+    wait_until(qapp, lambda: len(panel.sent_records) == 2)
+
+
+def test_a_queued_release_is_not_queued_twice(qapp):
+    backend, panel = two_series(qapp)
+    show(qapp, panel, {}, [RELEASE_A, RELEASE_A2])
+    assert panel.send_blocker() == "This release is being sent to qBittorrent now."
+    panel.table.selectRow(1)
+    wait_until(qapp, lambda: panel.pack_state() not in ("waiting", "reading"))
+    assert panel.send_selected()
+    assert panel.send_blocker() == "This release is already queued to send; it is not queued twice."
+    assert not panel.btn_send.isEnabled() and not panel.send_selected()
+    assert len(panel.queued_sends()) == 1
+    assert "Queued to send (1st): Example Series v09 (Digital) (Group)" in panel.status_label.text()
+    for gate in backend.gates.values():
+        gate.set()
+    wait_until(qapp, lambda: len(panel.sent_records) == 2)
+    assert panel.send_blocker() == "This release was already sent."             # as before
+
+
+def test_a_failed_send_does_not_stop_the_queue(qapp):
+    backend, panel = two_series(qapp)
+    backend.fail["a" * 40] = "qBittorrent refused the login"
+    panel.send_selected()
+    backend.gates["a" * 40].set()
+    backend.gates["b" * 40].set()
+    wait_until(qapp, lambda: len(panel.sent_records) == 1)
+    assert backend.started == [(7, "a" * 40), (8, "b" * 40)] and panel.sent_records[0].series_id == 8
+    show(qapp, panel, {}, [RELEASE_A, RELEASE_A2])
+    assert panel.status_label.text() == ("Could not send Example Series v03-05 (Digital) (Group): "
+                                         "qBittorrent refused the login")
+    assert panel.status_label.property("tone") == "bad"
+    assert panel.send_blocker() is None                                          # it can be sent again
+
+
+def test_stop_drops_the_queued_sends_and_says_so_in_the_log(qapp, caplog):
+    backend, panel = two_series(qapp)
+    panel.send_selected()
+    with caplog.at_level("INFO", logger="mangalist.gui.releases_panel"):
+        panel.stop()
+    assert panel.queued_sends() == [] and panel._sending is None
+    assert "1 queued send(s) dropped: Other Series v01-02 (Digital) (Group)" in caplog.text
+    backend.gates["a" * 40].set()
+    backend.gates["b" * 40].set()
+    for _ in range(20):
+        qapp.processEvents()
+    assert backend.started == [(7, "a" * 40)] and panel.sent_records == []

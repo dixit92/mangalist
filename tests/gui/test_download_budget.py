@@ -315,3 +315,30 @@ def test_the_cap_in_settings(qapp, db):
         again.deleteLater()
     finally:
         page.deleteLater()
+
+
+def test_a_queued_send_asks_the_budget_question_at_the_click_and_keeps_the_answer(qapp):
+    import threading
+    gate = threading.Event()
+
+    class Gated(BudgetBackend):
+        def send(self, series_id, cand, wanted_volumes, target_dir, **kw):
+            if cand.info_hash == "a" * 40:
+                gate.wait(10)
+            return super().send(series_id, cand, wanted_volumes, target_dir, **kw)
+
+    second = dataclasses.replace(big(5), title="Example Series v09 (Digital) (Group)", info_hash="d" * 40,
+                                 vol_from="9", vol_to="9", covers_missing=("9",))
+    backend = Gated(results=[big(1), second], records=[sized(record(9, series_id=8, status=S.FILED), 48 * GB)])
+    panel = open_panel(qapp, backend, choice="send")
+    assert panel.send_selected()                                    # 1 GB fits: the usual confirmation
+    panel.table.selectRow(1)
+    wait_until(qapp, lambda: panel.pack_state() not in ("waiting", "reading"))
+    if panel.partial_check.isEnabled():
+        panel.partial_check.setChecked(False)
+    assert panel.send_selected()                                    # 5 GB: the question, asked now
+    assert [kind for kind, _ in panel.asked] == ["over"] and len(panel.queued_sends()) == 1
+    gate.set()
+    wait_until(qapp, lambda: len(panel.sent_records) == 2)
+    assert backend.send_kwargs[1] == {"size_bytes": 5 * GB, "over_cap": "send"}      # the answer given at the click
+    assert [kind for kind, _ in panel.asked] == ["over"]            # nothing asked again when its turn came
