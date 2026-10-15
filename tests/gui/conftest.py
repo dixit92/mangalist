@@ -34,6 +34,14 @@ def wait_until(qapp, predicate, timeout: float = 10.0) -> None:
     qapp.processEvents()
 
 
+def settle_states(win, timeout: float = 10.0) -> None:
+    """Wait until the window's background has computed every row's state and the counts and To get followed (UI
+    performance stage 2: with the real runner, the states are pushed from a worker thread)."""
+    from PySide6.QtWidgets import QApplication
+
+    wait_until(QApplication.instance(), lambda: not win._model.states_pending() and win._states_call is None, timeout)
+
+
 def candidate(title="Example Series v03-05 (Digital) (Group)", *, info_hash="a" * 40, vol_from="3", vol_to="5",
               covers_missing=("3", "4", "5"), covers_held=(), digital=True, group="Group", seeders=12, trusted=True,
               not_comic=False, is_pack=None, reasons=("Digital release", "Covers 3 missing volumes")) -> NyaaCandidate:

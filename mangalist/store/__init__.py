@@ -93,4 +93,6 @@ def get_store(path: Optional[Path] = None) -> Store:
 def reset_stores() -> None:
     """Forget the shared stores (tests; a changed data folder)."""
     with _stores_lock:
+        for st in _stores.values():
+            st.release_ui_connection()
         _stores.clear()

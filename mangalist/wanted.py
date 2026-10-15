@@ -16,8 +16,10 @@ changed since the last scan is read at the next one (the same as the List). Cost
 archives on the dev box, half of it ``pathlib`` in the inventory and the restart rule (shared with the window).
 
 **One implementation.** The window's state providers (``MainWindow._mp_item_for`` / ``_knowledge_for`` /
-``_inventory_for``), the table model's ``_evaluate`` and the window's ``_rebuild_wanted`` loop call the functions below;
-the window keeps its own caching. What the window has that the database does not: the rename counts (they only set the
+``_inventory_for``), the table model's ``_compute`` and the window's To get entries call the functions below; the window
+keeps its own caching. Since UI performance stage 2 the window computes them off the UI thread (the states' worker:
+:func:`evaluate`, :func:`inventory_of`, :func:`series_wanted` per series, as :func:`library_states` composes them), and
+its Rename-pending count runs in a subprocess over :func:`entries_from_db` - the series as the last scan recorded them. What the window has that the database does not: the rename counts (they only set the
 Rename pending flag, never a gap) and the table's unsaved edits (none touch the state: overrides, links and kind answers
 are saved at once).
 """

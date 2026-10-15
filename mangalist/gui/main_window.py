@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, mu_cache, store, wanted
+from .. import config, mu_cache, process_pool, store, wanted
 from .._version import __version__
 from ..models import MangaEntry
 from ..scanner import (
@@ -252,11 +252,23 @@ class _SortProxy(QSortFilterProxyModel):
         if self._needle and self._needle not in source_model.search_text(source_row):
             return False
         if self._state_filter is not None:
-            if not state_matches(source_model.state_at(source_row), self._state_filter):
+            # the state the row shows (never computed here: a state still being computed shows the one before)
+            if not state_matches(source_model.shown_state_at(source_row), self._state_filter):
                 return False
         if self._dupes_only:
             return source_model.is_duplicate(source_row)
         return True
+
+    def lessThan(self, left, right) -> bool:
+        """Compare the rows' sort keys, kept per row by the model (``MangaTableModel.sort_key``: the value
+        ``data(UserRole)`` gives, compared as Qt compares it) - one Python call per comparison instead of two
+        ``data()`` calls, each through the whole role dispatch (a sort of 700 rows: ~300 ms -> tens of ms)."""
+        model = self.sourceModel()
+        key = getattr(model, "sort_key", None)
+        if key is None:
+            return super().lessThan(left, right)
+        col = left.column()
+        return key(left.row(), col) < key(right.row(), col)
 
 
 def _when(moment: Optional[datetime.datetime]) -> str:
@@ -318,6 +330,7 @@ class MainWindow(QMainWindow):
 
         self._cfg = config.load()
         self._db = store.get_store()
+        self._db.keep_ui_connection = True          # one connection for this thread's reads and writes (store/db.py)
         self._recover_journal()
         try:        # the Renamer window's rescans read what it renamed from the journal (both sides) since here
             self._journal_seen = journal_mark(self._db)
@@ -384,6 +397,18 @@ class MainWindow(QMainWindow):
         from .background import start_call as _start_call
 
         self._background = _start_call
+        # The series' states off the UI thread (UI performance stage 2): with a background runner the table never
+        # computes a state while painting, filtering, sorting or counting - a worker computes the rows without one and
+        # pushes them in one step (_request_states). A synchronous runner (tests) keeps computing them on first use.
+        self._states_runner = _start_call
+        self._states_call = None
+        self._model.deferred = bool(getattr(_start_call, "threaded", False))
+        self._model.states_wanted.connect(self._request_states, Qt.ConnectionType.QueuedConnection)
+        # Long counts in a subprocess (Rename pending, duplicates; mangalist.process_pool) - with the real runners only
+        # (a test's synchronous runner keeps them in this process).
+        from .background import start_process_call
+
+        self._process_runner = start_process_call
         self._build_ui()
 
         # Debounce timers so rapid column-resize / column-move / splitter events don't thrash config I/O.
@@ -502,7 +527,8 @@ class MainWindow(QMainWindow):
         self._derived_timer.setSingleShot(True)
         self._derived_timer.setInterval(300)
         self._derived_timer.timeout.connect(self._refresh_derived)
-        for sig in (self._model.modelReset, self._model.dataChanged, self._model.layoutChanged):
+        for sig in (self._model.modelReset, self._model.dataChanged, self._model.layoutChanged,
+                    self._model.rowsInserted, self._model.rowsRemoved):
             sig.connect(lambda *_a: self._derived_timer.start())
 
         QShortcut(QKeySequence.StandardKey.Find, self, activated=self._focus_search)
@@ -513,6 +539,9 @@ class MainWindow(QMainWindow):
         if sel is not None:
             sel.selectionChanged.connect(self._on_row_changed)
         self._model.modelReset.connect(self._on_row_changed)     # a reset drops the selection without a signal
+        # a library's rows replaced (set_entries inserts and removes only what changed): the details follow too
+        self._model.rowsInserted.connect(self._on_row_changed)
+        self._model.rowsRemoved.connect(self._on_row_changed)
 
         # Restore or apply default column order, then apply visibility.
         self._restore_column_state()
@@ -680,6 +709,77 @@ class MainWindow(QMainWindow):
                           can_add=True)
         lst.show_page(PAGE_EMPTY)
 
+    # --- The series' states, computed off the UI thread (UI performance stage 2) ----------------------------------
+
+    def _request_states(self) -> None:
+        """Compute the states of the rows without one in the background (one computation at a time; the rows that
+        lose their state meanwhile follow when it is in). The result is pushed in one step (_on_states_computed)."""
+        if not self._model.deferred or self._states_call is not None:
+            return
+        request = self._model.take_states_request()
+        if not request:
+            return
+        token = object()
+        self._states_call = token
+        call = self._states_runner(lambda: self._compute_states(request), self._on_states_computed,
+                                   lambda message: self._on_states_failed(request, message),
+                                   self._on_states_finished)
+        if self._states_call is token:              # still running (a synchronous runner has finished already)
+            self._states_call = call
+
+    def _compute_states(self, request):
+        """Off the UI thread: the states of *request* (the table model's providers - the same functions the headless
+        runner's :func:`mangalist.wanted.library_states` uses), and what each series with gaps adds to the Download
+        tab's "To get" (its series id read in one query for all of them)."""
+        computed = self._model.compute_states(request)
+        return computed, self._wanted_of(computed)
+
+    def _wanted_of(self, computed) -> list:
+        """``(entry, state, series id, its To get entries)`` for the series of *computed* with gaps (any thread)."""
+        if self._download_tab is None:
+            return []
+        gaps = [(e, result) for e, _generation, result in computed if result is not None and result[0].gaps]
+        if not gaps:
+            return []
+        downloads = self._volumes is not None
+        ids = self._volumes.series_ids_for([e for e, _result in gaps]) if downloads else {}
+        out = []
+        for e, (st, _links, knowledge) in gaps:
+            series_id = ids.get(str(e.folder)) if downloads else None
+            out.append((e, st, series_id, wanted.series_wanted(e, st, knowledge, self._model.held_volumes_of(e),
+                                                               series_id, downloads=downloads)))
+        return out
+
+    def _on_states_computed(self, result) -> None:
+        computed, wanted_items = result
+        self._model.push_states(computed)
+        model = self._model
+        for e, st, series_id, items in wanted_items:
+            if model.ready_state_of(e) is st:     # the state pushed (not one replaced meanwhile)
+                self._wanted_cache[id(e)] = (e, st, series_id, items)
+        self._derived_timer.stop()              # the push's own dataChanged: the counts and To get follow now
+        self._refresh_derived()
+
+    def _stop_states(self, wait_ms: int = 5000) -> None:
+        """The window closes: drop a states computation in flight and let its thread end (a running thread destroyed at
+        exit aborts the process)."""
+        self._model.deferred = False
+        call, self._states_call = self._states_call, None
+        if call is not None and hasattr(call, "abandon"):
+            call.abandon()
+            if hasattr(call, "wait"):
+                call.wait(wait_ms)
+
+    def _on_states_failed(self, request, message: str) -> None:
+        _log.warning("Computing the series' states in the background failed (%s); they are computed when shown",
+                     message)
+        self._model.abandon_states(request)
+
+    def _on_states_finished(self) -> None:
+        self._states_call = None
+        if self._model.states_pending():
+            self._request_states()
+
     def _refresh_derived(self) -> None:
         """What follows the table: the chips' counts, the footer, the Download tab's list, the details' button."""
         self._update_counts()
@@ -693,17 +793,17 @@ class MainWindow(QMainWindow):
         model = self._model
         rows = model.scope_rows()       # the library picked
         n = len(rows)
-        keys = [k for k in all_filter_keys() if k is not None and k != DUPLICATES]
+        keys = tuple(k for k in all_filter_keys() if k is not None and k != DUPLICATES)
         counts: Dict[Optional[str], Optional[int]] = {None: n}
         for k in keys:
             counts[k] = 0
         for row in rows:
-            st = model.state_at(row)
+            # the state each row shows (a state still being computed counts as before; the push counts again)
+            st = model.shown_state_at(row)
             if st is None:
                 continue
-            for k in keys:
-                if state_matches(st, k):
-                    counts[k] += 1
+            for k in model.filter_matches(st, keys):
+                counts[k] += 1
         series_dupes = len(model.duplicate_series())
         counts[DUPLICATES] = series_dupes + self._scoped_file_groups()
         self._list.set_counts(counts)
@@ -732,7 +832,10 @@ class MainWindow(QMainWindow):
         live = {id(e) for e in model.entries()}
         for key in [k for k in cache if k not in live]:     # series no longer in the table
             del cache[key]
-        for row in model.scope_rows():          # the library picked
+        rows = model.scope_rows()               # the library picked
+        if model.states_pending(rows):
+            return                              # some states are being computed: the list follows when they are in
+        for row in rows:
             entry = model.entry_at(row)
             st = model.state_at(row)
             if entry is None or st is None or not st.gaps:
@@ -966,9 +1069,15 @@ class MainWindow(QMainWindow):
         from .background import start_call
 
         db = self._db
+        failed = lambda msg: _log.warning("Counting duplicate files failed: %s", msg)    # noqa: E731
+        if self._in_subprocess() and finder is _real_duplicate_finder():
+            # a subprocess: the count does not slow the window down (UI performance stage 2)
+            self._dupe_call = self._process_runner(process_pool.duplicate_counts, (str(db.path),),
+                                                   self._on_duplicate_files_counted, failed,
+                                                   self._on_duplicate_count_finished)
+            return
         self._dupe_call = start_call(lambda: _count_by_folder(finder(db)), self._on_duplicate_files_counted,
-                                     lambda msg: _log.warning("Counting duplicate files failed: %s", msg),
-                                     self._on_duplicate_count_finished)
+                                     failed, self._on_duplicate_count_finished)
 
     def _on_duplicate_files_counted(self, counted) -> None:
         total, per_folder = counted
@@ -1024,15 +1133,31 @@ class MainWindow(QMainWindow):
             elif self._rename_again_folders is not None:
                 self._rename_again_folders = None if want is None else self._rename_again_folders | want
             return
+        self._rename_again, self._rename_again_folders = False, None
+        counted = lambda counts: self._on_rename_counted(counts, want)                     # noqa: E731
+        failed = lambda msg: _log.warning("Counting Rename pending failed: %s", msg)       # noqa: E731
+        if (self._in_subprocess() and self._background is self._states_runner
+                and getattr(self._make_renamer, "__func__", None) is MainWindow._make_renamer):
+            # A subprocess (UI performance stage 2): the 35-50 s count used to slow every UI action down by 40-50 %.
+            # It reads the series from the last scan's records (what this window's rows were scanned from).
+            token = object()
+            self._rename_call = token
+            call = self._process_runner(process_pool.rename_pending_counts,
+                                        (str(self._db.path), sorted(want) if want is not None else None),
+                                        counted, failed, self._on_rename_count_finished)
+            if self._rename_call is token:
+                self._rename_call = call
+            return
         entries = self._model.entries()
         if want is not None:
             entries = [e for e in entries if under_any(str(e.folder), want)]
         renamer = self._make_renamer()
-        self._rename_again, self._rename_again_folders = False, None
-        self._rename_call = self._background(lambda: renamer.pending_counts(entries),
-                                             lambda counts: self._on_rename_counted(counts, want),
-                                             lambda msg: _log.warning("Counting Rename pending failed: %s", msg),
+        self._rename_call = self._background(lambda: renamer.pending_counts(entries), counted, failed,
                                              self._on_rename_count_finished)
+
+    def _in_subprocess(self) -> bool:
+        """Do the long counts run in a subprocess (the real background runner, subprocesses not switched off)?"""
+        return bool(getattr(self._states_runner, "threaded", False)) and process_pool.enabled()
 
     def _on_rename_counted(self, counts, folders=None) -> None:
         counts = dict(counts or {})
@@ -1231,23 +1356,29 @@ class MainWindow(QMainWindow):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
         None; resolved once per scan / sync (:func:`mangalist.wanted.mangapixer_item`)."""
         key = str(entry.folder)
-        if key in self._mp_items:
-            return self._mp_items[key]
+        # Also called from the states' worker thread: the cache and the resolver are taken once, in this order (a
+        # reset - a scan, a MangaPixer sync - replaces the resolver first, then the cache), so an item read with an old
+        # resolver only ever lands in the old cache.
+        items = self._mp_items
+        if key in items:
+            return items[key]
         item = None
         if entry.root_id is not None:
             try:
-                if self._mp_resolver is None:
-                    self._mp_resolver = wanted.open_resolver(self._db)
-                if self._mp_roots_of is not self._mp_resolver:     # the roots, read and resolved once per resolver
-                    self._mp_roots = wanted.resolved_roots(self._db)
-                    self._mp_roots_of = self._mp_resolver
-                root = self._mp_roots.get(entry.root_id)
+                resolver = self._mp_resolver
+                if resolver is None:
+                    resolver = self._mp_resolver = wanted.open_resolver(self._db)
+                roots = self._mp_roots
+                if self._mp_roots_of is not resolver:      # the roots, read and resolved once per resolver
+                    roots = self._mp_roots = wanted.resolved_roots(self._db)
+                    self._mp_roots_of = resolver
+                root = roots.get(entry.root_id)
                 if root is not None:
-                    item = wanted.mangapixer_item(self._mp_resolver, entry.root_id, root[0], entry.folder,
+                    item = wanted.mangapixer_item(resolver, entry.root_id, root[0], entry.folder,
                                                   resolved_root=root[1])
             except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
                 _log.warning("MangaPixer data for %s unavailable", entry.folder, exc_info=True)
-        self._mp_items[key] = item
+        items[key] = item
         return item
 
     def _knowledge_for(self, entry: MangaEntry):
@@ -1411,8 +1542,8 @@ class MainWindow(QMainWindow):
         """What a scan's entries need before they are shown: the examined marks (moved with renamed series), the
         MangaUpdates data already cached."""
         self._reload_examined()                     # the scan may have carried marks with series
-        if self._volumes is not None:
-            self._volumes.forget_series_ids()
+        if self._volumes is not None:          # the series this scan read (and moved) are looked up again
+            self._volumes.forget_series_ids([e.folder for e in entries] + [p for pair in renamed or () for p in pair])
         if renamed:
             # A renamed series folder keeps its "examined" mark, like its MangaUpdates link.
             moved = {str(old): str(new) for old, new in renamed}
@@ -1647,6 +1778,8 @@ class MainWindow(QMainWindow):
         if changed:
             self._mp_resolver = None
             self._mp_items = {}
+            if self._volumes is not None and moved:    # their series rows moved: looked up again
+                self._volumes.forget_series_ids(list(moved) + list(moved.values()))
             self._model.forget_states(moved_entries)     # changed in place: the others keep their states
             self._model.set_entries(entries)
 
@@ -2428,8 +2561,8 @@ class MainWindow(QMainWindow):
         if entry is None:
             self._detail.set_auto_mode(None)
             return
-        self._detail.set_auto_mode(*self._auto_modes.detail(str(entry.folder)))
-        state = self._auto_modes.detail_state(str(entry.folder))
+        state = self._auto_modes.detail_state(str(entry.folder))       # read once for the line and the picker
+        self._detail.set_auto_mode(*self._auto_modes.detail_text(state))
         self._detail.set_auto_choice(*state if isinstance(state, tuple) else (None, None, False),
                                      available=isinstance(state, tuple))
 
@@ -2627,9 +2760,13 @@ class MainWindow(QMainWindow):
         if self._renamer_window is not None:
             self._renamer_window.close()
         self._derived_timer.stop()
+        self._stop_states()
         self._stop_scan()
         self._stop_mu()
         self._stop_signatures()
+        process_pool.shutdown()                     # a count still running in a subprocess is stopped
+        self._db.keep_ui_connection = False
+        self._db.release_ui_connection()
         self._cfg["window"] = {"w": self.width(), "h": self.height()}
         if self._splitter_timer.isActive():         # a drag just before closing is kept
             self._cfg[self._CFG_SPLITTER] = self._list.splitter.sizes()
@@ -2639,14 +2776,10 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def _count_by_folder(groups) -> Tuple[int, Dict[str, Tuple[int, int]]]:
-    """Lane C's duplicate groups -> (how many, per series folder (volume numbers, chapter numbers))."""
-    groups = list(groups)
-    per_folder: Dict[str, List[int]] = {}
-    for g in groups:
-        folder = getattr(g, "folder", None)
-        if folder is None:
-            continue
-        counts = per_folder.setdefault(str(folder), [0, 0])
-        counts[0 if getattr(g, "kind", "") == "volume" else 1] += 1
-    return len(groups), {k: (v[0], v[1]) for k, v in per_folder.items()}
+_count_by_folder = process_pool.count_by_folder     # (moved: the duplicate count runs in a subprocess)
+
+
+def _real_duplicate_finder():
+    from ..duplicates import find_duplicate_files
+
+    return find_duplicate_files

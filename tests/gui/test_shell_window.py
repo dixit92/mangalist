@@ -22,7 +22,7 @@ from mangalist.models import FileHit, MangaEntry  # noqa: E402
 from mangalist.states import InventorySnapshot  # noqa: E402
 
 from ..states.helpers import TODAY, item  # noqa: E402
-from .conftest import FakeBackend, qapp, wait_until  # noqa: E402,F401
+from .conftest import FakeBackend, qapp, settle_states, wait_until  # noqa: E402,F401
 
 LIB = Path("/lib")
 QUEST, TWIN_A, TWIN_B, PLAIN = "Example Quest", "Twin Series", "Twin Series (old)", "Plain Series"
@@ -113,6 +113,7 @@ def make_window(qapp, monkeypatch):
             win._on_scan_finished([_entry(QUEST), _entry(TWIN_A, mu="Twin"), _entry(TWIN_B, mu="twin "),
                                    _entry(PLAIN)])
             win._stop_signatures()
+            settle_states(win)                  # the states are computed in the background, as in the app
             win._refresh_derived()
         return win
 

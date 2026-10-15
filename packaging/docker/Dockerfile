@@ -86,6 +86,8 @@ ENV \
     # Volumes MVP (with MANGALIST_DOWNLOADS=1): file finished downloads, remove completed torrents.
     MANGALIST_DOWNLOADS_SCHEDULE=every:1h \
     MANGALIST_CATCH_UP=1 \
+    # A WARNING in the log when the window is blocked for more than 250 ms (mangalist/gui/watchdog.py).
+    MANGALIST_UI_WATCHDOG=1 \
     PYTHONPATH=/opt/mangalist/app \
     PYTHONDONTWRITEBYTECODE=1
 

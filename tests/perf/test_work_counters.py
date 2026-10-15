@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
@@ -345,3 +346,240 @@ def test_the_download_tab_reads_the_settings_once(qapp, monkeypatch):
     finally:
         tab.stop()
         tab.deleteLater()
+
+
+# --- UI performance stage 2: states in the background, rows replaced, sort keys --------------------------------------
+
+class _Jobs:
+    """A background runner the test drives: each job waits in ``pending`` until ``run_all`` runs it (its function as
+    the worker thread would, then its result as the UI thread gets it)."""
+
+    def __init__(self):
+        self.pending = []
+
+    def __call__(self, fn, on_done=None, on_error=None, on_finished=None):
+        self.pending.append((fn, on_done, on_finished))
+        return _Done()
+
+    def run_all(self, between=None):
+        while self.pending:
+            fn, on_done, on_finished = self.pending.pop(0)
+            result = fn()
+            if between is not None:
+                between()
+            if on_done is not None:
+                on_done(result)
+            if on_finished is not None:
+                on_finished()
+
+
+class _Done:
+    def abandon(self):
+        pass
+
+
+@pytest.fixture
+def deferred(win, monkeypatch):
+    """The window with its states computed "in the background" (the test's runner) - as the app runs."""
+    jobs = _Jobs()
+    monkeypatch.setattr(win._model, "deferred", True)
+    monkeypatch.setattr(win, "_states_runner", jobs)
+    yield jobs
+    jobs.run_all()
+    win._model.deferred = False
+
+
+def _wanted_has(win, entries) -> bool:
+    """Has the To get list been worked out for these very entries (not the folders' previous ones)?"""
+    return any(win._wanted_cache.get(id(e), (None,))[0] is e for e in entries)
+
+
+def _fresh_library(win, number):
+    fresh = [e for e in build(base=win.test_lib.roots[1].parent).entries if e.root_id == number]
+    for e in fresh:
+        e.root_id = win.test_roots[number]
+    return fresh
+
+
+def test_a_rescanned_library_is_computed_off_the_ui_thread_and_pushed_in_one_step(win, deferred, monkeypatch):
+    from mangalist import wanted
+    from mangalist.gui.table_model import COL_ENGLISH, COL_STATE
+
+    model = win._model
+    _all_states(model)
+    root = win.test_roots[4]
+    fresh = _fresh_library(win, 4)
+    before = model.evaluations
+    resets, changes = [], []
+    model.modelReset.connect(lambda: resets.append(1))
+    model.dataChanged.connect(lambda tl, br, roles=(): changes.append((tl.row(), br.row(), tl.column(), br.column())))
+    try:
+        win._set_rows([e for e in model.entries() if e.root_id != root] + fresh)      # what the library's scan hands over
+        win._refresh_derived()
+        rows = [r for r in range(model.rowCount()) if model.entry_at(r).root_id == root]
+        for r in rows:                              # painting, filtering, sorting and counting compute nothing here
+            for col in range(model.columnCount()):
+                model.data(model.index(r, col))
+        win._proxy.set_state_filter("wanted")
+        win._table.sortByColumn(COL_STATE, Qt.DescendingOrder)
+        win._update_counts()
+        win._top.set_library(root, emit=True)
+        assert model.evaluations == before and resets == []
+        assert model.states_pending(rows) and not _wanted_has(win, fresh)
+        QApplication.processEvents()                # the model asked (queued): one computation for the library
+        assert len(deferred.pending) == 1
+        worked = []
+        original = wanted.series_wanted
+        monkeypatch.setattr(wanted, "series_wanted", lambda *a, **k: worked.append(1) or original(*a, **k))
+        changes.clear()
+
+        def ui_side():                              # from here on the UI thread: no To get entry is worked out here
+            worked.clear()
+
+        deferred.run_all(between=ui_side)
+        assert worked == [] and model.evaluations == before
+        pushes = [c for c in changes if c[2] <= COL_STATE <= c[3]]
+        assert pushes == [(rows[0], rows[-1], COL_TITLE, COL_ENGLISH)]           # one dataChanged over the library
+        assert not model.states_pending() and _wanted_has(win, fresh)
+        check = MangaTableModel(fresh)                                          # the same states as computed at once
+        check.set_state_providers(knowledge_for=model._knowledge_for, inventory_for=model._inventory_for,
+                                  needs_kind_for=model._needs_kind_for, unbundled_for=model._unbundled_for)
+        for e in fresh:
+            got = model.ready_state_of(e)
+            assert got == check.state_at(check.entries().index(e))
+    finally:
+        win._proxy.set_state_filter(None)
+        win._table.sortByColumn(COL_TITLE, Qt.AscendingOrder)
+        win._top.set_library(None, emit=True)
+
+
+def test_a_changed_series_keeps_showing_its_state_until_the_new_one_is_pushed(win, deferred):
+    model = win._model
+    _all_states(model)
+    row = next(r for r in range(model.rowCount()) if model.state_at(r).gaps)
+    e = model.entry_at(row)
+    was = model.state_at(row)
+    before = model.evaluations
+    e.behind_override = "done"
+    try:
+        model.dataChanged.emit(model.index(row, 13), model.index(row, 13))     # the Behind column
+        assert model.shown_state_at(row) is was and model.evaluations == before    # shown until it is computed
+        QApplication.processEvents()
+        deferred.run_all()
+        assert model.shown_state_at(row).state == State.UP_TO_DATE and model.evaluations == before
+    finally:
+        e.behind_override = None
+        model.forget_states([e])
+        QApplication.processEvents()
+        deferred.run_all()
+    assert model.state_at(row).state == was.state
+
+
+def test_a_result_computed_from_old_inputs_is_dropped(qapp, warm_entries):
+    model = MangaTableModel(warm_entries[:10])
+    model.deferred = True
+    request = model.take_states_request()
+    assert len(request) == 10 and model.take_states_request() == []            # in flight: not asked twice
+    computed = model.compute_states(request)
+    model.set_rename_counts({str(warm_entries[2].folder): 3})                  # changed while it was computed
+    rows = model.push_states(computed)
+    assert 2 not in rows and model.ready_state_at(2) is None and len(rows) == 9
+    again = model.take_states_request()
+    assert [e for e, _g, _n in again] == [warm_entries[2]]
+    model.push_states(model.compute_states(again))
+    assert model.ready_state_at(2).rename_pending and model.evaluations == 0
+
+
+def test_a_librarys_rescan_replaces_its_rows_only(qapp, warm_entries):
+    from mangalist.gui.main_window import _SortProxy
+
+    shown = sorted(warm_entries, key=lambda e: e.root_id)          # the window's rows: library by library
+    model = MangaTableModel(shown)
+    proxy = _SortProxy()
+    proxy.setSourceModel(model)
+    proxy.sort(COL_TITLE)
+    _all_states(model)
+    events = []
+    model.modelReset.connect(lambda: events.append("reset"))
+    model.rowsRemoved.connect(lambda _p, first, last: events.append(("removed", first, last)))
+    model.rowsInserted.connect(lambda _p, first, last: events.append(("inserted", first, last)))
+    rows = [r for r, e in enumerate(shown) if e.root_id == 5]
+    fresh = [e for e in build().entries if e.root_id == 5]
+    keys = []
+    original = MangaTableModel._sort_value
+    model._sort_value = lambda row, e, col: keys.append(row) or original(model, row, e, col)
+    before = model.evaluations
+    model.set_entries(shown[:rows[0]] + fresh + shown[rows[-1] + 1:])
+    assert events == [("removed", rows[0], rows[-1]), ("inserted", rows[0], rows[0] + len(fresh) - 1)]
+    assert len(keys) <= len(fresh)                  # the other libraries' rows keep their sort keys
+    assert proxy.rowCount() == len(shown) - len(rows) + len(fresh)
+    titles = [proxy.data(proxy.index(r, COL_TITLE), Qt.UserRole) for r in range(proxy.rowCount())]
+    assert titles == sorted(titles)
+    _all_states(model)
+    assert model.evaluations - before == len(fresh)                            # the others kept their states
+
+
+def test_sorting_reads_each_rows_key_once(qapp, warm_entries):
+    from mangalist.gui.main_window import _SortProxy
+    from mangalist.gui.table_model import COL_STATE
+
+    model = _Counting(warm_entries)
+    proxy = _SortProxy()
+    proxy.setSourceModel(model)
+    _all_states(model)
+    model.calls = 0
+    proxy.sort(COL_STATE, Qt.DescendingOrder)
+    proxy.sort(COL_TITLE)
+    first = model.calls
+    proxy.sort(COL_STATE)
+    proxy.sort(COL_TITLE, Qt.DescendingOrder)
+    assert first == 0 and model.calls == 0          # data() is not asked per comparison: the keys are kept per row
+
+
+def test_the_ui_thread_keeps_one_store_connection(tmp_path, monkeypatch):
+    from mangalist.store import Store
+
+    db = Store(tmp_path / "x.db", import_legacy=False)
+    db.ensure_initialized()
+    opened = []
+    original = Store._raw_connect
+    monkeypatch.setattr(Store, "_raw_connect", lambda self: opened.append(threading.current_thread().name)
+                        or original(self))
+    db.list_roots()
+    db.list_roots()
+    assert len(opened) == 2                         # not asked for: one connection per call, as before
+    db.keep_ui_connection = True
+    opened.clear()
+    for _ in range(5):
+        db.list_roots()
+        db.set_setting("k", 1)
+    assert len(opened) == 1 and db.get_setting("k") == 1
+    with db.connect() as con:                       # a call inside another opens its own (the outer's transaction)
+        db.list_roots()
+        con.execute("SELECT 1")
+    assert len(opened) == 2
+    worker = threading.Thread(target=db.list_roots)
+    worker.start()
+    worker.join()
+    assert len(opened) == 3                         # another thread: its own short connection
+    db.release_ui_connection()
+    db.list_roots()
+    assert len(opened) == 4
+    db.release_ui_connection()
+
+
+def test_settings_build_the_shown_page_only(qapp, tmp_path, monkeypatch):
+    from mangalist import store
+    from mangalist.gui import settings_dialog as sd
+
+    store.reset_stores()
+    dlg = sd.SettingsDialog(None, store.get_store(), None)
+    try:
+        assert [type(p).__name__ for p in dlg.pages.built()] == ["LibraryPage"]
+        dlg.show_section(sd.SECTION_LOGGING)
+        assert len(dlg.pages.built()) == 2 and dlg.stack.currentIndex() == sd.DIALOG_SECTIONS.index(sd.SECTION_LOGGING)
+        assert dlg.pages[sd.SECTION_MATCHING] is dlg.pages[sd.SECTION_MATCHING]
+        assert set(dlg.pages) == set(sd.DIALOG_SECTIONS) and len(dlg.pages.built()) == 3
+    finally:
+        dlg.reject()
+        dlg.deleteLater()

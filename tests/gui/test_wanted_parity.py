@@ -16,7 +16,7 @@ from mangalist.models import MangaEntry  # noqa: E402
 
 from ..states.helpers import TODAY  # noqa: E402
 from ..wanted.library import build_library  # noqa: E402
-from .conftest import FakeBackend, qapp  # noqa: E402,F401
+from .conftest import FakeBackend, qapp, settle_states  # noqa: E402,F401
 
 
 class _DbBackend(FakeBackend):
@@ -45,6 +45,7 @@ def setup(qapp, tmp_path, monkeypatch):
     win._model.set_entries(entries)
     win._model.set_state_providers(today=TODAY)
     win._apply_library(None)
+    settle_states(win)                          # computed in the background, as in the app
     yield lib, win
     win.close()
     win.deleteLater()
