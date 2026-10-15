@@ -91,6 +91,7 @@ STATE_FILTERS: List[Tuple[Optional[str], str]] = (
     [(None, "All states"), ("wanted", "Wanted (any)"), ("missing", "Missing (volumes or chapters)")]
     + [(st.value, st.value) for st in STATE_ORDER]
     + [("upcoming", "Upcoming"), ("attention", "Needs attention"), ("rename", "Rename pending")]
+    + [("unbundled", "Unbundled chapters")]     # the series' setting (owner, 2026-10-15: under More filters)
 )
 
 
@@ -110,6 +111,8 @@ def state_matches(state: Optional[SeriesState], key: Optional[str]) -> bool:
         return bool(state.needs_attention)
     if key == "rename":
         return state.rename_pending
+    if key == "unbundled":
+        return state.unbundled
     if key == State.UPGRADE.value:  # incl. Complete + Upgrade available (owner rule c)
         return state.state == State.UPGRADE or state.complete_with_upgrade
     return state.state.value == key

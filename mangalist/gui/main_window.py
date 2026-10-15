@@ -57,7 +57,7 @@ from . import lanes
 from .app_icon import build_app_icon
 from .downloads_backend import create_backend as create_downloads_backend
 from .list_tab import DUPLICATES, PAGE_DUPLICATES, PAGE_EMPTY, PAGE_TABLE, ListTab, all_filter_keys, chip_label
-from .list_text import unbundled_status, wanted_label
+from .list_text import unbundled_first_status, unbundled_status, wanted_label
 from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
@@ -338,7 +338,7 @@ class MainWindow(QMainWindow):
         self._unbundled = UnbundledFolders(self._db)     # the per-series Unbundled Chapters setting
         self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
                                         needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)),
-                                        unbundled_for=lambda e: self._unbundled.is_on(e.folder))
+                                        unbundled_for=lambda e: self._unbundled.choice(e.folder) or False)
 
         # Downloads: only with downloads switched on and a backend (the Download tab and the volumes controller are
         # built in _build_ui).
@@ -2215,7 +2215,37 @@ class MainWindow(QMainWindow):
         if n:
             self._model.refresh_states()
             self._on_row_changed()
+        if n and on:        # where the volume list does not say where the volumes end: the first chapter to get
+            waiting = [(r, e) for r, e in self._entries_for([e.folder for e in entries])
+                       if getattr(getattr(self._model.state_at(r), "unbundled_ask", None), "needed", False)]
+            if len(entries) == 1 and waiting:
+                self.ask_unbundled_first_for(str(waiting[0][1].folder))
+            elif waiting:
+                self._status_label.setText(unbundled_status(on, n) + unbundled_first_status(None, "", len(waiting)))
         return n
+
+    def unbundled_first_ask(self, folders):
+        """The "first chapter to get" question of *folders*' one series with Unbundled chapters on (None: several,
+        off, or its volume list says where the volumes end) - the series menus show "First chapter to get…" for it."""
+        found = self._entries_for(folders)
+        if len(found) != 1 or not self._unbundled.is_on(found[0][1].folder):
+            return None
+        return getattr(self._model.state_at(found[0][0]), "unbundled_ask", None)
+
+    def ask_unbundled_first_for(self, folder) -> str:
+        """Ask (again) for *folder*'s first chapter to get (gui/unbundled_dialog.py); the states follow."""
+        from .unbundled_dialog import prompt_first_chapter
+
+        found = self._entries_for([folder])
+        if not found:
+            return ""
+        row, entry = found[0]
+        text = prompt_first_chapter(self, self._unbundled, entry, self._model.state_at(row))
+        if text:
+            self._status_label.setText(text)
+            self._model.refresh_states()
+            self._on_row_changed()
+        return text
 
     # --- The series host (series_actions.py): what the series menus of every screen need from the List ----------
 

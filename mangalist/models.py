@@ -76,7 +76,7 @@ def _max_parsed(files: "Iterable[FileHit]", what: str) -> Optional[Decimal]:
         if p is None:
             legacy.append(f)
             continue
-        r = p.volume if what == "volume" else p.chapter
+        r = p.volume if what == "volume" else (None if getattr(p, "is_extra", False) else p.chapter)
         if r is not None and (best is None or r.end > best):
             best = r.end
     if legacy:
@@ -308,6 +308,8 @@ class MangaEntry:
             for f in self.inventory_files:
                 p = f.parsed
                 unit = getattr(p, attr, None) if p is not None else None
+                if attr == "chapter" and getattr(p, "is_extra", False):
+                    unit = None                     # a comics extra's number ("Annual 2") is not chapter 2
                 if unit is None or (attr == "volume" and getattr(p, "chapter", None) is not None):
                     continue
                 n = int(unit.start)

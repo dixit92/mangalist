@@ -38,8 +38,9 @@ Layers (first match wins)
    older ``Title vol NN`` / ``Title Vol. NN`` / ``Title cNNN (...)`` / ``Title NNN (Year) (Digital)`` forms
    (the LAST volume token is the unit: ``Title - Part 5 - Sub v05`` is volume 5); the comics / BD album tokens
    ``Tome 3`` / ``Tomo`` / ``Band`` / ``Deel`` / ``Album`` / ``Livre`` / ``T03`` are volumes, and ``Annual 2`` /
-   ``Special #1`` / ``One-Shot 1`` / ``FCBD`` an extra (``parse_comics_extra``, first). A single-digit ``[v2]`` tag
-   is a release revision, not a volume.
+   ``Special #1`` / ``One-Shot 1`` / ``FCBD`` an extra (``parse_comics_extra``, first) - with its own number as the
+   chapter, flagged extra, as in MangaPixer (``Annual 2`` = chapter 2, ``is_extra``: never counted as chapter 2).
+   A single-digit ``[v2]`` tag is a release revision, not a volume.
 3b. **labelled** - a site's own chapter label: ``Title - Episode 35``, ``Title Contact. 0001 - <title>``,
    ``Title [Pact 0015]`` (contact / episode / report / pact / act / lesson / stage / round / night / ...).
 4. **generic** - today's classifier (``classifier.detect_tokens`` + the ``models`` number regexes),

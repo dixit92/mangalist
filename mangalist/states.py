@@ -50,8 +50,15 @@ chapters*). The volume side is unchanged, and the setting only ever adds gaps. A
 wanted; in a folder of volumes only, nor is one a released volume the folder lacks collects (that volume is the gap).
 When a later volume comes out, the chapters it collects become an *Upgrade* (every one held) or it is a *Missing
 volume* (some not held), as in any folder holding chapters, and the unbundled range moves past it. Where the list does
-not say which chapter the newest held volume ends with, the folder is compared as without the setting ("Check for new
-chapters" cannot tell where to start either).
+not say which chapter the newest held volume ends with, the setting asks the owner once for "the first chapter to get"
+(owner, 2026-10-15, question 14: "Yes"; stored per series, editable later, :mod:`mangalist.unbundled`): with that answer
+the chapters from it are compared, and those between the newest mapped volume's end and it count as held by the
+unmapped volumes; without it (or once a newer unmapped volume arrived after it was given) the folder is compared as
+without the setting, and the series needs attention (:attr:`SeriesState.unbundled_ask`). A volume that is not out in
+English (the original edition's volume, compared where there is no English volume list) does not move the start: with
+the setting on its chapters are wanted as chapters too (owner, 2026-10-15, question 15: "the English scanlation may be
+at parity with the original source"); the volume stays a gap as well. A Complete series may have the setting (question
+16: "Allow it - then the unbundled chapters can be upgraded once the volumes are out").
 
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
@@ -121,12 +128,15 @@ ATTENTION_REVIEW = "needs review"
 ATTENTION_KIND = "needs kind"
 ATTENTION_NOT_A_WORK = "not one work"
 ATTENTION_IN_VOLUMES = "chapters in volumes"
+ATTENTION_UNBUNDLED_START = "unbundled start"
 ATTENTION_LABELS = {
     ATTENTION_UNMATCHED: "No MangaUpdates match",
     ATTENTION_REVIEW: "Match needs review",
     ATTENTION_KIND: "Volumes or chapters? (bare numbers)",
     ATTENTION_NOT_A_WORK: "Not matched: the folder is not one work",
     ATTENTION_IN_VOLUMES: "Chapter files inside volumes you hold - row menu: Set aside chapters its volumes hold…",
+    ATTENTION_UNBUNDLED_START: "Unbundled chapters: where the newest volume ends is not known - row menu: "
+                               "First chapter to get…",
 }
 
 
@@ -308,6 +318,31 @@ class Gap:
 
 
 @dataclass(frozen=True)
+class UnbundledAsk:
+    """The Unbundled Chapters question "the first chapter to get" of a series whose newest held volume the volume list
+    does not map (owner, 2026-10-15, question 14): what the prompt shows, and the answer in force (:attr:`current`).
+    Exact numbers as text."""
+
+    volume: str                          # the newest held volume (the list does not say where it ends)
+    mapped_volume: Optional[str] = None  # the newest volume below it that the list maps ...
+    mapped_end: Optional[str] = None     # ... and the chapter that one ends with
+    suggestion: int = 1                  # an estimate of the first chapter after :attr:`volume` (chapters per volume)
+    current: Optional[str] = None        # the owner's answer in force (None: not given yet, or given before a newer
+                                         # unmapped volume arrived - :attr:`given_for`)
+    given_for: Optional[str] = None      # the newest held volume when the answer was given
+
+    @property
+    def needed(self) -> bool:
+        """No answer in force: the chapters after the volumes are not compared until the owner gives one."""
+        return self.current is None
+
+    @property
+    def stale(self) -> bool:
+        """An answer was given, for an older newest volume: a newer unmapped volume arrived since."""
+        return self.current is None and self.given_for is not None
+
+
+@dataclass(frozen=True)
 class SeriesState:
     state: State
     gaps: Tuple[Gap, ...] = ()
@@ -325,6 +360,7 @@ class SeriesState:
     mangapixer_disagrees: bool = False
     edition: Optional[str] = None                # the edition declared in MangaPixer, e.g. "Master edition"
     unbundled: bool = False                      # the series' Unbundled Chapters setting is on (mangalist.unbundled)
+    unbundled_ask: Optional[UnbundledAsk] = None # where its unbundled chapters start depends on the owner's answer
 
     # -- convenience -----------------------------------------------------------------------------
 
@@ -533,7 +569,7 @@ def compute_state(
     behind_override: Optional[str] = None,
     today: Optional[_dt.date] = None,
     restarts: Collection[str] = (),
-    unbundled: bool = False,
+    unbundled: Any = False,
 ) -> SeriesState:
     """The state of one series folder.
 
@@ -548,7 +584,10 @@ def compute_state(
     and ``Season 2`` both from 1 - :attr:`mangalist.models.MangaEntry.restarting_units`): they are not compared with one
     total, so no gap of that kind is invented (MangaPixer gives no verdict either).
     *unbundled*: the series' Unbundled Chapters setting (:mod:`mangalist.unbundled`) - a folder holding volumes also
-    wants the chapters after its last volume (see the module docstring); off (the default) changes nothing.
+    wants the chapters after its last volume (see the module docstring); off (the default) changes nothing. True, or
+    the setting's :class:`~mangalist.unbundled.UnbundledChoice` (any true object): its ``first_chapter`` /
+    ``for_volume`` are the owner's "first chapter to get", used where the volume list does not map the newest held
+    volume.
 
     MangaDex's highest whole English chapter (:attr:`~mangalist.knowledge.SeriesKnowledge.mangadex_latest`) is a chapter
     target only where nothing else tells (see the module docstring): the state is computed without it first, and again
@@ -587,7 +626,7 @@ def _evaluate(
     behind_override: Optional[str],
     today: _dt.date,
     restarts: Collection[str],
-    unbundled: bool = False,
+    unbundled: Any = False,
     extra_target: Optional[Decimal] = None,
 ) -> SeriesState:
     """:func:`compute_state`'s rules; *extra_target* joins the chapter target's candidates (MangaDex's latest)."""
@@ -633,7 +672,7 @@ def _evaluate(
         # MangaPixer's declared edition and tracking off"; MangaPixer answers Can't tell / NotTracked).
         return SeriesState(state=State.NOT_TRACKED, reasons=("Track completion is off for this folder in MangaPixer",),
                            needs_attention=common["needs_attention"], rename_pending=rename_pending,
-                           rename_count=rename_count, source=k.source)
+                           rename_count=rename_count, source=k.source, unbundled=bool(unbundled))
     completion = k.completion if k is not None else None
 
     def finish(state: State, gaps: Sequence[Gap] = (), reasons: Sequence[str] = ()) -> SeriesState:
@@ -701,6 +740,7 @@ def _evaluate(
     mixed = held.has_volumes and held.has_chapters
     top_volume = max(held.volumes) if held.volumes else None
     unmapped_for_chapters: List[VolumeInfo] = []   # rule (b): upgrades once every chapter is held
+    original_only: Set[Decimal] = set()            # missing volumes of the original edition, not out in English
     if "volume" in restarts:
         reasons.append("Volume numbers start again in each folder of the series - not compared")
     elif k.licensed and out_vols:
@@ -735,6 +775,7 @@ def _evaluate(
             else:
                 gaps.append(Gap(GAP_VOLUME, v.volume, note=f"original volume; chapters {v.chapters_from}-"
                                                             f"{v.chapters_to} out in English"))
+                original_only.add(vd)
         reasons.append(f"No English volume list: {len(jp_out)} original volume(s) whose chapters are out in English")
     elif not k.licensed and held.has_volumes and _scan_volume_total(k):
         compared = True
@@ -759,19 +800,29 @@ def _evaluate(
         reasons.append("Chapter numbers start again in each folder of the series (e.g. each season) - not compared")
         target = None
     unbundled_missing: Optional[List[Decimal]] = None
+    unbundled_target = target
     if unbundled and held.has_volumes and target is not None:
         # Unbundled Chapters (the series' setting): the chapters after the last volume, whatever the folder holds so
         # far - added to what the rules below compare (the setting never takes a gap away). Where the last volume ends
-        # is not known, the folder is compared as without the setting.
-        after, why = _unbundled_start(k, held, gaps)
-        reasons.append(why)
-        if after is not None:
+        # is not known, the owner's "first chapter to get" says where to start; without it the folder is compared as
+        # without the setting (and needs attention).
+        start = _unbundled_start(k, held, gaps, unbundled, original_only)
+        reasons.append(start.why)
+        if start.ask is not None:
+            common["unbundled_ask"] = start.ask
+            if start.ask.needed:
+                common["needs_attention"] = tuple(dict.fromkeys(common["needs_attention"] + (ATTENTION_UNBUNDLED_START,)))
+        if start.after is not None:
             compared = chapters_checked = True
-            unbundled_missing = [c for c in _whole_numbers(after, target) if c > after and not held.holds_chapter(c)]
-            if target != target.to_integral_value() and target > after and not held.holds_chapter(target):
+            if start.assumed:
+                # the owner's answer: the unmapped volumes hold the chapters up to it (never wanted as chapters)
+                held = replace(held, covered=held.covered | frozenset(start.assumed))
+            unbundled_missing = [c for c in _whole_numbers(start.after, target) if start.wants(c)
+                                 and not held.holds_chapter(c)]
+            if target != target.to_integral_value() and start.wants(target) and not held.holds_chapter(target):
                 unbundled_missing.append(target)
-            unbundled_missing += [p for p in held.split_missing if after < p <= target and p not in unbundled_missing
-                                  and not held.holds_chapter(p)]
+            unbundled_missing += [p for p in held.split_missing if start.wants(p) and p <= target
+                                  and p not in unbundled_missing and not held.holds_chapter(p)]
     # A volumes-only folder holding volumes the volume list does not map: which chapters those hold is unknown, so the
     # chapter numbers are not compared (owner, 2026-10-11: every volume of a finished 4-koma held, the list mapped only
     # volumes 1-3, and MangaUpdates' strip count 717 made "missing ch 261-717").
@@ -806,7 +857,7 @@ def _evaluate(
 
     if unbundled_missing is not None:           # a folder the rules above do not compare on chapters (volumes only)
         gaps += _chapter_gaps(unbundled_missing)
-        reasons.append(f"Latest chapter {fmt_num(target)}")
+        reasons.append(f"Latest chapter {fmt_num(unbundled_target)}")
 
     # Owner rule (b), 2026-10-03: a chapter-only folder of a licensed series never shows Missing
     # volumes; a released volume is an upgrade - provided every chapter is present.
@@ -891,28 +942,104 @@ def last_volume_chapter(volumes: Iterable[VolumeInfo], top: Optional[Decimal]) -
     return max(ends) if ends else None
 
 
-def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap]) -> Tuple[Optional[Decimal], str]:
-    """Where a folder's unbundled chapters start (the chapter after it), and the reason line - or ``(None, why not)``.
+@dataclass(frozen=True)
+class _UnbundledStart:
+    """Where a folder's unbundled chapters start: after :attr:`after` (or from it, :attr:`inclusive` - the owner's
+    "first chapter to get"), the reason line, the question behind it (None: the volume list says), and the chapters
+    the owner's answer puts in the unmapped volumes (:attr:`assumed`). :attr:`after` None: not compared."""
 
-    The last volume is the newest one the folder holds, or lacks (a missing volume or an upgrade, released): the
-    chapters a held volume collects are held, and those of a released volume the folder lacks come with that volume - so
-    neither is wanted as chapters. Its end comes from MangaPixer's volume list; when the list does not map the newest
-    held volume, where it ends is not known (a guess could ask for chapters that volume holds) and the caller compares
-    the folder as without the setting."""
+    after: Optional[Decimal]
+    why: str
+    inclusive: bool = False
+    ask: Optional[UnbundledAsk] = None
+    assumed: Tuple[Decimal, ...] = ()
+
+    def wants(self, c: Decimal) -> bool:
+        return self.after is not None and (c >= self.after if self.inclusive else c > self.after)
+
+
+def _newest_mapped(volumes: Iterable[VolumeInfo], top: Decimal) -> Tuple[Optional[Decimal], Optional[Decimal]]:
+    """``(the newest volume numbered *top* or lower that the list maps, the chapter the volumes up to it end with)``."""
+    numbers = [to_decimal(v.volume) for v in volumes or () if v.has_chapters]
+    numbers = [n for n in numbers if n is not None and n <= top]
+    if not numbers:
+        return None, None
+    newest = max(numbers)
+    return newest, last_volume_chapter(volumes, newest)
+
+
+def unbundled_suggestion(volumes: Iterable[VolumeInfo], top: Decimal, target: Optional[Decimal] = None,
+                         origin_volumes: Optional[Decimal] = None) -> int:
+    """An estimate of the first chapter after volume *top* when the list does not map it: the newest mapped volume
+    below's end, plus its chapters per volume for each volume after it; when the list maps none, the latest chapter
+    (*target*) over the original edition's volume count (*origin_volumes*) per volume; else 1. At most the chapter after
+    *target* (nothing more to get yet). Only
+    a suggestion for the prompt - the owner's answer is what counts."""
+    newest, end = _newest_mapped(volumes, top)
+    if newest is not None and end is not None and newest >= 1:
+        guess = int(end + (top - newest) * (end / newest)) + 1
+    elif target is not None and origin_volumes and origin_volumes >= top:
+        guess = int(top * (target / origin_volumes)) + 1
+    else:
+        return 1
+    return max(1, min(guess, int(target) + 1)) if target is not None else max(1, guess)
+
+
+def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap], choice: Any,
+                     original_only: Collection[Decimal] = ()) -> _UnbundledStart:
+    """Where a folder's unbundled chapters start (see :class:`_UnbundledStart`).
+
+    The last volume is the newest one the folder holds, or lacks while it is out in English (a missing volume or an
+    upgrade): the chapters a held volume collects are held, and those of a released volume the folder lacks come with
+    that volume - so neither is wanted as chapters. A missing volume of the original edition that is not out in English
+    (*original_only*) does not count: its chapters are wanted as chapters (owner, 2026-10-15). Its end comes from
+    MangaPixer's volume list. When the list does not map the newest held volume, the owner's "first chapter to get"
+    (*choice*'s ``first_chapter``, given while ``for_volume`` was the newest held volume) says where to start - a guess
+    could ask for chapters that volume holds; without an answer in force the caller compares the folder as without the
+    setting."""
     top = max(held.volumes)
     mapped = {to_decimal(v.volume): v for v in k.volumes or () if v.has_chapters}
-    if top not in mapped:
-        return None, f"Unbundled chapters: the volume list does not say which chapter volume {fmt_num(top)} ends with"
-    after, last = last_volume_chapter(k.volumes, top), top
+    ask: Optional[UnbundledAsk] = None
+    assumed: Tuple[Decimal, ...] = ()
+    if top in mapped:
+        after, last, inclusive = last_volume_chapter(k.volumes, top), top, False
+    else:
+        first = to_decimal(getattr(choice, "first_chapter", None))
+        given_for = to_decimal(getattr(choice, "for_volume", None))
+        newest, end = _newest_mapped(k.volumes, top)
+        stale = first is not None and given_for is not None and top > given_for
+        ask = UnbundledAsk(volume=fmt_num(top), mapped_volume=fmt_num(newest) if newest is not None else None,
+                           mapped_end=fmt_num(end) if end is not None else None,
+                           suggestion=unbundled_suggestion(k.volumes, top, _chapter_target(k), k.origin_volumes),
+                           current=fmt_num(first) if first is not None and not stale else None,
+                           given_for=fmt_num(given_for) if given_for is not None else None)
+        if first is None or first <= 0:
+            return _UnbundledStart(None, f"Unbundled chapters: the volume list does not say which chapter volume "
+                                         f"{fmt_num(top)} ends with - set the first chapter to get", ask=ask)
+        if stale:
+            return _UnbundledStart(None, f"Unbundled chapters: volume {fmt_num(top)} arrived after the first chapter "
+                                         f"to get ({fmt_num(first)}) was set for volume {fmt_num(given_for)} - set it "
+                                         "again", ask=ask)
+        after, last, inclusive = first, None, True
+        below = end if end is not None else Decimal(0)
+        assumed = tuple(sorted(c for c in _whole_numbers(max(below, Decimal(0)), first) if below < c < first))
     for g in gaps:
         number = to_decimal(g.start)
+        if g.kind == GAP_VOLUME and number in original_only:
+            continue                            # not out in English: its chapters are wanted as chapters
         v = mapped.get(number) if g.kind in (GAP_VOLUME, GAP_UPGRADE) else None
         end = to_decimal(v.chapters_to) if v is not None else None
-        if end is not None and (after is None or end > after):
-            after, last = end, number
+        if end is not None and (after is None or end > after or (inclusive and end >= after)):
+            after, last, inclusive = end, number, False
     if after is None:
-        return None, f"Unbundled chapters: the volume list does not say which chapter volume {fmt_num(top)} ends with"
-    return after, f"Unbundled chapters after chapter {fmt_num(after)} (the end of volume {fmt_num(last)})"
+        return _UnbundledStart(None, f"Unbundled chapters: the volume list does not say which chapter volume "
+                                     f"{fmt_num(top)} ends with", ask=ask)
+    if inclusive:
+        why = (f"Unbundled chapters from chapter {fmt_num(after)} (your first chapter to get; the volume list does not "
+               f"say which chapter volume {fmt_num(top)} ends with)")
+    else:
+        why = f"Unbundled chapters after chapter {fmt_num(after)} (the end of volume {fmt_num(last)})"
+    return _UnbundledStart(after, why, inclusive, ask, assumed)
 
 
 def _empty_folder_chapters(target: Decimal) -> List[Decimal]:

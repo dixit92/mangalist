@@ -149,7 +149,14 @@ def wanted_series(*, folder: str, title: str, english_title: Optional[str], stat
 UNBUNDLED_MENU = "Unbundled chapters (volumes + the chapters after the last volume)"
 UNBUNDLED_HELP = ("Also get the chapters after the last volume - Missing chapters from the series' Suwayomi source, "
                   "Automatic downloads included - before the next volume is out; when it is, it replaces them as an "
-                  "upgrade. Needs MangaPixer's volume list to say where the last volume ends.")
+                  "upgrade. Where MangaPixer's volume list does not say where the last volume ends, it asks once for "
+                  "the first chapter to get.")
+#: The row menu's entry to give or change the first chapter to get (a series whose newest volume the list does not map).
+UNBUNDLED_FIRST_MENU = "First chapter to get…"
+UNBUNDLED_FIRST_HELP = ("Unbundled chapters: the first chapter after the volumes you hold - MangaPixer's volume list does "
+                        "not say which chapter the newest one ends with")
+#: The List's More filters entry (owner, 2026-10-15, question 17).
+UNBUNDLED_FILTER = "Unbundled chapters"
 
 
 def unbundled_detail(on: bool) -> str:
@@ -164,6 +171,19 @@ def unbundled_status(on: bool, n: int) -> str:
     series = f"{n} series" if n != 1 else "1 series"
     return (f"Unbundled chapters on for {series}: the chapters after the last volume are wanted too" if on
             else f"Unbundled chapters off for {series}: volumes only")
+
+
+def unbundled_first_status(first, volume: str, n_waiting: int = 0) -> str:
+    """The status line after the "first chapter to get" prompt (*first* None: asked later), or - *n_waiting* - after
+    the setting was switched on for a selection whose series *n_waiting* still need it."""
+    if n_waiting:
+        series = f"{n_waiting} series need" if n_waiting != 1 else "1 series needs"
+        return (f" - {series} the first chapter to get (the volume list does not say where the newest volume ends): "
+                f"row menu, {UNBUNDLED_FIRST_MENU}")
+    if first is None:
+        return (f"Unbundled chapters: no first chapter to get yet - the chapters after volume {volume} are not "
+                f"compared until you give one (row menu, {UNBUNDLED_FIRST_MENU})")
+    return f"Unbundled chapters from chapter {first} (the first chapter to get after volume {volume})"
 
 
 def wanted_label(groups: Iterable[str]) -> str:
