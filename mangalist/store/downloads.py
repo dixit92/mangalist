@@ -36,8 +36,8 @@
   chosen period. Never cleared: a record that is still in progress (queued, sent, downloaded), a FILED one (its
   torrent still seeds and counts against the download budget; Remove Completed turns it REMOVED first), a FAILED one
   (it wants a look, and may still count against the budget), the newest record (SQLite reuses the largest id once its
-  row is gone; ``replacements.download_id`` and ``upgrades.first_download`` go by id), a REMOVED record the
-  replaced-chapters pass has not looked at yet, and a record whose replaced-chapters batch still waits for the owner
+  row is gone; ``replacements.download_id`` and ``upgrades.first_download`` go by id), a REMOVED torrent record the
+  replaced-chapters pass has not looked at yet (chapter records are never looked at), and a record whose replaced-chapters batch still waits for the owner
   (pending / held). What a cleared record used to tell other features is kept where it matters: a cleared torrent's
   info hash stays in ``meta`` (``downloads.cleared_releases``), so the find pass still never picks the same release
   twice. Findings keep their ``record_id`` (a plain number, never joined) and a settled replaced-chapters batch keeps
@@ -522,7 +522,8 @@ class DownloadLedger:
                     report.kept_newest += 1
                 elif batches.get(r["id"]) in HOLDING_BATCH:
                     report.kept_waiting_chapters += 1
-                elif r["status"] == DownloadStatus.REMOVED and r["id"] > first and r["id"] not in batches:
+                elif (r["tool"] == TOOL_QBITTORRENT and r["status"] == DownloadStatus.REMOVED and r["id"] > first
+                      and r["id"] not in batches):        # (chapter downloads are never looked at: no batch is due)
                     report.kept_unexamined += 1
                 else:
                     clear.append(r)

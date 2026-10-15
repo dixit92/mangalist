@@ -129,6 +129,14 @@ def ids_max(db) -> int:
     return max(ids(db))
 
 
+def test_chapter_records_are_never_looked_at_so_none_waits_for_that(lib):
+    ledger, db, series = lib
+    db.set_meta("upgrades.first_download", "0")
+    chapter = add(db, series["S1"], S.REMOVED, 40, n=1, tool="suwayomi", examined=False)
+    add(db, series["S1"], S.SENT, 0, n=2)
+    assert ledger.clear_finished(7, now=NOW).cleared == 1 and chapter not in ids(db)
+
+
 def test_a_cleared_torrent_is_remembered_so_it_is_never_picked_again(lib):
     ledger, db, series = lib
     add(db, series["S1"], S.REMOVED, 40, n=11)
