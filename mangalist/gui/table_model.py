@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor
 
 from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, from_own_matcher
@@ -85,6 +85,40 @@ MODE_CHIP_ROLE = Qt.UserRole + 20   # Title: the series' own automatic-downloads
                                     # (a small chip after the title; "" for none)
 # Roles a series' state does not read: a dataChanged for these alone keeps the cached state.
 NOT_STATE_ROLES = frozenset({int(Qt.BackgroundRole), int(MODE_CHIP_ROLE)})
+# The columns a pushed state changes (the Title's subtitle is MangaPixer's title; MU Title to English read the state or
+# its knowledge): one dataChanged over them per push (UI performance stage 2).
+STATE_PUSH_COLUMNS = (COL_TITLE, COL_ENGLISH)
+
+# The roles as plain ints: data() runs for every painted cell and every sort comparison, and comparing an int with a
+# PySide enum member costs a Python call each time (UI performance stage 2).
+_DISPLAY = int(Qt.DisplayRole)
+_EDIT = int(Qt.EditRole)
+_TOOLTIP = int(Qt.ToolTipRole)
+_USER = int(Qt.UserRole)
+_BACKGROUND = int(Qt.BackgroundRole)
+_ALIGNMENT = int(Qt.TextAlignmentRole)
+_SUBTITLE = int(SUBTITLE_ROLE)
+_REVIEW = int(REVIEW_ROLE)
+_STATE = int(STATE_ROLE)
+_MODE_CHIP = int(MODE_CHIP_ROLE)
+_ALIGN_RIGHT = int(Qt.AlignRight | Qt.AlignVCenter)
+_ALIGN_CENTER = int(Qt.AlignCenter)
+_RIGHT_COLUMNS = frozenset({COL_FILES, COL_SUBS, COL_VOL, COL_CH, COL_BOTH, COL_MTIME, COL_RENAME})
+_CENTER_COLUMNS = frozenset({COL_VERDICT, COL_EXAMINED, COL_LICENSED, COL_BEHIND, COL_COMPLETED, COL_DUPE})
+_MU_COLUMNS = frozenset({COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED})
+_STATE_ROLES = [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole]
+_MISSING = object()
+
+
+def _comparable(value: Any):
+    """A sort value (``data(UserRole)``) as a key Python compares the way Qt's proxy compares the value: an empty value
+    after every other (``QVariant`` invalid), text by UTF-16 code unit (``QString::compare``, case-sensitive), numbers
+    as numbers."""
+    if value is None:
+        return (1,)
+    if isinstance(value, str):
+        return (0, value.encode("utf-16-be"))
+    return (0, value)
 
 # State filters (key -> label), in the order the toolbar lists them; None = every row.
 STATE_FILTERS: List[Tuple[Optional[str], str]] = (
@@ -162,6 +196,22 @@ def merge_folder_scan(entries: List[MangaEntry], root_id: Optional[int], root_fo
 
 
 class MangaTableModel(QAbstractTableModel):
+    """The List's rows: one :class:`MangaEntry` per series, with its state (State / Gaps / Official source / English
+    and the MangaUpdates columns) computed from the providers the window sets.
+
+    **States in the background** (UI performance stage 2). With :attr:`deferred` on (the window turns it on when it has
+    a background runner), nothing that paints, filters, sorts or counts computes a state on the UI thread: a row
+    without an up-to-date state shows the one it had before (the same entry's, or the previous scan's entry of the same
+    folder) - or nothing for a series never seen - and :attr:`states_wanted` asks the window to compute the missing
+    ones (:meth:`take_states_request` / :meth:`compute_states` off the UI thread / :meth:`push_states`). A push stores
+    them in one step and emits one ``dataChanged`` over the rows and columns they change. :meth:`state_at` and the
+    other single-row readers still compute at once (the details panel, a row's menu). Off (the default, and the tests
+    that hand the window a synchronous runner), every state is computed on first use as before."""
+
+    # Rows without an up-to-date state (deferred mode): the window computes them off the UI thread. Emitted once until
+    # the window takes the request.
+    states_wanted = Signal()
+
     def __init__(self, entries: Optional[List[MangaEntry]] = None, parent=None):
         super().__init__(parent)
         self._entries: List[MangaEntry] = list(entries or [])
@@ -183,7 +233,23 @@ class MangaTableModel(QAbstractTableModel):
         # entry - another library's scan, a library switch - keeps its state; a rescanned series is a new entry. Dropped
         # when the row changes (dataChanged on a column the state reads), the rename counts or the providers change.
         self._state_cache: Dict[int, Tuple[MangaEntry, Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]] = {}
-        self.evaluations = 0            # how many states were computed (the work-counter tests read it)
+        self.evaluations = 0            # how many states were computed on the UI thread (the work-counter tests)
+        self.pushed = 0                 # how many states arrived from the background (deferred mode)
+        # Deferred mode (see the class docstring): what a row shows until its new state arrives - the same entry's old
+        # state (``id(entry)`` -> (entry, result)) or, for a rescanned series, its folder's last one.
+        self.deferred = False
+        self._stale: Dict[int, Tuple[MangaEntry, Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]] = {}
+        self._stale_folders: Dict[str, Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]] = {}
+        self._generation: Dict[int, int] = {}       # id(entry) -> bumped whenever its state goes out of date
+        self._in_flight: set = set()                # id(entry) of the states being computed in the background
+        self._failed: set = set()                   # ... that could not be computed there (computed here on use)
+        self._asked = False                         # states_wanted emitted, the window has not taken the request yet
+        self._pushing = False                       # a push's own dataChanged (keeps the states it just stored)
+        # Sort keys per row (``id(entry)`` -> (entry, {column: key})): the proxy's lessThan compares these instead of
+        # asking data() twice per comparison. Dropped for a row with every dataChanged that touches it.
+        self._sort_keys: Dict[int, Tuple[MangaEntry, Dict[int, Any]]] = {}
+        # Which state filters a state passes (``id(state)`` -> (state, keys asked, keys passed)), for the chips' counts.
+        self._filter_cache: Dict[int, Tuple[SeriesState, tuple, frozenset]] = {}
         self._today: Optional[datetime.date] = None
         # Where a row's inventory and knowledge come from. FALLBACK defaults: the inventory read from the
         # entry's file names (states.fallback_inventory_from_entry) and the own matcher's knowledge; the
@@ -202,20 +268,79 @@ class MangaTableModel(QAbstractTableModel):
 
     def set_entries(self, entries: List[MangaEntry]) -> None:
         """Show *entries*. The states of entries shown before are kept (see ``_state_cache``); an entry changed in place
-        outside the model's setters must be handed to :meth:`forget_states`."""
-        self.beginResetModel()
-        self._entries = list(entries)
-        self._mu_processing_row = None
-        self._rebuild_dupe_map()
-        kept = {id(e) for e in self._entries}
-        for key in [k for k in self._state_cache if k not in kept]:
-            del self._state_cache[key]
-        self.endResetModel()
+        outside the model's setters must be handed to :meth:`forget_states`.
+
+        Only the rows that changed are replaced (UI performance stage 2): the rows before the first and after the last
+        changed entry stay (the same objects), the ones between are removed and the new ones inserted - one library's
+        scan no longer resets the other libraries' 600 rows (the proxy re-sorts only what was inserted, the selection
+        and the scroll position of the other rows stay). The same list again repaints every row (entries changed in
+        place)."""
+        new = list(entries)
+        old = self._entries
+        n_old, n_new = len(old), len(new)
+        head = 0
+        while head < n_old and head < n_new and old[head] is new[head]:
+            head += 1
+        tail = 0
+        while tail < n_old - head and tail < n_new - head and old[n_old - 1 - tail] is new[n_new - 1 - tail]:
+            tail += 1
+        self._forget_gone(new)
+        processing, self._mu_processing_row = self._mu_processing_row, None
+        if head == n_old == n_new:                      # the same rows: what changed in place repaints
+            self._rebuild_dupe_map()
+            if new:
+                self._pushing = True                    # keep the states (forget_states names the changed ones)
+                try:
+                    self.dataChanged.emit(self.index(0, 0), self.index(n_new - 1, self.columnCount() - 1))
+                finally:
+                    self._pushing = False
+        else:
+            if n_old - tail > head:
+                self.beginRemoveRows(QModelIndex(), head, n_old - tail - 1)
+                self._entries = old[:head] + old[n_old - tail:]
+                self._rebuild_dupe_map()
+                self.endRemoveRows()
+            if n_new - tail > head:
+                self.beginInsertRows(QModelIndex(), head, n_new - tail - 1)
+                self._entries = new
+                self._rebuild_dupe_map()
+                self.endInsertRows()
+            self._entries = new
+            self._rebuild_dupe_map()
+            if processing is not None and processing < min(head, n_new):     # the row being looked up stays
+                idx = self.index(processing, 0)
+                self.dataChanged.emit(idx, self.index(processing, self.columnCount() - 1), [Qt.BackgroundRole])
+        if self.deferred and any(id(e) not in self._state_cache for e in new):
+            self._want_states()
+
+    def _forget_gone(self, new: List[MangaEntry]) -> None:
+        """Drop what is kept for entries that are not in *new*; a gone entry's state stays shown for its folder until the
+        folder's new entry has its own (deferred mode)."""
+        kept = {id(e) for e in new}
+        for cache in (self._state_cache, self._stale):
+            for key in [k for k in cache if k not in kept]:
+                e, result = cache.pop(key)
+                if self.deferred:
+                    self._stale_folders[str(e.folder)] = result
+        for key in [k for k in self._sort_keys if k not in kept]:
+            del self._sort_keys[key]
+        for store in (self._generation, ):
+            for key in [k for k in store if k not in kept]:
+                del store[key]
+        self._failed &= kept
+        if self._stale_folders:
+            folders = {str(e.folder) for e in new}
+            for folder in [f for f in self._stale_folders if f not in folders]:
+                del self._stale_folders[folder]
+        if len(self._filter_cache) > 4 * max(len(new), 64):
+            self._filter_cache.clear()
 
     def forget_states(self, entries: Iterable[MangaEntry]) -> None:
         """*entries* were changed in place (their MangaUpdates data, kind or folder): compute their states again."""
-        for e in entries:
-            self._state_cache.pop(id(e), None)
+        keys = [id(e) for e in entries]
+        for k in keys:
+            self._sort_keys.pop(k, None)
+        self._invalidate(keys)
 
     # --- rescan state ----------------------------------------------------------
 
@@ -241,27 +366,60 @@ class MangaTableModel(QAbstractTableModel):
         self.refresh_states()
 
     def refresh_states(self) -> None:
-        """Recompute every row's state (e.g. after new knowledge arrived)."""
+        """Recompute every row's state (e.g. after new knowledge arrived). Deferred: the rows keep showing their states
+        until the new ones are pushed."""
+        if self.deferred:
+            self._invalidate(set(self._state_cache) | self._in_flight | self._failed)
+            if any(id(e) not in self._state_cache for e in self._entries):
+                self._want_states()
+            return
         self._state_cache.clear()
+        self._generation.clear()
         if self._entries:
             self.dataChanged.emit(self.index(0, COL_STATE), self.index(len(self._entries) - 1, COL_ENGLISH),
-                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+                                  _STATE_ROLES)
+
+    def _invalidate(self, keys: Iterable[int]) -> None:
+        """The states of the entries *keys* (``id(entry)``) are out of date: drop them (deferred: keep them shown until
+        the new ones arrive, and drop a result still being computed from the old inputs)."""
+        any_key = False
+        for k in keys:
+            any_key = True
+            got = self._state_cache.pop(k, None)
+            if self.deferred:
+                if got is not None:
+                    self._stale[k] = got
+                self._generation[k] = self._generation.get(k, 0) + 1
+                self._failed.discard(k)
+        if any_key and self.deferred:
+            self._want_states()
 
     def _on_data_changed(self, top_left, bottom_right, roles=()) -> None:
+        first, last = top_left.row(), bottom_right.row()
+        n = len(self._entries)
+        keys = [id(self._entries[r]) for r in range(max(first, 0), min(last, n - 1) + 1)]
+        for k in keys:                  # what a cell shows changed: its sort keys go (cheap; any column)
+            self._sort_keys.pop(k, None)
+        if self._pushing:
+            return                      # a push's own repaint (or the same rows again): the states stay
         if top_left.column() == bottom_right.column() and top_left.column() in NOT_STATE_INPUTS:
             return                      # the Dupe / Library / Rename column alone: the state does not read them
         if roles and {int(r) for r in roles} <= NOT_STATE_ROLES:
             return                      # a tint (the row being looked up) or the mode chip
-        keys = [id(self._entries[r]) for r in range(top_left.row(), bottom_right.row() + 1)
-                if 0 <= r < len(self._entries)]
-        if not any(k in self._state_cache for k in keys):
+        if not any(k in self._state_cache or k in self._in_flight or k in self._stale for k in keys):
             return
-        for k in keys:
-            self._state_cache.pop(k, None)
-        if top_left.column() > COL_STATE or bottom_right.column() < COL_ENGLISH:
+        self._invalidate(keys)
+        if not self.deferred and (top_left.column() > COL_STATE or bottom_right.column() < COL_ENGLISH):
             # The row changed elsewhere (MU match, override): repaint its state cells too.
-            self.dataChanged.emit(self.index(top_left.row(), COL_STATE), self.index(bottom_right.row(), COL_ENGLISH),
-                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+            self.dataChanged.emit(self.index(first, COL_STATE), self.index(last, COL_ENGLISH), _STATE_ROLES)
+
+    def _compute(self, e: MangaEntry, rename_count: int):
+        """One series' (state, official links, knowledge) from the providers (any thread)."""
+        st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
+                                 needs_kind=self._needs_kind_for(e), rename_count=rename_count, today=self._today,
+                                 unbundled=self._unbundled_for(e))
+        links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
+        return st, links, knowledge
 
     def _evaluate(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]:
         e = self.entry_at(row)
@@ -271,17 +429,141 @@ class MangaTableModel(QAbstractTableModel):
         if cached is not None and cached[0] is e:
             return cached[1]
         self.evaluations += 1
-        st, knowledge = evaluate(e, knowledge=self._knowledge_for(e), inventory=self._inventory_for(e),
-                                 needs_kind=self._needs_kind_for(e),
-                                 rename_count=self._rename_counts.get(str(e.folder), 0), today=self._today,
-                                 unbundled=self._unbundled_for(e))
-        links = official_links(knowledge, title=knowledge.search_title or e.english_title or e.title)
-        self._state_cache[id(e)] = (e, (st, links, knowledge))
-        return st, links, knowledge
+        result = self._compute(e, self._rename_counts.get(str(e.folder), 0))
+        self._state_cache[id(e)] = (e, result)
+        self._stale.pop(id(e), None)
+        return result
+
+    def _shown(self, row: int) -> Optional[Tuple[SeriesState, List[OfficialLink], SeriesKnowledge]]:
+        """What *row* shows: its state; deferred, the state it showed before while the new one is computed (None for a
+        series never seen), never computed here."""
+        e = self._entries[row] if 0 <= row < len(self._entries) else None
+        if e is None:
+            return None
+        k = id(e)
+        cached = self._state_cache.get(k)
+        if cached is not None and cached[0] is e:
+            return cached[1]
+        if not self.deferred or k in self._failed:
+            return self._evaluate(row)
+        if k not in self._in_flight:
+            self._want_states()
+        stale = self._stale.get(k)
+        if stale is not None and stale[0] is e:
+            return stale[1]
+        return self._stale_folders.get(str(e.folder))
 
     def state_at(self, row: int) -> Optional[SeriesState]:
+        """*row*'s state, computed now if it is not known (one row: the details panel, a menu, an action)."""
         got = self._evaluate(row)
         return got[0] if got else None
+
+    def shown_state_at(self, row: int) -> Optional[SeriesState]:
+        """The state *row* shows (deferred: possibly the one before, or None while it is computed) - for the filters and
+        the counts, which never compute a state on the UI thread."""
+        got = self._shown(row)
+        return got[0] if got else None
+
+    def ready_state_at(self, row: int) -> Optional[SeriesState]:
+        """*row*'s up-to-date state, or None when it is not known yet (never computed here)."""
+        e = self.entry_at(row)
+        cached = self._state_cache.get(id(e)) if e is not None else None
+        return cached[1][0] if cached is not None and cached[0] is e else None
+
+    def ready_state_of(self, e: MangaEntry) -> Optional[SeriesState]:
+        """*e*'s up-to-date state, or None when it is not known (never computed here)."""
+        cached = self._state_cache.get(id(e))
+        return cached[1][0] if cached is not None and cached[0] is e else None
+
+    def states_pending(self, rows: Optional[Iterable[int]] = None) -> bool:
+        """Deferred: does a row of *rows* (all when None) wait for its state? Always False otherwise (computed on
+        use)."""
+        if not self.deferred:
+            return False
+        cache, failed = self._state_cache, self._failed
+        entries = self._entries
+        it = entries if rows is None else (entries[r] for r in rows if 0 <= r < len(entries))
+        return any(id(e) not in cache and id(e) not in failed for e in it)
+
+    def _want_states(self) -> None:
+        if not self._asked:
+            self._asked = True
+            self.states_wanted.emit()
+
+    def take_states_request(self) -> List[Tuple[MangaEntry, int, int]]:
+        """The rows to compute in the background: ``(entry, its generation, its rename count)`` for each entry without
+        an up-to-date state that is not being computed already, in row order. They count as in flight from here."""
+        self._asked = False
+        cache, flight = self._state_cache, self._in_flight
+        out = []
+        for e in self._entries:
+            k = id(e)
+            if k in cache or k in flight or k in self._failed:
+                continue
+            flight.add(k)
+            out.append((e, self._generation.get(k, 0), self._rename_counts.get(str(e.folder), 0)))
+        return out
+
+    def compute_states(self, request: Iterable[Tuple[MangaEntry, int, int]]) -> List[Tuple[MangaEntry, int, Any]]:
+        """Off the UI thread: the results of :meth:`take_states_request` (``None`` for a series whose state could not be
+        computed - it is computed on the UI thread on use, where the error shows as before)."""
+        out = []
+        for e, generation, rename_count in request:
+            try:
+                result = self._compute(e, rename_count)
+            except Exception:  # noqa: BLE001 - computed again on use, where it fails visibly as before
+                result = None
+            out.append((e, generation, result))
+        return out
+
+    def push_states(self, computed: Iterable[Tuple[MangaEntry, int, Any]]) -> List[int]:
+        """Store the background's results in one step: the ones still current (the entry still shown, nothing changed
+        since the request) replace what their rows showed; then one ``dataChanged`` over those rows' state columns.
+        Returns the rows that changed."""
+        where = {id(e): r for r, e in enumerate(self._entries)}
+        rows = []
+        for e, generation, result in computed:
+            k = id(e)
+            self._in_flight.discard(k)
+            r = where.get(k)
+            if r is None or self._entries[r] is not e or self._generation.get(k, 0) != generation:
+                continue                # gone, or changed meanwhile (a newer request computes it)
+            if result is None:
+                self._failed.add(k)
+                continue
+            if k not in self._state_cache:
+                self._state_cache[k] = (e, result)
+                self.pushed += 1
+            self._stale.pop(k, None)
+            self._stale_folders.pop(str(e.folder), None)
+            rows.append(r)
+        if rows:
+            first, last = min(rows), max(rows)
+            self._pushing = True
+            try:
+                self.dataChanged.emit(self.index(first, STATE_PUSH_COLUMNS[0]),
+                                      self.index(last, STATE_PUSH_COLUMNS[1]), _STATE_ROLES)
+            finally:
+                self._pushing = False
+        if self.deferred and any(id(e) not in self._state_cache and id(e) not in self._in_flight
+                                 and id(e) not in self._failed for e in self._entries):
+            self._want_states()
+        return rows
+
+    def abandon_states(self, request: Iterable[Tuple[MangaEntry, int, int]]) -> None:
+        """The background computation of *request* failed as a whole: those rows are computed on use instead."""
+        for e, _generation, _count in request:
+            self._in_flight.discard(id(e))
+            self._failed.add(id(e))
+
+    def filter_matches(self, st: SeriesState, keys: tuple) -> frozenset:
+        """Which of the state filters *keys* *st* passes (kept per state object: the chips' counts read it per row)."""
+        got = self._filter_cache.get(id(st))
+        if got is not None and got[0] is st and got[1] == keys:
+            return got[2]
+        passed = frozenset(k for k in keys if state_matches(st, k))
+        self._filter_cache[id(st)] = (st, keys, passed)
+        return passed
 
     def links_at(self, row: int) -> List[OfficialLink]:
         got = self._evaluate(row)
@@ -292,12 +574,22 @@ class MangaTableModel(QAbstractTableModel):
         got = self._evaluate(row)
         return got[2] if got else None
 
+    def ready_knowledge_at(self, row: int) -> Optional[SeriesKnowledge]:
+        """The knowledge behind *row*'s up-to-date state, or None when the state is not known yet."""
+        e = self.entry_at(row)
+        cached = self._state_cache.get(id(e)) if e is not None else None
+        return cached[1][2] if cached is not None and cached[0] is e else None
+
+    def held_volumes_of(self, e: MangaEntry) -> Tuple[str, ...]:
+        """The volume numbers *e*'s folder holds as volume archives (exact decimal strings, ascending; any thread)."""
+        return held_volumes(self._inventory_for(e) or fallback_inventory_from_entry(e))
+
     def held_volumes_at(self, row: int) -> Tuple[str, ...]:
         """The volume numbers *row*'s folder holds as volume archives (exact decimal strings, ascending)."""
         e = self.entry_at(row)
         if e is None:
             return ()
-        return held_volumes(self._inventory_for(e) or fallback_inventory_from_entry(e))
+        return self.held_volumes_of(e)
 
     def held_chapters_at(self, row: int) -> Tuple[Any, ...]:
         """The chapters *row*'s folder holds as chapter archives (numbers, or ``(from, to)`` for a range archive)."""
@@ -312,10 +604,25 @@ class MangaTableModel(QAbstractTableModel):
         matcher), the entry with MangaPixer's values when MangaPixer knows the folder, or None when MangaPixer
         says it is not a series (those columns stay empty - no stale own-matcher numbers)."""
         e = self.entry_at(row)
-        got = self._evaluate(row)
+        got = self._shown(row)
         if e is None or not got:
             return e
         return mangapixer_view(e, got[2])
+
+    def sort_key(self, row: int, col: int):
+        """The key *row* sorts by in column *col* (its ``data(UserRole)`` as :func:`_comparable` makes it), kept until
+        the row changes: the proxy's lessThan compares these (UI performance stage 2)."""
+        e = self._entries[row]
+        k = id(e)
+        keys = self._sort_keys.get(k)
+        if keys is None or keys[0] is not e:
+            keys = (e, {})
+            self._sort_keys[k] = keys
+        got = keys[1].get(col, _MISSING)
+        if got is _MISSING:
+            got = _comparable(self._sort_value(row, e, col))
+            keys[1][col] = got
+        return got
 
     # --- library scope ---------------------------------------------------------------------------------------
 
@@ -337,10 +644,13 @@ class MangaTableModel(QAbstractTableModel):
         same library, so the Dupe column and the Duplicates chip agree with the rows the picker lets through."""
         if root_id == self._scope:
             return
+        before = [self._dupe_signature(r) for r in range(len(self._entries))]
         self._scope = root_id
         self._rebuild_dupe_map()
-        if self._entries:
-            self.dataChanged.emit(self.index(0, COL_DUPE), self.index(len(self._entries) - 1, COL_DUPE),
+        # only the rows whose Duplicates cell changes repaint (a library switch otherwise re-sorts and repaints 700)
+        changed = [r for r, old in enumerate(before) if self._dupe_signature(r) != old]
+        if changed:
+            self.dataChanged.emit(self.index(changed[0], COL_DUPE), self.index(changed[-1], COL_DUPE),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
 
     def search_text(self, row: int) -> str:
@@ -370,6 +680,15 @@ class MangaTableModel(QAbstractTableModel):
             if e.mu_title is not None and (self._scope is None or e.root_id == self._scope):
                 # Normalize for comparison (case-insensitive, strip whitespace)
                 self._dupe_map.setdefault(e.mu_title.strip().lower(), []).append(i)
+
+    def _dupe_signature(self, row: int):
+        """What *row*'s Duplicates cell depends on that the scope changes: in scope, and the other rows of its title."""
+        if not self.in_scope(row):
+            return None
+        e = self._entries[row]
+        if e.mu_title is None:
+            return ()
+        return tuple(self._dupe_map.get(e.mu_title.strip().lower(), ()))
 
     def is_duplicate(self, row: int) -> bool:
         """Return True if this row shares an MU title with another row (of the library picked, if any)."""
@@ -408,11 +727,15 @@ class MangaTableModel(QAbstractTableModel):
         flipped = {f for f in set(new) | set(self._rename_counts) if new.get(f) != self._rename_counts.get(f)}
         self._rename_counts = new
         rows = [r for r, e in enumerate(self._entries) if str(e.folder) in flipped]
-        for r in rows:                  # only the series whose count changed are evaluated again
-            self._state_cache.pop(id(self._entries[r]), None)
-        for r in rows:
-            self.dataChanged.emit(self.index(r, COL_STATE), self.index(r, COL_ENGLISH),
-                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+        # only the series whose count changed are evaluated again (deferred: in the background, pushed in one step)
+        self._invalidate([id(self._entries[r]) for r in rows])
+        if rows and not self.deferred:
+            self._pushing = True        # one repaint over them (the rows between keep their states)
+            try:
+                self.dataChanged.emit(self.index(min(rows), COL_STATE), self.index(max(rows), COL_ENGLISH),
+                                      _STATE_ROLES)
+            finally:
+                self._pushing = False
         if self._entries:
             self.dataChanged.emit(self.index(0, COL_RENAME), self.index(len(self._entries) - 1, COL_RENAME),
                                   [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
@@ -563,14 +886,17 @@ class MangaTableModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role=Qt.DisplayRole):
         if not index.isValid():
             return None
-        e = self._entries[index.row()]
+        if role.__class__ is not int:
+            role = int(role)
+        row = index.row()
+        e = self._entries[row]
         col = index.column()
 
-        if role == Qt.DisplayRole or role == Qt.EditRole:
+        if role == _DISPLAY or role == _EDIT:
             if col == COL_EXAMINED:
                 return "✓" if e.examined else ""
             if col == COL_DUPE:
-                return self._duplicates_text(index.row())
+                return self._duplicates_text(row)
             if col == COL_TITLE:
                 if e.parent_folder is not None:
                     return f"{e.parent_folder.name} / {e.title}"
@@ -580,7 +906,7 @@ class MangaTableModel(QAbstractTableModel):
             if col == COL_LIBRARY:
                 return self.library_name(e.root_id)
             if col == COL_RENAME:
-                n = self.rename_count_at(index.row())
+                n = self.rename_count_at(row)
                 return f"{n} file{'s' if n != 1 else ''}" if n else ""
             if col == COL_FILES:
                 return e.n_files
@@ -598,8 +924,8 @@ class MangaTableModel(QAbstractTableModel):
                 if e.last_modified:
                     return datetime.datetime.fromtimestamp(e.last_modified).strftime("%Y-%m-%d %H:%M")
                 return ""
-            if col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED):
-                v = self.mu_view(index.row())
+            if col in _MU_COLUMNS:
+                v = self.mu_view(row)
                 if v is None:
                     return ""
                 if col == COL_MU_TITLE:
@@ -615,47 +941,60 @@ class MangaTableModel(QAbstractTableModel):
                     return _behind_text(v)
                 return _completed_text(v)
             if col == COL_STATE:
-                st = self.state_at(index.row())
-                return state_text(st) if st else ""
+                got = self._shown(row)
+                return state_text(got[0]) if got else ""
             if col == COL_GAPS:
-                st = self.state_at(index.row())
-                return st.gaps_text if st else ""
+                got = self._shown(row)
+                return got[0].gaps_text if got else ""
             if col == COL_OFFICIAL:
-                return _official_text(self.links_at(index.row()))
+                got = self._shown(row)
+                return _official_text(list(got[1]) if got else [])
             if col == COL_ENGLISH:
-                return english_text(self.knowledge_at(index.row()))
+                got = self._shown(row)
+                return english_text(got[2] if got else None)
+            return None
 
-        if role == SUBTITLE_ROLE and col == COL_TITLE:
-            v = self.mu_view(index.row())
+        if role == _USER:
+            return self._sort_value(row, e, col)
+
+        if role == _SUBTITLE:
+            if col != COL_TITLE:
+                return None
+            v = self.mu_view(row)
             return (v.mu_title or "") if v is not None else ""
-        if role == REVIEW_ROLE and col == COL_TITLE:
-            return needs_review(e)
-        if role == MODE_CHIP_ROLE and col == COL_TITLE:
-            return self._mode_chips.get(str(e.folder), "")
-        if role == STATE_ROLE and col == COL_STATE:
-            return self.state_at(index.row())
+        if role == _REVIEW:
+            return needs_review(e) if col == COL_TITLE else None
+        if role == _MODE_CHIP:
+            return self._mode_chips.get(str(e.folder), "") if col == COL_TITLE else None
+        if role == _STATE:
+            if col != COL_STATE:
+                return None
+            got = self._shown(row)
+            return got[0] if got else None
 
-        if role == Qt.TextAlignmentRole:
-            if col in (COL_FILES, COL_SUBS, COL_VOL, COL_CH, COL_BOTH, COL_MTIME, COL_RENAME):
-                return int(Qt.AlignRight | Qt.AlignVCenter)
-            if col in (COL_VERDICT, COL_EXAMINED, COL_LICENSED, COL_BEHIND, COL_COMPLETED, COL_DUPE):
-                return int(Qt.AlignCenter)
+        if role == _ALIGNMENT:
+            if col in _RIGHT_COLUMNS:
+                return _ALIGN_RIGHT
+            if col in _CENTER_COLUMNS:
+                return _ALIGN_CENTER
+            return None
 
-        if role == Qt.BackgroundRole:
-            if self._mu_processing_row == index.row():
+        if role == _BACKGROUND:
+            if self._mu_processing_row == row:
                 return qcolor("busy_row")
             if e.examined:
                 return qcolor("ok_bg")
             if col == COL_MU_TITLE and needs_review(e):
                 return qcolor("warn_bg")
+            return None
 
-        if role == Qt.ToolTipRole:
+        if role == _TOOLTIP:
             if col == COL_EXAMINED:
                 return "Examined" if e.examined else "Not examined"
             if col == COL_DUPE:
-                return self._duplicates_tip(index.row())
+                return self._duplicates_tip(row)
             if col == COL_RENAME:
-                n = self.rename_count_at(index.row())
+                n = self.rename_count_at(row)
                 return (f"{n} file{'s' if n != 1 else ''} not named by the naming scheme (right-click: Rename to the "
                         "scheme)") if n else None
             if col == COL_MU_TITLE:
@@ -663,9 +1002,10 @@ class MangaTableModel(QAbstractTableModel):
                 if tip is not None:
                     return tip
             if col in (COL_LICENSED, COL_BEHIND, COL_COMPLETED):
-                v = self.mu_view(index.row())
+                v = self.mu_view(row)
                 if v is None:
-                    st = self.state_at(index.row())
+                    got = self._shown(row)
+                    st = got[0] if got else None
                     return (st.reasons[0] if st and st.reasons else None)
                 if col == COL_LICENSED:
                     return "Licensed in English" if v.licensed is True else None
@@ -673,81 +1013,85 @@ class MangaTableModel(QAbstractTableModel):
                     return _behind_tooltip(v) or str(e.folder)
                 return _completed_tooltip(v)
             if col == COL_STATE:
-                st = self.state_at(index.row())
-                return st.tooltip() if st else None
+                got = self._shown(row)
+                return got[0].tooltip() if got else None
             if col == COL_GAPS:
-                st = self.state_at(index.row())
-                return (st.gaps_tooltip() or "No gaps") if st else None
+                got = self._shown(row)
+                return (got[0].gaps_tooltip() or "No gaps") if got else None
             if col == COL_OFFICIAL:
-                return _official_tooltip(self.links_at(index.row())) or None
+                got = self._shown(row)
+                return _official_tooltip(list(got[1]) if got else []) or None
             # Default tooltip: folder path, with franchise info if applicable
             if e.parent_folder is not None:
                 return f"Subseries of: {e.parent_folder.name}\n{e.folder}"
             return str(e.folder)
 
-        # Sort by numeric value for percentage / count columns
-        if role == Qt.UserRole:
-            if col == COL_EXAMINED:
-                return 1 if e.examined else 0
-            if col == COL_DUPE:
-                # the most duplicated first: numbers held twice, plus the other folders of the same series
-                vols, chs = self.duplicate_files_at(index.row())
-                return vols + chs + (len(self.get_duplicate_rows(index.row())) if self.is_duplicate(index.row()) else 0)
-            if col == COL_FILES:
-                return e.n_files
-            if col == COL_SUBS:
-                return e.n_subfolders
-            if col == COL_VOL:
-                return e.vol_pct
-            if col == COL_CH:
-                return e.ch_pct
-            if col == COL_BOTH:
-                return e.both_pct
-            if col == COL_VERDICT:
-                return e.verdict.value
-            if col == COL_TITLE:
-                # Sort by parent name first (if subseries), then title
-                if e.parent_folder is not None:
-                    return f"{e.parent_folder.name.lower()} / {e.title.lower()}"
-                return e.title.lower()
-            if col == COL_ENG:
-                return (e.english_title or "").lower()
-            if col == COL_LIBRARY:
-                return self.library_name(e.root_id).lower()
-            if col == COL_RENAME:
-                return self.rename_count_at(index.row())
-            if col == COL_MTIME:
-                return e.last_modified
-            if col in (COL_MU_TITLE, COL_LICENSED, COL_BEHIND, COL_COMPLETED):
-                v = self.mu_view(index.row())   # sort what the cells show (MangaPixer's values when it knows the folder)
-                if col == COL_MU_TITLE:
-                    if v is None:
-                        return "2"
-                    # Confirmed entries sort before unconfirmed, then alphabetically.
-                    prefix = "0" if v.mu_confirmed else "1"
-                    return f"{prefix}{(v.mu_title or '').lower()}"
-                if col == COL_LICENSED:
-                    if v is not None and v.licensed is True:
-                        return 1
-                    if v is not None and v.licensed is False:
-                        return 0
-                    return -1
-                if col == COL_BEHIND:
-                    return _behind_sort(v) if v is not None else -1.0
-                return _completed_sort(v) if v is not None else -1
-            if col == COL_STATE:
-                st = self.state_at(index.row())
-                # STATE_ORDER rank first, then more missing units first (one number: Qt sorts it).
-                rank, neg_missing = st.sort_key if st else (len(STATE_ORDER), 0)
-                return rank * 1_000_000 + neg_missing
-            if col == COL_GAPS:
-                st = self.state_at(index.row())
-                return st.n_missing if st else -1
-            if col == COL_OFFICIAL:
-                return _official_text(self.links_at(index.row())).lower()
-            if col == COL_ENGLISH:
-                return english_text(self.knowledge_at(index.row())).lower()
+        return None
 
+    def _sort_value(self, row: int, e: MangaEntry, col: int):
+        """``data(UserRole)``: what column *col* sorts by (numbers for the counts and percentages)."""
+        if col == COL_EXAMINED:
+            return 1 if e.examined else 0
+        if col == COL_DUPE:
+            # the most duplicated first: numbers held twice, plus the other folders of the same series
+            vols, chs = self.duplicate_files_at(row)
+            return vols + chs + (len(self.get_duplicate_rows(row)) if self.is_duplicate(row) else 0)
+        if col == COL_FILES:
+            return e.n_files
+        if col == COL_SUBS:
+            return e.n_subfolders
+        if col == COL_VOL:
+            return e.vol_pct
+        if col == COL_CH:
+            return e.ch_pct
+        if col == COL_BOTH:
+            return e.both_pct
+        if col == COL_VERDICT:
+            return e.verdict.value
+        if col == COL_TITLE:
+            # Sort by parent name first (if subseries), then title
+            if e.parent_folder is not None:
+                return f"{e.parent_folder.name.lower()} / {e.title.lower()}"
+            return e.title.lower()
+        if col == COL_ENG:
+            return (e.english_title or "").lower()
+        if col == COL_LIBRARY:
+            return self.library_name(e.root_id).lower()
+        if col == COL_RENAME:
+            return self.rename_count_at(row)
+        if col == COL_MTIME:
+            return e.last_modified
+        if col in _MU_COLUMNS:
+            v = self.mu_view(row)   # sort what the cells show (MangaPixer's values when it knows the folder)
+            if col == COL_MU_TITLE:
+                if v is None:
+                    return "2"
+                # Confirmed entries sort before unconfirmed, then alphabetically.
+                prefix = "0" if v.mu_confirmed else "1"
+                return f"{prefix}{(v.mu_title or '').lower()}"
+            if col == COL_LICENSED:
+                if v is not None and v.licensed is True:
+                    return 1
+                if v is not None and v.licensed is False:
+                    return 0
+                return -1
+            if col == COL_BEHIND:
+                return _behind_sort(v) if v is not None else -1.0
+            return _completed_sort(v) if v is not None else -1
+        if col == COL_STATE:
+            got = self._shown(row)
+            # STATE_ORDER rank first, then more missing units first (one number: Qt sorts it).
+            rank, neg_missing = got[0].sort_key if got else (len(STATE_ORDER), 0)
+            return rank * 1_000_000 + neg_missing
+        if col == COL_GAPS:
+            got = self._shown(row)
+            return got[0].n_missing if got else -1
+        if col == COL_OFFICIAL:
+            got = self._shown(row)
+            return _official_text(list(got[1]) if got else []).lower()
+        if col == COL_ENGLISH:
+            got = self._shown(row)
+            return english_text(got[2] if got else None).lower()
         return None
 
 

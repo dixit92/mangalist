@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -23,13 +24,20 @@ def utcnow() -> str:
 
 
 class StoreBase:
-    """One SQLite file. Every call opens its own short connection (safe from worker threads)."""
+    """One SQLite file. Every call opens its own short connection (safe from worker threads) - except on the UI thread
+    of a window that keeps one (:attr:`keep_ui_connection`, UI performance stage 2): there a connection is opened once
+    and reused, so a click that reads or writes a setting no longer pays for opening the file, three PRAGMAs and a
+    close (which checkpoints the write-ahead log when it was the last connection: 20-40 ms per call measured)."""
 
     def __init__(self, path: Path):
         self.path = Path(path)
         self._init_lock = threading.RLock()
         self._ready = False
         self._initializing = False
+        self.keep_ui_connection = False
+        self._ui_con: Optional[sqlite3.Connection] = None
+        self._ui_file: Optional[tuple] = None       # (device, inode) of the file it was opened on
+        self._ui_depth = 0
 
     # --- connections -------------------------------------------------------------------------------
 
@@ -67,11 +75,51 @@ class StoreBase:
     def _after_init(self) -> None:
         """Hook run once after the schema is current (imports of older files)."""
 
+    def _reused_connection(self) -> Optional[sqlite3.Connection]:
+        """The UI thread's kept connection (opened again when the file was replaced or a transaction was left open),
+        or None where none is kept: another thread, a nested call, or not asked for."""
+        if not self.keep_ui_connection or self._ui_depth or threading.current_thread() is not threading.main_thread():
+            return None
+        try:
+            st = os.stat(self.path)
+            file_id = (st.st_dev, st.st_ino)
+        except OSError:
+            file_id = None
+        con = self._ui_con
+        if con is not None and (file_id is None or file_id != self._ui_file or con.in_transaction):
+            self.release_ui_connection()
+            con = None
+        if con is None and file_id is not None:
+            con = self._ui_con = self._raw_connect()
+            self._ui_file = file_id
+        return con
+
+    def release_ui_connection(self) -> None:
+        """Close the UI thread's kept connection (the window closes; the store is forgotten)."""
+        con, self._ui_con, self._ui_file = self._ui_con, None, None
+        if con is not None:
+            try:
+                con.close()
+            except sqlite3.Error:
+                pass
+
     @contextmanager
     def connect(self, durable: bool = False) -> Iterator[sqlite3.Connection]:
         """A connection inside one transaction: committed on success, rolled back on error, closed.
         *durable* syncs the commit to disk before returning (the journal's write-ahead records)."""
         self.ensure_initialized()
+        kept = None if durable else self._reused_connection()
+        if kept is not None:
+            self._ui_depth += 1
+            try:
+                yield kept
+                kept.commit()
+            except BaseException:
+                kept.rollback()
+                raise
+            finally:
+                self._ui_depth -= 1
+            return
         con = self._raw_connect()
         if durable:
             con.execute("PRAGMA synchronous=FULL")

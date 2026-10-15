@@ -68,12 +68,20 @@ class AutoModes(QObject):
         backend = self._backend
 
         def run():
-            ids = {}
-            for folder in folders:
+            ids = None
+            batch = getattr(backend, "series_ids_for", None)
+            if callable(batch):         # one query for every folder (UI performance stage 2)
                 try:
-                    ids[folder] = backend.series_id_for(folder)
-                except Exception:  # noqa: BLE001 - that row gets no chip
-                    ids[folder] = None
+                    ids = {folder: dict(got).get(folder) for got in (batch(folders),) for folder in folders}
+                except Exception:  # noqa: BLE001 - one by one instead
+                    ids = None
+            if ids is None:
+                ids = {}
+                for folder in folders:
+                    try:
+                        ids[folder] = backend.series_id_for(folder)
+                    except Exception:  # noqa: BLE001 - that row gets no chip
+                        ids[folder] = None
             known = sorted({i for i in ids.values() if i is not None})
             modes = dict(backend.series_modes(known)) if known else {}
             return ids, modes, defaults_of(backend, known), backend.default_mode()
@@ -137,7 +145,11 @@ class AutoModes(QObject):
     def detail(self, folder: str) -> Tuple[str, str]:
         """(text, tooltip) of the details panel's line: ``Auto`` / ``Notify (the default)`` / ``Off (the library's
         default)``; a folder not scanned into the store yet says so."""
-        state = self.detail_state(folder)
+        return self.detail_text(self.detail_state(folder))
+
+    @staticmethod
+    def detail_text(state) -> Tuple[str, str]:
+        """:meth:`detail` from a :meth:`detail_state` already read (the details panel reads it once per selection)."""
         if state is None:
             return NOT_SCANNED, ""
         if isinstance(state, str):

@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         paths.migrate_legacy_data()
     except OSError:
         logging.getLogger(__name__).warning("Could not migrate the old data folder", exc_info=True)
-    log_config.apply_stored()          # the owner's log level (Settings > Logging); INFO until the database is read
+    stored = log_config.apply_stored()  # the owner's log level (Settings > Logging); INFO until the database is read
     logging.getLogger(__name__).info("Data folder: %s", paths.data_dir())
     # On Windows, set an explicit AppUserModelID so the taskbar uses our icon
     # instead of grouping under the generic python.exe icon.
@@ -61,15 +61,27 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger(__name__).warning("The bundled fonts did not load; using the system font")
     win = MainWindow()
     win.show()
+    # The event-loop watchdog: a WARNING when the window is blocked > 250 ms (on in the container, MANGALIST_UI_WATCHDOG;
+    # on the desktop with the Debug log level).
+    from mangalist.gui.watchdog import start_if_wanted
+
+    watchdog = start_if_wanted(stored.level if stored is not None else None)
     if "--smoke-test" in args:
         QTimer.singleShot(0, app.quit)
     else:
         # The library at start without a click: scan the library folders in the background.
         QTimer.singleShot(0, win.start_initial_scan)
     code = app.exec()
+    if watchdog is not None:
+        watchdog.stop()
     win.close()                     # stop the background work (a scan, signatures) before the application goes
     return code
 
 
 if __name__ == "__main__":
+    # The long counts run in subprocesses started with "spawn" (mangalist/process_pool.py): in a PyInstaller build
+    # such a child is this executable again, and freeze_support() turns it into the worker (a no-op otherwise).
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     sys.exit(main())

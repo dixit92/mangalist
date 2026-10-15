@@ -11,6 +11,9 @@ from mangalist import paths
 @pytest.fixture(autouse=True)
 def _isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv(paths.ENV_DATA_DIR, str(tmp_path / "data"))
+    # The long counts run in this process unless a test asks for the subprocess pool (tests/test_process_pool.py): a
+    # window per test would otherwise start child processes for every Rename-pending count.
+    monkeypatch.setenv("MANGALIST_SUBPROCESS", "0")
 
 
 @pytest.fixture(scope="session", autouse=True)

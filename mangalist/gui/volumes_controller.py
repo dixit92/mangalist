@@ -76,9 +76,40 @@ class VolumesController(QObject):
                 self._series_ids[key] = None
         return self._series_ids[key]
 
-    def forget_series_ids(self) -> None:
-        """A scan changed the store's series rows: look the folders up again."""
-        self._series_ids.clear()
+    def series_ids_for(self, entries) -> Dict[str, Optional[int]]:
+        """folder -> series id for *entries* (any thread): the ones not known yet read in one query when the backend
+        can (``series_ids_for``), else one by one."""
+        folders = [str(e.folder) for e in entries]
+        known = self._series_ids
+        todo = [f for f in folders if f not in known]
+        if todo:
+            batch = getattr(self.backend, "series_ids_for", None)
+            got = None
+            if callable(batch):
+                try:
+                    got = dict(batch(todo))
+                except Exception as exc:  # noqa: BLE001 - one by one instead
+                    _log.warning("series lookup failed: %s", type(exc).__name__)
+            if got is not None:
+                for f in todo:
+                    known[f] = got.get(f)
+            else:
+                for f in todo:
+                    try:
+                        known[f] = self.backend.series_id_for(f)
+                    except Exception as exc:  # noqa: BLE001 - a broken lookup disables the action, nothing more
+                        _log.warning("series lookup failed: %s", type(exc).__name__)
+                        known[f] = None
+        return {f: known.get(f) for f in folders}
+
+    def forget_series_ids(self, folders=None) -> None:
+        """A scan changed the store's series rows: look the folders up again - *folders* only (the series a library's
+        scan read, and both sides of a renamed / moved one; the other libraries' rows did not change), or all."""
+        if folders is None:
+            self._series_ids.clear()
+            return
+        for folder in folders:
+            self._series_ids.pop(str(folder), None)
 
     def availability(self, src_row: int) -> Availability:
         entry = self._model.entry_at(src_row)

@@ -128,6 +128,11 @@ class Backend:
         series = self.db.series_for_folder(folder)
         return series.id if series is not None else None
 
+    def series_ids_for(self, folders) -> dict:
+        """folder -> series id (None: not scanned) for many folders in one query (the window's To get list after a
+        scan, the automatic-download chips)."""
+        return self.db.series_ids_for_folders(folders)
+
     def placement(self, series_id: int) -> Placement:
         try:
             return placement_for(self.db, series_id)

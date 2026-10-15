@@ -32,6 +32,7 @@ from mangalist.knowledge import from_mangapixer_item  # noqa: E402
 from mangalist.models import FileHit, MangaEntry  # noqa: E402
 from mangalist.states import State  # noqa: E402
 
+from ..gui.conftest import settle_states  # noqa: E402
 from .helpers import TODAY, item  # noqa: E402
 
 ROOT = Path("/library/Manga")
@@ -163,6 +164,7 @@ def window(qapp):
     win._open_url = opened.append
     win._model.set_state_providers(today=TODAY)
     win._on_scan_finished(entries())
+    settle_states(win)                  # the states are computed in the background, as in the app
     try:
         yield win, opened
     finally:

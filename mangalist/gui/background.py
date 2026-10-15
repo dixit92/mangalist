@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional, Set
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 
 from .downloads_backend import BackendError
 
@@ -77,3 +77,79 @@ def start_call(fn: Callable[[], Any], on_done: Optional[Callable[[Any], None]] =
         call.finished.connect(on_finished)
     call.start()
     return call
+
+
+class ProcessCall(QObject):
+    """A job of :mod:`mangalist.process_pool` (a subprocess), with :class:`BackgroundCall`'s interface: ``succeeded``
+    / ``failed`` and then ``finished`` on the thread that started it, :meth:`abandon` to drop the result."""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+    _arrived = Signal(object)           # from the pool's thread: the future, delivered on this object's thread
+
+    IDLE_MS = 60_000                    # the pool is shut down after a minute without a job (its memory goes back)
+
+    def __init__(self, future, on_done=None, on_error=None, on_finished=None):
+        super().__init__()
+        self.abandoned = False
+        self._future = future
+        _ACTIVE.add(self)
+        if on_done is not None:
+            self.succeeded.connect(on_done)
+        if on_error is not None:
+            self.failed.connect(on_error)
+        if on_finished is not None:
+            self.finished.connect(on_finished)
+        self._arrived.connect(self._deliver, Qt.ConnectionType.QueuedConnection)
+        future.add_done_callback(self._arrived.emit)        # last: a job done already is delivered too
+
+    def _deliver(self, future) -> None:
+        try:
+            if not future.cancelled():
+                exc = future.exception()
+                if exc is not None:
+                    if not isinstance(exc, BackendError):
+                        _log.warning("subprocess call failed: %s", type(exc).__name__)
+                    self.failed.emit(describe_error(exc))
+                else:
+                    self.succeeded.emit(future.result())
+        finally:
+            self.finished.emit()
+            _ACTIVE.discard(self)
+            QTimer.singleShot(self.IDLE_MS, _release_idle_pool)
+            self.deleteLater()
+
+    def abandon(self) -> None:
+        """Drop the result (the subprocess finishes its job; :func:`mangalist.process_pool.shutdown` stops it)."""
+        self.abandoned = True
+        for signal in (self.succeeded, self.failed):
+            try:
+                signal.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+        self._future.cancel()
+
+    def wait(self, _msecs: int = 0) -> bool:
+        return True
+
+
+def _release_idle_pool() -> None:
+    from .. import process_pool
+
+    process_pool.release_if_idle()
+
+
+def start_process_call(fn: Callable[..., Any], args: tuple = (), on_done: Optional[Callable[[Any], None]] = None,
+                       on_error: Optional[Callable[[str], None]] = None,
+                       on_finished: Optional[Callable[[], None]] = None) -> ProcessCall:
+    """Run the Qt-free ``fn(*args)`` in a subprocess (:func:`mangalist.process_pool.submit`); the callbacks as with
+    :func:`start_call`, connected before the job can finish."""
+    from .. import process_pool
+
+    return ProcessCall(process_pool.submit(fn, *args), on_done, on_error, on_finished)
+
+
+# The window computes the series' states with this runner off the UI thread; a test's synchronous stand-in has no such
+# mark (main_window: the states are then computed on first use, as before).
+start_call.threaded = True

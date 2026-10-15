@@ -246,6 +246,39 @@ class SeriesMixin:
         loc = self._locate(folder)
         return self.get_series(*loc) if loc is not None else None
 
+    def series_ids_for_folders(self, folders: Iterable) -> Dict[str, Optional[int]]:
+        """``str(folder)`` -> its series row's id (None: not scanned, or outside every root) for many absolute folders
+        at once: the roots read and resolved once, the series rows in one query - what :meth:`series_for_folder` gives
+        one by one (each a roots read, two resolves and two connections; 560 of them at the end of a scan)."""
+        folders = [os.fspath(f) for f in folders]
+        if not folders:
+            return {}
+        bases = []
+        for root in self.list_roots():
+            try:
+                resolved = str(Path(root.path).resolve())
+            except OSError:
+                resolved = root.path
+            bases.append((root.id, [b for b in dict.fromkeys((root.path, resolved))]))
+        located: Dict[str, Optional[Tuple[int, str]]] = {}
+        for p in folders:
+            located[p] = None
+            np_ = os.path.normcase(p)
+            for root_id, candidates in bases:
+                hit = next((b for b in candidates if np_.startswith(os.path.normcase(b).rstrip(os.sep) + os.sep)), None)
+                if hit is not None:
+                    located[p] = (root_id, rel_posix(Path(p), Path(hit)))
+                    break
+        wanted_roots = {loc[0] for loc in located.values() if loc is not None}
+        ids: Dict[Tuple[int, str], int] = {}
+        if wanted_roots:
+            marks = ",".join("?" * len(wanted_roots))
+            with self.connect() as con:
+                for r in con.execute(f"SELECT id, root_id, rel_path FROM series WHERE root_id IN ({marks})",
+                                     sorted(wanted_roots)).fetchall():
+                    ids[(r["root_id"], r["rel_path"])] = r["id"]
+        return {p: (ids.get(loc) if loc is not None else None) for p, loc in located.items()}
+
     def _locate(self, folder) -> Optional[Tuple[int, str]]:
         """(root id, root-relative path) of an absolute folder inside a root, else None. Tries the path as
         given and the root resolved (the scanner keys folders under the resolved root)."""
