@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.35] - 2026-10-15
+
+The thirty-fourth MangaList release (testing build): move a series to another library from its menu, and sends from the release panel are queued instead of waited for.
+
+- **Move to library.** The List's row menu (one or several series) and the To get row menu have Move to library ▸ with your other libraries. One confirmation (Cancel is the default) names the series, the folder they go to and what changes there: series on "Use the default" take that library's automatic-download default, and its "Rename automatically" applies. Each series folder moves as a whole - one rename, nothing copied or deleted - and keeps its MangaUpdates link, settings, examined mark and download history; both folders are rescanned at once. Undo last move is in the same menu. A move is refused, with the reason, while a download of the series is not filed yet, while replaced chapters wait for your answer, when the other library already has a folder of that name, or when the two libraries are on different drives or shares (move it with a file manager then; the next scan recognises it).
+- **Sends are queued.** Send to qBittorrent in the release panel while another send runs queues the release ("Queued to send (1st)") instead of waiting: one send at a time, in the order clicked, each exactly as chosen at the click. The status line shows the series on screen, not another series' "Sending..."; a failed send does not stop the ones after it.
+
 ## [2026.10.34] - 2026-10-14
 
 The thirty-third MangaList release (testing build): a faster window and Found as one list, split chapters you hold are no longer asked for again, and the holding folder empties in one go.
