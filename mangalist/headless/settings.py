@@ -44,7 +44,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
+from datetime import datetime, timezone, tzinfo
 from typing import Any, Dict, Mapping, NamedTuple, Optional
 
 from .schedule import Schedule, parse_schedule, validate_schedule
@@ -169,6 +169,8 @@ def local_timezone(env: Optional[Mapping[str, str]] = None) -> tzinfo:
     """``TZ`` as an IANA zone when it names one, else the system's current local zone."""
     env = os.environ if env is None else env
     name = (env.get("TZ") or "").strip().lstrip(":")
+    if name.upper() in ("UTC", "ETC/UTC", "GMT", "ETC/GMT", "Z"):
+        return timezone.utc                      # needs no time-zone database (Windows has none without tzdata)
     if name:
         try:
             from zoneinfo import ZoneInfo
