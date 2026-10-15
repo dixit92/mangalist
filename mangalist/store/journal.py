@@ -21,8 +21,9 @@ Guarantees:
   ``verify="hash"``) changed since the plan was made is not moved - re-plan after MangaPixer has seen
   the change.
 - **One writer.** A plan with a ``root_path`` takes that root's ``.mangalist.lock`` while it applies or
-  undoes, and every step must lie inside that root. Other tools writing into the library meanwhile is
-  normal: a path they took simply makes that step fail (nothing is overwritten).
+  undoes, and every step must lie inside that root (a cross-root plan: inside its roots, every one of them locked).
+  Other tools writing into the library meanwhile is normal: a path they took simply makes that step fail (nothing
+  is overwritten).
 
 **Link steps** (``op='link'``, :meth:`Journal.plan_links`; the volumes MVP's arrivals): a step that creates a NEW
 name in the library for a finished download's file. Every guarantee above holds, with these specifics:
@@ -51,6 +52,22 @@ and recovered exactly like a move (an older build reads them as moves), with the
 - The source must be a plain file strictly inside the root, with no symlink anywhere below the root (the file itself
   included) and not a ``.mangalist`` lock artefact. Folders are never held.
 - A holding folder on another filesystem fails the step (``EXDEV``): nothing is copied, nothing deleted.
+
+**Cross-root plans** (:meth:`Journal.plan_across_roots`; Move to library, owner 2026-10-15: "Can you add a move to library
+feature now"): whole FOLDERS moved from inside one library root into another. Applied, undone and recovered exactly like
+moves (an older build reads them as moves), with these specifics:
+
+- The plan names two or more roots that do not overlap; each step's source lies strictly inside one of them and its
+  destination strictly inside one of them. ``root_path`` holds the first root (sorted), the ``meta`` row
+  ``journal.plan_roots.<plan id>`` (written in the same transaction) all of them - no schema change.
+- EVERY root's ``.mangalist.lock`` is taken while the plan applies or undoes, always in the same order (sorted by path),
+  so two cross-root plans can never deadlock; a root that is busy refuses the whole plan before anything moves (the
+  locks already taken are released).
+- A step is ONE rename of the folder: its source must be a real folder (not a symlink), the destination's parent must
+  exist (no folders are created), the destination must not exist (no-replace).
+- Across filesystems a rename fails with ``EXDEV``: refused when planning if the two sides' devices differ
+  (:class:`AcrossFilesystems`), and a step whose rename still meets ``EXDEV`` (a FUSE or SMB share that reports one device
+  but cannot rename between its shares) fails with :data:`ACROSS_FILESYSTEMS` - nothing is copied, nothing deleted.
 """
 
 from __future__ import annotations
@@ -61,6 +78,7 @@ import json
 import logging
 import os
 import shutil
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -86,8 +104,19 @@ class ContentAndPathChange(StepRefused):
     """A step would change an archive's content and its path at once."""
 
 
+class AcrossFilesystems(StepRefused):
+    """A cross-root step whose two sides lie on different filesystems: a rename cannot do it (MangaList never copies +
+    deletes)."""
+
+
 class PlanStateError(JournalError):
     pass
+
+
+#: A step's error when its rename met ``EXDEV`` (the two sides are on different filesystems or shares).
+ACROSS_FILESYSTEMS = "the destination is on another filesystem; MangaList never copies + deletes"
+#: The ``meta`` key (+ plan id) holding a cross-root plan's roots (JSON list).
+PLAN_ROOTS_META = "journal.plan_roots."
 
 
 @dataclass
@@ -483,11 +512,117 @@ class Journal:
                             [(plan_id, i, s, d, sz, sg, now) for i, s, d, sz, sg in rows])
         return self.get_plan(plan_id)
 
+    def plan_across_roots(self, reason: str, moves: Iterable[Union[Move, Tuple]], roots: Sequence,
+                          note: Optional[str] = None) -> Plan:
+        """Check *moves* - whole folders, each from inside one of *roots* into another place inside one of them (Move to
+        library: a series folder from one library root into another) - and record them as one plan that holds every
+        root's lock while it applies or undoes (see "Cross-root plans" above). Raises :class:`StepRefused` (nothing
+        recorded) for the first step that is not allowed; :class:`AcrossFilesystems` when a rename cannot reach."""
+        plan_roots = sorted({_norm(r) for r in roots}, key=os.path.normcase)
+        if len(plan_roots) < 2:
+            raise StepRefused("a cross-root plan needs two library roots")
+        for a in plan_roots:
+            if not os.path.isdir(a):
+                raise StepRefused(f"the root {a} is not a folder")
+            for b in plan_roots:
+                if a != b and _same_or_inside(a, b):
+                    raise StepRefused(f"the roots {a} and {b} overlap")
+
+        def root_of(p: str) -> Optional[str]:
+            return next((r for r in plan_roots if _inside(p, r)), None)
+
+        rows = []
+        sources: List[str] = []
+        taken: Dict[str, bool] = {}
+        for i, mv in enumerate(moves):
+            if not isinstance(mv, Move):
+                mv = Move(*mv)
+            src, dst = _norm(mv.src), _norm(mv.dst)
+            where = f"step {i + 1} ({src} -> {dst})"
+            if mv.changes_content:
+                raise StepRefused(f"{where}: content changes are not journal moves")
+            for p in (src, dst):
+                if root_of(p) is None:
+                    raise StepRefused(f"{where}: {p} is not inside one of the plan's roots")
+            if _same_or_inside(dst, src) or _same_or_inside(src, dst):
+                raise StepRefused(f"{where}: a folder cannot move into itself or its own parent")
+            if any(_same_or_inside(src, s) or _same_or_inside(s, src) for s in sources):
+                raise StepRefused(f"{where}: the folder is listed twice, or inside another folder of the plan")
+            if not exists_exact(src) or os.path.islink(src) or not os.path.isdir(src):
+                raise StepRefused(f"{where}: the source is not a folder (gone, a file or a symbolic link)")
+            parent = os.path.dirname(dst)
+            if not os.path.isdir(parent):
+                raise StepRefused(f"{where}: the destination's folder {parent} does not exist")
+            if os.path.lexists(dst) or taken.get(os.path.normcase(dst)):
+                raise StepRefused(f"{where}: the destination exists (a move never replaces anything)")
+            name = os.path.basename(_lexical(mv.dst))
+            problem = windows_name_problem(name)
+            if problem:
+                raise StepRefused(f"{where}: {name!r}: {problem}")
+            try:
+                across = _device(src) != _device(parent)
+            except OSError as exc:
+                raise StepRefused(f"{where}: cannot read the folders: {exc}") from None
+            if across:
+                raise AcrossFilesystems(f"{where}: {ACROSS_FILESYSTEMS}")
+            sources.append(src)
+            taken[os.path.normcase(dst)] = True
+            rows.append((i, src, dst))
+        if not rows:
+            raise StepRefused("a plan needs at least one move")
+        now = utcnow()
+        with self.store.connect(durable=True) as con:
+            cur = con.execute("INSERT INTO journal_plans (created_at, updated_at, reason, root_path, status, note, host,"
+                              " pid) VALUES (?,?,?,?, 'planned', ?,?,?)",
+                              (now, now, reason, plan_roots[0], note, this_host(), os.getpid()))
+            plan_id = int(cur.lastrowid)
+            con.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (f"{PLAN_ROOTS_META}{plan_id}", json.dumps(plan_roots, ensure_ascii=False)))
+            con.executemany("INSERT INTO journal_steps (plan_id, seq, op, src, dst, is_dir, src_size, src_signature,"
+                            " state, updated_at) VALUES (?,?, 'move', ?,?, 1, NULL, NULL, 'planned', ?)",
+                            [(plan_id, i, s, d, now) for i, s, d in rows])
+        _log.info("Journal: plan %d (%s) recorded: %d folder%s across %d roots", plan_id, reason, len(rows),
+                  "" if len(rows) == 1 else "s", len(plan_roots))
+        return self.get_plan(plan_id)
+
+    def plan_roots(self, plan: Plan) -> List[str]:
+        """Every root whose lock *plan* takes: a cross-root plan's roots (sorted), else its ``root_path`` (or none)."""
+        if plan.root_path is None:
+            return []
+        try:
+            with self.store.connect() as con:
+                r = con.execute("SELECT value FROM meta WHERE key = ?", (f"{PLAN_ROOTS_META}{plan.id}",)).fetchone()
+            roots = json.loads(r["value"]) if r is not None and r["value"] else None
+        except (TypeError, ValueError):
+            roots = None
+        if isinstance(roots, list) and roots:
+            return sorted({_norm(p) for p in roots} | {plan.root_path}, key=os.path.normcase)
+        return [plan.root_path]
+
+    @contextmanager
+    def lock_roots(self, roots: Sequence):
+        """Hold the locks of *roots* for the block, taken in the order every cross-root plan takes them (sorted by
+        path), with heartbeats; yields them (pass them to :meth:`apply` / :meth:`undo`). A busy root raises
+        :class:`~mangalist.store.lock.LockBusy` (or another ``LockError``) after the locks already taken are released.
+        A caller that must not leave a plan behind when a root is busy takes the locks first, then plans."""
+        taken: List[RootLock] = []
+        try:
+            for root in sorted({_norm(r) for r in roots}, key=os.path.normcase):
+                lk = self.lock_factory(root)
+                lk.acquire()
+                taken.append(lk)
+                lk.start_heartbeat()
+            yield list(taken)
+        finally:
+            for lk in reversed(taken):
+                lk.release()
+
     # --- applying ----------------------------------------------------------------------------------
 
     def apply(self, plan_id: int, lock: Optional[RootLock] = None) -> Plan:
         """Apply (or resume) a plan. Stops at the first step that cannot be done; the plan is then
-        ``failed`` and can be undone, or applied again once the cause is fixed."""
+        ``failed`` and can be undone, or applied again once the cause is fixed. *lock*: the root's lock, already held
+        (a cross-root plan: its roots' locks, e.g. from :meth:`lock_roots`); else the plan takes them itself."""
         plan = self.get_plan(plan_id)
         if plan.status not in ("planned", "failed", "interrupted"):
             raise PlanStateError(f"plan {plan_id} is {plan.status}; only a planned, failed or interrupted plan applies")
@@ -554,7 +689,7 @@ class Journal:
             for d in reversed(made):
                 _rmdir_if_empty(d)
             if exc.errno == errno.EXDEV:
-                return self._fail(step, "the destination is on another filesystem; MangaList never copies + deletes")
+                return self._fail(step, ACROSS_FILESYSTEMS)
             if isinstance(exc, FileExistsError):
                 return self._fail(step, "the destination appeared meanwhile; nothing replaced")
             return self._fail(step, f"rename failed: {exc}")
@@ -815,26 +950,47 @@ class Journal:
 
     # --- internals ---------------------------------------------------------------------------------
 
-    def _locked(self, plan: Plan, lock: Optional[RootLock]):
+    def _locked(self, plan: Plan, lock):
+        """The plan's root lock(s) for the block: *lock* (a held :class:`RootLock`, or for a cross-root plan a sequence
+        of them) where given, else taken here. A cross-root plan takes every root's lock in sorted order (no deadlock
+        between two such plans); when one is busy, those already taken are released and the error is raised."""
         journal = self
+        roots = self.plan_roots(plan)
 
         class _Ctx:
             def __enter__(self_inner):
-                self_inner.own = None
+                self_inner.own = []
                 if plan.root_path is None:
-                    return lock if lock is not None and lock.held else None
-                if lock is not None:
-                    if not lock.held or _norm(lock.root) != plan.root_path:
-                        raise PlanStateError(f"the lock given is not a held lock of {plan.root_path}")
-                    return lock
-                self_inner.own = journal.lock_factory(plan.root_path)
-                self_inner.own.acquire()
-                self_inner.own.start_heartbeat()
-                return self_inner.own
+                    return lock if isinstance(lock, RootLock) and lock.held else None
+                given = [lock] if isinstance(lock, RootLock) else list(lock or ())
+                by_root = {}
+                for g in given:
+                    if not g.held or _norm(g.root) not in roots:
+                        raise PlanStateError(f"the lock given is not a held lock of {' / '.join(roots)}")
+                    by_root[_norm(g.root)] = g
+                held = []
+                try:
+                    for root in roots:
+                        if root in by_root:
+                            held.append(by_root[root])
+                            continue
+                        own = journal.lock_factory(root)
+                        own.acquire()
+                        self_inner.own.append(own)
+                        own.start_heartbeat()
+                        held.append(own)
+                except BaseException:
+                    self_inner.release()
+                    raise
+                return held[0] if len(held) == 1 else _LockSet(held)
+
+            def release(self_inner):
+                for own in reversed(self_inner.own):
+                    own.release()
+                self_inner.own = []
 
             def __exit__(self_inner, *exc):
-                if self_inner.own is not None:
-                    self_inner.own.release()
+                self_inner.release()
 
         return _Ctx()
 
@@ -875,6 +1031,23 @@ class Journal:
                         (status, utcnow(), this_host(), os.getpid(), plan_id))
 
 
+class _LockSet:
+    """The locks of a cross-root plan while it applies or undoes, seen by the steps as one: :meth:`check` checks every
+    one; ``root`` is the first (only hold steps read it, and a cross-root plan has none)."""
+
+    def __init__(self, locks: Sequence[RootLock]):
+        self.locks = list(locks)
+        self.root = self.locks[0].root
+
+    @property
+    def held(self) -> bool:
+        return all(lk.held for lk in self.locks)
+
+    def check(self) -> None:
+        for lk in self.locks:
+            lk.check()
+
+
 # A hard link is not possible here: copy (verified) instead.
 _COPY_INSTEAD = {e for e in (errno.EXDEV, errno.EPERM, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", None),
                              errno.EMLINK, errno.ENOSYS, errno.EACCES) if e is not None}
@@ -882,7 +1055,8 @@ _COPY_INSTEAD = {e for e in (errno.EXDEV, errno.EPERM, errno.ENOTSUP, getattr(er
 
 class MoveFollower:
     """Where a file the library had at some path is now: followed through the moves the journal applied after a given
-    plan (the renamer's renames to the scheme; an undone move is not followed). The journal's moves are read once.
+    plan (the renamer's renames to the scheme, and the folder a file lies in when that folder moved - Move to library;
+    an undone move is not followed). The journal's moves are read once.
 
     Checks that a filed volume is still in the library use it (owner, 2026-10-12: completed torrents were not removed
     and the holding folder could not be emptied - the automatic rename had renamed the filed volumes)."""
@@ -890,6 +1064,7 @@ class MoveFollower:
     def __init__(self, journal: "Journal"):
         self.journal = journal
         self._moves: Optional[Dict[str, List[Tuple[int, str]]]] = None
+        self._folders: List[Tuple[int, str, str]] = []          # (plan id, source key, destination) of folder moves
         self._plans: List[Tuple[int, str]] = []                 # (id, created_at) of every plan
 
     def _read(self) -> Dict[str, List[Tuple[int, str]]]:
@@ -899,7 +1074,11 @@ class MoveFollower:
                 for plan in self.journal.list_plans():
                     self._plans.append((plan.id, plan.created_at))
                     for step in plan.steps:
-                        if step.op == "move" and step.state == "done" and not step.is_dir:
+                        if step.op != "move" or step.state != "done":
+                            continue
+                        if step.is_dir:     # a moved folder (Move to library) carries every file inside it along
+                            self._folders.append((plan.id, _key(step.src), _norm(step.dst)))
+                        else:
                             moves.setdefault(_key(step.src), []).append((plan.id, step.dst))
             except Exception:  # noqa: BLE001 - no journal: the recorded path is all that is known
                 _log.debug("Journal: the applied moves could not be read", exc_info=True)
@@ -917,9 +1096,12 @@ class MoveFollower:
         moves = self._read()
         seen = set()
         current, since = str(path), after_plan
-        while _key(current) not in seen:
-            seen.add(_key(current))
-            later = [(pid, dst) for pid, dst in moves.get(_key(current), ()) if pid > since]
+        while (_key(current), since) not in seen:
+            seen.add((_key(current), since))
+            key = _key(current)
+            later = [(pid, dst) for pid, dst in moves.get(key, ()) if pid > since]
+            later += [(pid, dst + _norm(current)[len(src):]) for pid, src, dst in self._folders
+                      if pid > since and key.startswith(src.rstrip(os.sep) + os.sep) and len(_norm(current)) == len(key)]
             if not later:
                 break
             since, current = min(later)
@@ -928,6 +1110,11 @@ class MoveFollower:
 
 def _key(p) -> str:
     return os.path.normcase(_norm(p))
+
+
+def _device(path: str) -> int:
+    """The device *path* lies on (a rename cannot leave it)."""
+    return os.stat(path).st_dev
 
 
 def _ident(path: str) -> Optional[str]:

@@ -938,6 +938,7 @@ class DownloadTab(QWidget):
         actions.add_modes()
         actions.add_unbundled()
         actions.add_behind()
+        actions.add_move_to_library()
         act_new = act_source = None
         if len(refs) == 1:
             menu.addSeparator()

@@ -69,6 +69,7 @@ from .table_model import (
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
 from .links import open_folder, open_link
+from .background import describe_error
 from .series_actions import SeriesMenu, SeriesRef
 
 
@@ -353,6 +354,7 @@ class MainWindow(QMainWindow):
         self._wanted_cache: Dict[int, tuple] = {}    # id(entry) -> (entry, its state, series id, its To get entries)
         self._dupe_per_folder: Dict[str, Tuple[int, int]] = {}
         self._last_scan: Optional[datetime.datetime] = None
+        self._scan_note: Optional[str] = None       # said with the next scan's result (a move to library started it)
         self._scan_label = ""
         self._library: Optional[int] = None          # the picked library folder (root id); None = all libraries
         self._libraries_key: Optional[tuple] = None
@@ -1491,6 +1493,9 @@ class MainWindow(QMainWindow):
             text += f"  —  {len(errors)} root(s) not reachable"
             tips.append("Not reachable:")
             tips += [f"  {e}" for e in errors]
+        note, self._scan_note = self._scan_note, None
+        if note:                            # what started this scan (a move to library) stays readable
+            text = f"{note}  —  {text}"
         self._status_label.setText(text)
         self._status_label.setToolTip("\n".join(tips))
         self._progress.setVisible(False)
@@ -2055,6 +2060,7 @@ class MainWindow(QMainWindow):
             act_exclude = menu.addAction("Exclude from its library…")
             act_exclude.setToolTip("Add this folder to its library's exclusions: MangaList stops scanning it (its files "
                                    "are not touched; Settings > Library undoes it)")
+            series.add_move_to_library()
             pending = self._model.rename_count_at(rows[0])
             act_rename = menu.addAction(f"Rename to the scheme ({pending} file{'s' if pending != 1 else ''})…"
                                         if pending else "Rename to the scheme…")
@@ -2099,6 +2105,7 @@ class MainWindow(QMainWindow):
             menu.addAction(f"{n} folders selected").setEnabled(False)
             menu.addSeparator()
             act_exclude = menu.addAction(f"Exclude {n} folders from their libraries…")
+            series.add_move_to_library()
             act_rename = menu.addAction(f"Rename {n} series to the scheme…")
             act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
             menu.addSeparator()
@@ -2274,6 +2281,102 @@ class MainWindow(QMainWindow):
             n += 1
         what = "marked up to date" if done else "counted as behind again"
         return f"Behind: {n} series {what}." if n else ""
+
+    # --- Move to library (mangalist.library_move; owner, 2026-10-15) ---------------------------------------
+
+    def library_targets(self, folders) -> List[Tuple[int, str, str]]:
+        """The library folders *folders* can move to: every other one (all of them when the series lie in several)."""
+        roots = self._roots()
+        held = set()
+        for f in folders:
+            loc = self._db._locate(f)
+            if loc is not None:
+                held.add(loc[0])
+        return [(r.id, r.name, r.path) for r in roots if not (len(held) == 1 and r.id in held)]
+
+    def confirm_move(self, check) -> bool:
+        """Ask before a move to library (tests answer for the owner by replacing this on the window)."""
+        from ..library_move import confirm_text
+
+        title, text, label = confirm_text(check, show_modes=self._auto_modes is not None)
+        return self._ask(title, text, label)
+
+    def confirm_undo_move(self, record) -> bool:
+        return self._ask("Undo the last move?", f"Move {record.count} series back from {record.target_name} to "
+                                                f"{' / '.join(record.source_names) or 'where they were'}?\n\n"
+                                                f"(moved {record.created_at})", "Move back")
+
+    def tell_move(self, title: str, text: str) -> None:
+        """Say why nothing moved (tests replace this on the window)."""
+        QMessageBox.information(self, title, text)
+
+    def _ask(self, title: str, text: str, label: str) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=self)
+        yes = box.addButton(label, QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def move_to_library(self, folders, root_id: int) -> str:
+        """Move to library ▸ <library>: check, confirm (Cancel is the default), move through one cross-root journal plan,
+        then scan both folders so the List shows the series in its new library at once. Returns the status line."""
+        from .. import library_move
+
+        if self._thread is not None:
+            return f"Move to library: {library_move.SCAN_RUNNING}"
+        titles = {str(e.folder): str(e.title) for _r, e in self._entries_for(folders)}
+        try:
+            check = library_move.check_move(self._db, [(str(f), titles.get(str(f), Path(f).name)) for f in folders],
+                                            root_id)
+        except Exception as exc:  # noqa: BLE001 - said, nothing moved
+            _log.warning("Move to library: the check failed", exc_info=True)
+            return f"Move to library: {exc if isinstance(exc, ValueError) else describe_error(exc)}"
+        if not check.items:
+            lines = library_move.refused_lines(check) or [f"{t} - already in {check.target.name}" for t in check.already]
+            self.tell_move(f"Not moved to {check.target.name}", "Nothing can move:\n\n" + "\n".join(lines))
+            return f"Move to library: nothing moved ({len(lines)} refused)."
+        if not self.confirm_move(check):
+            return ""
+        result = library_move.move_series(self._db, check)
+        return self._after_library_move(result)
+
+    def last_library_move(self) -> Optional[str]:
+        """The "Undo last move (…)" label of the menu, None when no move can be undone."""
+        from ..library_move import last_move
+
+        try:
+            record = last_move(self._db)
+        except Exception:  # noqa: BLE001 - the entry stays out
+            _log.warning("Move to library: reading the last move failed", exc_info=True)
+            return None
+        return record.label if record is not None else None
+
+    def undo_library_move(self) -> str:
+        from .. import library_move
+
+        if self._thread is not None:
+            return f"Undo move: {library_move.SCAN_RUNNING}"
+        record = library_move.last_move(self._db)
+        if record is None:
+            return "Move to library: nothing to undo."
+        if not self.confirm_undo_move(record):
+            return ""
+        return self._after_library_move(library_move.undo_move(self._db, record.plan_id))
+
+    def _after_library_move(self, result) -> str:
+        """A move (or its undo) ran: what failed is shown in a box; what moved updates the table's data (examined marks,
+        modes) and both sides are scanned; the status line says what happened once that scan is in."""
+        if not result.moved:
+            self.tell_move("Not moved", result.message)
+            return result.message
+        if not result.ok:
+            self.tell_move("Moved only in part", result.message)
+        self._apply_identity_changes(result.moved)      # the examined marks moved in the database; the scan does the rest
+        self._scan_note = result.message
+        if not self._scan_paths(result.paths):
+            self._scan_note = None
+        return result.message
 
     def folder_for_series(self, series_id: int) -> Optional[str]:
         """The folder of a store series id among the List's rows (the To get list's ids first, then the modes' cache,

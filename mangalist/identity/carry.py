@@ -21,8 +21,9 @@ How (:func:`carry`, MangaPixer's ``MoveRowsAsync``): T's own data is NEVER overw
   stays ``missing`` (shown in the Missing series list for a manual decision). An O with nothing left is
   retired (its data now lives on T).
 
-Folder renames within a root and moves between roots are the same case. Manual :func:`reattach` and
-:func:`forget` serve the Missing series list. No Qt here.
+Folder renames within a root and moves between roots are the same case. A folder the journal itself moved (the
+Renamer, Move to library) is followed directly by :func:`follow_folder_move`, with the same result. Manual
+:func:`reattach` and :func:`forget` serve the Missing series list. No Qt here.
 """
 
 from __future__ import annotations
@@ -276,6 +277,60 @@ def carry(con: sqlite3.Connection, ctx: _Ctx, old_id: int, new_id: int, how: str
     return res
 
 
+def follow_folder_move(db, old_folder, new_folder) -> List[CarryResult]:
+    """A series folder the journal moved (a rename inside its root, or Move to library into another root): its series
+    row - and the rows of the subseries below it - follow DIRECTLY, without waiting for a scan to recognise the move by
+    the archives, with the same result as that carry-over: the same series id (so its ledger rows, own mode, Unbundled
+    setting, findings and units stay with it) now at the new root and path, its MangaUpdates link re-keyed to the new
+    folder (never over a link the new path already has), its kind answer on the row, its examined mark moved, recorded
+    in ``series_carries`` (``how='journal'``). The archive rows follow through
+    :meth:`~mangalist.store.archives.ArchivesMixin.follow_journal_move`.
+
+    A row already recorded at the new path (a missing series of that name) is left alone - the next scan sorts it out
+    by the archives. A folder that is no series row (a plain folder) only has its link re-keyed, as before."""
+    old_loc, new_loc = db._locate(old_folder), db._locate(new_folder)
+    out: List[CarryResult] = []
+    with db.connect() as con:
+        ctx = _Ctx(con)
+        rows = []
+        if old_loc is not None and new_loc is not None:
+            (old_root, old_rel), (new_root, new_rel) = old_loc, new_loc
+            prefix = old_rel.rstrip("/") + "/"
+            rows = con.execute("SELECT * FROM series WHERE root_id = ? AND (rel_path = ? OR substr(rel_path, 1, ?) = ?)"
+                               " ORDER BY length(rel_path), rel_path",
+                               (old_root, old_rel, len(prefix), prefix)).fetchall()
+        for o in rows:
+            rel = new_rel + o["rel_path"][len(old_rel):]
+            if con.execute("SELECT 1 FROM series WHERE root_id = ? AND rel_path = ?", (new_root, rel)).fetchone():
+                _log.warning("Journal move: a series row already exists at %s; the next scan decides", rel)
+                continue
+            key_o = ctx.key(o)
+            key_n = link_key(ctx.dirs.get(new_root, Path(".")), rel)
+            con.execute("UPDATE series SET root_id = ?, rel_path = ?, status = 'present', missing_since = NULL"
+                        " WHERE id = ?", (new_root, rel, o["id"]))
+            res = CarryResult(o["id"], o["id"], key_o, key_n, "journal", moved=["row"])
+            if _has_link(con, key_o) and _rekey(con, key_o, key_n):
+                res.moved.append("link")
+            elif o["rel_path"] == old_rel and _rekey(con, str(old_folder), str(new_folder)):
+                res.moved.append("link")                # keyed under the root as given (not resolved)
+            if o["kind_hint"]:
+                res.moved.append("kind")
+            if ctx.move_examined(key_o, key_n):
+                res.moved.append("examined")
+            _sync_mu(con, o["id"], key_n)
+            con.execute("INSERT INTO series_carries (from_series_id, to_series_id, from_root_id, from_path, to_root_id,"
+                        " to_path, how, moved, kept, at) VALUES (?,?,?,?,?,?, 'journal', ?, '[]', ?)",
+                        (o["id"], o["id"], o["root_id"], o["rel_path"], new_root, rel, json.dumps(res.moved), ctx.now))
+            _log.info("Journal move: series %d %s -> %s (moved %s)", o["id"], key_o, key_n, ",".join(res.moved))
+            out.append(res)
+        if not rows:
+            literal = _rekey(con, str(old_folder), str(new_folder))      # a plain folder's link, keyed as given
+            if literal:
+                out.append(CarryResult(0, 0, str(old_folder), str(new_folder), "journal", moved=["link"]))
+        ctx.flush()
+    return out
+
+
 def carry_moved_series(db, from_series_ids: Iterable[Optional[int]], dirs: Optional[Dict[int, Path]] = None,
                        how: str = "archives") -> List[CarryResult]:
     """Run the carry-over rule for every missing series archives were just recognised as moved out of."""
@@ -425,5 +480,5 @@ def carries_since(db, after_id: int) -> List[tuple]:
 
 
 __all__ = ["MIN_MOVED_SHARE", "CarryResult", "MissingSeries", "LiveSeries", "ReattachError", "map_target", "carry",
-           "carry_moved_series", "missing_series", "missing_count", "live_series", "reattach", "forget",
+           "carry_moved_series", "follow_folder_move", "missing_series", "missing_count", "live_series", "reattach", "forget",
            "root_dirs", "last_carry_id", "carries_since"]

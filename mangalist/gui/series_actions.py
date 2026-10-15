@@ -3,8 +3,8 @@ tab's To get list: "Can I set auto download mode directly from here instead of g
 these missed connections?" - vault note "Manga-list - Series Actions Everywhere").
 
 Each screen builds its own :class:`QMenu` and adds the shared entries through a :class:`SeriesMenu` - Automatic
-downloads ▸, Unbundled chapters, Mark Behind as up to date / Clear it, Show in List, Open folder, Copy title, Open
-MangaUpdates page, Open in MangaPixer, Fix MangaUpdates match… - in the order that screen wants, then its own entries
+downloads ▸, Unbundled chapters, Mark Behind as up to date / Clear it, Move to library ▸, Show in List, Open folder,
+Copy title, Open MangaUpdates page, Open in MangaPixer, Fix MangaUpdates match… - in the order that screen wants, then its own entries
 (the List's Exclude / Rename / Set aside / Review duplicates, the To get list's Check for new chapters / Change source,
 a Found card's Show in To get / Skip all) next to them. After the menu ran, :meth:`SeriesMenu.run` does the chosen shared
 action and returns the status line for it (None: not one of the shared entries - the screen's own).
@@ -25,6 +25,10 @@ what it can do itself::
     behind_counts(folders) -> (can mark, marked)
     set_behind_done(folders, done) -> str    Mark Behind as up to date / clear it; the states follow
     folder_for_series(series_id) -> str | None
+    library_targets(folders) -> [(root id, name, path)]   Move to library ▸: the other library folders
+    move_to_library(folders, root id) -> str              asks, moves, rescans; the status line
+    last_library_move() -> str | None                     the "Undo last move (…)" label (None: nothing to undo)
+    undo_library_move() -> str
 
 The modes go straight to the downloads backend (``own_series_mode`` / ``set_series_mode`` / ``default_mode`` and,
 schema 8, ``series_defaults``): :func:`add_mode_menu` is the one "Automatic downloads" submenu, and its "Use the default
@@ -76,6 +80,13 @@ CHANGE_SOURCE_TIP = ("Open the series' chapters and pick where they come from: M
                      "Remembered for the series")
 BEHIND_DONE_TIP = ("Treat the series as up to date: the List shows it Up to date, and scheduled find passes and Find now "
                    "skip it (it stays listed in To get, as in the List's Gaps)")
+
+
+MOVE_MENU = "Move to library"
+MOVE_TIP = ("Move the series folder into another library folder (one rename, undoable): it keeps its MangaUpdates link, "
+            "settings and download history")
+NO_OTHER_LIBRARY = "No other library folder"
+UNDO_MOVE_TIP = "Put the series of the last move back where they were"
 
 
 MENU_BUTTON_TEXT = "⋯"
@@ -269,6 +280,32 @@ class SeriesMenu:
         text = set_done(folders, done)
         self._changed("behind")
         return text or ""
+
+    def add_move_to_library(self) -> Optional[QMenu]:
+        """Move to library ▸: the other library folders by name (each moves the series there, after the host's
+        confirmation), then "Undo last move (…)" while the last move can be undone (owner, 2026-10-15)."""
+        targets, move = self._host_fn("library_targets"), self._host_fn("move_to_library")
+        folders = self.folders()
+        if targets is None or move is None or not folders:
+            return None
+        sub = self.menu.addMenu(MOVE_MENU)
+        sub.setToolTipsVisible(True)
+        sub.menuAction().setToolTip(MOVE_TIP)
+        try:
+            found = list(targets(folders))
+        except Exception as exc:  # noqa: BLE001 - the submenu says why it is off
+            _log.warning("Reading the library folders failed: %s", describe_error(exc))
+            found = []
+        for root_id, name, path in found:
+            self._add(name, lambda rid=root_id: move(folders, rid) or "", str(path), menu=sub)
+        if not found:
+            sub.addAction(NO_OTHER_LIBRARY).setEnabled(False)
+        last, undo = self._host_fn("last_library_move"), self._host_fn("undo_library_move")
+        label = last() if last is not None and undo is not None else None
+        if label:
+            sub.addSeparator()
+            self._add(label, lambda: undo() or "", UNDO_MOVE_TIP, menu=sub)
+        return sub
 
     def add_show_in_list(self) -> Optional[QAction]:
         ref = self.single

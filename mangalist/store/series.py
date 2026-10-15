@@ -233,19 +233,13 @@ class SeriesMixin:
                         (r["mu_id"] if r else None, (1 if r["mu_confirmed"] else 0) if r else 0, root_id, rel))
 
     def relink_folder(self, old_folder, new_folder) -> bool:
-        """A series folder moved (by the journal): re-point its row (also into another root) and its
-        links-cache entry. The archive rows follow through :meth:`follow_journal_move`."""
-        old_loc, new_loc = self._locate(old_folder), self._locate(new_folder)
-        moved = False
-        with self.connect() as con:
-            if old_loc is not None and new_loc is not None:
-                exists = con.execute("SELECT 1 FROM series WHERE root_id=? AND rel_path=?", new_loc).fetchone()
-                if not exists:
-                    cur = con.execute("UPDATE series SET root_id=?, rel_path=? WHERE root_id=? AND rel_path=?",
-                                      (new_loc[0], new_loc[1], old_loc[0], old_loc[1]))
-                    moved = cur.rowcount > 0
-            moved = _rekey_link(con, str(old_folder), str(new_folder)) or moved
-        return moved
+        """A series folder moved (by the journal): re-point its row - and its subseries' rows - (also into another
+        root), its links-cache entry and its examined mark, as a recognised move would
+        (:func:`mangalist.identity.carry.follow_folder_move`). The archive rows follow through
+        :meth:`follow_journal_move`. False when nothing followed."""
+        from ..identity.carry import follow_folder_move
+
+        return bool(follow_folder_move(self, old_folder, new_folder))
 
     def series_for_folder(self, folder) -> Optional[Series]:
         """The series row of an absolute folder inside a root, or None (not scanned, or outside every root)."""
@@ -262,15 +256,6 @@ class SeriesMixin:
                 if np_.startswith(nb.rstrip(os.sep) + os.sep):
                     return root.id, rel_posix(Path(p), Path(base))
         return None
-
-
-def _rekey_link(con: sqlite3.Connection, old_key: str, new_key: str) -> bool:
-    if old_key == new_key:
-        return False
-    if con.execute("SELECT 1 FROM links_cache WHERE folder = ?", (new_key,)).fetchone():
-        return False  # the new path has its own link: never overwrite it
-    cur = con.execute("UPDATE links_cache SET folder = ? WHERE folder = ?", (new_key, old_key))
-    return cur.rowcount > 0
 
 
 def seen_from_entries(root_dir: Path, entries: Iterable) -> List[SeriesSeen]:
