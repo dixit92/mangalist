@@ -432,7 +432,9 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
         if target is None:
             bare = getattr(parsed, "number", None) is not None and (
                 str(getattr(getattr(parsed, "kind", None), "value", "")) == "unknown" or getattr(parsed, "guessed", False))
-            why = ("an extra (no chapter number)" if getattr(parsed, "is_extra", False)
+            why = (("a comics extra: not counted as chapter "
+                    f"{parsed.chapter}, so it keeps its name" if getattr(parsed, "chapter", None) is not None
+                    else "an extra (no chapter number)") if getattr(parsed, "is_extra", False)
                    else "a bare number: chapters or volumes? (answer above)" if bare
                    else "the name says no volume or chapter number" if not getattr(parsed, "has_units", True)
                    else "the name could not be read with certainty")

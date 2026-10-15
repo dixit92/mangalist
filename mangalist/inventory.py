@@ -376,7 +376,9 @@ def units_from_parsed(rel_path: str, parsed: Any, file_size: Optional[int] = Non
 
     - volume: one ``volume`` row (``vol_from`` / ``vol_to``);
     - chapter: one ``chapter`` row (``ch_from`` / ``ch_to``; ``vol_*`` = the volume it belongs to),
-      or one ``extra`` row when the chapter has no number;
+      or one ``extra`` row when the chapter has no number - or is a comics extra (``Annual 2``: chapter 2 flagged
+      extra, as in MangaPixer; the row keeps the number, but an extra never holds a chapter, so it never fills a
+      missing chapter 2);
     - both (``v10 + 085-086``): a ``volume`` row and a ``chapter`` row;
     - unknown: one ``unknown`` row, with a bare number in ``num_from`` / ``num_to``.
 
@@ -405,6 +407,8 @@ def units_from_parsed(rel_path: str, parsed: Any, file_size: Optional[int] = Non
     if kind == "chapter":
         if cf is None:
             return [Unit(kind="extra", vol_from=vf, vol_to=vt, **common)]
+        if parsed.is_extra:
+            return [Unit(kind="extra", vol_from=vf, vol_to=vt, ch_from=cf, ch_to=ct, **common)]
         return [Unit(kind="chapter", vol_from=vf, vol_to=vt, ch_from=cf, ch_to=ct, **common)]
     nf, nt = rng(parsed.number)
     return [Unit(kind="unknown", num_from=nf, num_to=nt, **common)]

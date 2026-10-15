@@ -14,6 +14,7 @@ from mangalist.parsing import (
     Layer,
     ParseContext,
     SeriesHead,
+    UnitRange,
     parse_comics_extra,
     parse_name,
     parse_names,
@@ -164,20 +165,23 @@ def test_no_album_token(name):
     assert parse_name(name).volume is None
 
 
-@pytest.mark.parametrize("name, title, group", [
-    ("Some Comic Annual 2.cbz", "Annual 2", None),
-    ("Some Comic Annual.cbz", "Annual", None),
-    ("Some Comic Annual #2 (2019) (Digital) (Grp).cbz", "Annual #2", "Grp"),
-    ("Some Comic Special #1.cbz", "Special #1", None),
-    ("Some Comic - One-Shot 1 - A Story.cbz", "One-Shot 1 - A Story", None),
-    ("Some Comic Oneshot 2.cbz", "Oneshot 2", None),
-    ("Some Comic FCBD 2019.cbz", "FCBD 2019", None),
-    ("Some Comic Free Comic Book Day 2020.cbz", "Free Comic Book Day 2020", None),
+@pytest.mark.parametrize("name, title, group, chapter", [
+    ("Some Comic Annual 2.cbz", "Annual 2", None, "2"),
+    ("Some Comic Annual.cbz", "Annual", None, None),
+    ("Some Comic Annual #2 (2019) (Digital) (Grp).cbz", "Annual #2", "Grp", "2"),
+    ("Some Comic Special #1.cbz", "Special #1", None, "1"),
+    ("Some Comic - One-Shot 1 - A Story.cbz", "One-Shot 1 - A Story", None, "1"),
+    ("Some Comic Oneshot 2.cbz", "Oneshot 2", None, "2"),
+    ("Some Comic Annual 2.005.cbz", "Annual 2.005", None, "2.5"),       # the padded sub-number, as MangaPixer
+    ("Some Comic FCBD 2019.cbz", "FCBD 2019", None, None),              # a year, not a number
+    ("Some Comic Free Comic Book Day 2020.cbz", "Free Comic Book Day 2020", None, None),
 ])
-def test_comics_extras_are_extras_without_a_chapter_number(name, title, group):
+def test_comics_extras_are_numbered_extras_as_in_mangapixer(name, title, group, chapter):
+    """Owner, 2026-10-15 (question 13): "No, parity with MangaPixer" - ``Annual 2`` is chapter 2 flagged extra
+    (MangaPixer 1.42.0 ``AutoMatchText.UnitsOf``)."""
     r = parse_name(name)
     assert (r.kind, r.chapter, r.is_extra, r.title, r.group, r.series) == (
-        Kind.CHAPTER, None, True, title, group, "Some Comic")
+        Kind.CHAPTER, UnitRange.maybe(chapter), True, title, group, "Some Comic")
     assert target_name(r, ext=".cbz", series_title="Some Comic") is None      # the renamer leaves extras alone
 
 
