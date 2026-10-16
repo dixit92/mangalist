@@ -23,10 +23,19 @@ The rules, in order (the full table is in the lane note):
    chapters is missing (in a folder that holds volumes, or holds nothing but volumes' worth); a volume
    whose chapters are all held as chapters is an **upgrade**. Without an English edition, the
    scanlation's latest volume is the target for a folder that holds volumes. **Chapters** (a folder
-   that holds chapter files, or an unlicensed series) - every whole chapter from the first expected
-   one up to the latest known one (MangaUpdates' latest chapter, the English chapter count, the
-   finished total - the largest) that is held neither as a chapter nor inside a held volume, plus
-   the latest chapter itself when it is a decimal (``24.5``).
+   that holds chapter files; an unlicensed folder of volumes only with Unbundled Chapters on, below) -
+   every whole chapter from the first expected one up to the latest known one (MangaUpdates' latest
+   chapter, the English chapter count, the finished total - the largest) that is held neither as a
+   chapter nor inside a held volume, plus the latest chapter itself when it is a decimal (``24.5``).
+   An **unlicensed folder that holds volumes only**, Unbundled Chapters off (owner, 2026-10-15:
+   "Start clean: they all stop wanting chapters until you tick Unbundled on the ones you want" - the
+   older rule compared every unlicensed series' chapters, so a folder of volumes 1-15 showed "Missing
+   chapters 54-94"), compares no chapter: the chapters out count as volumes ("They shouldn't be
+   marked as completed"). The volume list's (original edition) volumes whose chapters are all out and
+   that the folder lacks are *Missing volumes*; chapters out past the last volume known (held, such a
+   volume, or a scanlation volume the list maps) are one open-ended gap after it (``Vol. 16+``,
+   :attr:`Gap.open_end`); the reason says so and points to Unbundled chapters. Where the list does not
+   say which chapters the newest held volume holds, nothing is compared, as before.
 4. State by priority: *Missing volumes* > *Missing chapters* > *Upgrade available* > *Complete*
    (finished and held whole in the edition the folder collects) > *Up to date*.
 
@@ -44,7 +53,8 @@ list chapters MangaDex no longer serves (the lane note "MangaPixer Export Fields
 
 **Unbundled Chapters** (a per-series setting, :mod:`mangalist.unbundled`; owner, 2026-10-11: "a setting to convert a
 volume-only series to a volumes + unbundled chapters series, with both upgrade and new missing chapter downloads
-applicable"): for a folder that holds volumes, the chapters after the last volume - where the newest volume that is
+applicable"; for an unlicensed series, the only way its folder of volumes wants chapters - rule 3): for a folder that
+holds volumes, the chapters after the last volume - where the newest volume that is
 held, missing or an upgrade ends by MangaPixer's volume list - up to the chapter target are compared too (*Missing
 chapters*). The volume side is unchanged, and the setting only ever adds gaps. A chapter a held volume collects is never
 wanted; in a folder of volumes only, nor is one a released volume the folder lacks collects (that volume is the gap).
@@ -301,12 +311,14 @@ class Gap:
     start: str                     # exact number
     end: Optional[str] = None      # a range's last number (None for one unit)
     note: Optional[str] = None     # e.g. "English 2025-07", "chapters 17-24.5"
+    open_end: bool = False         # "Vol. 16+": this volume and the ones after it, how many not known (an unlicensed
+                                   # volume folder's chapters past the volumes the volume list knows)
 
     @property
     def label(self) -> str:
         unit = "Ch." if self.kind == GAP_CHAPTER else "Vol."
         rng = self.start if self.end is None else f"{self.start}-{self.end}"
-        return f"{unit} {rng}"
+        return f"{unit} {rng}{'+' if self.open_end else ''}"
 
     @property
     def size(self) -> int:
@@ -418,12 +430,20 @@ class SeriesState:
         return tuple(out)
 
     @property
+    def missing_volumes_text(self) -> str:
+        """The missing volume numbers as text: ``3, 5-6``; an open-ended gap last: ``3, 16+`` (:attr:`Gap.open_end`)."""
+        gaps = self.gaps_of(GAP_VOLUME)
+        vols = _compress([g.start for g in gaps if not g.open_end]) + [f"{g.start}+" for g in gaps if g.open_end]
+        return ", ".join(vols)
+
+    @property
     def gaps_text(self) -> str:
-        """Short form for a table cell: ``Vol. 3, 5-6 · Ch. 10-12, 24.5 · Upgrade vol. 1-2``."""
+        """Short form for a table cell: ``Vol. 3, 5-6 · Ch. 10-12, 24.5 · Upgrade vol. 1-2`` (``Vol. 16+``: an
+        open-ended volume gap)."""
         parts = []
-        vols = _compress(self.missing_volumes)
+        vols = self.missing_volumes_text
         if vols:
-            parts.append("Vol. " + ", ".join(vols))
+            parts.append("Vol. " + vols)
         chs = [s if e is None else f"{s}-{e}" for s, e in self.missing_chapters]
         if chs:
             parts.append("Ch. " + ", ".join(chs))
@@ -584,7 +604,8 @@ def compute_state(
     and ``Season 2`` both from 1 - :attr:`mangalist.models.MangaEntry.restarting_units`): they are not compared with one
     total, so no gap of that kind is invented (MangaPixer gives no verdict either).
     *unbundled*: the series' Unbundled Chapters setting (:mod:`mangalist.unbundled`) - a folder holding volumes also
-    wants the chapters after its last volume (see the module docstring); off (the default) changes nothing. True, or
+    wants the chapters after its last volume (see the module docstring); off (the default) changes nothing - except that
+    an unlicensed folder of volumes only then counts the chapters out past its volumes as volume gaps. True, or
     the setting's :class:`~mangalist.unbundled.UnbundledChoice` (any true object): its ``first_chapter`` /
     ``for_volume`` are the owner's "first chapter to get", used where the volume list does not map the newest held
     volume.
@@ -834,7 +855,11 @@ def _evaluate(
                 reasons.append(f"The volume list does not say which chapters volume(s) {_span(unmapped)} hold - "
                                "chapters not compared")
             target = None
-    if target is not None and (held.has_chapters or not k.licensed or not held.has_volumes):
+    # An unlicensed folder of volumes only compares chapters with Unbundled Chapters on (owner, 2026-10-15: "Start
+    # clean: they all stop wanting chapters until you tick Unbundled on the ones you want"); without it the chapters out
+    # past its volumes are volume gaps (below).
+    volumes_only = held.has_volumes and not held.has_chapters
+    if target is not None and (held.has_chapters or not held.has_volumes or (not k.licensed and unbundled)):
         if held.has_chapters or not held.has_volumes or held.covered:
             compared = True
             start = Decimal(1)
@@ -851,6 +876,11 @@ def _evaluate(
             gaps += _chapter_gaps(missing)
             chapters_checked = True
             reasons.append(f"Latest chapter {fmt_num(target)}")
+    elif target is not None and volumes_only and not k.licensed:
+        compared = True
+        more, why = _unlicensed_volume_gaps(k, held, gaps, target, extra_target)
+        gaps += more
+        reasons.append(why)
     elif (target is not None and held.has_volumes and k.licensed and not out_vols
           and not _jp_volumes_out(k, extra_target)):
         reasons.append("No English volume list to compare with")
@@ -898,6 +928,56 @@ def _range_held(held: _Held, lo: Optional[Decimal], hi: Optional[Decimal]) -> bo
         return False
     numbers = _whole_numbers(lo, hi) | {lo, hi}
     return all(held.holds_chapter(c) for c in numbers)
+
+
+def _unlicensed_volume_gaps(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap], target: Decimal,
+                            extra_target: Optional[Decimal] = None) -> Tuple[List[Gap], str]:
+    """The volume gaps of an unlicensed folder that holds volumes only, Unbundled Chapters off (owner, 2026-10-15: "They
+    shouldn't be marked as completed"), and the reason line: the chapters out (up to *target*) are not wanted as
+    chapters, but they keep the series from Up to date / Complete as volumes. The volume list's (original edition)
+    volumes whose chapters are all out and that the folder lacks are gaps (as :func:`_jp_volumes_out` counts them);
+    chapters out past the last volume known - held, such a volume, or a scanlation volume already a gap (*gaps*) - make
+    one open-ended gap after it (``Vol. 16+``, :attr:`Gap.open_end`), provided the list says which chapter that volume
+    ends with (a scanlation volume it does not map may hold them). The caller has made sure the newest held volume is
+    mapped."""
+    out: List[Gap] = []
+    have = {to_decimal(g.start) for g in gaps if g.kind in (GAP_VOLUME, GAP_UPGRADE)}
+    for v in _jp_volumes_out(k, extra_target):
+        vd = to_decimal(v.volume)
+        if vd is None or vd in held.volumes or vd in have:
+            continue
+        if _range_held(held, to_decimal(v.chapters_from), to_decimal(v.chapters_to)):
+            continue                            # the held volumes collect its chapters after all
+        out.append(Gap(GAP_VOLUME, v.volume, note=f"original edition, chapters {v.chapters_from}-{v.chapters_to}; "
+                                                  "not licensed in English"))
+    top = max(held.volumes)
+    last = max([top] + [to_decimal(g.start) for g in out] + [d for d in have if d is not None])
+    end = last_volume_chapter(k.volumes, last)
+    if end is not None and target > end and any(v.has_chapters and to_decimal(v.volume) == last for v in k.volumes):
+        out.append(Gap(GAP_VOLUME, fmt_num(last.to_integral_value(rounding="ROUND_FLOOR") + 1), open_end=True,
+                       note=f"{_chapters_text(_first_after(end), target)} out past volume {fmt_num(last)}; not "
+                            "licensed in English"))
+    if not out:
+        return out, f"Latest chapter {fmt_num(target)}"         # the volumes held collect every chapter out
+    top_end = last_volume_chapter(k.volumes, top)
+    if top_end is not None and target > top_end:
+        lo = _first_after(top_end)
+        past = f"{_chapters_text(lo, target)} {'are' if lo < target else 'is'} out past volume {fmt_num(top)}"
+    else:
+        past = "the volume list has volumes out, by their chapters, that the folder lacks"
+    why = (f"Not licensed in English and the folder holds volumes only: {past} - counted as missing volumes, not "
+           "chapters; turn on Unbundled chapters to get them as chapters")
+    return out, why
+
+
+def _chapters_text(lo: Decimal, hi: Decimal) -> str:
+    """``chapters 54-94``, or ``chapter 94`` when *lo* is not below *hi*."""
+    return f"chapters {fmt_num(lo)}-{fmt_num(hi)}" if lo < hi else f"chapter {fmt_num(hi)}"
+
+
+def _first_after(end: Decimal) -> Decimal:
+    """The first whole chapter after *end* (``53`` -> 54, ``53.5`` -> 54)."""
+    return end.to_integral_value(rounding="ROUND_FLOOR") + 1
 
 
 def _scan_volume_total(k: SeriesKnowledge) -> Optional[Decimal]:
