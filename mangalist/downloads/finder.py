@@ -62,6 +62,7 @@ from .finding import (
     REASON_SOURCE_EMPTY,
     REASON_SOURCE_GONE,
     REASON_SOURCE_LACKS,
+    REASON_SOURCE_BEHIND,
     REASON_SOURCE_NEVER,
     REASON_SOURCE_TAKEN_DOWN,
     REASON_UNCERTAIN,
@@ -742,6 +743,16 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
             lacks = _text([r.number for r in pending], volumes=False)
             _dropped(ctx, sid, name, match, missing, existing, keep, source_name,
                      reason=REASON_SOURCE_LACKS.format(source=source_name, missing=lacks, has=has))
+        elif pending and listed and not within and not any(r.available for r in pending):
+            from ..parsing.model import plain
+
+            newest = max(listed)
+            behind = [r.number for r in pending]
+            _dropped(ctx, sid, name, match, missing, existing, keep, source_name,
+                     key=f"behind:{plain(newest)}", title=f"{_text(behind, volumes=False)} (past {source_name}'s newest)",
+                     reason=REASON_SOURCE_BEHIND.format(source=source_name, newest=f"ch. {plain(newest)}",
+                                                        missing=_text(behind, volumes=False),
+                                                        verb="is" if len(behind) == 1 else "are"))
         ctx.store.retire(sid, KIND_CHAPTERS, keep)
         return True
     chosen = tuple(_numbers(p.number for p in picks))
@@ -791,10 +802,14 @@ def _empty_reason(ctx: _Context, sid: int, source, source_name: str) -> str:
 
 
 def _dropped(ctx: _Context, sid: int, name: str, match, missing: Tuple[str, ...], existing, keep: Set[str],
-             source_name: Optional[str] = None, *, reason: str) -> None:
+             source_name: Optional[str] = None, *, reason: str, key: str = "dropped",
+             title: Optional[str] = None) -> None:
+    """A finding without a pick: the saved source cannot give the missing chapters (*reason* says which case). Its key
+    ``chapters:<source>:<key>`` decides how long a Skip holds: ``dropped`` for good (for that source), ``behind:<newest>``
+    until the source lists a newer chapter."""
     source = source_name or match.source.display_name
-    pick = _Pick(KIND_CHAPTERS, f"chapters:{match.source.id}:dropped",
-                 f"{_text(missing, volumes=False)} (not on {source})", missing, None,
+    pick = _Pick(KIND_CHAPTERS, f"chapters:{match.source.id}:{key}",
+                 title or f"{_text(missing, volumes=False)} (not on {source})", missing, None,
                  {"type": PAYLOAD_DROPPED, "source_id": match.source.id, "source_name": source,
                   "manga_id": int(match.manga.id)})
     keep.add(pick.pick_key)
