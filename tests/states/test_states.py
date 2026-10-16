@@ -501,9 +501,14 @@ def test_unmapped_held_volumes_are_not_compared_by_chapter_and_all_volumes_held_
 def test_the_original_volume_count_needs_a_complete_translation():
     held = inv(held_volumes=["1", "2", "3"], chapters_covered_by_volumes=[("1", "260")])
     s = state(held, _four_koma(translation_complete=False))
-    assert not s.missing_volumes                             # scanlation may not reach volume 7: no volume claimed
-    # every held volume mapped: chapters past them are compared as before
-    assert s.missing_chapters and s.missing_chapters[0][0] == "261"
+    assert "7" not in s.missing_volumes                      # scanlation may not reach volume 7: no volume claimed
+    # every held volume mapped: the chapters out past them are one open-ended volume gap (owner, 2026-10-15: an
+    # unlicensed folder of volumes only wants chapters with Unbundled chapters on) ...
+    assert s.state == State.MISSING_VOLUMES and not s.missing_chapters
+    assert s.gaps_text == "Vol. 4+" and "chapters 261-717" in s.gaps[0].note
+    # ... and with the setting on they are compared as chapters, as before
+    s = state(held, _four_koma(translation_complete=False), unbundled=True)
+    assert s.missing_chapters and s.missing_chapters[0][0] == "261" and not s.missing_volumes
 
 
 def test_a_volume_starting_at_part_one_covers_that_chapter():
@@ -516,7 +521,7 @@ def test_a_volume_starting_at_part_one_covers_that_chapter():
     # an extra starting a volume (N.5) does not cover chapter N
     vols5 = (VolumeInfo("1", "1", "10"), VolumeInfo("3", "11.5", "16"))
     k5 = own(licensed_en=False, latest_chapter="16", volumes=vols5)
-    s5 = state(inv(held_volumes=["3"]), k5)
+    s5 = state(inv(held_volumes=["3"]), k5, unbundled=True)     # unlicensed volumes only: chapters with Unbundled on
     assert any(Decimal(lo) <= 11 <= Decimal(hi or lo) for lo, hi in s5.missing_chapters), s5.missing_chapters
 
 

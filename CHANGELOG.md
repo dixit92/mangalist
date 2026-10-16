@@ -7,6 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.38] - 2026-10-15
+
+The thirty-seventh MangaList release (testing build): Add series finds the English title and gets the first volumes, and unlicensed volume series follow Unbundled chapters.
+
+- **Add series names the folder with the official English title.** A series picked from a title search had no English title; MangaList now finds MangaDex's record of that MangaUpdates series and takes AniList's English title through it - the licensed one ("Mistress Kanan is Devilishly Easy", not a fan title MangaDex also lists). With several English titles and no AniList answer, they are all offered and none is the default.
+- **"Find releases now" after adding finds releases.** It searched nothing: the new series' state is worked out in the background after the scan, and the find ran before it. It now waits for it.
+- **A series you confirmed is searched on nyaa.** Only series matched in MangaPixer could be searched, and MangaPixer never lists an empty folder - so a series just added could not be searched at all. A MangaUpdates match confirmed in MangaList (Add series, Fix MangaUpdates match) is now enough; an automatic match is not.
+- **Unlicensed volume series follow Unbundled chapters.** A series not licensed in English whose folder holds only volumes wanted its later chapters even with Unbundled chapters off. Now it wants them only with the setting on; off, the chapters out past your volumes are missing volumes - the original edition's volumes, and an open-ended "Vol. 26+" after the last known one - never Up to date. On the owner's library 5 series move from Missing chapters to Missing volumes.
+
 ## [2026.10.37] - 2026-10-15
 
 The thirty-sixth MangaList release (testing build): a chapter source that is behind is said, not skipped in silence.

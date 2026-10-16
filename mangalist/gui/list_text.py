@@ -105,7 +105,7 @@ def match_text(knowledge: Optional[SeriesKnowledge]) -> str:
 def group_gaps_text(state: SeriesState, group: str) -> str:
     """One group's part of the gaps: ``Vol. 21-23``, ``Ch. 41-44``, ``Upgrade vol. 13``."""
     if group == GROUP_VOLUMES:
-        nums = numbers_text(state.missing_volumes)
+        nums = state.missing_volumes_text                   # ``16+``: an open-ended gap (an unlicensed volume folder)
         return f"Vol. {nums}" if nums else ""
     if group == GROUP_UPGRADES:
         nums = numbers_text(state.upgrade_volumes)

@@ -59,7 +59,7 @@ def test_entries_carry_the_series_id_titles_and_the_nyaa_rule(lib):
     assert quest.findable and quest.reason == "" and quest.held == ("1",) and quest.gaps == "Vol. 2-3"
     assert quest.titles[:2] == ("Example Quest", "Example Quest: Second Name")
     own = got[("Manga/Own Series", "volumes")]
-    assert not own.findable and "not linked there" in own.reason
+    assert own.findable and own.reason == ""             # a confirmed own match is searched too (owner, 2026-10-15)
     chapters = got[("Manga/Scanlation Chapters", "chapters")]
     assert not chapters.findable and chapters.reason == "needs Suwayomi" and chapters.gaps == "Ch. 16-20"
 

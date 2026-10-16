@@ -88,6 +88,11 @@ class Fakes:
         self.search_results = search or []
         self.md = md
         self.md_calls: List[str] = []
+        self.anilist: Dict[int, Dict[str, Any]] = {}
+        self.search_md = None                       # MangaDex's title search answer ({"data": [...]})
+
+    def al_get(self, anilist_id):
+        return self.anilist.get(anilist_id)
 
     def mu_get(self, sid):
         if sid not in self.records:
@@ -107,13 +112,15 @@ class Fakes:
 
     def md_get(self, url):
         self.md_calls.append(url)
+        if "/manga?title=" in url:
+            return self.search_md or {"data": []}
         if self.md is None:
             raise A.AddSeriesError("MangaDex has no series with that id.")
         return self.md
 
     def lookup(self, text, show_all=False):
         return A.lookup(text, mu_get=self.mu_get, mu_search=self.mu_search, mangadex_get=self.md_get,
-                        show_all=show_all)
+                        show_all=show_all, anilist_get=self.al_get)
 
 
 def test_a_mangaupdates_link_reads_the_record():
@@ -122,7 +129,7 @@ def test_a_mangaupdates_link_reads_the_record():
     assert out.info.mu_id == 1000 and out.info.kind == "Manga" and out.info.licensed is True
     assert out.info.latest_chapter == 42.0
     assert out.info.summary() == ["Manga (2015)", "Licensed in English", "Latest chapter 42"]
-    assert f.search_calls == [] and f.md_calls == []
+    assert f.search_calls == [] and all("/manga?title=" in url for url in f.md_calls) and len(f.md_calls) <= 1
 
 
 def test_a_mangaupdates_id_that_does_not_exist_is_said_plainly():
@@ -518,3 +525,57 @@ def test_suwayomi_that_fails_or_lacks_the_series_is_a_note(db):
     assert "could not be asked" in A.find_mangadex_source(db, UUID, client_factory=lambda c: Down()).note
     assert "no such series" in A.find_mangadex_source(db, UUID, client_factory=lambda c: Empty()).note
     assert "No MangaDex source" in A.find_mangadex_source(db, UUID, client_factory=lambda c: NoMangaDex()).note
+
+
+# --- the official English title (owner, 2026-10-15: a typed title gave no English) -------------------------------
+
+def _md_item(mu_sid, english_alts, al=None, title="Made Up Romaji"):
+    links = {"mu": A.base36_from_mu_id(mu_sid)}
+    if al is not None:
+        links["al"] = str(al)
+    return {"id": UUID, "type": "manga", "attributes": {"title": {"ja-ro": title}, "year": 2022, "status": "ongoing",
+            "originalLanguage": "ja", "altTitles": [{"en": e} for e in english_alts], "links": links}}
+
+
+def test_a_picked_mangaupdates_series_takes_anilists_english_title_through_mangadex():
+    f = Fakes({1000: mu_record(1000, title="Made Up Romaji")}, search=[mu_record(1000, title="Made Up Romaji")])
+    f.search_md = {"data": [_md_item(999, ["Not This One"]), _md_item(1000, ["A Fan Title", "The Licensed Title"],
+                                                                        al=55)]}
+    f.anilist[55] = {"english_title": "The Licensed Title"}
+    look = f.lookup("Made Up Romaji")
+    info = A.with_mu_record(look, look.candidates[0], mu_get=f.mu_get, mangadex_get=f.md_get, anilist_get=f.al_get)
+    assert info.english_title == "The Licensed Title" and info.mangadex_id == UUID
+    assert A.propose_names(info)[0] == "Made Up Romaji [The Licensed Title]"
+
+
+def test_several_english_titles_without_anilist_are_proposals_not_the_default():
+    f = Fakes({1000: mu_record(1000, title="Made Up Romaji")}, search=[mu_record(1000, title="Made Up Romaji")])
+    f.search_md = {"data": [_md_item(1000, ["A Fan Title", "The Licensed Title"])]}
+    look = f.lookup("Made Up Romaji")
+    info = A.with_mu_record(look, look.candidates[0], mu_get=f.mu_get, mangadex_get=f.md_get, anilist_get=f.al_get)
+    names = A.propose_names(info)
+    assert info.english_title is None and names[0] == "Made Up Romaji"
+    assert "Made Up Romaji [The Licensed Title]" in names and "Made Up Romaji [A Fan Title]" in names
+
+
+def test_one_english_title_on_mangadex_is_still_taken():
+    f = Fakes({1000: mu_record(1000, title="Made Up Romaji")})
+    f.search_md = {"data": [_md_item(1000, ["The Only English Title"])]}
+    out = f.lookup(f"https://www.mangaupdates.com/series/{A.base36_from_mu_id(1000)}/x")
+    assert out.info.english_title == "The Only English Title"
+
+
+def test_no_mangadex_record_for_the_series_keeps_the_romaji_alone():
+    f = Fakes({1000: mu_record(1000, title="Made Up Romaji")})
+    f.search_md = {"data": [_md_item(999, ["Another Series"])]}                  # links another MangaUpdates page
+    out = f.lookup(f"https://www.mangaupdates.com/series/{A.base36_from_mu_id(1000)}/x")
+    assert out.info.english_title is None and A.propose_names(out.info)[0] == "Made Up Romaji"
+
+
+def test_a_mangadex_link_prefers_anilists_english_title():
+    body = {"result": "ok", "data": _md_item(1000, ["A Fan Title", "The Licensed Title"], al=55)}
+    f = Fakes({1000: mu_record(1000, title="Made Up Romaji")}, md=body)
+    f.anilist[55] = {"english_title": "The Licensed Title"}
+    out = f.lookup(f"https://mangadex.org/title/{UUID}/slug")
+    assert out.info.english_title == "The Licensed Title"
+
