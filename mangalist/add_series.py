@@ -35,7 +35,7 @@ import logging
 import os
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import parse_qs, urlparse
@@ -144,6 +144,9 @@ class MangaDexSeries:
     romaji_title: Optional[str] = None      # the romanised original title (the folder scheme's romaji), else the main
     alt_titles: List[str] = field(default_factory=list)
     mu_id: Optional[int] = None             # from links.mu (a base-36 token), when MangaDex lists it
+    anilist_id: Optional[int] = None        # from links.al, when MangaDex lists it (AniList keeps the official English
+                                            # title apart from fan titles; MangaDex's English alternatives mix both)
+    english_alts: List[str] = field(default_factory=list)   # every English alternative title MangaDex lists
     year: Optional[int] = None
     status: Optional[str] = None
     original_language: Optional[str] = None
@@ -172,6 +175,7 @@ def mangadex_from_record(body: Mapping[str, Any]) -> MangaDexSeries:
     titles = attrs.get("title") if isinstance(attrs.get("title"), Mapping) else {}
     alts: List[str] = []
     alt_english: Optional[str] = None
+    english_alts: List[str] = []
     romanised: Optional[str] = None
     for alt in attrs.get("altTitles") or ():
         if not isinstance(alt, Mapping):
@@ -179,8 +183,11 @@ def mangadex_from_record(body: Mapping[str, Any]) -> MangaDexSeries:
         for lang, text in alt.items():
             if not isinstance(text, str) or not text.strip():
                 continue
-            if lang == "en" and alt_english is None:
-                alt_english = text.strip()
+            if lang == "en":
+                if alt_english is None:
+                    alt_english = text.strip()
+                if not any(_same(text, e) for e in english_alts):
+                    english_alts.append(text.strip())
             if isinstance(lang, str) and lang.endswith("-ro") and romanised is None:
                 romanised = text.strip()
             alts.append(text.strip())
@@ -190,7 +197,9 @@ def mangadex_from_record(body: Mapping[str, Any]) -> MangaDexSeries:
     # MangaDex often keeps the romanised title under "en" and the English one among the alternatives; a main title
     # under "en" is the English title only when a romanised alternative says what the original is called.
     own_lang, own_title = own if own is not None else ("en", alt_english)
-    english = alt_english
+    # several English alternatives (an official title and fan titles, MangaDex does not say which): none is taken here -
+    # the official one comes from AniList (official_english), else the owner picks from the proposals
+    english = alt_english if len(english_alts) <= 1 else None
     if own_lang == "en" and romanised and not _same(own_title, romanised):
         english, romaji = own_title, romanised
     else:
@@ -205,10 +214,14 @@ def mangadex_from_record(body: Mapping[str, Any]) -> MangaDexSeries:
             mu_id = mu_id_from_base36(links["mu"].strip())
         except ValueError:
             mu_id = None
+    anilist_id: Optional[int] = None
+    if isinstance(links.get("al"), str) and links["al"].strip().isdigit():
+        anilist_id = int(links["al"].strip())
     year = attrs.get("year")
     return MangaDexSeries(
         id=data["id"].lower(), title=main.strip(), english_title=english.strip() if english else None,
-        romaji_title=romaji, alt_titles=list(dict.fromkeys(alts)), mu_id=mu_id,
+        romaji_title=romaji, alt_titles=list(dict.fromkeys(alts)), mu_id=mu_id, anilist_id=anilist_id,
+        english_alts=english_alts,
         year=year if isinstance(year, int) and not isinstance(year, bool) else None,
         status=attrs.get("status") if isinstance(attrs.get("status"), str) else None,
         original_language=attrs.get("originalLanguage") if isinstance(attrs.get("originalLanguage"), str) else None)
@@ -229,6 +242,61 @@ def fetch_mangadex(manga_id: str, *, get: Callable[[str], Dict[str, Any]] = _htt
     except Exception as exc:  # noqa: BLE001 - the owner is told, the log keeps the type only (no URL, no secret)
         _log.info("Add a series: MangaDex lookup failed (%s)", type(exc).__name__)
         raise AddSeriesError("MangaDex could not be reached or did not answer.") from None
+
+
+def _anilist_get(anilist_id: int) -> Optional[Mapping[str, Any]]:
+    from . import anilist_client
+
+    return anilist_client.get_manga(anilist_id)
+
+
+def official_english(md: MangaDexSeries, *,
+                     anilist_get: Callable[[int], Optional[Mapping[str, Any]]] = _anilist_get) -> MangaDexSeries:
+    """*md* with AniList's English title (the official licensed one) when MangaDex links an AniList record that has one
+    (owner, 2026-10-15: MangaDex listed "Kanan-sama is Easy as Hell!" and "Mistress Kanan is Devilishly Easy" as English
+    titles; AniList's English title is the second, the licensed one). Best effort: *md* unchanged otherwise."""
+    if md.anilist_id is None:
+        return md
+    try:
+        media = anilist_get(md.anilist_id)
+    except Exception as exc:  # noqa: BLE001 - a name proposal only
+        _log.info("Add a series: AniList lookup failed (%s)", type(exc).__name__)
+        return md
+    english = str((media or {}).get("english_title") or "").strip()
+    if not english or (md.romaji_title and _same(english, md.romaji_title)):
+        return md
+    return replace(md, english_title=english, title=english)
+
+
+def mangadex_for_mu(mu_id: int, title: str, *, get: Callable[[str], Dict[str, Any]] = _http_get_json
+                    ) -> Optional[MangaDexSeries]:
+    """MangaDex's record of the MangaUpdates series *mu_id*: a title search whose result links back to that MangaUpdates
+    page (``links.mu``), else None (best effort - for the English title and the chapters' MangaDex id)."""
+    from urllib.parse import quote
+
+    if not title:
+        return None
+    try:
+        body = get(f"{MANGADEX_API}/manga?title={quote(title)}&limit=10")
+    except Exception as exc:  # noqa: BLE001
+        _log.info("Add a series: MangaDex search failed (%s)", type(exc).__name__)
+        return None
+    for item in (body.get("data") if isinstance(body, Mapping) else None) or ():
+        try:
+            md = mangadex_from_record({"data": item})
+        except AddSeriesError:
+            continue
+        if md.mu_id == mu_id:
+            return md
+    return None
+
+
+def _with_english(md: Optional[MangaDexSeries], mu_id: Optional[int], title: str, *,
+                  mangadex_get: Callable[[str], Dict[str, Any]],
+                  anilist_get: Callable[[int], Optional[Mapping[str, Any]]]) -> Optional[MangaDexSeries]:
+    if md is None and mu_id is not None:
+        md = mangadex_for_mu(mu_id, title, get=mangadex_get)
+    return official_english(md, anilist_get=anilist_get) if md is not None else None
 
 
 # --- what is known about the series -----------------------------------------------------------------------------
@@ -303,7 +371,8 @@ def info_from_mu(detail: Mapping[str, Any], mangadex: Optional[MangaDexSeries] =
         kind=str(detail["type"]) if detail.get("type") else None,
         year=str(detail["year"]) if detail.get("year") else None,
         licensed=detail["licensed"] if isinstance(detail.get("licensed"), bool) else None,
-        latest_chapter=latest, associated=list(dict.fromkeys(assoc)),
+        latest_chapter=latest,
+        associated=list(dict.fromkeys(assoc + (list(mangadex.english_alts) if mangadex else []))),
         english_title=mangadex.english_title if mangadex else None,
         mangadex_id=mangadex.id if mangadex else None, mangadex_title=mangadex.title if mangadex else None,
         mangadex_romaji=mangadex.romaji_title if mangadex else None, detail=dict(detail))
@@ -358,7 +427,8 @@ def search_mu(query: str,
 
 def lookup(text: str, *, mu_get: Callable[[int], Dict[str, Any]] = mu_client.get_series,
            mu_search: Callable[..., List[Dict[str, Any]]] = mu_client.search_series,
-           mangadex_get: Callable[[str], Dict[str, Any]] = _http_get_json, show_all: bool = False) -> Lookup:
+           mangadex_get: Callable[[str], Dict[str, Any]] = _http_get_json, show_all: bool = False,
+           anilist_get: Callable[[int], Optional[Mapping[str, Any]]] = _anilist_get) -> Lookup:
     """Read what the owner pasted. A MangaUpdates link: its record. A MangaDex link: MangaDex's record and, when
     MangaDex lists the series' MangaUpdates page, that record too; else MangaUpdates' search results for MangaDex's
     title (``candidates``) and ``info`` as a series without a match. A title: the search results only. A search leaves
@@ -373,8 +443,11 @@ def lookup(text: str, *, mu_get: Callable[[int], Dict[str, Any]] = mu_client.get
             out.notes.append("MangaUpdates found nothing for that title.")
         return out
     if link.kind == KIND_MANGAUPDATES:
-        return Lookup(info=info_from_mu(_get_mu(link.mu_id, mu_get)))
-    md = fetch_mangadex(link.mangadex_id, get=mangadex_get)
+        detail = _get_mu(link.mu_id, mu_get)
+        md = _with_english(None, link.mu_id, str(detail.get("title") or ""), mangadex_get=mangadex_get,
+                           anilist_get=anilist_get)
+        return Lookup(info=info_from_mu(detail, md))
+    md = official_english(fetch_mangadex(link.mangadex_id, get=mangadex_get), anilist_get=anilist_get)
     out = Lookup(mangadex=md)
     if md.mu_id is not None:
         try:
@@ -393,13 +466,19 @@ def lookup(text: str, *, mu_get: Callable[[int], Dict[str, Any]] = mu_client.get
 
 
 def with_mu_record(look: Lookup, record: Mapping[str, Any], *,
-                   mu_get: Callable[[int], Dict[str, Any]] = mu_client.get_series) -> SeriesInfo:
+                   mu_get: Callable[[int], Dict[str, Any]] = mu_client.get_series,
+                   mangadex_get: Callable[[str], Dict[str, Any]] = _http_get_json,
+                   anilist_get: Callable[[int], Optional[Mapping[str, Any]]] = _anilist_get) -> SeriesInfo:
     """The series after the owner picked a MangaUpdates search *record* (its full record is read for the licence and the
-    latest chapter); MangaDex's facts are kept when the link came from there."""
+    latest chapter); MangaDex's facts are kept when the link came from there, else MangaDex's record of that series is
+    looked up for the English title (AniList's official one first - owner, 2026-10-15: a typed title gave no English)."""
     sid = record.get("series_id")
     if not isinstance(sid, int) or isinstance(sid, bool):
         raise AddSeriesError("That search result has no MangaUpdates id.")
-    return info_from_mu(_get_mu(sid, mu_get), look.mangadex)
+    detail = _get_mu(sid, mu_get)
+    md = look.mangadex if look.mangadex is not None else _with_english(
+        None, sid, str(detail.get("title") or ""), mangadex_get=mangadex_get, anilist_get=anilist_get)
+    return info_from_mu(detail, md)
 
 
 # --- the folder name --------------------------------------------------------------------------------------------

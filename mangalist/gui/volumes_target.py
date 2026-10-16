@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..downloads.contracts import DownloadRecord, DownloadStatus
-from ..knowledge import SOURCE_MANGAPIXER, SeriesKnowledge, fmt_num, to_decimal
+from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, SOURCE_OWN_MATCHER, SeriesKnowledge, fmt_num, to_decimal
 from ..states import SeriesState
 
 MAX_SEARCH_TITLES = 10     # the main title first, then alternatives; a series has dozens of aliases at most
@@ -89,13 +89,24 @@ def find_volumes_availability(*, series_id: Optional[int], folder: str, title: s
                               knowledge: Optional[SeriesKnowledge], state: Optional[SeriesState],
                               held: Sequence[str]) -> Availability:
     """Whether a series can be searched on nyaa. Enabled for a series matched in MangaPixer (source ``mangapixer``
-    and ``matched``), licensed in English, with a scanned folder. The missing volumes are a ranking hint, not a
+    and ``matched``) or whose MangaUpdates match the owner confirmed in MangaList (Add series, Fix MangaUpdates match):
+    MangaPixer never lists an empty folder, so a series just added could not be searched at all (owner, 2026-10-15:
+    "empty folders won't be linked by mangapixer"); an automatic own match is not enough (a wrong guess would fetch
+    another series). Then licensed in English, with a scanned folder. The missing volumes are a ranking hint, not a
     condition: when MangaList cannot tell which English volumes are out (``missing`` empty), nyaa's results are
     compared with the volumes held - a release on nyaa is itself proof that a volume is out."""
-    if knowledge is None or knowledge.source != SOURCE_MANGAPIXER:
-        return Availability(False, "Only series matched in MangaPixer can be searched on nyaa "
-                                   "(this one is not linked there).")
-    if not knowledge.matched:
+    if knowledge is None:
+        return Availability(False, "Only series matched in MangaPixer, or whose MangaUpdates match you confirmed, can "
+                                   "be searched on nyaa (this one is not linked).")
+    if knowledge.source == SOURCE_OWN_MATCHER:
+        if knowledge.link_state != LINK_CONFIRMED or not knowledge.matched:
+            return Availability(False, "Only series matched in MangaPixer, or whose MangaUpdates match you confirmed, "
+                                       "can be searched on nyaa (confirm this one's match first: Fix MangaUpdates "
+                                       "match… in the row menu).")
+    elif knowledge.source != SOURCE_MANGAPIXER:
+        return Availability(False, "Only series matched in MangaPixer, or whose MangaUpdates match you confirmed, can "
+                                   "be searched on nyaa (this one is not linked).")
+    elif not knowledge.matched:
         why = knowledge.not_a_series_reason or "MangaPixer has not matched this series yet"
         return Availability(False, f"Only series matched in MangaPixer can be searched on nyaa ({why}).")
     if not knowledge.licensed:

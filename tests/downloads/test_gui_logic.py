@@ -40,10 +40,15 @@ def test_enabled_for_a_mangapixer_series_with_missing_volumes():
     assert got.target.titles == ("Example Series", "Exemplar")          # case-insensitive duplicate dropped
 
 
-def test_disabled_without_mangapixer_with_the_reason():
-    own = _availability(_knowledge(source=SOURCE_OWN_MATCHER), _state(3))
-    assert not own.enabled and "MangaPixer" in own.reason and own.target is None
-    assert not _availability(None, _state(3)).enabled
+def test_an_own_match_needs_the_owners_confirmation(monkeypatch):
+    # owner, 2026-10-15: a series added in MangaList (an empty folder) is never linked in MangaPixer - its confirmed
+    # MangaUpdates match is enough; an automatic own match is not (a wrong guess would fetch another series)
+    own = _availability(_knowledge(source=SOURCE_OWN_MATCHER, link_state=LINK_AUTO), _state(3))
+    assert not own.enabled and "confirm" in own.reason and own.target is None
+    confirmed = _availability(_knowledge(source=SOURCE_OWN_MATCHER, link_state=LINK_CONFIRMED), _state(3))
+    assert confirmed.enabled and confirmed.target.missing == ("3",)
+    none = _availability(None, _state(3))
+    assert not none.enabled and "MangaPixer" in none.reason
 
 
 def test_disabled_when_mangapixer_has_no_match_for_it():

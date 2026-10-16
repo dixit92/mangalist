@@ -89,7 +89,7 @@ def test_nothing_of_the_volumes_gui_exists_without_downloads(make_window):
 @pytest.mark.parametrize("title, enabled, why", [
     (QUEST, True, ""),
     (REVIEW, False, "MangaPixer"),
-    (OWN, False, "not linked there"),
+    (OWN, False, "confirm this one's match"),       # no match at all: to be searched it needs a confirmed one
     (DONE, True, ""),
     (NEW, False, "rescan first"),
 ])
@@ -187,7 +187,7 @@ def test_find_volumes_for_a_disabled_row_only_says_why(make_window):
     opened = []
     win._volumes.run_nyaa = lambda *a: opened.append(a)
     assert not win._volumes.open_find_volumes(_row(win, OWN))
-    assert opened == [] and "not linked" in win._status_label.text()
+    assert opened == [] and "confirm" in win._status_label.text()
 
 
 def test_close_stops_the_refresh_timer(make_window):

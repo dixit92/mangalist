@@ -762,6 +762,7 @@ class MainWindow(QMainWindow):
                 self._wanted_cache[id(e)] = (e, st, series_id, items)
         self._derived_timer.stop()              # the push's own dataChanged: the counts and To get follow now
         self._refresh_derived()
+        self._run_after_add()                   # an Add series choice waiting for the new series' state
 
     def _stop_states(self, wait_ms: int = 5000) -> None:
         """The window closes: drop a states computation in flight and let its thread end (a running thread destroyed at
@@ -1735,11 +1736,21 @@ class MainWindow(QMainWindow):
             self._start_scan([dlg.root], scopes or None)          # the new folder only
 
     def _run_after_add(self) -> None:
-        """After the rescan that follows Add series: the finish step's choice (lane A, owner 2026-10-15, answer 5)."""
-        step, self._after_add = getattr(self, "_after_add", None), None
+        """After the rescan that follows Add series: the finish step's choice (lane A, owner 2026-10-15, answer 5). The
+        series' state is computed in the background after the scan (UI performance stage 2): until it is in, the new
+        series is in no wanted list, so a find then searched nothing ("0 series searched", owner 2026-10-15) - the
+        choice waits for it and :meth:`_on_states_computed` runs this again."""
+        step = getattr(self, "_after_add", None)
         if not step or not step[0] or self._download_tab is None:
+            self._after_add = None
             return
         what, folder, series_id = step
+        key = os.path.normcase(os.path.normpath(folder))
+        rows = [r for r in range(self._model.rowCount())
+                if os.path.normcase(os.path.normpath(str(getattr(self._model.entry_at(r), "folder", "")))) == key]
+        if rows and self._model.states_pending(rows):
+            return                              # its state is on its way
+        self._after_add = None
         if what == "find" and series_id is not None and callable(getattr(self._download_tab, "find_for", None)):
             self._rebuild_wanted()
             self.show_tab(TAB_DOWNLOAD)
