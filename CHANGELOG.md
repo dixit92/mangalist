@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.37] - 2026-10-15
+
+The thirty-sixth MangaList release (testing build): a chapter source that is behind is said, not skipped in silence.
+
+- **A source behind your missing chapters waits under Found.** When every missing chapter of a series is newer than its source's newest (the source stopped, or has not caught up), the find pass skipped the series without a word - an Auto series never got its chapters and nothing said why. It now waits under Found with Change source…: "MangaDex (EN) has nothing past ch. 49; ch. 50-62 are not there yet - Change source?". Skip hides it until the source has a newer chapter.
+
 ## [2026.10.36] - 2026-10-15
 
 The thirty-fifth MangaList release (testing build): the cycle planned from the owner's answers - folder names `<romaji> [<English>]`, Scheduled tasks, Unbundled chapters and comics extras level with MangaPixer, the Download tab polished, and the window no longer freezes during a scan.
