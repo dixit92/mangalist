@@ -110,7 +110,8 @@ def find_volumes_availability(*, series_id: Optional[int], folder: str, title: s
         why = knowledge.not_a_series_reason or "MangaPixer has not matched this series yet"
         return Availability(False, f"Only series matched in MangaPixer can be searched on nyaa ({why}).")
     if not knowledge.licensed:
-        return Availability(False, "Not licensed in English: there are no English volumes to look for.")
+        return Availability(False, "Not licensed in English: there are no English volumes to look for. Unbundled "
+                                   "chapters (row menu) gets the chapters after the last volume instead.")
     missing = state.missing_volumes if state is not None else ()
     if series_id is None:
         return Availability(False, "MangaList has not scanned this folder yet: rescan first.")
