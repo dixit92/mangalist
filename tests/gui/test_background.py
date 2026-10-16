@@ -66,3 +66,32 @@ def test_callbacks_are_connected_before_the_thread_starts(qapp, monkeypatch):
     background.start_call(lambda: 1 / 0, None, got.append, lambda: got.append("finished"))
     qapp.processEvents()
     assert got == [7, "finished", "unexpected error (ZeroDivisionError)", "finished"]
+
+
+def test_a_threads_worker_is_destroyed_on_the_ui_thread_after_the_thread_ends(qapp):
+    # thread.finished -> worker.deleteLater destroyed the worker inside its ending thread, where Qt holds a signal/slot
+    # lock while PySide waits for the interpreter lock - the UI thread connecting a signal then deadlocked with it.
+    from PySide6.QtCore import QObject, Qt, QThread, Signal
+
+    from mangalist.gui.background import release_on_ui_thread
+
+    class Worker(QObject):
+        done = Signal()
+
+        def run(self):
+            self.done.emit()
+
+    destroyed_on = []
+    thread = QThread()
+    worker = Worker()
+    worker.moveToThread(thread)
+    worker.destroyed.connect(lambda *_: destroyed_on.append(threading.current_thread()),
+                             Qt.ConnectionType.DirectConnection)
+    thread.started.connect(worker.run)
+    worker.done.connect(thread.quit)
+    release_on_ui_thread(thread, worker)
+    del worker                                  # the window drops its own reference too
+    thread.start()
+    wait_until(qapp, lambda: destroyed_on and thread.isFinished())     # (thread.quit is delivered on the UI thread)
+    assert thread.wait(5_000)
+    assert destroyed_on == [threading.main_thread()]                    # not inside the thread as it ended

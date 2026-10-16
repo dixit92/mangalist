@@ -38,6 +38,22 @@ def _disconnect_all(obj: QObject, signals) -> None:
             pass
 
 
+def release_on_ui_thread(thread: QThread, worker: QObject) -> None:
+    """Destroy *worker* (a QObject moved to *thread*) on the UI thread once *thread* has finished - in place of
+    ``thread.finished.connect(worker.deleteLater)``. That deletes the worker inside its own thread as the thread ends,
+    where Qt's destructor holds a signal/slot lock while PySide waits for Python's interpreter lock; the UI thread,
+    holding the interpreter lock and connecting any signal that shares that lock, then waits for it: both stop for
+    good (the test suite's GUI-stage hang, 2026-10-16; a stress run of the old way deadlocked within 500 threads).
+    Here the last reference goes on the UI thread (``finished`` is delivered there), and Python deletes the worker with
+    the interpreter lock already held. Connect it before ``thread.deleteLater``."""
+    holder = [worker]
+
+    def release() -> None:
+        holder.clear()
+
+    thread.finished.connect(release)
+
+
 class BackgroundCall(QThread):
     succeeded = Signal(object)
     failed = Signal(str)

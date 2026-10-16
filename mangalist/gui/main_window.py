@@ -69,7 +69,7 @@ from .table_model import (
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
 from .links import open_folder, open_link
-from .background import describe_error
+from .background import describe_error, release_on_ui_thread
 from .series_actions import SeriesMenu, SeriesRef
 
 
@@ -1479,7 +1479,7 @@ class MainWindow(QMainWindow):
         worker.failed.connect(self._on_scan_failed)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
+        release_on_ui_thread(thread, worker)          # never deleteLater in its own thread (a deadlock)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_thread_finished)
         self._thread = thread
@@ -1839,7 +1839,7 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_signature_progress)
         worker.finished.connect(self._on_signatures_finished)
         worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
+        release_on_ui_thread(thread, worker)          # never deleteLater in its own thread (a deadlock)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_signature_thread_finished)
         self._sig_thread = thread
@@ -1940,7 +1940,7 @@ class MainWindow(QMainWindow):
         worker.entry_started.connect(self._on_mu_entry_started)
         worker.entry_updated.connect(self._on_mu_entry_updated)
         worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
+        release_on_ui_thread(thread, worker)          # never deleteLater in its own thread (a deadlock)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_mu_thread_finished)
         self._mu_thread = thread
