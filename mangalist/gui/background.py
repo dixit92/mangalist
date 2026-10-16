@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional, Set
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QMetaMethod, QObject, Qt, QThread, QTimer, Signal
 
 from .downloads_backend import BackendError
 
@@ -25,6 +25,17 @@ def describe_error(exc: BaseException) -> str:
     if isinstance(exc, BackendError):
         return str(exc) or "the operation failed"
     return f"unexpected error ({type(exc).__name__})"
+
+
+def _disconnect_all(obj: QObject, signals) -> None:
+    """Disconnect every slot of *signals* - only those that have one: PySide6 6.12 warns ("Failed to disconnect (None)
+    from signal ...") for a signal nobody listens to, e.g. a call started without an ``on_error``."""
+    for signal in signals:
+        try:
+            if obj.isSignalConnected(QMetaMethod.fromSignal(signal)):
+                signal.disconnect()
+        except (RuntimeError, TypeError):
+            pass
 
 
 class BackgroundCall(QThread):
@@ -51,11 +62,7 @@ class BackgroundCall(QThread):
     def abandon(self) -> None:
         """Drop the result: whoever started the call no longer listens."""
         self.abandoned = True
-        for signal in (self.succeeded, self.failed):
-            try:
-                signal.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+        _disconnect_all(self, (self.succeeded, self.failed))
 
     def _cleanup(self) -> None:
         _ACTIVE.discard(self)
@@ -123,11 +130,7 @@ class ProcessCall(QObject):
     def abandon(self) -> None:
         """Drop the result (the subprocess finishes its job; :func:`mangalist.process_pool.shutdown` stops it)."""
         self.abandoned = True
-        for signal in (self.succeeded, self.failed):
-            try:
-                signal.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+        _disconnect_all(self, (self.succeeded, self.failed))
         self._future.cancel()
 
     def wait(self, _msecs: int = 0) -> bool:

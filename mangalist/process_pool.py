@@ -67,6 +67,7 @@ def submit(fn: Callable[..., Any], *args: Any) -> "Future":
     return value. Falls back to running it in the calling thread when subprocesses are off or cannot start."""
     global _running, _broken
     if enabled():
+        future = None
         with _lock:
             try:
                 future = _get_pool().submit(fn, *args)
@@ -76,8 +77,13 @@ def submit(fn: Callable[..., Any], *args: Any) -> "Future":
                 _broken = True
             else:
                 _running += 1
-                future.add_done_callback(_job_done)
-                return future
+        if future is not None:
+            # Only after the lock is released: a job that is done already (a quick job finished by the pool's thread
+            # meanwhile, or a pool that broke) runs its callback right here, in this thread, and _job_done takes the
+            # lock - inside it, the UI thread waited for itself for ever (the test suite's intermittent hang,
+            # 2026-10-15/16).
+            future.add_done_callback(_job_done)
+            return future
     from concurrent.futures import Future
 
     future = Future()

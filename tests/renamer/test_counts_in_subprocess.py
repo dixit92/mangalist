@@ -5,6 +5,7 @@ and in a real spawned subprocess. Made-up series in the test's temporary folder.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,10 @@ def test_a_real_subprocess_gives_the_same_count(scanned, monkeypatch):
         assert process_pool.submit(os.getpid).result(timeout=120) != os.getpid()    # really another process
         future = process_pool.submit(process_pool.rename_pending_counts, str(db.path))
         assert future.result(timeout=120) == expected
+        # a future's waiters are woken before its callbacks run: the pool's count of running jobs follows a moment later
+        deadline = time.monotonic() + 10
+        while process_pool.busy() and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert not process_pool.busy()
         assert process_pool.release_if_idle()                           # idle: its processes go
     finally:
