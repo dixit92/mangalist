@@ -241,7 +241,7 @@ def test_scheme_names_never_leak_units_from_the_title():
 
 def test_the_schemes_are_templates():
     assert CHAPTER_SCHEME == "Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}"
-    assert VOLUME_SCHEME == "{%SQ - }Vol. %V3{-%VE3}{ [%G]}"
+    assert VOLUME_SCHEME == "{%SQ - }Vol. %V3{-%VE3}{ + %EX}{ [%G]}"
     assert TITLED_VOLUME_SCHEME == "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
     assert DEFAULT_SCHEMES == (CHAPTER_SCHEME, VOLUME_SCHEME, TITLED_VOLUME_SCHEME)
 
@@ -602,3 +602,67 @@ def test_naming_is_qt_free():
     code = "import sys, mangalist.naming; assert 'PySide6' not in sys.modules, 'PySide6 loaded'"
     root = Path(__file__).resolve().parents[2]
     subprocess.run([sys.executable, "-c", code], check=True, cwd=root)
+
+
+# --- a rename never drops what the scheme can say (integrator, 2026-10-16) -------------------------------------------
+
+@pytest.mark.parametrize("name, expected", [
+    ("Vol. 5.5 [G].cbz", "Vol. 005.5 [G].cbz"),                                  # the generic layer keeps no group
+    ("Vol. 001 Extras [G].cbz", "Vol. 001 + Extras [G].cbz"),
+    ("Some Series v01 + Extras (2020) (Digital) (G).cbz", "Vol. 001 + Extras [G].cbz"),
+    ("Some Series v02 (Extras) (G).cbz", "Vol. 002 + Extras [G].cbz"),
+    ("Some Series v03 [omake] [G].cbz", "Vol. 003 + Omake [G].cbz"),
+    ("Some Series v06 Side-Story (G).cbz", "Vol. 006 + Side Story [G].cbz"),
+    ("Some Series v07.5 Bonus.cbz", "Vol. 007.5 + Bonus.cbz"),
+    ("Vol. 001 + Extras [G].cbz", "Vol. 001 + Extras [G].cbz"),                 # the scheme's own: stable
+    ("Vol. 001-003 + Side Stories.cbz", "Vol. 001-003 + Side Stories.cbz"),
+    ("Season 2 - Vol. 004 + Afterword [G].cbz", "Season 2 - Vol. 004 + Afterword [G].cbz"),
+    # dropped by design: the series title, the year, a Digital edition, a fix, a revision, a placeholder group
+    ("Some Series v05 (2021) (Digital-Compilation) (G) (f) [v2].cbz", "Vol. 005 [G].cbz"),
+    ("Some Series v09 (Digital) (no group).cbz", "Vol. 009.cbz"),
+    ("Some Series Vol 10 (f) (Digital) (Made-Group).cbz", "Vol. 010 [Made-Group].cbz"),
+    ("Some Series Ch 7 (Made Scans).cbz", "Ch. 0007.00 [Made Scans].cbz"),
+])
+def test_a_rename_keeps_the_group_and_the_extras(name, expected):
+    assert _t(name) == expected
+    p = parse_name(expected)
+    assert p.layer is Layer.SCHEME and _t(expected) == expected                  # read back exactly, renamed once
+
+
+@pytest.mark.parametrize("name, what", [
+    ("Some Series v01 (Collector's Edition) (G).cbz", "'(Collector's Edition)'"),
+    ("Some Series v07 (Special Edition) (G).cbz", "'(Special Edition)'"),        # an edition, not an extra
+    ("Some Series v03 - The Made Up Day (Digital) (G).cbz", "'The Made Up Day'"),  # a volume title
+    ("Some Series v04 (2021) (Digital) (Oak) (Elm).cbz", "'(Elm)'"),             # a second group
+    ("Some Series Vol 8 Bonus + Omake [G].cbz", "'Bonus + Omake'"),              # two markers
+    ("Some Series Vol.11 Odd Words.cbz", "'Odd Words'"),
+    ("Some Series v12 (Omnibus).cbz", "'(Omnibus)'"),                             # never taken for the group
+    ("Some Series Chapter 5 Odd Words (G).cbz", "'Odd Words'"),                   # a generic-layer chapter title
+])
+def test_a_name_whose_parts_the_scheme_cannot_keep_is_left_alone(name, what):
+    p = parse_name(name)
+    assert _t(name) is None and _t(name, titled=True) is None
+    assert naming.unkept_reason(p) == f"the name has {what} the scheme cannot keep"
+
+
+def test_a_volume_read_only_by_the_series_answer_keeps_its_title_or_is_left_alone():
+    ctx = ParseContext(kind_hint="volumes", series_title="Some Series")
+    assert _t("Some Series 07 (G).cbz", ctx=ctx) == "Vol. 007 [G].cbz"
+    assert _t("Some Series 014.6  A Title (Grp).cbz", ctx=ctx) is None
+
+
+@pytest.mark.parametrize("text, marker", [
+    ("extras", "Extras"), ("Extra", "Extra"), ("OMAKE", "Omake"), ("side_story", "Side Story"),
+    ("Side-Stories", "Side Stories"), ("+ bonus", "Bonus"), ("specials", "Specials"), ("Edition", None), ("", None),
+])
+def test_extras_marker(text, marker):
+    assert naming.extras_marker(text) == marker
+
+
+def test_volume_names_with_extras():
+    assert volume_file_name(5, extras="extras", group="G") == "Vol. 005 + Extras [G].cbz"
+    assert volume_file_name(1, volume_end=3, extras="side story") == "Vol. 001-003 + Side Story.cbz"
+    with pytest.raises(ValueError):
+        volume_file_name(1, extras="Collector's Edition")
+    p = parse_name("Vol. 005 + Extras [G].cbz")
+    assert (p.layer, p.kind, str(p.volume), p.group, p.is_extra) == (Layer.SCHEME, Kind.VOLUME, "5", "G", False)

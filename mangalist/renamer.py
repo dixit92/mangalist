@@ -112,6 +112,9 @@ class Namer(Protocol):
                     limits: Any = None) -> Optional[str]:
         """The scheme's file name for *parsed* (None: leave the file alone)."""
 
+    def unkept_reason(self, parsed: Any) -> Optional[str]:
+        """Why *parsed* is left alone because its scheme name would lose part of its name (optional)."""
+
     def titled_target_name(self, parsed: Any, *, ext: str, series_title: Optional[str],
                            volume_of: Optional[Callable[[Decimal], Optional[Decimal]]] = None,
                            folder: Optional[str] = None, limits: Any = None) -> Optional[str]:
@@ -150,6 +153,9 @@ class DefaultNamer:
         kw = {} if limits is None else {"limits": limits}
         return mod.target_name(parsed, ext=ext, series_title=series_title, volume_of=volume_of, folder=folder,
                                titled=True, **kw)
+
+    def unkept_reason(self, parsed):
+        return self._module().unkept_reason(parsed)
 
     def volume_lookup(self, db, series_id):
         return self._module().volume_lookup(db, series_id)
@@ -498,6 +504,18 @@ _TITLE_SWAP = {"(": "[", ")": "]"}
 _GROUP_SWAP = {"[": "(", "]": ")"}
 
 
+def _unkept_reason(namer: Namer, parsed: Any) -> Optional[str]:
+    """Why the namer left *parsed* alone because its scheme name would lose part of its name (a group, an extras
+    marker, an edition ...; :func:`mangalist.naming.unkept_reason`), or None (optional on a namer)."""
+    ask = getattr(namer, "unkept_reason", None)
+    if ask is None:
+        return None
+    try:
+        return ask(parsed)
+    except Exception:  # noqa: BLE001 - the generic reasons then
+        return None
+
+
 def _is_volume(parsed: Any) -> bool:
     return str(getattr(getattr(parsed, "kind", None), "value", getattr(parsed, "kind", ""))) == "volume"
 
@@ -580,6 +598,10 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
             first.append(FilePlan(path, None, LEFT_ALONE, layer, f"naming failed ({type(exc).__name__})"))
             continue
         if target is None:
+            unkept = _unkept_reason(namer, parsed)
+            if unkept:
+                first.append(FilePlan(path, None, LEFT_ALONE, layer, unkept))
+                continue
             bare = getattr(parsed, "number", None) is not None and (
                 str(getattr(getattr(parsed, "kind", None), "value", "")) == "unknown" or getattr(parsed, "guessed", False))
             why = (("a comics extra: not counted as chapter "
@@ -971,12 +993,13 @@ def file_units(kind: str, numbers: str, volume: str = "") -> FileUnits:
 
 def with_units(parsed: Any, units: FileUnits, name: str) -> Any:
     """*parsed* (the parser's reading of *name*, or None) with the units the owner set; its title and group stay."""
-    from .parsing.model import Kind, ParsedName, UnitRange
+    from .parsing.model import OWNER_UNITS_NOTE, Kind, ParsedName, UnitRange
 
     base = parsed if parsed is not None else ParsedName(name=name)
     rng = UnitRange(units.start, units.end)
     title = _LEADING_UNITS.sub("", base.title).strip() if base.title else ""
-    common = dict(number=None, is_extra=False, guessed=False, ambiguous=False, title=title or None)
+    common = dict(number=None, is_extra=False, guessed=False, ambiguous=False, title=title or None,
+                  notes=tuple(base.notes) + (OWNER_UNITS_NOTE,))
     if units.kind == UNIT_VOLUME:
         return replace(base, kind=Kind.VOLUME, volume=rng, chapter=None, **common)
     if units.volume is not None:

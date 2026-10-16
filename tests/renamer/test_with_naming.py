@@ -97,3 +97,14 @@ def test_a_file_whose_numbers_the_owner_sets_is_named_by_them_and_reads_back(db,
     with pytest.raises(ValueError):
         file_units(UNIT_CHAPTER, "twelve")
     assert file_units(UNIT_VOLUME, " 4 ", "9").volume is None                     # a volume has no volume
+
+
+def test_a_rename_that_would_lose_part_of_the_name_is_left_alone_with_the_reason(tmp_path):
+    # integrator, 2026-10-16: never drop what the old name carried; leave the file alone and say why
+    lossy, half, extras = ("Series X v01 (Collector's Edition) (G).cbz", "Vol. 5.5 [G].cbz",
+                           "Series X v02 + Extras (Digital) (G).cbz")
+    plans = _plans(tmp_path, [lossy, half, extras], series_title="Series X")
+    assert plans[lossy].status == LEFT_ALONE
+    assert plans[lossy].reason == "the name has '(Collector's Edition)' the scheme cannot keep"
+    assert plans[half].target == "Vol. 005.5 [G].cbz"
+    assert plans[extras].target == "Vol. 002 + Extras [G].cbz"
