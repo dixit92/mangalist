@@ -46,7 +46,7 @@ def test_each_file_gets_its_verdict(tmp_path):
     assert plans[names[0]].layer == "fmd2"
     assert plans[names[1]].status == UNCHANGED
     assert plans[names[2]].status == LEFT_ALONE and "no volume or chapter" in plans[names[2]].reason
-    assert plans[names[3]].target == "Series X - Vol. 003 [Rel].cbz"
+    assert plans[names[3]].target == "Vol. 003 [Rel].cbz" and not plans[names[3]].held   # renamed before too
     assert plans[names[4]].status == LEFT_ALONE and "not allowed on Windows" in plans[names[4]].reason
     # the namer is told the folder (the length rule's Windows path) and the series title
     assert all(c[2] == str(tmp_path) and c[1] == "Series X" for c in namer.calls)

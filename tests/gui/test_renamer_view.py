@@ -511,23 +511,27 @@ def test_the_automatic_mode_texts_say_folders_are_never_renamed_automatically():
 
     for text in (LEAD, automatic_text("Manga"), ENFORCE_TIP):
         assert "never" in text and "<romaji> [<English>]" in text
-        assert "Folder names and series-title changes wait for your Rename" in text
+        assert "Folder names and" in text and "wait for your Rename" in text and "Vol. 001" in text
 
 
-def test_title_changes_are_marked_in_the_preview_and_listed_to_check(qapp, db, tmp_path):
+def test_format_changes_are_marked_in_the_preview_and_listed_to_check(qapp, db, tmp_path):
+    """Owner, 2026-10-16: a volume renamed only for the new format ("Vol. 001", no series title) waits for this
+    window's Rename - marked in the preview, listed first under To check, counted in the confirmation."""
     library = tmp_path / "titled" / "Manga"
     library.mkdir(parents=True)
-    root = make_library(db, library, {"Vol Romaji [Vol English]": {"Vol Romaji - Vol. 001.cbz": payload("t1")}})
+    root = make_library(db, library, {"Vol Romaji [Vol English]": {"Vol Romaji - Vol. 001.cbz": payload("t1"),
+                                                                   "Vol Romaji v02 (G).cbz": payload("t2")}})
     r = Renamer(db, rescan=None, request_scans=None,
                 title_for=lambda root_, series: ("Vol Romaji", ()) if series.rel_path.startswith("Vol Romaji") else None)
     win = _window(qapp, r, Scope.root(root.id, "Manga"))
     try:
         row = [win.preview.topLevelItem(i) for i in range(win.preview.topLevelItemCount())
                if win.preview.topLevelItem(i).text(0) == "Vol Romaji - Vol. 001.cbz"][0]
-        assert row.text(1) == "Vol Romaji [Vol English] - Vol. 001.cbz" and "new series title" in row.text(2)
-        assert win.notes.topLevelItem(0).text(0).startswith("New series title")
+        assert row.text(1) == "Vol. 001.cbz" and "new volume name format (waits for your Rename" in row.text(2)
+        assert win.notes.topLevelItem(0).text(0).startswith("New volume name format")
         win.apply()
-        assert "renamed only because of the new series title" in win.asked[0][1]
-        assert (library / "Vol Romaji [Vol English]" / "Vol Romaji [Vol English] - Vol. 001.cbz").exists()
+        assert "renamed to the new volume name format" in win.asked[0][1]
+        assert (library / "Vol Romaji [Vol English]" / "Vol. 001.cbz").exists()
+        assert (library / "Vol Romaji [Vol English]" / "Vol. 002 [G].cbz").exists()
     finally:
         win.deleteLater()

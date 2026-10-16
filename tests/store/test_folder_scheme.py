@@ -31,17 +31,63 @@ def test_scheme_name(romaji, english, name):
         assert windows_name_problem(name) is None
 
 
-def test_a_long_romaji_title_is_shortened_to_its_main_part():
-    long = "Made Up Romaji wa Hontou ni: Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"
-    assert len(long) > fs.LONG_TITLE
-    assert fs.short_romaji(long) == "Made Up Romaji wa Hontou ni"
-    assert fs.scheme_name(long, "The Made Up Story") == "Made Up Romaji wa Hontou ni [The Made Up Story]"
-    assert fs.scheme_name(long, "Made Up Romaji wa Hontou ni") == "Made Up Romaji wa Hontou ni"   # = its short form
-    short = "Made Up: Subtitle"                                          # not long: kept whole (colon dropped)
-    assert fs.short_romaji(short) == "Made Up Subtitle"
-    no_separator = "Made Up Romaji " + "Nagai " * 10
-    assert fs.short_romaji(no_separator) == no_separator.strip()
-    assert fs.short_romaji("12: " + "Nagai " * 10) == ("12 " + "Nagai " * 10).strip()   # a head of digits is no name
+LONG = "Made Up Romaji wa Hontou ni: Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"
+
+
+def test_a_long_romaji_without_an_official_short_name_stays_whole():
+    """Owner, 2026-10-16: "a long romaji stays full if official name isn't there" - never cut at a subtitle."""
+    assert len(LONG) > fs.LONG_TITLE
+    whole = "Made Up Romaji wa Hontou ni Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"     # only the colon dropped
+    assert fs.short_romaji(LONG) == whole
+    assert fs.scheme_name(LONG, "The Made Up Story") == f"{whole} [The Made Up Story]"
+    assert fs.short_romaji(LONG, "The Made Up Story", ["The Made Up Story", "Nagai Monogatari desu yo ne"]) == whole
+    assert fs.short_romaji("Made Up: Subtitle", None, ["Made Up"]) == "Made Up Subtitle"   # not long: never shortened
+
+
+@pytest.mark.parametrize("alts, english, short", [
+    (["Made Up Romaji"], None, "Made Up Romaji"),                              # the romaji's own head
+    (["NagaMono"], "The Made Up Story", "NagaMono"),                           # one coined word
+    (["Tsuzuku no Monogatari"], None, "Tsuzuku no Monogatari"),                # reads as romaji
+    (["Made Up Is Long"], None, None),                                         # reads as English (is, ...)
+    (["The Made Up Story"], "The Made Up Story", None),                        # the English title itself
+    (["Some Odd Tale"], None, None),                                           # two words or more, nothing of the romaji
+    (["MURN"], None, None),                                                    # an acronym
+    (["Mono"], None, "Mono"),                                                  # four letters: enough
+    (["Nai"], None, None),                                                     # fewer: not a name
+    (["Made Up Romaji (AUTHOR Name)"], None, None),                            # a disambiguation, not a name
+    (["Made Up Romaji wa Hontou ni Nagai Nagai Fukudai ga"], None, None),      # five words or more: not short
+    (["メイドアップ"], None, None),                                              # not ASCII
+    ([], "MADEUP: The Made Up Story", "Madeup"),                               # English head (BOFURI rule), title case
+    ([], "Odd Tale: The Made Up Story", None),                                 # an English head unrelated to the romaji
+    (["Madeup-sama: Love Story"], "Love Story", "Madeup-sama"),                # an alternative "<head>: <English>"
+    (["Made Up Hero: Is It Long?"], None, None),                               # head of an English title, 3 words
+])
+def test_an_official_short_name_replaces_a_long_romaji(alts, english, short):
+    got = fs.short_name_candidates(LONG, english, alts)
+    assert (got[0] if got else None) == short
+    assert fs.short_romaji(LONG, english, alts) == (short or fs.clean_part(LONG))
+
+
+def test_the_short_name_choice_is_deterministic():
+    """The relation to the romaji first (its head, then romaji words / a shared word, then one coined word), then the
+    shortest, then alphabetical - whatever order MangaUpdates lists them in."""
+    alts = ["NagaMono", "Tsuzuku no Monogatari", "Made Up Romaji", "Fukudai Hero", "Hontou Monogatari", "Zeta"]
+    order = ["Made Up Romaji", "Fukudai Hero", "Hontou Monogatari", "Tsuzuku no Monogatari", "Zeta", "NagaMono"]
+    assert list(fs.short_name_candidates(LONG, None, alts)) == order
+    assert list(fs.short_name_candidates(LONG, None, list(reversed(alts)))) == order
+    assert fs.short_name_candidates(LONG, None, ["Nagai Y", "Nagai X"])[0] == "Nagai X"   # same tier and length
+
+
+def test_the_folder_name_with_a_short_name_keeps_the_english_bracket():
+    alts = ["NagaMono", "The Made Up Story"]
+    assert fs.scheme_name(LONG, "The Made Up Story", alt_titles=alts) == "NagaMono [The Made Up Story]"
+    assert fs.scheme_name(LONG, "NagaMono", alt_titles=["NagaMono", "Naga-Mono"]) == \
+        "Made Up Romaji wa Hontou ni Nagai Nagai Fukudai ga Tsuzuku Monogatari desu [NagaMono]"   # the English is not one
+    titles = fs.titles_for("NagaMono [The Made Up Story]", LONG, alts)
+    assert titles.name() == "NagaMono [The Made Up Story]"                     # stable: a renamed folder reads back
+    assert fs.titles_for("NagaMono", LONG, alts).english is None               # the folder's name is the short name
+    fits = fs.windows_fits("/data/Manga", "SERVER")
+    assert fs.scheme_name(LONG, "E" * 300, fits=fits, alt_titles=alts).startswith("NagaMono [E")
 
 
 def test_the_length_rule_cuts_the_english_part_first_then_the_romaji():

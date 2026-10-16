@@ -263,6 +263,18 @@ def test_without_an_english_title_the_romaji_alone_is_first_and_english_looking_
     assert "Made Up Romaji no Hon [Made Up Romaji]" not in names
 
 
+def test_a_long_romaji_is_proposed_by_its_official_short_name():
+    # owner, 2026-10-16: a romaji over 50 characters uses an official short name (animefetch's rule), else stays whole
+    long = "Made Up Romaji wa Totemo Nagai Fukudai ga Tsuzuku Hanashi desu yo"
+    info = A.info_from_mu(mu_record(title=long, associated=[{"title": "The Made Up Long Story"},
+                                                            {"title": "MadeNaga"}]))
+    names = A.propose_names(info)
+    assert names[0] == "MadeNaga" == info.scheme_name()
+    assert names[1] == "MadeNaga [The Made Up Long Story]"
+    plain = A.info_from_mu(mu_record(title=long, associated=[{"title": "The Made Up Long Story"}]))
+    assert A.propose_names(plain)[0] == long                       # no official short name: never cut
+
+
 def test_the_matching_title_is_the_only_proposal_when_nothing_differs():
     info = A.info_from_mu(mu_record(title="Same Title", associated=[]))
     assert A.propose_names(info) == ["Same Title"]

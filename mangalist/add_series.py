@@ -333,7 +333,7 @@ class SeriesInfo:
         """The library's folder name for the series, ``<romaji> [<English>]`` (:mod:`mangalist.folder_scheme`)."""
         from .folder_scheme import scheme_name
 
-        return scheme_name(self.romaji, self.english_title)
+        return scheme_name(self.romaji, self.english_title, alt_titles=self.associated)
 
     def summary(self) -> List[str]:
         """The lines the dialog shows under the title."""
@@ -518,14 +518,15 @@ def propose_names(info: SeriesInfo) -> List[str]:
 
     romaji, english = info.romaji, info.english_title
     schemed: List[str] = []
-    first = scheme_name(romaji, english)
+    alts = info.associated               # a long romaji: its official short name (folder_scheme.short_name_candidates)
+    first = scheme_name(romaji, english, alt_titles=alts)
     if first:
         schemed.append(first)
     for alt in english_candidates(info.associated, romaji, limit=MAX_ASSOCIATED_PROPOSALS):
-        name = scheme_name(romaji, alt)
+        name = scheme_name(romaji, alt, alt_titles=alts)
         if name:
             schemed.append(name)
-    plain = scheme_name(romaji)
+    plain = scheme_name(romaji, alt_titles=alts)
     if plain:
         schemed.append(plain)
     ordered: List[str] = []

@@ -110,6 +110,11 @@ class UnitRange:
         return plain(self.start) if not self.is_range else f"{plain(self.start)}-{plain(self.end)}"
 
 
+#: The note on a reading whose units the owner set by hand (the Renamer's "Set chapter / volume"): its numbers are not
+#: looked for in the name again.
+OWNER_UNITS_NOTE = "units set by the owner"
+
+
 @dataclass(frozen=True)
 class ParsedName:
     """Units read from one archive file name.

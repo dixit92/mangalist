@@ -7,6 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.39] - 2026-10-16
+
+The thirty-eighth MangaList release (testing build): shorter names - volume files without the series title and official short folder names - and two rare freezes fixed.
+
+- **Volume files are named "Vol. 001 [group].cbz".** The series' full "<romaji> [<English>]" name in every volume file made paths of about 330 characters, past what Windows tools take (260). The folder carries the name; volume files carry none, like chapter files: `Vol. 001 [group].cbz`, `Vol. 012.5`, `Vol. 005 + Extras [group].cbz`. Old names are still read. These renames wait for your Rename (marked "new volume name format"), like folder renames; new downloads are named this way from the start.
+- **Long titles use an official short name.** A romaji title over 50 characters becomes an official short name the series goes by (an alternative title such as "Kaguya-sama", "RoshiDere", "DanMachi Sword Oratoria"), the way animefetch names folders; without one, the full title stays - nothing is cut.
+- **Renames never lose part of a name.** A volume's group and extras note are kept; a name the scheme cannot keep whole (an edition, a volume title, a second group) is left alone, with the reason.
+- **Fixed: the window could freeze for good right after a scan** - two rare deadlocks in background jobs (a subprocess count finishing very quickly, and a background worker being cleaned up while the window connected a signal).
+
 ## [2026.10.38] - 2026-10-15
 
 The thirty-seventh MangaList release (testing build): Add series finds the English title and gets the first volumes, and unlicensed volume series follow Unbundled chapters.

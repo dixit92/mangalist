@@ -43,9 +43,14 @@ data follow through the journal's folder-move follow, :meth:`~mangalist.store.se
 The romaji is the series' MangaUpdates title (MangaPixer's record, else MangaList's own confirmed match); without one
 the folder is left alone. Subseries folders (``Parent/Side 1 - ...``) are never renamed. **A folder is renamed only by
 the owner's explicit Rename in the window**: the automatic pass (and filing) never renames a folder, whatever the
-library's setting (:meth:`Renamer.apply` takes ``folders=True`` only from the window). Answer 12 ("Titles should
-follow the scheme in answer 6 and should change"): the series title volume names use is the same scheme name, so a
-changed match (e.g. MangaPixer's Switch to MangaUpdates) makes the volumes Rename pending as well.
+library's setting (:meth:`Renamer.apply` takes ``folders=True`` only from the window).
+
+**Volume names carry no series title** (owner, 2026-10-16): ``Vol. 001 [<group>].cbz`` - the folder carries the title,
+like the chapter names (:mod:`mangalist.naming`). Nearly every volume in the library still has the old
+``<Series title> - Vol. 001`` form, so the new format makes them Rename pending; **a volume rename the new format causes
+waits for the owner's Rename** (:attr:`FilePlan.format_held`, like folders): the automatic pass renames a volume only
+when it would have renamed it before this change anyway (a release name, a padding fix) - straight to the new format,
+so no file is renamed twice - or when the file already has the new format. Newly filed volumes get the new format.
 
 **Rename pending** (:meth:`Renamer.pending_counts`): per series folder, how many files the scheme would rename, plus one
 when the folder itself would be renamed (roots set to Off never count). The List shows it as a flag, a column and a
@@ -82,8 +87,9 @@ UNCHANGED, RENAME, LEFT_ALONE, COLLISION = "unchanged", "rename", "left alone", 
 
 FOLDER_NOTE = ("Series folders are renamed to \"<romaji> [<English>]\" only when you press Rename here - never "
                "automatically. MangaList asks MangaPixer to scan afterwards so it sees the new folder names.")
-TITLE_NOTE = ("Some volume names change only because of the series title \"<romaji> [<English>]\": like folder names, "
-              "they are renamed only when you press Rename here - never automatically.")
+TITLE_NOTE = ("Volume names no longer carry the series title (\"Vol. 001 [group]\": the folder has it). Volumes renamed "
+              "only for this new format wait like folder names: they are renamed only when you press Rename here - "
+              "never automatically.")
 ANALYSIS_WARNING = ("Files MangaPixer has not analysed yet lose their read state when renamed - let MangaPixer finish "
                     "its scan first.")
 NOT_ANALYSED_WARNING = ("MangaPixer has not analysed every archive of {n} series yet: renaming them now loses their "
@@ -105,6 +111,16 @@ class Namer(Protocol):
                     volume_of: Optional[Callable[[Decimal], Optional[Decimal]]] = None, folder: Optional[str] = None,
                     limits: Any = None) -> Optional[str]:
         """The scheme's file name for *parsed* (None: leave the file alone)."""
+
+    def unkept_reason(self, parsed: Any) -> Optional[str]:
+        """Why *parsed* is left alone because its scheme name would lose part of its name (optional)."""
+
+    def titled_target_name(self, parsed: Any, *, ext: str, series_title: Optional[str],
+                           volume_of: Optional[Callable[[Decimal], Optional[Decimal]]] = None,
+                           folder: Optional[str] = None, limits: Any = None) -> Optional[str]:
+        """The name the scheme gave *parsed* until 2026-10-16 (a volume ``<series title> - Vol. 001``; a chapter as
+        today) - only compared against, to hold the renames the new volume format causes (optional: a namer without it
+        holds every volume rename out of the new format)."""
 
     def volume_lookup(self, db: Any, series_id: int) -> Callable[[Decimal], Optional[Decimal]]:
         """Chapter -> volume from MangaPixer's volume list of the series."""
@@ -131,6 +147,15 @@ class DefaultNamer:
         mod = self._module()
         kw = {} if limits is None else {"limits": limits}
         return mod.target_name(parsed, ext=ext, series_title=series_title, volume_of=volume_of, folder=folder, **kw)
+
+    def titled_target_name(self, parsed, *, ext, series_title, volume_of=None, folder=None, limits=None):
+        mod = self._module()
+        kw = {} if limits is None else {"limits": limits}
+        return mod.target_name(parsed, ext=ext, series_title=series_title, volume_of=volume_of, folder=folder,
+                               titled=True, **kw)
+
+    def unkept_reason(self, parsed):
+        return self._module().unkept_reason(parsed)
 
     def volume_lookup(self, db, series_id):
         return self._module().volume_lookup(db, series_id)
@@ -206,6 +231,12 @@ class FilePlan:
     unit_words: bool = False        # the chapter title holds a unit word (a parser may read a number from it)
     needs_kind: bool = False        # left alone: a bare number whose kind only the series' "volumes or chapters?" settles
     title_held: bool = False        # renamed: the scheme's series title changed the name (waits for the owner's Rename)
+    format_held: bool = False       # renamed: the new volume format ("Vol. 001", no series title) changed the name (waits)
+
+    @property
+    def held(self) -> bool:
+        """The rename waits for the owner's Rename in the window: the automatic pass never makes it."""
+        return self.title_held or self.format_held
 
     @property
     def name(self) -> str:
@@ -268,12 +299,13 @@ class SeriesPreview:
 
     @property
     def auto_renames(self) -> List[FilePlan]:
-        """The renames the automatic pass may make: not the ones a new series title causes (they wait for the owner)."""
-        return [f for f in self.renames if not f.title_held]
+        """The renames the automatic pass may make: not the ones the new volume format (or a new series title) causes
+        (they wait for the owner)."""
+        return [f for f in self.renames if not f.held]
 
     @property
     def held_renames(self) -> List[FilePlan]:
-        return [f for f in self.renames if f.title_held]
+        return [f for f in self.renames if f.held]
 
     @property
     def folder_rename(self) -> bool:
@@ -366,7 +398,7 @@ class RenameBatch:
     series: Tuple[SeriesPreview, ...]
 
     folders: bool = False                        # the series folders are renamed too (the owner's Rename only)
-    titles: bool = True                          # renames a new series title causes too (False: the automatic pass)
+    titles: bool = True                          # the held renames too (new volume format; False: the automatic pass)
 
     def files_of(self, s: SeriesPreview) -> List[FilePlan]:
         return s.renames if self.titles else s.auto_renames
@@ -418,7 +450,7 @@ class AutoReport:
     skipped: Optional[str] = None
     after: str = ""
     unchanged: int = 0                  # series not looked at again: nothing changed since a pass found nothing to do
-    held: int = 0                       # renames a new series title causes: they wait for the owner's Rename
+    held: int = 0                       # renames the new volume format causes: they wait for the owner's Rename
 
     @property
     def renamed(self) -> int:
@@ -431,7 +463,7 @@ class AutoReport:
         if self.waiting:
             parts.append(f"{len(self.waiting)} root(s) wait for the first guided rename")
         if self.held:
-            parts.append(f"{self.held} file(s) with a new series title wait for your Rename")
+            parts.append(f"{self.held} file(s) in the new volume name format wait for your Rename")
         if self.after:
             parts.append(self.after)
         return "renames: " + ("; ".join(parts) if parts else "nothing to rename")
@@ -472,6 +504,55 @@ _TITLE_SWAP = {"(": "[", ")": "]"}
 _GROUP_SWAP = {"[": "(", "]": ")"}
 
 
+def _unkept_reason(namer: Namer, parsed: Any) -> Optional[str]:
+    """Why the namer left *parsed* alone because its scheme name would lose part of its name (a group, an extras
+    marker, an edition ...; :func:`mangalist.naming.unkept_reason`), or None (optional on a namer)."""
+    ask = getattr(namer, "unkept_reason", None)
+    if ask is None:
+        return None
+    try:
+        return ask(parsed)
+    except Exception:  # noqa: BLE001 - the generic reasons then
+        return None
+
+
+def _is_volume(parsed: Any) -> bool:
+    return str(getattr(getattr(parsed, "kind", None), "value", getattr(parsed, "kind", ""))) == "volume"
+
+
+def in_volume_format(name: str) -> bool:
+    """*name* already has the volume format (``Vol. 001 [<group>].cbz``, ``Season 2 - Vol. 001``: no series title)."""
+    from .parsing.template import MANGALIST_VOLUME_SCHEME, compile_template
+
+    return compile_template(MANGALIST_VOLUME_SCHEME).parse(os.path.splitext(name)[0]) is not None
+
+
+def _format_held(namer: Namer, parsed: Any, name: str, *, ext: str, series_title: Optional[str],
+                 legacy_title: Optional[str], volume_of, folder: str, limits: Any) -> bool:
+    """A volume rename the new volume format causes (owner, 2026-10-16: every library renames automatically, and the
+    new format makes nearly every volume Rename pending): it waits for the owner's Rename unless the file already has
+    the new format, or the renamer before this change would have renamed it automatically anyway (a release name, a
+    padding fix: :meth:`Namer.titled_target_name` gives another name than the file's, and not one a new series title
+    changed - lane A's hold, 2026-10-15). Such a file goes straight to the new format (renamed once). Cannot tell
+    (no titled names, naming failed): held."""
+    if in_volume_format(name):
+        return False
+    titled = getattr(namer, "titled_target_name", None)
+    if titled is None:
+        return True
+    try:
+        before = titled(parsed, ext=ext, series_title=series_title, volume_of=volume_of, folder=folder, limits=limits)
+        if before is None or before == name:
+            return True                                  # only the new format changes it
+        if legacy_title and legacy_title != series_title:
+            old = titled(parsed, ext=ext, series_title=legacy_title, volume_of=volume_of, folder=folder, limits=limits)
+            if old != before and (old == name or not _has_new_title(name, series_title)):
+                return True                              # the new series title changed it before: it waited then too
+    except Exception:  # noqa: BLE001 - cannot tell: hold it for the owner
+        return True
+    return False
+
+
 def _has_new_title(name: str, title: Optional[str]) -> bool:
     """*name* already starts with the new series title (``<new title> - Vol. 1.cbz`` -> ``<new title> - Vol. 001.cbz`` is
     a padding fix, not a title change)."""
@@ -486,11 +567,12 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
     folder, comparing names case-insensitively, against the other files of the series AND everything else in the
     folder (a file that is not part of the series is never displaced).
 
-    *legacy_title*: the series title volume names used before the folder scheme (the record's title, else the folder's
-    name). A rename whose target differs from the target that title gives - the scheme's ``<romaji> [<English>]``
-    changed the name, alone or with another fix (a file is never renamed twice) - is marked
-    :attr:`FilePlan.title_held` unless the file already carries the new title: the automatic pass leaves it for the
-    owner's Rename (integrator, 2026-10-15: 2615 such renames in the owner's library, not previewed yet)."""
+    A volume rename the new volume format causes is marked :attr:`FilePlan.format_held` (:func:`_format_held`; owner,
+    2026-10-16): the automatic pass leaves it for the owner's Rename. *legacy_title*: the series title volume names
+    used before the folder scheme (the record's title, else the folder's name) - a volume whose old name a new series
+    title changed waited before (lane A, 2026-10-15) and still waits. Any other rename whose target differs from the
+    target that title gives is marked :attr:`FilePlan.title_held` (no file name but a volume's uses the title today,
+    so this is a guard for namers that do)."""
     first: List[FilePlan] = []
     for path, parsed in files:
         path = os.path.normpath(str(path))
@@ -516,6 +598,10 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
             first.append(FilePlan(path, None, LEFT_ALONE, layer, f"naming failed ({type(exc).__name__})"))
             continue
         if target is None:
+            unkept = _unkept_reason(namer, parsed)
+            if unkept:
+                first.append(FilePlan(path, None, LEFT_ALONE, layer, unkept))
+                continue
             bare = getattr(parsed, "number", None) is not None and (
                 str(getattr(getattr(parsed, "kind", None), "value", "")) == "unknown" or getattr(parsed, "guessed", False))
             why = (("a comics extra: not counted as chapter "
@@ -535,7 +621,11 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
                                                                                 target, _GROUP_SWAP),
                      unit_words=bool(title and _UNIT_WORDS.search(title)))
         status = UNCHANGED if target == name else RENAME
-        if status == RENAME and legacy_title and legacy_title != series_title:
+        if status == RENAME and _is_volume(parsed):
+            flags["format_held"] = _format_held(namer, parsed, name, ext=ext, series_title=series_title,
+                                                legacy_title=legacy_title, volume_of=volume_of,
+                                                folder=os.path.dirname(path), limits=limits)
+        elif status == RENAME and legacy_title and legacy_title != series_title:
             try:
                 before = namer.target_name(parsed, ext=ext, series_title=legacy_title, volume_of=volume_of,
                                            folder=os.path.dirname(path), limits=limits)
@@ -628,8 +718,8 @@ def make_batches(previews: Iterable[SeriesPreview], size: int = BATCH_SIZE, *, f
                  titles: Optional[bool] = None) -> List[RenameBatch]:
     """Series with renames, grouped per root into batches of about *size* files (a series is never split). With
     *folders* (the owner's Rename in the window, never the automatic pass) a series whose folder is renamed counts too,
-    its folder as one more step. *titles* (default: as *folders*): the renames a new series title causes are included;
-    without it (the automatic pass) they wait for the owner's Rename."""
+    its folder as one more step. *titles* (default: as *folders*): the held renames (the new volume format,
+    :attr:`FilePlan.held`) are included; without it (the automatic pass) they wait for the owner's Rename."""
     titles = folders if titles is None else titles
 
     def weight(s: SeriesPreview) -> int:
@@ -903,12 +993,13 @@ def file_units(kind: str, numbers: str, volume: str = "") -> FileUnits:
 
 def with_units(parsed: Any, units: FileUnits, name: str) -> Any:
     """*parsed* (the parser's reading of *name*, or None) with the units the owner set; its title and group stay."""
-    from .parsing.model import Kind, ParsedName, UnitRange
+    from .parsing.model import OWNER_UNITS_NOTE, Kind, ParsedName, UnitRange
 
     base = parsed if parsed is not None else ParsedName(name=name)
     rng = UnitRange(units.start, units.end)
     title = _LEADING_UNITS.sub("", base.title).strip() if base.title else ""
-    common = dict(number=None, is_extra=False, guessed=False, ambiguous=False, title=title or None)
+    common = dict(number=None, is_extra=False, guessed=False, ambiguous=False, title=title or None,
+                  notes=tuple(base.notes) + (OWNER_UNITS_NOTE,))
     if units.kind == UNIT_VOLUME:
         return replace(base, kind=Kind.VOLUME, volume=rng, chapter=None, **common)
     if units.volume is not None:
@@ -1037,9 +1128,9 @@ class Renamer:
         return titles.name(fits) if titles is not None else None
 
     def series_title(self, root, series) -> str:
-        """The series title volume names use (owner, 2026-10-15, answer 12: "Titles should follow the scheme in answer 6
-        and should change"): the folder scheme's ``<romaji> [<English>]``, else - no record title - the folder's
-        name."""
+        """The series' title (owner, 2026-10-15, answer 12): the folder scheme's ``<romaji> [<English>]``, else - no
+        record title - the folder's name. Volume names no longer carry it (2026-10-16); it keeps a season / part the
+        title already says out of a volume's name, and it is what the old volume names are compared with."""
         folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
         try:
             name = self.scheme_folder_name(root, series)
@@ -1050,7 +1141,7 @@ class Renamer:
 
     def legacy_title(self, root, series) -> str:
         """The series title volume names used before the folder scheme (2026.10.35): the record's title, else the
-        folder's name. A rename that differs from what this title gives waits for the owner's Rename."""
+        folder's name (see :func:`plan_files`: what the automatic pass would have renamed before)."""
         folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
         romaji, _alts = self._record_titles(root, series)
         return romaji or os.path.basename(folder)
@@ -1304,7 +1395,7 @@ class Renamer:
         for shown in batch.series:
             series = self.series_by_id(shown.series_id) if shown.series_id is not None else None
             folder_wanted = batch.folders and shown.folder_rename
-            wanted = batch.files_of(shown)          # the automatic pass: not the renames a new series title causes
+            wanted = batch.files_of(shown)          # the automatic pass: not the held renames (new volume format)
             if series is None:
                 result.skipped += [(f.name, "the series is no longer in the library") for f in wanted]
                 if folder_wanted:
@@ -1589,7 +1680,7 @@ class Renamer:
                 continue
             dry = self.dry_run(root_ids=[root.id], series_ids=todo, should_stop=should_stop)
             for s in dry.series:            # nothing to rename: not looked at again until its files or names change
-                if not s.auto_renames and s.series_id in digests:       # (a new series title waits for the owner)
+                if not s.auto_renames and s.series_id in digests:       # (the new volume format waits for the owner)
                     quiet[str(s.series_id)] = digests[s.series_id]
             report.held += sum(len(s.held_renames) for s in dry.series)
             ready = [s for s in dry.series if s.auto_renames and s.analysed is not False]
@@ -1707,6 +1798,7 @@ __all__ = [
     "ANALYSIS_WARNING", "AUTO_LIMIT", "AutoReport", "BATCH_SIZE", "BatchRecord", "BatchResult", "COLLISION",
     "DefaultNamer", "DryRun", "ENFORCE_LABELS", "FilePlan", "KEY_GUIDED_ROOTS", "KEY_WINDOWS_SERVER", "LEFT_ALONE",
     "Namer", "NamingUnavailable", "PLAN_REASON", "RENAME", "RenameBatch", "Renamer", "RootDryRun", "SeriesPreview",
-    "UNCHANGED", "guided_roots", "make_batches", "naming_available", "normalize_server", "order_moves", "plan_files",
+    "UNCHANGED", "guided_roots", "in_volume_format", "make_batches", "naming_available", "normalize_server",
+    "order_moves", "plan_files",
     "record_rescan", "request_mangapixer_scans", "set_windows_server", "windows_server",
 ]

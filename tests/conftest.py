@@ -3,6 +3,10 @@ cache or logs (and none writes next to the source tree)."""
 
 from __future__ import annotations
 
+import faulthandler
+import os
+import sys
+
 import pytest
 
 from mangalist import paths
@@ -38,3 +42,23 @@ def _qt_teardown():
         widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     app.processEvents()
+
+
+EXIT_DUMP_S = 120
+
+
+def pytest_unconfigure(config):
+    """After the last test: a process (pytest or an xdist worker) that has not exited within EXIT_DUMP_S - a thread or
+    a subprocess pool that never stops at exit - dumps every thread's stack and exits with an error, so CI shows where
+    it hung instead of waiting for the job's timeout. (``faulthandler_timeout`` in pytest.ini covers a hang inside a
+    test.) Only in a process that pytest itself runs (``pytest`` / ``python -m pytest``, an xdist worker) - never in a
+    program that calls ``pytest.main()`` and lives on."""
+    argv0 = os.path.normcase(os.path.normpath(sys.argv[0] if sys.argv else ""))
+    own = (hasattr(config, "workerinput") or os.path.basename(argv0) in ("pytest", "pytest.exe", "py.test")
+           or argv0.endswith(os.path.join("pytest", "__main__.py")))
+    if not own:
+        return
+    try:
+        faulthandler.dump_traceback_later(EXIT_DUMP_S, exit=True, file=sys.__stderr__)
+    except (AttributeError, ValueError, OSError):        # no usable stderr: nothing to dump to
+        pass

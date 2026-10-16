@@ -29,8 +29,9 @@ Layers (first match wins)
 -------------------------
 
 1. **scheme** - the root's own template inverted (exact), then MangaList's own scheme
-   (``Ch. 0102.00 Vol. 012 (<title>) [<group>]`` / ``<Series> - Vol. 001 [<group>]``, :mod:`mangalist.naming`) in
-   every root: its title and group are free text, never read for numbers.
+   (``Ch. 0102.00 Vol. 012 (<title>) [<group>]`` / ``Vol. 001 [<group>]``, :mod:`mangalist.naming`; and the volume
+   names it wrote until 2026-10-16, ``<Series> - Vol. 001 [<group>]``) in every root: its title and group are free
+   text, never read for numbers.
 2. **fmd2** - ``NNNN [ ... ]`` / ``Title - NNNN [ ... ]``: ``NNNN`` is the index; units come ONLY from the
    bracket head (``Vol. V``, ``Ch. C``, ``Ch. 10-12``); the title after `` - `` and the group in the last
    ``[...]`` are never read for numbers.
@@ -67,6 +68,7 @@ from .template import (
     FMD2_CHAPTER_SCHEME,
     FMD2_VOLUME_SCHEME,
     MANGALIST_CHAPTER_SCHEME,
+    MANGALIST_TITLED_VOLUME_SCHEME,
     MANGALIST_VOLUME_SCHEME,
     TOKENS,
     Template,
@@ -80,7 +82,8 @@ from .template import (
 
 __all__ = [
     "FMD2_CHAPTER_SCHEME", "FMD2_VOLUME_SCHEME", "Kind", "KindHint", "Layer", "MANGALIST_CHAPTER_SCHEME",
-    "MANGALIST_VOLUME_SCHEME", "ParseContext", "ParsedName", "TOKENS", "Template", "TemplateError", "TokenSpec",
+    "MANGALIST_TITLED_VOLUME_SCHEME", "MANGALIST_VOLUME_SCHEME", "ParseContext", "ParsedName", "TOKENS", "Template",
+    "TemplateError", "TokenSpec",
     "SeriesHead", "UnitRange", "compile_template", "parse_bare", "parse_comics_extra", "parse_fmd2", "parse_generic",
     "parse_labelled", "parse_name", "parse_names", "parse_release", "parse_scheme",
     "register_token", "series_head_of", "to_decimal", "values_of", "windows_safe", "with_series_head",

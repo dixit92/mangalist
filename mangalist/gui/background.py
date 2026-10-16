@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional, Set
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QMetaMethod, QObject, Qt, QThread, QTimer, Signal
 
 from .downloads_backend import BackendError
 
@@ -25,6 +25,33 @@ def describe_error(exc: BaseException) -> str:
     if isinstance(exc, BackendError):
         return str(exc) or "the operation failed"
     return f"unexpected error ({type(exc).__name__})"
+
+
+def _disconnect_all(obj: QObject, signals) -> None:
+    """Disconnect every slot of *signals* - only those that have one: PySide6 6.12 warns ("Failed to disconnect (None)
+    from signal ...") for a signal nobody listens to, e.g. a call started without an ``on_error``."""
+    for signal in signals:
+        try:
+            if obj.isSignalConnected(QMetaMethod.fromSignal(signal)):
+                signal.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+
+
+def release_on_ui_thread(thread: QThread, worker: QObject) -> None:
+    """Destroy *worker* (a QObject moved to *thread*) on the UI thread once *thread* has finished - in place of
+    ``thread.finished.connect(worker.deleteLater)``. That deletes the worker inside its own thread as the thread ends,
+    where Qt's destructor holds a signal/slot lock while PySide waits for Python's interpreter lock; the UI thread,
+    holding the interpreter lock and connecting any signal that shares that lock, then waits for it: both stop for
+    good (the test suite's GUI-stage hang, 2026-10-16; a stress run of the old way deadlocked within 500 threads).
+    Here the last reference goes on the UI thread (``finished`` is delivered there), and Python deletes the worker with
+    the interpreter lock already held. Connect it before ``thread.deleteLater``."""
+    holder = [worker]
+
+    def release() -> None:
+        holder.clear()
+
+    thread.finished.connect(release)
 
 
 class BackgroundCall(QThread):
@@ -51,11 +78,7 @@ class BackgroundCall(QThread):
     def abandon(self) -> None:
         """Drop the result: whoever started the call no longer listens."""
         self.abandoned = True
-        for signal in (self.succeeded, self.failed):
-            try:
-                signal.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+        _disconnect_all(self, (self.succeeded, self.failed))
 
     def _cleanup(self) -> None:
         _ACTIVE.discard(self)
@@ -123,11 +146,7 @@ class ProcessCall(QObject):
     def abandon(self) -> None:
         """Drop the result (the subprocess finishes its job; :func:`mangalist.process_pool.shutdown` stops it)."""
         self.abandoned = True
-        for signal in (self.succeeded, self.failed):
-            try:
-                signal.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+        _disconnect_all(self, (self.succeeded, self.failed))
         self._future.cancel()
 
     def wait(self, _msecs: int = 0) -> bool:
