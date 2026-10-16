@@ -7,6 +7,24 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.36] - 2026-10-15
+
+The thirty-fifth MangaList release (testing build): the cycle planned from the owner's answers - folder names `<romaji> [<English>]`, Scheduled tasks, Unbundled chapters and comics extras level with MangaPixer, the Download tab polished, and the window no longer freezes during a scan.
+
+- **Folder names `<romaji> [<English>]`.** Series folders follow animefetch's form (the English part left out when there is none or it repeats the romaji). Add series names a new folder so; the Renamer lists a folder not named so as a rename candidate and renames it as one undoable step, keeping the series. Volume files take the same series title. Folder renames, and file renames that change only the series title, wait for your Rename - the automatic pass never does them - so nothing changes on its own; other renames stay automatic.
+- **Add series** offers Find releases now / Open in Download right after adding, names the folder by the scheme, and hides doujinshi and artbooks from title searches (a box shows them).
+- **Scheduled tasks.** Settings > Scheduled tasks lists what runs on its own - the MangaPixer sync, the full re-read (every 6 h, 12 h or daily), checking downloads, the find pass and the new clean-up of finished download records (off, daily, weekly or monthly; "Clear finished now" too) - each with its last and next run and Run now. The clean-up clears only removed or cancelled records older than the period; nothing in progress, seeding, failed or still needed is touched, and a cleared release is never sent again.
+- **Library Empty.** A library whose folder is now empty says "Library Empty" instead of "Scan failed".
+- **Unbundled chapters.** Where MangaPixer's volume list does not map your newest volume, turning it on asks once for the first chapter to get (with a suggestion; change it later from the row menu). With it on, the chapters of a volume not out in English yet are wanted too. A filter under More filters.
+- **Comics extras as MangaPixer reads them.** `Annual 2`, `Special #1`, `One-Shot 1`, `FCBD` are numbered extras: they never fill a missing chapter.
+- **Found.** A series header's mode chip shows the series' own mode exactly; a series with no gaps left shows its name; Enter sends and Delete skips the selected finding.
+- **In progress.** Failed rows (chapter downloads too) have Dismiss.
+- **Release panel.** A queued send can be cancelled; a declared edition's volumes can be searched on nyaa by hand.
+- **Mark Behind as up to date** takes the series out of To get.
+- **Move to library.** The move is tried between shares too (you are told to move it yourself only if the system refuses); choose a folder inside the target library; refused while replaced chapters are in the holding folder.
+- **Looks.** Dark's accent is MangaPixer's violet; "Not tracked" has its own colour.
+- **A window that does not freeze.** Series states are worked out in the background and arrive in one step: on a library of 692 series the longest freeze during a scan went from 1.1 s to under 0.1 s, a library's first visit from up to 1 s to 0.15 s, sorting from 0.5 s to 0.05 s, and the Rename-pending and duplicate counts run in a separate process so the window stays smooth while they run. In the container a watchdog logs a warning whenever the window is blocked for more than a quarter of a second.
+
 ## [2026.10.35] - 2026-10-15
 
 The thirty-fourth MangaList release (testing build): move a series to another library from its menu, and sends from the release panel are queued instead of waited for.
