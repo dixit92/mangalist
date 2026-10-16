@@ -1,8 +1,9 @@
 """A FAKE namer standing in for the naming lane's ``mangalist.naming`` (made-up names only; no real titles or paths).
 
 It writes the settled format closely enough for the renamer's tests - ``Ch. 0102.00 Vol. 012 (<title>) [<group>].cbz`` and
-``<Series title> - Vol. 001 [<group>].cbz`` - and leaves a name it already wrote as it is (the real module round-trips
-through the parser's scheme layer; today's parser does not read the title back, so the fake recognises its own names)."""
+``Vol. 001 [<group>].cbz`` (no series title since 2026-10-16) - and leaves a name it already wrote as it is (the real
+module round-trips through the parser's scheme layer; the fake recognises its own names). ``titled_target_name`` gives
+the volume format until 2026-10-16, ``<Series title> - Vol. 001 [<group>].cbz`` (the renamer's hold compares with it)."""
 
 from __future__ import annotations
 
@@ -11,7 +12,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable, Dict, List, Optional, Tuple
 
-_OWN = re.compile(r"^(Ch\. \d{4}\.\d{2}( Vol\. \d{3})?( \(.*\))?( \[.*\])?|.+ - Vol\. \d{3}( \[.*\])?)\.[A-Za-z0-9]+$")
+_OWN = re.compile(r"^(Ch\. \d{4}\.\d{2}( Vol\. \d{3})?( \(.*\))?( \[.*\])?|Vol\. \d{3}( \[.*\])?)\.[A-Za-z0-9]+$")
+_OWN_TITLED = re.compile(r"^(Ch\. \d{4}\.\d{2}( Vol\. \d{3})?( \(.*\))?( \[.*\])?|.+ - Vol\. \d{3}( \[.*\])?)\.[A-Za-z0-9]+$")
 
 
 @dataclass(frozen=True)
@@ -42,14 +44,15 @@ class FakeNamer:
     def volume_lookup(self, db, series_id) -> Callable[[Decimal], Optional[Decimal]]:
         return lambda ch: self.volumes.get(Decimal(ch))
 
-    def target_name(self, parsed, *, ext, series_title, volume_of=None, folder=None, limits=None):
+    def target_name(self, parsed, *, ext, series_title, volume_of=None, folder=None, limits=None, titled=False):
         name = parsed.name
-        self.calls.append((name, series_title, folder))
+        if not titled:
+            self.calls.append((name, series_title, folder))
         if name in self.fail_on:
             raise RuntimeError("naming failed on purpose")
-        if name in self.overrides:
+        if name in self.overrides and not titled:
             return self.overrides[name]
-        if _OWN.match(name):
+        if (_OWN_TITLED if titled else _OWN).match(name):
             return name
         limits = limits or FakeLimits()
         kind = getattr(parsed.kind, "value", parsed.kind)
@@ -64,9 +67,15 @@ class FakeNamer:
                 title = title[:-2].rstrip() + "…" if len(title) > 2 else ""
                 out = head + (f" ({title})" if title else "") + group + ext
             return out
-        if kind == "volume" and parsed.volume is not None and series_title:
-            return f"{series_title} - Vol. {int(parsed.volume.start):03d}{group}{ext}"
+        if kind == "volume" and parsed.volume is not None:
+            if titled:
+                return f"{series_title} - Vol. {int(parsed.volume.start):03d}{group}{ext}" if series_title else None
+            return f"Vol. {int(parsed.volume.start):03d}{group}{ext}"
         return None
+
+    def titled_target_name(self, parsed, *, ext, series_title, volume_of=None, folder=None, limits=None):
+        return self.target_name(parsed, ext=ext, series_title=series_title, volume_of=volume_of, folder=folder,
+                                limits=limits, titled=True)
 
 
 class Recorder:

@@ -422,9 +422,10 @@ def test_a_library_kept_in_the_scheme_gets_its_volumes_under_the_schemes_names(l
     qbt.set(HASH, state="uploading", progress=1.0)
     run_arrivals(qbt, ledger)
     rec = ledger.get(sent.id)
-    assert rec.status == S.FILED and rec.filed_files == ("Series A - Vol. 002.cbz", "Series A - Vol. 003.cbz")
+    # owner, 2026-10-16: volumes carry no series title - "Vol. 002.cbz" from the start, never renamed again
+    assert rec.status == S.FILED and rec.filed_files == ("Vol. 002.cbz", "Vol. 003.cbz")
     torrent_dir = qbt.save_root / "Series A v01-04 (Digital)"
-    assert os.path.samefile(sdir / "Series A - Vol. 002.cbz", torrent_dir / "Series A v02 (Digital).cbz")
+    assert os.path.samefile(sdir / "Vol. 002.cbz", torrent_dir / "Series A v02 (Digital).cbz")
 
 
 def test_a_library_set_to_rename_automatically_but_not_converted_keeps_release_names(ledger, sent, qbt, series, db):
@@ -444,7 +445,7 @@ def test_filed_files_renamed_to_the_scheme_still_let_the_torrent_go(ledger, sent
     qbt.set(HASH, state="uploading", progress=1.0)
     run_arrivals(qbt, ledger)
     journal = Journal(ledger.store)
-    old, new = sdir / "Series A v02 (Digital).cbz", sdir / "Series A - Vol. 002.cbz"
+    old, new = sdir / "Series A v02 (Digital).cbz", sdir / "Vol. 002.cbz"
     plan = journal.plan("rename to the scheme", [(str(old), str(new))], root_path=str(sdir.parent))
     journal.apply(plan.id)
     assert new.exists() and not old.exists()

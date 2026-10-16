@@ -5,9 +5,10 @@ The rules follow animefetch's show folders (``animefetch/placement.py``: ``clean
 ``plex_titles.english_from_mal``), adapted to manga:
 
 - **romaji** - the series' MangaUpdates title (MangaPixer's record title, else MangaList's own confirmed match; the
-  caller looks it up). A title longer than :data:`LONG_TITLE` characters is shortened to its part before the first
-  subtitle separator (``: ``, `` - ``, `` ~``), when that part is a real name - animefetch's "official short name" for a
-  long romaji title (``Kaguya-sama wa Kokurasetai: Tensai-tachi no Ren'ai Zunousen`` -> ``Kaguya-sama wa Kokurasetai``).
+  caller looks it up). A title longer than :data:`LONG_TITLE` characters is replaced by an **official short name** when
+  the series has one, animefetch's rule (``placement.short_name_candidates``; owner, 2026-10-16: "a long romaji stays
+  full if official name isn't there"): see :func:`short_name_candidates`. Without one the full romaji stays - a title
+  is never cut at a subtitle separator any more.
 - **English** - the English title, in square brackets after the romaji. It is LEFT OUT when it is unknown or when it is
   the romaji again written differently (compared on letters and digits only, accents folded: ``86 Eighty-Six`` /
   ``86 -Eighty Six-``), so a series without an English title is just ``<romaji>``. MangaUpdates and MangaPixer do not
@@ -33,7 +34,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence, Tuple
 
-LONG_TITLE = 50                 # animefetch's LONG_TITLE: a longer romaji title is shortened to its main part
+LONG_TITLE = 50                 # animefetch's LONG_TITLE: a longer romaji title uses an official short name
 MAX_FOLDER_BYTES = 255
 ELLIPSIS = "…"
 #: The shortest file name the length rule must leave room for under the folder (a chapter in the file scheme).
@@ -42,7 +43,6 @@ PROBE_FILE = "Ch. 0000.00 Vol. 000.cbz"
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _DROPPED = re.compile(r'[\\*?"<>|]')
 _SPACES = re.compile(r"\s+")
-_SEPARATOR = re.compile(r"\s*(?::\s|\s-\s|\s~|～)")
 _FOLDER = re.compile(r"^\s*(?P<title>.+?)(?:\s*\[(?P<eng>[^\]]+)\])?\s*$")
 _WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")
 
@@ -126,18 +126,93 @@ def clean_part(text: Optional[str]) -> str:
     return t.rstrip(". ")
 
 
-def short_romaji(title: Optional[str]) -> str:
-    """The romaji part of the folder name: *title* cleaned, cut to its part before the first subtitle separator when it
-    is longer than :data:`LONG_TITLE` characters and that part is a real name (two characters or more, not only digits
-    or punctuation)."""
-    raw = (title or "").strip()
-    if len(clean_part(raw)) > LONG_TITLE:
-        m = _SEPARATOR.search(raw)
-        if m:
-            head = clean_part(raw[:m.start()])
-            if len(head) >= 2 and re.search(r"[^\W\d_]", head):
-                return head
-    return clean_part(raw)
+_ACRONYM = re.compile(r"^[A-Z0-9&.\-]+$")
+_NOT_A_NAME = re.compile(r"[()\[\]{}]")
+MIN_SHORT_LETTERS = 4           # an official short name has at least this many letters ("Bofuri", "KakaKano")
+
+
+def _letters(text: str) -> int:
+    return sum(c.isalpha() for c in text)
+
+
+def _short_tier(name: str, full: str) -> Optional[int]:
+    """How a short-name candidate relates to the full romaji, best first; None: it does not look like a short romaji
+    name at all (an English translation such as ``Garbage Hero`` or ``Devil's New Wife``, which reads like neither).
+
+    0. the romaji's own head, ending at a word (``Garbage Brave`` for ``Garbage Brave: Isekai ni ...``);
+    1. it reads as romaji (``Mikkakan no Koufuku``) or shares a word of four letters or more with the romaji
+       (``Kimi no Hoshi`` for ``Hoshi o Miru Hi ...``);
+    2. a single word - the coined short names MangaUpdates lists (``KakaKano``, ``RoshiDere``, ``Oregairu``)."""
+    key, full_key = name.casefold(), full.casefold()
+    if full_key.startswith(key) and (len(full_key) == len(key) or not full_key[len(key)].isalnum()):
+        return 0
+    full_words = {w for w in _words(full) if len(w) >= 4 and w not in ENGLISH_WORDS}
+    if romaji_like(name) or any(w in full_words for w in _words(name)):
+        return 1
+    if len(name.split()) == 1:
+        return 2
+    return None
+
+
+def short_name_candidates(title: Optional[str], english: Optional[str] = None,
+                          alt_titles: Iterable[str] = ()) -> Sequence[str]:
+    """Official short names for a long romaji *title*, best first (animefetch's ``short_name_candidates``, adapted to
+    MangaUpdates: it lists every language's titles together and labels none of them, where animefetch reads MAL's
+    short synonyms):
+
+    - an alternative title that looks like a short romaji name: ASCII only, at most four words, shorter than the full
+      title, at least :data:`MIN_SHORT_LETTERS` letters, no brackets (``Beast Tamer (AUTHOR)`` is a disambiguation,
+      not a name), not all capitals (an acronym), not reading as English (:func:`looks_english`) nor holding the
+      English title, and related to the romaji (:func:`_short_tier`: its head, romaji words or a shared word, or one
+      coined word). Cleaned like the romaji (``DanMachi: Side Story`` -> ``DanMachi Side Story``);
+    - the part before a colon of an English title, when it is one or two words (``BOFURI: I Don't Want to Get Hurt...``
+      -> ``Bofuri``: an all-capitals head longer than three letters is written in title case, as animefetch does). The
+      English titles are the series' English title, the alternative titles that read as English (MangaUpdates lists
+      its English titles among them, unlabelled) and an alternative title that is ``<head>: <the English title>``
+      (``Made-sama: Love Story`` with the English title ``Love Story`` -> ``Made-sama``).
+
+    Order (deterministic): the relation to the romaji (:func:`_short_tier`: its head first, then romaji-like or
+    sharing a word, then one coined word), then the shortest, then alphabetical (case-folded), then as written. An
+    empty list: the series has no official short name and keeps its full romaji."""
+    full = clean_part(title)
+    if not full:
+        return []
+    eng = clean_part(english) if english else ""
+    alts = [a.strip() for a in alt_titles or () if isinstance(a, str) and a.strip()]
+    found: dict = {}
+
+    def offer(text: str) -> None:
+        name = clean_part(text)
+        if (not name or not name.isascii() or len(name) >= len(full) or len(name.split()) > 4
+                or _letters(name) < MIN_SHORT_LETTERS or _NOT_A_NAME.search(name) or same_title(name, full)
+                or looks_english(name) or (eng and title_key(eng) in title_key(name))):
+            return
+        tier = _short_tier(name, full)
+        if tier is not None and not any(same_title(name, k) for k in found):
+            found[name] = tier
+
+    for alt in alts:
+        if not _ACRONYM.match(alt) and not _NOT_A_NAME.search(alt.replace(":", "")):
+            offer(alt)
+    english_titles = [english] + [a for a in alts if looks_english(a)
+                                  or (eng and ":" in a and same_title(a.split(":", 1)[1], eng))]
+    for source in english_titles:
+        if source and ":" in source:
+            head = source.split(":", 1)[0].strip()
+            if head and len(head.split()) <= 2:
+                offer(head[:1] + head[1:].lower() if head.isupper() and len(head) > 3 else head)
+    return sorted(found, key=lambda n: (found[n], len(n), n.casefold(), n))
+
+
+def short_romaji(title: Optional[str], english: Optional[str] = None, alt_titles: Iterable[str] = ()) -> str:
+    """The romaji part of the folder name: *title* cleaned; when it is longer than :data:`LONG_TITLE` characters, the
+    series' first official short name (:func:`short_name_candidates`) instead, else the full title - never cut."""
+    full = clean_part(title)
+    if len(full) > LONG_TITLE:
+        names = short_name_candidates(title, english, alt_titles)
+        if names:
+            return clean_part(names[0])
+    return full
 
 
 # --- the name --------------------------------------------------------------------------------------------------
@@ -190,14 +265,16 @@ def fit_name(romaji: str, english: Optional[str], fits=None) -> str:
     return _windows_safe(romaji)
 
 
-def scheme_name(romaji: Optional[str], english: Optional[str] = None, *, fits=None) -> Optional[str]:
+def scheme_name(romaji: Optional[str], english: Optional[str] = None, *, fits=None,
+                alt_titles: Iterable[str] = ()) -> Optional[str]:
     """The scheme's folder name for a series called *romaji* (its MangaUpdates title) with the English title *english*
-    (None: unknown); None without a usable romaji title. The bracket is left out when the English title is the romaji
-    (or its short form) written differently."""
+    (None: unknown) and the alternative titles *alt_titles* (where an official short name of a long romaji comes from:
+    :func:`short_romaji`); None without a usable romaji title. The bracket is left out when the English title is the
+    romaji (or its short form) written differently."""
     full = clean_part(romaji)
     if not full:
         return None
-    short = short_romaji(romaji)
+    short = short_romaji(romaji, english, alt_titles)
     eng = clean_part(english) if english else ""
     if eng and (same_title(eng, short) or same_title(eng, full)):
         eng = ""
@@ -255,9 +332,10 @@ def english_from_folder(folder_name: str, romaji: Optional[str], alt_titles: Ite
             return text
     if not top_level or not name:
         return None
-    if romaji and (same_title(name, romaji) or same_title(name, short_romaji(romaji))):
+    alt_titles = tuple(alt_titles or ())
+    if romaji and (same_title(name, romaji) or same_title(name, short_romaji(romaji, None, alt_titles))):
         return None
-    latin_alts = [a for a in alt_titles or () if isinstance(a, str) and latin(a)]
+    latin_alts = [a for a in alt_titles if isinstance(a, str) and latin(a)]
     paren = _TRAILING_PAREN.match(name)
     if paren:
         inner = paren.group("inner").strip()
@@ -280,9 +358,10 @@ class SeriesTitles:
     romaji: str
     english: Optional[str] = None
     source: str = ""                 # where the romaji came from ("MangaPixer", "MangaUpdates match", ...)
+    alt_titles: Tuple[str, ...] = ()  # the record's alternative titles (an official short name of a long romaji)
 
     def name(self, fits=None) -> Optional[str]:
-        return scheme_name(self.romaji, self.english, fits=fits)
+        return scheme_name(self.romaji, self.english, fits=fits, alt_titles=self.alt_titles)
 
 
 def titles_for(folder_name: str, romaji: Optional[str], alt_titles: Iterable[str] = (), *, top_level: bool = True,
@@ -292,8 +371,10 @@ def titles_for(folder_name: str, romaji: Optional[str], alt_titles: Iterable[str
     title (the folder cannot be named: it is left alone)."""
     if not clean_part(romaji):
         return None
-    eng = english_from_folder(folder_name, romaji, alt_titles, top_level=top_level) if folder_name else None
-    return SeriesTitles(str(romaji).strip(), eng or (english.strip() if english and english.strip() else None), source)
+    alts = tuple(a.strip() for a in alt_titles or () if isinstance(a, str) and a.strip())
+    eng = english_from_folder(folder_name, romaji, alts, top_level=top_level) if folder_name else None
+    return SeriesTitles(str(romaji).strip(), eng or (english.strip() if english and english.strip() else None), source,
+                        alts)
 
 
 def english_candidates(alt_titles: Iterable[str], romaji: Optional[str], limit: int = 6) -> Sequence[str]:
@@ -315,5 +396,5 @@ def english_candidates(alt_titles: Iterable[str], romaji: Optional[str], limit: 
 __all__ = [
     "ELLIPSIS", "ENGLISH_WORDS", "LONG_TITLE", "MAX_FOLDER_BYTES", "ROMAJI_WORDS", "SeriesTitles", "clean_part",
     "english_candidates", "english_from_folder", "fit_name", "looks_english", "parse_folder", "romaji_like",
-    "same_title", "scheme_name", "short_romaji", "title_key", "titles_for", "windows_fits",
+    "same_title", "scheme_name", "short_name_candidates", "short_romaji", "title_key", "titles_for", "windows_fits",
 ]

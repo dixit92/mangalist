@@ -16,6 +16,7 @@ from mangalist.naming import (
     CHAPTER_SCHEME,
     DEFAULT_SCHEMES,
     ELLIPSIS,
+    TITLED_VOLUME_SCHEME,
     VOLUME_SCHEME,
     NameLimits,
     chapter_file_name,
@@ -25,13 +26,14 @@ from mangalist.naming import (
     sanitize_series,
     sanitize_title,
     target_name,
+    titled_volume_name,
     volume_file_name,
     volume_lookup,
     volume_name,
     volumes_from_list,
     windows_path,
 )
-from mangalist.parsing import Kind, Layer, ParseContext, parse_name
+from mangalist.parsing import Kind, Layer, ParseContext, parse_name, parse_names
 
 D = Decimal
 WIN = NameLimits(windows_server="SERVER")
@@ -65,15 +67,37 @@ def test_chapter_names(kwargs, expected):
 
 
 @pytest.mark.parametrize("args, kwargs, expected", [
-    (("Some Series", 1), {}, "Some Series - Vol. 001.cbz"),
-    (("Some Series", "12"), dict(group="Grp"), "Some Series - Vol. 012 [Grp].cbz"),
-    (("Some Series", 1), dict(volume_end=3), "Some Series - Vol. 001-003.cbz"),
-    (("Some Series", "10.5"), {}, "Some Series - Vol. 010.5.cbz"),
-    (("Some Series", 100), {}, "Some Series - Vol. 100.cbz"),
-    (("Series 2", 3), {}, "Series 2 - Vol. 003.cbz"),
+    ((1,), {}, "Vol. 001.cbz"),
+    (("12",), dict(group="Grp"), "Vol. 012 [Grp].cbz"),
+    ((1,), dict(volume_end=3), "Vol. 001-003.cbz"),
+    (("10.5",), {}, "Vol. 010.5.cbz"),
+    (("12.5",), dict(group="Made Up Group"), "Vol. 012.5 [Made Up Group].cbz"),
+    ((100,), {}, "Vol. 100.cbz"),
+    ((1000,), {}, "Vol. 1000.cbz"),
+    ((0,), dict(group="G"), "Vol. 000 [G].cbz"),
+    ((3,), dict(series_title="Series 2"), "Vol. 003.cbz"),                  # the title is never part of the name
+    ((2,), dict(qualifier="season 02", group="G"), "Season 2 - Vol. 002 [G].cbz"),
+    ((1,), dict(qualifier="Part 5", ext="zip"), "Part 5 - Vol. 001.zip"),
+    ((1,), dict(qualifier="Season 2", series_title="Some Series Season 2"), "Vol. 001.cbz"),   # the folder says it
 ])
 def test_volume_names(args, kwargs, expected):
+    """Owner, 2026-10-16: volume files carry no series title (the folder does), like the chapter names."""
     assert volume_file_name(*args, **kwargs) == expected
+
+
+def test_the_volume_names_until_2026_10_16_carry_the_title():
+    assert titled_volume_name("Some Series", 1, group="Grp").name == "Some Series - Vol. 001 [Grp].cbz"
+    assert titled_volume_name("Some Series", 2, qualifier="Season 2").name == "Some Series Season 2 - Vol. 002.cbz"
+    with pytest.raises(ValueError):
+        titled_volume_name("  ", 1)
+    with pytest.raises(ValueError):
+        titled_volume_name("???", 1)
+
+
+def test_volume_names_sort_in_reading_order():
+    names = [volume_file_name(v, group=g) for v, g in [("1", "B"), ("1.5", None), ("2", "A"), ("10", None),
+                                                      ("100", None), ("1000", None)]]
+    assert sorted(names) == names
 
 
 def test_every_chapter_name_sorts_in_reading_order():
@@ -94,9 +118,11 @@ def test_bad_ranges_and_titles_raise():
     with pytest.raises(ValueError):
         chapter_file_name("12", chapter_end="10")
     with pytest.raises(ValueError):
-        volume_file_name("  ", 1)
+        volume_file_name(3, volume_end=2)
     with pytest.raises(ValueError):
-        volume_file_name("???", 1)
+        volume_file_name(None)
+    with pytest.raises(ValueError):
+        volume_file_name(1, qualifier="Book 2")
 
 
 # --- round trips: render -> parse -> the same values ------------------------------------------------------------
@@ -141,11 +167,43 @@ def test_chapter_round_trip(chapter, end, volume, title, group):
                                  volume=p.volume.start if p.volume else None, title=p.title, group=p.group) == name
 
 
+@pytest.mark.parametrize("volume, end, group, qualifier", [
+    ("1", None, "1r0n", None),
+    ("12", None, "Grp", None),
+    ("1", "3", "Grp", None),
+    ("10.5", None, None, None),
+    ("12.5", None, "Made Up Group", None),
+    ("5", None, "Team [X]", None),
+    ("3", None, "Vol. 9 Scans", None),          # a unit word in the group is free text
+    ("1", None, "グループ", None),
+    ("4", None, "G", "Season 2"),
+    ("2", "4", None, "Part 5"),
+])
+def test_volume_round_trip(volume, end, group, qualifier):
+    name = volume_file_name(volume, volume_end=end, group=group, qualifier=qualifier)
+    for ctx in (None, ParseContext(schemes=DEFAULT_SCHEMES), ParseContext(series_title="Made Up Series [Made Up]"),
+                ParseContext(kind_hint="chapters", series_title="Made Up Series")):
+        p = parse_name(name, ctx)
+        assert (p.layer, p.kind) == (Layer.SCHEME, Kind.VOLUME), name
+        assert p.volume.start == D(volume) and p.volume.end == D(end or volume)
+        assert p.group == sanitize_group(group) and p.qualifier == qualifier and p.series is None
+        assert p.chapter is None
+
+
+def test_a_folder_of_volume_names_reads_back_exactly():
+    """Inside a series folder the plain names are read by the scheme, never as a title plus a number (the series head
+    of the folder is "Vol." - a unit word)."""
+    names = [volume_file_name(v, group="1r0n") for v in ("1", "2", "3", "12.5")] + [volume_file_name(13)]
+    got = parse_names(names, ParseContext(series_title="Made Up Romaji no Hanashi [A Made Up Story]"))
+    assert [(p.layer, p.kind, str(p.volume), p.group) for p in got] == [
+        (Layer.SCHEME, Kind.VOLUME, "1", "1r0n"), (Layer.SCHEME, Kind.VOLUME, "2", "1r0n"),
+        (Layer.SCHEME, Kind.VOLUME, "3", "1r0n"), (Layer.SCHEME, Kind.VOLUME, "12.5", "1r0n"),
+        (Layer.SCHEME, Kind.VOLUME, "13", None)]
+
+
 @pytest.mark.parametrize("series, volume, end, group", [
     ("Some Series", "1", None, None),
-    ("Some Series", "12", None, "Grp"),
     ("Some Series", "1", "3", "Grp"),
-    ("Some Series", "10.5", None, None),
     ("Some Series - Part 5 - Sub", "5", None, "Team [X]"),
     ("Series 2", "3", None, None),
     ("Title [English Title]", "2", None, "G"),
@@ -153,8 +211,9 @@ def test_chapter_round_trip(chapter, end, volume, title, group):
     ("日本語", "1", None, "グループ"),
     ("Vol. 2 Is In The Title", "4", None, None),
 ])
-def test_volume_round_trip(series, volume, end, group):
-    name = volume_file_name(series, volume, volume_end=end, group=group)
+def test_the_titled_volume_names_still_read_back(series, volume, end, group):
+    """Most of a library still carries the volume names until 2026-10-16: they are read exactly, title included."""
+    name = titled_volume_name(series, volume, volume_end=end, group=group).name
     p = parse_name(name)
     assert (p.layer, p.kind) == (Layer.SCHEME, Kind.VOLUME), name
     assert p.volume.start == D(volume) and p.volume.end == D(end or volume)
@@ -182,8 +241,9 @@ def test_scheme_names_never_leak_units_from_the_title():
 
 def test_the_schemes_are_templates():
     assert CHAPTER_SCHEME == "Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}"
-    assert VOLUME_SCHEME == "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
-    assert DEFAULT_SCHEMES == (CHAPTER_SCHEME, VOLUME_SCHEME)
+    assert VOLUME_SCHEME == "{%SQ - }Vol. %V3{-%VE3}{ [%G]}"
+    assert TITLED_VOLUME_SCHEME == "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
+    assert DEFAULT_SCHEMES == (CHAPTER_SCHEME, VOLUME_SCHEME, TITLED_VOLUME_SCHEME)
 
 
 def test_a_custom_root_scheme_comes_first_and_the_default_still_reads():
@@ -229,7 +289,7 @@ def test_series_titles_keep_brackets_and_lose_a_trailing_dot():
 def test_illegal_characters_never_reach_a_name():
     name = chapter_file_name("1", volume=1, title='<>:"/\\|?*\x01 T', group='<>:"/\\|?*\x02 G')
     assert not any(c in name for c in '<>:"/\\|?*') and not any(ord(c) < 32 for c in name)
-    name = volume_file_name('S<>:"/\\|?*\x03', 1, group="G")
+    name = volume_file_name(1, group='<>:"/\\|?*\x03 G')
     assert not any(c in name for c in '<>:"/\\|?*') and not name.endswith((" ", "."))
 
 
@@ -240,7 +300,7 @@ def test_the_group_is_always_capped():
     assert r.name == f"Ch. 0001.00 [{'G' * 31}{ELLIPSIS}].cbz" and r.shortened == ("group",) and r.fits
     assert chapter_file_name("1", group="G" * 32) == f"Ch. 0001.00 [{'G' * 32}].cbz"
     assert chapter_file_name("1", group="G" * 10, limits=NameLimits(group_cap=5)) == f"Ch. 0001.00 [GGGG{ELLIPSIS}].cbz"
-    assert volume_file_name("S", 1, group="G" * 40).endswith(f"[{'G' * 31}{ELLIPSIS}].cbz")
+    assert volume_file_name(1, group="G" * 40) == f"Vol. 001 [{'G' * 31}{ELLIPSIS}].cbz"
 
 
 def test_a_long_title_is_cut_to_255_bytes():
@@ -296,14 +356,15 @@ def test_too_long_even_without_title_and_group_is_flagged(caplog):
     assert "longer than the length rule" in caplog.text
 
 
-def test_volume_names_shorten_the_group_then_the_series_title():
-    r = volume_name("S" * 300, 1, group="Grp")
-    assert r.fits and r.shortened == ("group", "series") and len(r.name.encode()) <= 255
-    assert r.name.endswith(f"{ELLIPSIS} - Vol. 001.cbz")
+def test_volume_names_shorten_only_the_group():
+    r = volume_name(1, group="Grp", series_title="S" * 300)                 # a long title never matters
+    assert r.fits and r.shortened == () and r.name == "Vol. 001 [Grp].cbz"
+    r = volume_name(1, group="Grp", folder="/data/R/" + "F" * 234, limits=WIN)
+    assert r.fits and r.shortened == ("group",) and r.name == "Vol. 001.cbz"
     p = parse_name(r.name)
     assert (p.kind, str(p.volume)) == (Kind.VOLUME, "1")
-    r = volume_name("Some Series", 1, group="Grp", folder="/data/R/" + "F" * 220, limits=WIN)
-    assert r.fits and r.shortened == ("group",) and r.name == "Some Series - Vol. 001.cbz"
+    r = titled_volume_name("S" * 300, 1, group="Grp")                       # the old names: the group, then the title
+    assert r.fits and r.shortened == ("group", "series") and r.name.endswith(f"{ELLIPSIS} - Vol. 001.cbz")
 
 
 def test_name_fits():
@@ -419,15 +480,19 @@ def _t(name, series="Some Series", volume_of=None, **kw):
     ("0020 [Ch. 10-12 - Triple].cbz", "Ch. 0010.00-0012.00 (Triple).cbz"),
     ("Some Series c012 (2020) (Grp).cbz", "Ch. 0012.00 [Grp].cbz"),
     ("Some Series - c001 (v01) [Grp].cbz", "Ch. 0001.00 Vol. 001 [Grp].cbz"),
-    ("Some Series v01 (2019) (Digital) (Grp).cbz", "Some Series - Vol. 001 [Grp].cbz"),
-    ("Some Series v01-03 (2019) (Digital) (Grp).cbz", "Some Series - Vol. 001-003 [Grp].cbz"),
-    ("Other Name - Part 5 - Sub v05 (2022) (Digital) (Grp).cbz", "Some Series Part 5 - Vol. 005 [Grp].cbz"),
+    ("Some Series v01 (2019) (Digital) (Grp).cbz", "Vol. 001 [Grp].cbz"),                  # the edition is dropped
+    ("Some Series v01-03 (2019) (Digital) (Grp).cbz", "Vol. 001-003 [Grp].cbz"),
+    ("Some Series v12.5 (2019) (Digital) (Grp).cbz", "Vol. 012.5 [Grp].cbz"),
+    ("Other Name - Part 5 - Sub v05 (2022) (Digital) (Grp).cbz", "Part 5 - Vol. 005 [Grp].cbz"),
     ("0012 [Contact. 0001 - Hello [G]].cbz", "Ch. 0001.00 (Hello) [G].cbz"),
     ("0076 [0076  The Arc Title (3)].cbz", "Ch. 0076.00 (The Arc Title [3]).cbz"),
     ("Some Series - Episode 35 (2023) (Digital) (Grp).cbz", "Ch. 0035.00 [Grp].cbz"),
     ("Vol. 1 Ch 3.cbz", "Ch. 0003.00 Vol. 001.cbz"),
     ("Ch. 0010.00 (The Vol 2 Begins) [G].cbz", "Ch. 0010.00 (The Vol 2 Begins) [G].cbz"),   # already in the scheme
-    ("Some Series - Vol. 002 [G].cbz", "Some Series - Vol. 002 [G].cbz"),
+    ("Some Series - Vol. 002 [G].cbz", "Vol. 002 [G].cbz"),                         # the volume names until 2026-10-16
+    ("Some Series Season 2 - Vol. 002.cbz", "Season 2 - Vol. 002.cbz"),
+    ("Vol. 002 [G].cbz", "Vol. 002 [G].cbz"),                                       # already in the scheme
+    ("Season 2 - Vol. 012.5 [G].cbz", "Season 2 - Vol. 012.5 [G].cbz"),
     ("0001 [Ch. 1].CBZ", "Ch. 0001.00.CBZ"),
 ])
 def test_target_names(name, expected):
@@ -472,11 +537,17 @@ def test_files_left_alone(name, why):
     assert _t(name) is None, why
 
 
-def test_a_volume_needs_a_series_title():
-    assert _t("Some Series v01 (2019) (Digital) (G).cbz", series=None) is None
-    assert _t("Some Series v01 (2019) (Digital) (G).cbz", series="  ") is None
-    assert _t("Some Series v01 (2019) (Digital) (G).cbz", series="?*") is None
-    assert _t("0001 [Ch. 1].cbz", series=None) == "Ch. 0001.00.cbz"            # chapters carry no series title
+def test_a_volume_needs_no_series_title():
+    for series in (None, "  ", "?*", "Some Series"):
+        assert _t("Some Series v01 (2019) (Digital) (G).cbz", series=series) == "Vol. 001 [G].cbz"
+    assert _t("0001 [Ch. 1].cbz", series=None) == "Ch. 0001.00.cbz"            # chapters carry no series title either
+
+
+def test_the_titled_target_is_the_volume_name_until_2026_10_16():
+    assert _t("Some Series v01 (2019) (Digital) (G).cbz", titled=True) == "Some Series - Vol. 001 [G].cbz"
+    assert _t("Some Series v01 (2019) (Digital) (G).cbz", series=None, titled=True) is None
+    assert _t("Some Series - Vol. 001 [G].cbz", titled=True) == "Some Series - Vol. 001 [G].cbz"
+    assert _t("0001 [Ch. 1].cbz", titled=True) == "Ch. 0001.00.cbz"            # a chapter: as today
 
 
 def test_the_series_answer_unlocks_a_guessed_chapter():
@@ -484,7 +555,7 @@ def test_the_series_answer_unlocks_a_guessed_chapter():
     assert _t("Some Series 07.cbz", ctx=ctx) == "Ch. 0007.00.cbz"
     assert _t("Some Series 014.6  A Title (Grp).cbz", ctx=ctx) == "Ch. 0014.60 (A Title) [Grp].cbz"
     ctx = ParseContext(kind_hint="volumes", series_title="Some Series")
-    assert _t("Some Series 07.cbz", ctx=ctx) == "Some Series - Vol. 007.cbz"
+    assert _t("Some Series 07.cbz", ctx=ctx) == "Vol. 007.cbz"
 
 
 def test_target_name_applies_the_length_rule():
@@ -516,14 +587,15 @@ def test_a_scan_reads_scheme_names_exactly(tmp_path):
     folder.mkdir(parents=True)
     names = [chapter_file_name("10", title="The Vol 2 Begins", group="G"),
              chapter_file_name("11", volume=2, title="Chapter 5 of the Ch. 3 Arc"),
-             volume_file_name("Some Series", 1, group="G")]
+             volume_file_name(1, group="G"), volume_file_name("2.5", group="1r0n"),
+             titled_volume_name("Some Series", 3, group="G").name]          # not renamed yet: still read
     for n in names:
         (folder / n).write_bytes(b"x")
     (entry,) = scan_root(tmp_path / "Lib", schemes=naming.DEFAULT_SCHEMES)
     parsed = {f.path.name: f.parsed for f in entry.files}
     assert all(p.layer is Layer.SCHEME for p in parsed.values())
     assert parsed[names[0]].volume is None and parsed[names[1]].chapter.start == D("11")
-    assert entry.inventory().volumes == (D("1"),)
+    assert entry.inventory().volumes == (D("1"), D("2.5"), D("3"))
 
 
 def test_naming_is_qt_free():

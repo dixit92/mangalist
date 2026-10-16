@@ -15,7 +15,9 @@ from .layers import (
     parse_bare, parse_comics_extra, parse_fmd2, parse_generic, parse_labelled, parse_release, parse_scheme,
 )
 from .model import Kind, Layer, ParsedName
-from .template import MANGALIST_CHAPTER_SCHEME, MANGALIST_VOLUME_SCHEME, Template, compile_template
+from .template import (
+    MANGALIST_CHAPTER_SCHEME, MANGALIST_TITLED_VOLUME_SCHEME, MANGALIST_VOLUME_SCHEME, Template, compile_template,
+)
 
 KindHint = Union[Kind, str, None]
 
@@ -72,8 +74,11 @@ _NO_CONTEXT = ParseContext()
 
 # MangaList's own scheme is read back exactly in every root, after the root's own scheme (if any): every name the
 # renamer writes keeps its title and group as free text ("Ch. 0010.00 (The Vol 2 Begins) [G]" is chapter 10, no volume).
+# The volume scheme with the series title (until 2026-10-16) is read too: "Vol. 001 [G]" first, so a name in today's
+# scheme is never read as a series title.
 _BUILT_IN_SCHEMES: Tuple[Template, ...] = (compile_template(MANGALIST_CHAPTER_SCHEME),
-                                           compile_template(MANGALIST_VOLUME_SCHEME))
+                                           compile_template(MANGALIST_VOLUME_SCHEME),
+                                           compile_template(MANGALIST_TITLED_VOLUME_SCHEME))
 
 
 def parse_name(name: Union[str, "os.PathLike[str]"], context: Optional[ParseContext] = None, *,

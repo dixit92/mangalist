@@ -7,7 +7,8 @@ marks in MangaPixer), or "Rename library…" (the library picked, or every libra
   how many names of each pattern were found; the plain warning about MangaPixer's read state;
 - per series, old -> new for every file, coloured: renamed (blue), unchanged (grey), left alone (amber), collision (red);
   the series folder itself on the first row when it is not named ``<romaji> [<English>]`` (owner, 2026-10-15; it is
-  renamed only by this window's Rename, never automatically);
+  renamed only by this window's Rename, never automatically); a volume renamed only for the new volume format
+  (``Vol. 001 [group]``, no series title; owner, 2026-10-16) is marked as waiting for this window's Rename too;
 - "To check": the files left alone, the name collisions (with "Review duplicates…"), the titles the length rule would
   shorten and the titles that hold a volume or chapter word;
 - Apply (a confirmation naming the counts first), a busy state while it works, the result, and "Undo last batch".
@@ -104,8 +105,9 @@ PATTERN_LABELS = {"scheme": "already in a scheme", "fmd2": "FMD2 names", "releas
 
 LEAD = ("Only names change - never a file's contents - so MangaPixer can keep its read marks. Renames are made in "
         "batches; each batch can be undone. A series folder not named \"<romaji> [<English>]\" is renamed too, as one "
-        "step (the series keeps its data). Folder names and series-title changes wait for your Rename here - never "
-        "automatically; everything else a library set to Rename automatically renames by itself.")
+        "step (the series keeps its data). Volumes are named \"Vol. 001 [group]\" (the folder carries the title). "
+        "Folder names and volumes renamed only for that new format wait for your Rename here - never automatically; "
+        "everything else a library set to Rename automatically renames by itself.")
 PILOT_SERIES = ("Start here: rename this one series, then open it in MangaPixer and check that its read marks are still "
                 "there. If they are, rename its whole library.")
 PILOT_LIBRARY = ("Tip: rename one series first (right-click it in the List > Rename to the scheme…) and check its read "
@@ -218,10 +220,10 @@ AUTOMATIC_TITLE = "Keep this library in the scheme?"
 def automatic_text(name: str) -> str:
     return (f"{name} is being renamed to the naming scheme. Rename its new files automatically from now on?\n\n"
             "Downloaded volumes are then filed under the scheme's names, and the scheduled rescan renames anything else "
-            "named differently (each batch can be undone). Folder names and series-title changes wait for your Rename: "
-            "a folder not named \"<romaji> [<English>]\", or a volume whose name changes only with the series title, "
-            "shows as Rename pending until you rename it here - never automatically; everything else is automatic. You "
-            "can change this later in Settings > Library.")
+            "named differently (each batch can be undone). Folder names and the new volume name format wait for your "
+            "Rename: a folder not named \"<romaji> [<English>]\", or a volume still named \"<Series title> - Vol. "
+            "001\" (now \"Vol. 001 [group]\"), shows as Rename pending until you rename it here - never automatically; "
+            "everything else is automatic. You can change this later in Settings > Library.")
 
 
 def _thread_runner(fn, on_done, on_error):
@@ -651,7 +653,9 @@ class RenamerWindow(QDialog):
                 "(as it is)" if f.status != UNCHANGED else prefix + f.name)
             what = STATUS_TEXT[f.status] + (f": {f.reason}" if f.reason and f.status != COLLISION else
                                             f" - {f.reason}" if f.reason else "")
-            if f.status == RENAME and f.title_held:
+            if f.status == RENAME and f.format_held:
+                what += " - new volume name format (waits for your Rename, never automatic)"
+            elif f.status == RENAME and f.title_held:
                 what += " - new series title (waits for your Rename, never automatic)"
             if f.status == LEFT_ALONE and not f.needs_kind:
                 what += " - right-click to set its chapter or volume"
@@ -692,8 +696,8 @@ class RenamerWindow(QDialog):
     def _fill_notes(self, dry: DryRun) -> None:
         self.notes.clear()
         groups = (
-            ("New series title \"<romaji> [<English>]\" (renamed only by your Rename)",
-             lambda f: f.status == RENAME and f.title_held),
+            ("New volume name format \"Vol. 001 [group]\" (renamed only by your Rename)",
+             lambda f: f.status == RENAME and f.held),
             ("Left alone", lambda f: f.status == LEFT_ALONE),
             ("Name collisions (both files keep their names)", lambda f: f.status == COLLISION),
             ("Chapter titles the length rule would shorten", lambda f: f.status == RENAME and f.title_cut),
@@ -807,8 +811,8 @@ class RenamerWindow(QDialog):
                 lines.append(f"  … and {folders - 3} more")
         held = sum(len(s.held_renames) for s in dry.series)
         if held:
-            lines.append(f"{_plural(held, 'file')} {'is' if held == 1 else 'are'} renamed only because of the new series "
-                         "title \"<romaji> [<English>]\".")
+            lines.append(f"{_plural(held, 'volume')} {'is' if held == 1 else 'are'} renamed to the new volume name format "
+                         "\"Vol. 001 [group]\" (no series title: the folder has it).")
         lines += [f"{dry.count(LEFT_ALONE)} file(s) are left alone and {_plural(dry.count(COLLISION), 'name collision')} "
                   "are not renamed.",
                   "Each batch can be undone with \"Undo last batch\"."]

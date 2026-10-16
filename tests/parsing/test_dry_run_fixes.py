@@ -78,7 +78,8 @@ def test_a_series_of_numbered_chapters_no_longer_collides():
     ("Some Series season 02 v03.cbz", "Season 2", "3"),
     ("Some Series Part 2 v03.cbz", "Part 2", "3"),
     ("Some Series - Part 5 - A Subtitle v05 (2022) (Digital) (G).cbz", "Part 5", "5"),
-    ("Some Series Season 2 - Vol. 001 [G].cbz", "Season 2", "1"),                  # the scheme's own form
+    ("Season 2 - Vol. 001 [G].cbz", "Season 2", "1"),                              # the scheme's own form
+    ("Some Series Season 2 - Vol. 001 [G].cbz", "Season 2", "1"),                  # ... until 2026-10-16
     ("Some Series v01 (2020) (Digital) (G).cbz", None, "1"),
     ("Some Partition v01.cbz", None, "1"),
     ("Some Series - Part 5 Is Long v01.cbz", None, "1"),                            # not at the end of the title
@@ -90,15 +91,15 @@ def test_the_qualifier_is_read(name, qualifier, vol):
 
 def test_two_seasons_no_longer_collide():
     one, two = _t("Some Series Season 1 v01.cbz"), _t("Some Series Season 2 v01 (2020) (Digital) (G).cbz")
-    assert (one, two) == ("Some Series Season 1 - Vol. 001.cbz", "Some Series Season 2 - Vol. 001 [G].cbz")
-    assert _t("Other Title - Part 5 - A Subtitle v05 (2022) (Digital) (G).cbz") == "Some Series Part 5 - Vol. 005 [G].cbz"
+    assert (one, two) == ("Season 1 - Vol. 001.cbz", "Season 2 - Vol. 001 [G].cbz")
+    assert _t("Other Title - Part 5 - A Subtitle v05 (2022) (Digital) (G).cbz") == "Part 5 - Vol. 005 [G].cbz"
 
 
 def test_a_title_that_already_says_it_is_not_repeated():
-    assert _t("Some Series Season 2 v01.cbz", series="Some Series Season 2") == "Some Series Season 2 - Vol. 001.cbz"
-    assert _t("Some Series Season 2 v01.cbz", series="Some Series: Season 02") == "Some Series - Season 02 - Vol. 001.cbz"
-    assert _t("Some Series Season 2 v01.cbz", series="Some Series Season 3") == \
-        "Some Series Season 3 Season 2 - Vol. 001.cbz"
+    """The series folder's title already says the season: the volume name leaves it out (the folder carries it)."""
+    assert _t("Some Series Season 2 v01.cbz", series="Some Series Season 2") == "Vol. 001.cbz"
+    assert _t("Some Series Season 2 v01.cbz", series="Some Series: Season 02") == "Vol. 001.cbz"
+    assert _t("Some Series Season 2 v01.cbz", series="Some Series Season 3") == "Season 2 - Vol. 001.cbz"
 
 
 @pytest.mark.parametrize("series, qualifier", [
@@ -106,20 +107,22 @@ def test_a_title_that_already_says_it_is_not_repeated():
     ("Some Series - Part 5 - Sub", "Season 1"), ("A [B]", "Part 1"),
 ])
 def test_qualifier_round_trip(series, qualifier):
-    name = volume_file_name(series, 3, volume_end=4, group="G", qualifier=qualifier)
+    name = volume_file_name(3, volume_end=4, group="G", qualifier=qualifier, series_title=series)
     r = parse_name(name)
     assert (r.layer, r.kind, r.series, r.qualifier, str(r.volume), r.group) == \
-        (Layer.SCHEME, Kind.VOLUME, series, qualifier, "3-4", "G")
+        (Layer.SCHEME, Kind.VOLUME, None, qualifier, "3-4", "G")
     assert target_name(r, ext=".cbz", series_title=series) == name                  # renaming again changes nothing
 
 
 def test_a_title_ending_in_a_season_reads_back_the_same_name():
-    # By construction the parse-back takes a trailing "Season N" as the qualifier; the name is still stable.
-    name = volume_file_name("Some Series Season 2", 1)
-    r = parse_name(name)
+    # The old names: by construction the parse-back takes a trailing "Season N" as the qualifier. Renamed to the new
+    # format the folder's title says the season, so it is left out - and that name is stable.
+    r = parse_name("Some Series Season 2 - Vol. 001.cbz")
     assert (r.series, r.qualifier) == ("Some Series", "Season 2")
-    assert target_name(r, ext=".cbz", series_title="Some Series Season 2") == name
-    assert target_name(r, ext=".cbz", series_title="Some Series") == name
+    assert target_name(r, ext=".cbz", series_title="Some Series Season 2") == "Vol. 001.cbz"
+    assert target_name(r, ext=".cbz", series_title="Some Series") == "Season 2 - Vol. 001.cbz"
+    again = parse_name("Season 2 - Vol. 001.cbz")
+    assert target_name(again, ext=".cbz", series_title="Some Series") == "Season 2 - Vol. 001.cbz"
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -133,7 +136,7 @@ def test_sanitize_qualifier(text, expected):
 @pytest.mark.parametrize("bad", ["Book 2", "Season", "2nd Season", "Season 2 extra", "Part two"])
 def test_a_bad_qualifier_raises(bad):
     with pytest.raises(ValueError):
-        volume_file_name("Some Series", 1, qualifier=bad)
+        volume_file_name(1, qualifier=bad)
 
 
 def test_chapters_carry_no_qualifier():
@@ -265,7 +268,7 @@ def test_three_point_one_and_three_point_ten_share_a_name():
 def test_the_series_answer_still_decides_a_guess_with_a_qualifier():
     r = parse_name("Some Series Season 2 07.cbz", ParseContext(kind_hint="volumes"))
     assert (r.kind, str(r.volume), r.qualifier) == (Kind.VOLUME, "7", "Season 2")
-    assert target_name(r, ext=".cbz", series_title="Some Series") == "Some Series Season 2 - Vol. 007.cbz"
+    assert target_name(r, ext=".cbz", series_title="Some Series") == "Season 2 - Vol. 007.cbz"
 
 
 # --- owner, 2026-10-11: a site's watermark after a bare number ("<Series> 001 Read Online.cbz") ---------------------

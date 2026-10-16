@@ -382,10 +382,15 @@ def compile_template(template: Union[str, Template]) -> Template:
 # MangaList's own scheme (owner, 2026-10-10; Next Cycle Design sections 10-12) - the default of every root whose
 # naming scheme is empty, and always read back by the parser (layer 1). Chapters: "Ch. 0102.00 Vol. 012 (<chapter
 # title>) [<group>]" - the number first, so a plain sort is the reading order and a volume learned later never moves
-# a file; each later part only when known; a range "Ch. 0010.00-0012.00". Volumes: "<Series title> - Vol. 001
-# [<group>]", a range "Vol. 001-003", a season / part of the series "<Series title> Season 2 - Vol. 001". mangalist.naming renders them (sanitising, length rule).
+# a file; each later part only when known; a range "Ch. 0010.00-0012.00". Volumes (owner, 2026-10-16: "the folder
+# already encodes the romaji and alternate title and it is the closest to the chapter scheme"): "Vol. 001 [<group>]",
+# no series title; a range "Vol. 001-003", a season / part of the series "Season 2 - Vol. 001". mangalist.naming
+# renders them (sanitising, length rule).
 MANGALIST_CHAPTER_SCHEME = "Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}"
-MANGALIST_VOLUME_SCHEME = "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
+MANGALIST_VOLUME_SCHEME = "{%SQ - }Vol. %V3{-%VE3}{ [%G]}"
+# The volume scheme until 2026-10-16: "<Series title> - Vol. 001 [<group>]" ("<Series title> Season 2 - Vol. 001").
+# Still read back exactly in every root (most of the library carries it until the owner's Rename); never written.
+MANGALIST_TITLED_VOLUME_SCHEME = "%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}"
 
 # The owner's FMD2 scheme (PD 6; MangaList's default until 2026-10-10, now only what FMD2 writes). %I = FMD2's
 # numbering index (C1 open for phase 2).

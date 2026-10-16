@@ -47,10 +47,15 @@ def test_a_volume_from_the_volume_list_is_added_and_then_stable(tmp_path):
     assert plans[target].status == UNCHANGED                         # the renamed name reads back to itself
 
 
-def test_volume_releases_get_the_series_title(tmp_path):
-    name = "Series X v05 (2022) (Digital) (grp).cbz"
-    plans = _plans(tmp_path, [name], series_title="Series X")
-    assert plans[name].target == "Series X - Vol. 005 [grp].cbz"
+def test_volume_releases_get_the_plain_volume_name(tmp_path):
+    name, old, half = "Series X v05 (2022) (Digital) (grp).cbz", "Series X - Vol. 006 [grp].cbz", "Series X v06.5.cbz"
+    plans = _plans(tmp_path, [name, old, half], series_title="Series X")
+    assert plans[name].target == "Vol. 005 [grp].cbz" and not plans[name].held       # renamed before this change too
+    assert plans[old].target == "Vol. 006 [grp].cbz" and plans[old].format_held      # only the format: waits
+    assert plans[half].target == "Vol. 006.5.cbz" and not plans[half].held
+    (tmp_path / "b").mkdir()
+    again = _plans(tmp_path / "b", ["Vol. 005 [grp].cbz", "Vol. 006.5.cbz"], series_title="Series X")
+    assert all(p.status == UNCHANGED for p in again.values())                          # read back exactly
 
 
 def test_extras_and_unreadable_names_are_left_alone(tmp_path):

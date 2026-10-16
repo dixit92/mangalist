@@ -14,9 +14,13 @@ Settled in the Next Cycle Design, sections 10-12 (owner answers 2026-10-10); the
 - a chapter range (rare: ``c010-012``) is ``Ch. 0010.00-0012.00``: both ends in the same form, so the range still sorts
   at its first chapter.
 
-**Volumes** - ``<Series title> - Vol. 001 [<group>].cbz`` (3-digit volume; a range ``Vol. 001-003``; the series title is
-MangaPixer's title, owner 2026-10-10). A season / part the file name states is kept after the title, ``<Series title>
-Season 2 - Vol. 001``, because volume numbers restart with it (renamer dry run, 2026-10-10).
+**Volumes** - ``Vol. 001 [<group>].cbz`` (3-digit volume, any decimals it has: ``Vol. 012.5``; a range
+``Vol. 001-003``). No series title (owner, 2026-10-16: "the folder already encodes the romaji and alternate title and
+it is the closest to the chapter scheme which already exists"; a title in every volume name made paths of ~330
+characters, past Windows' 260). A season / part the file name states is kept in front, ``Season 2 - Vol. 001``,
+because volume numbers restart with it (renamer dry run, 2026-10-10) - unless the series title already says it. Until
+2026-10-16 volumes were ``<Series title> - Vol. 001 [<group>]`` (:data:`TITLED_VOLUME_SCHEME`): still read back, and
+rendered only so the renamer can tell a rename the new format alone causes (:func:`titled_volume_name`).
 
 **Why parentheses for the title** (section 12): MangaPixer reads nothing inside ``( )`` / ``[ ]`` when the rest of the
 name states a unit, so a title such as "The Vol 2 Begins" is never read as volume 2 there; MangaList reads its own
@@ -35,7 +39,7 @@ Windows server name is set - the whole Windows path (``\\\\SERVER\\<share>\\...\
 terminator). The group is always capped at :attr:`NameLimits.group_cap` characters (32; owner: "Some group names are
 long, so have a cap"). When a name is still too long it is shortened in this order: the chapter title (cut, ending with
 ``…``, then left out), then the group (cut further, then left out); never the number, the volume or the extension. A
-volume name shortens the group, then the series title. If even the shortest form is too long it is returned anyway and
+volume name shortens its group. If even the shortest form is too long it is returned anyway and
 flagged (:attr:`NameResult.fits` False, logged as a warning).
 """
 
@@ -49,15 +53,19 @@ from typing import Any, Callable, Iterable, Optional, Tuple, Union
 
 from .parsing._common import QUALIFIER, real_group, series_qualifier
 from .parsing.model import Kind, ParsedName, UnitRange, plain, to_decimal
-from .parsing.template import MANGALIST_CHAPTER_SCHEME, MANGALIST_VOLUME_SCHEME, compile_template
+from .parsing.template import (
+    MANGALIST_CHAPTER_SCHEME, MANGALIST_TITLED_VOLUME_SCHEME, MANGALIST_VOLUME_SCHEME, compile_template,
+)
 
 _log = logging.getLogger(__name__)
 
 CHAPTER_SCHEME = MANGALIST_CHAPTER_SCHEME
 """``Ch. %CN4{-%CE4}{ Vol. %V3}{ (%CT)}{ [%G]}`` - the chapter scheme as a :mod:`mangalist.parsing.template`."""
 VOLUME_SCHEME = MANGALIST_VOLUME_SCHEME
-"""``%T - Vol. %V3{-%VE3}{ [%G]}`` - the volume scheme."""
-DEFAULT_SCHEMES: Tuple[str, ...] = (CHAPTER_SCHEME, VOLUME_SCHEME)
+"""``{%SQ - }Vol. %V3{-%VE3}{ [%G]}`` - the volume scheme (no series title)."""
+TITLED_VOLUME_SCHEME = MANGALIST_TITLED_VOLUME_SCHEME
+"""``%T{ %SQ} - Vol. %V3{-%VE3}{ [%G]}`` - the volume scheme until 2026-10-16 (read back, never written)."""
+DEFAULT_SCHEMES: Tuple[str, ...] = (CHAPTER_SCHEME, VOLUME_SCHEME, TITLED_VOLUME_SCHEME)
 """The scheme of every root whose own ``naming_scheme`` is empty (the scanner's scheme hook)."""
 
 ELLIPSIS = "\u2026"
@@ -321,22 +329,58 @@ def chapter_file_name(chapter: Number, *, chapter_end: Optional[Number] = None, 
                         folder=folder, limits=limits).name
 
 
-def volume_name(series_title: str, volume: Number, *, volume_end: Optional[Number] = None,
-                group: Optional[str] = None, ext: str = ".cbz", folder: Optional[str] = None,
-                limits: NameLimits = _DEFAULT_LIMITS, qualifier: Optional[str] = None) -> NameResult:
-    """:func:`volume_file_name` with how it was made."""
-    series = sanitize_series(series_title)
-    if series is None:
-        raise ValueError(f"a volume name needs a series title, not {series_title!r}")
+def _volume_parts(volume: Number, volume_end: Optional[Number], qualifier: Optional[str],
+                  series: Optional[str]) -> Tuple[Decimal, Optional[Decimal], Optional[str]]:
     qual = sanitize_qualifier(qualifier)
-    if qual is not None and _states(series, qual):
+    if qual is not None and series and _states(series, qual):
         qual = None
     start = _number(volume, "volume")
-    end = _end(start, volume_end, "volume")
+    return start, _end(start, volume_end, "volume"), qual
+
+
+def volume_name(volume: Number, *, volume_end: Optional[Number] = None, group: Optional[str] = None,
+                ext: str = ".cbz", folder: Optional[str] = None, limits: NameLimits = _DEFAULT_LIMITS,
+                qualifier: Optional[str] = None, series_title: Optional[str] = None) -> NameResult:
+    """:func:`volume_file_name` with how it was made."""
+    start, end, qual = _volume_parts(volume, volume_end, qualifier, sanitize_series(series_title))
     tpl = compile_template(VOLUME_SCHEME)
     suffix = _ext(ext)
 
-    shortest = _cut(series, 2) or series[:1]           # the volume scheme needs a title: never left out entirely
+    def render(g: Optional[str], _unused: Optional[str]) -> str:
+        return tpl.render({"qualifier": qual, "volume": start, "volume_end": end, "group": g}, sanitize=None) + suffix
+
+    g, capped = _capped_group(group, limits)
+    return _fit(render, g, None, ("group", "series"), lambda n: name_fits(n, folder=folder, limits=limits),
+                ("group",) if capped else ())
+
+
+def volume_file_name(volume: Number, *, volume_end: Optional[Number] = None, group: Optional[str] = None,
+                     ext: str = ".cbz", folder: Optional[str] = None, limits: NameLimits = _DEFAULT_LIMITS,
+                     qualifier: Optional[str] = None, series_title: Optional[str] = None) -> str:
+    """The scheme name of a volume archive: ``Vol. 001 [<group>].cbz`` (a range ``Vol. 001-003``, a half volume
+    ``Vol. 012.5``) - no series title: the series folder carries it. ``qualifier``: the season / part of the series
+    the volume belongs to (``"Season 2"``, ``"Part 5"``), written in front - ``Season 2 - Vol. 001`` - unless
+    ``series_title`` (the series folder's title) already says it; volume numbers restart with it, so it keeps two
+    seasons' volume 1 apart. Raises ValueError without a valid volume number, or for a qualifier that is not
+    "Season N" / "Part N"."""
+    return volume_name(volume, volume_end=volume_end, group=group, ext=ext, folder=folder, limits=limits,
+                       qualifier=qualifier, series_title=series_title).name
+
+
+def titled_volume_name(series_title: str, volume: Number, *, volume_end: Optional[Number] = None,
+                       group: Optional[str] = None, ext: str = ".cbz", folder: Optional[str] = None,
+                       limits: NameLimits = _DEFAULT_LIMITS, qualifier: Optional[str] = None) -> NameResult:
+    """The volume name of the scheme until 2026-10-16, ``<Series title> - Vol. 001 [<group>].cbz``
+    (:data:`TITLED_VOLUME_SCHEME`; the group is shortened first, then the title). Never written: the renamer compares
+    against it to tell a rename the new volume format alone causes (it waits for the owner's Rename). Raises
+    ValueError without a series title or a valid volume number."""
+    series = sanitize_series(series_title)
+    if series is None:
+        raise ValueError(f"a titled volume name needs a series title, not {series_title!r}")
+    start, end, qual = _volume_parts(volume, volume_end, qualifier, series)
+    tpl = compile_template(TITLED_VOLUME_SCHEME)
+    suffix = _ext(ext)
+    shortest = _cut(series, 2) or series[:1]           # the titled scheme needs a title: never left out entirely
 
     def render(g: Optional[str], s: Optional[str]) -> str:
         return tpl.render({"series": s or shortest, "qualifier": qual, "volume": start, "volume_end": end,
@@ -347,24 +391,12 @@ def volume_name(series_title: str, volume: Number, *, volume_end: Optional[Numbe
                 ("group",) if capped else ())
 
 
-def volume_file_name(series_title: str, volume: Number, *, volume_end: Optional[Number] = None,
-                     group: Optional[str] = None, ext: str = ".cbz", folder: Optional[str] = None,
-                     limits: NameLimits = _DEFAULT_LIMITS, qualifier: Optional[str] = None) -> str:
-    """The scheme name of a volume archive: ``<Series title> - Vol. 001 [<group>].cbz`` (a range ``Vol. 001-003``).
-    ``qualifier``: the season / part of the series the volume belongs to (``"Season 2"``, ``"Part 5"``), written
-    after the title - ``<Series title> Season 2 - Vol. 001`` - unless the title already says it; volume numbers
-    restart with it, so it keeps two seasons' volume 1 apart. Raises ValueError without a series title, a valid
-    volume number, or for a qualifier that is not "Season N" / "Part N"."""
-    return volume_name(series_title, volume, volume_end=volume_end, group=group, ext=ext, folder=folder,
-                       limits=limits, qualifier=qualifier).name
-
-
 # --- a parsed file's scheme name --------------------------------------------------------------------------------
 
 
 def target_name(parsed: Optional[ParsedName], *, ext: str, series_title: Optional[str],
                 volume_of: Optional[Callable[[Decimal], Optional[Decimal]]] = None, folder: Optional[str] = None,
-                limits: NameLimits = _DEFAULT_LIMITS) -> Optional[str]:
+                limits: NameLimits = _DEFAULT_LIMITS, titled: bool = False) -> Optional[str]:
     """The scheme name for a parsed archive, or None to leave the file alone:
 
     - unreadable (no units), a bare number whose kind the name does not state (``01.cbz``, or a bare number after the
@@ -372,7 +404,12 @@ def target_name(parsed: Optional[ParsedName], *, ext: str, series_title: Optiona
       with loose chapters (``v10 + 085-086``), or numbers the generic layer found more than once;
     - an extra / omake / one-shot without its own chapter number (owner, 2026-10-10: "leave them"; ``.5`` chapters
       are chapters);
-    - a chapter whose own name states a volume range, or a volume file without a ``series_title``.
+    - a chapter whose own name states a volume range.
+
+    *series_title* (the series folder's title) is not part of a volume name any more: it only keeps a season / part
+    the title already says out of the name. ``titled=True`` gives the volume name of the scheme until 2026-10-16
+    (``<series_title> - Vol. 001``, :func:`titled_volume_name`; None without a series title) - the renamer's
+    comparison, never a name to write.
 
     A chapter's volume is the one its name states, else ``volume_of(chapter)`` when given (a range only when both
     ends map to the same volume). The title and group come from the name as parsed (a title that only restates the
@@ -385,12 +422,16 @@ def target_name(parsed: Optional[ParsedName], *, ext: str, series_title: Optiona
         if parsed.kind is Kind.CHAPTER:
             return _chapter_target(parsed, ext, volume_of, folder, limits)
         if parsed.kind is Kind.VOLUME:
-            if parsed.volume is None or not (series_title or "").strip() or sanitize_series(series_title) is None:
+            if parsed.volume is None:
                 return None
             rng = parsed.volume
-            return volume_file_name(series_title, rng.start, volume_end=rng.end if rng.is_range else None,
-                                    group=parsed.group, ext=ext, folder=folder, limits=limits,
-                                    qualifier=parsed.qualifier)
+            kw = dict(volume_end=rng.end if rng.is_range else None, group=parsed.group, ext=ext, folder=folder,
+                      limits=limits, qualifier=parsed.qualifier)
+            if titled:
+                if not (series_title or "").strip() or sanitize_series(series_title) is None:
+                    return None
+                return titled_volume_name(series_title, rng.start, **kw).name
+            return volume_file_name(rng.start, series_title=series_title, **kw)
     except ValueError:
         _log.debug("Naming: no scheme name for %r", parsed.name, exc_info=True)
     return None
@@ -480,8 +521,8 @@ def volume_lookup(db, series_id: int) -> Callable[[Decimal], Optional[Decimal]]:
 
 
 __all__ = [
-    "CHAPTER_SCHEME", "DEFAULT_SCHEMES", "ELLIPSIS", "NameLimits", "NameResult", "VOLUME_SCHEME", "chapter_file_name",
-    "chapter_name", "name_fits", "restates_number", "sanitize_group", "sanitize_qualifier", "sanitize_series",
-    "sanitize_title", "target_name",
+    "CHAPTER_SCHEME", "DEFAULT_SCHEMES", "ELLIPSIS", "NameLimits", "NameResult", "TITLED_VOLUME_SCHEME",
+    "VOLUME_SCHEME", "chapter_file_name", "chapter_name", "name_fits", "restates_number", "sanitize_group",
+    "sanitize_qualifier", "sanitize_series", "sanitize_title", "target_name", "titled_volume_name",
     "volume_file_name", "volume_lookup", "volume_name", "volumes_from_list", "windows_path",
 ]

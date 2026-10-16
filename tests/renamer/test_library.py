@@ -59,11 +59,12 @@ def test_dry_run_counts_and_lists(renamer, two_series, caplog):
     assert fmd2(1, "0001", "Start", "Group A") in _names(Path(two_series.path) / "Series A")
 
 
-def test_volume_names_use_the_title_given(db, namer, hooks, two_series):
+def test_volume_names_carry_no_title(db, namer, hooks, two_series):
     r = Renamer(db, namer=namer, title_for=lambda root, series: "Series Bee" if series.rel_path == "Series B" else None,
                 rescan=hooks.rescan, request_scans=hooks.request_scans)
     p = r.preview_series(_sid(db, two_series, "Series B"))
-    assert [f.target for f in p.renames] == ["Series Bee - Vol. 001 [Rel].cbz", "Series Bee - Vol. 002 [Rel].cbz"]
+    assert p.series_title == "Series Bee"
+    assert [f.target for f in p.renames] == ["Vol. 001 [Rel].cbz", "Vol. 002 [Rel].cbz"]
     # without a title from MangaPixer: the folder's name
     p = r.preview_series(_sid(db, two_series, "Series A"))
     assert p.series_title == "Series A"

@@ -191,28 +191,32 @@ def test_subseries_folders_are_never_renamed(db, library):
     assert parent.folder_target == "Made Up Romaji"
 
 
-def test_volume_names_use_the_scheme_title_and_follow_a_new_match(db, library):
-    # owner, 2026-10-15 (answer 12): "Titles should follow the scheme in answer 6 and should change"
+def test_volume_names_carry_no_series_title_and_ignore_a_new_match(db, library):
+    # owner, 2026-10-16: "Vol. 001 [group].cbz" - the folder carries the title, so a new match changes no volume name
     root = make_library(db, library, {"Volume Folder": {"Volume Folder v01 (Digital).cbz": payload("v1")}})
     sid = _sid(db, root, "Volume Folder")
     r = make(db)
     s = r.preview_series(sid)
     assert s.series_title == "Made Up Volumes"
-    assert s.renames[0].target == "Made Up Volumes - Vol. 001.cbz"
+    assert s.renames[0].target == "Vol. 001.cbz" and not s.renames[0].held     # renamed before this change too
     TITLES["Volume Folder"] = ("Made Up Volumes Switched", ())     # e.g. MangaPixer's Switch to MangaUpdates
     try:
-        assert make(db).preview_series(sid).renames[0].target == "Made Up Volumes Switched - Vol. 001.cbz"
+        assert make(db).preview_series(sid).renames[0].target == "Vol. 001.cbz"
     finally:
         TITLES["Volume Folder"] = ("Made Up Volumes", ())
     bare = Renamer(db, namer=FakeNamer(), title_for=lambda *a: None, rescan=None, request_scans=None)
     assert bare.preview_series(sid).series_title == "Volume Folder"   # no title: the folder's name, as before
 
 
-def test_filing_names_volumes_with_the_scheme_title(db, library):
+def test_filing_names_volumes_in_the_new_format(db, library):
     root = make_library(db, library, {"Kept Romaji [Kept English]": {"Ch. 0001.00 [G].cbz": payload("k1")}})
     series = db.get_series(root.id, "Kept Romaji [Kept English]")
-    name = make(db).scheme_name(root, series, "Release v03 (Digital).cbz")
-    assert name == "Kept Romaji [Kept English] - Vol. 003.cbz"
+    assert make(db).scheme_name(root, series, "Release v03 (Digital).cbz") == "Vol. 003.cbz"
+    real_namer = Renamer(db, title_for=titles, rescan=None, request_scans=None)       # the real naming module
+    assert real_namer.scheme_name(root, series, "Release v03 (2021) (Digital) (Made-Group).cbz") == \
+        "Vol. 003 [Made-Group].cbz"
+    assert real_namer.scheme_name(root, series, "Release v12.5 (Digital) (Made-Group).cbz") == \
+        "Vol. 012.5 [Made-Group].cbz"
 
 
 def test_the_default_titles_come_from_a_confirmed_own_match(db, library):
@@ -241,21 +245,31 @@ def test_plan_folder_rules():
     assert rn.plan_folder("Old", "New", names=names) == (RENAME, "")
 
 
-# --- renames a new series title causes wait for the owner (integrator, 2026-10-15) -----------------------------------
+# --- renames the new volume format causes wait for the owner (owner, 2026-10-16) ------------------------------------
 
-HELD = {"Vol Romaji [Vol English]": ("Vol Romaji", ())}
+HELD = {"Vol Romaji [Vol English]": ("Vol Romaji", ()), "Plain Romaji": ("Plain Romaji", ())}
+TITLED = {
+    "Vol Romaji - Vol. 001.cbz": payload("t1"),                      # the old format with the record's title
+    "Vol Romaji [Vol English] - Vol. 002.cbz": payload("t2"),        # the old format with the scheme title: format only
+    "Vol Romaji [Vol English] - Vol. 3.cbz": payload("t3"),          # the old format + padding: renamed before too
+    "Vol Romaji v04 (Digital) (Made Group).cbz": payload("t4"),      # a release name a new series title held before
+    fmd2(5, "0005", "Made Up Day", "G"): payload("t5"),              # a chapter: no series title in its name
+}
+PLAIN = {
+    "Plain Romaji v01 (Digital) (G).cbz": payload("p1"),             # a release name: renamed before too
+    "Plain Romaji - Vol. 002.cbz": payload("p2"),                    # the old format: format only
+    "Vol. 3.cbz": payload("p3"),                                     # neither: a padding fix
+    "Vol. 004 [G].cbz": payload("p4"),                               # already the new format
+    "Vol. 005 [no group].cbz": payload("p5"),                        # the new format, another fix: automatic
+}
 
 
 @pytest.fixture
 def titled(db, library):
-    """A series whose scheme title (``Vol Romaji [Vol English]``) differs from the title its volumes were named by
-    before (the record's ``Vol Romaji``). The REAL naming module."""
-    root = make_library(db, library, {"Vol Romaji [Vol English]": {
-        "Vol Romaji - Vol. 001.cbz": payload("t1"),                      # only the series title changes
-        "Vol Romaji v02 (Digital).cbz": payload("t2"),                   # the title AND the numbering change
-        "Vol Romaji [Vol English] - Vol. 3.cbz": payload("t3"),          # already the new title: padding only
-        fmd2(4, "0004", "Made Up Day", "G"): payload("t4"),              # a chapter: no series title in its name
-    }})
+    """Two series of a library set to Rename automatically, named by the REAL naming module: one whose scheme title
+    (``Vol Romaji [Vol English]``) differs from the title its volumes were named by before (the record's ``Vol
+    Romaji``), one whose title never changed (``Plain Romaji``)."""
+    root = make_library(db, library, {"Vol Romaji [Vol English]": dict(TITLED), "Plain Romaji": dict(PLAIN)})
     root.enforce_naming = "automatic"
     db.update_root(root)
     return root
@@ -267,39 +281,72 @@ def real(db, hooks=None):
                    request_scans=hooks.request_scans)
 
 
-def test_title_only_renames_are_marked_and_wait_for_the_owner(db, titled):
+def test_format_only_volume_renames_are_marked_and_wait_for_the_owner(db, titled):
     s = real(db).preview_series(_sid(db, titled, "Vol Romaji [Vol English]"))
     by = {f.name: f for f in s.renames}
-    assert by["Vol Romaji - Vol. 001.cbz"].title_held                 # title only
-    assert by["Vol Romaji v02 (Digital).cbz"].title_held              # title + numbering: held whole, renamed once
-    assert not by["Vol Romaji [Vol English] - Vol. 3.cbz"].title_held  # padding only
-    assert not by[fmd2(4, "0004", "Made Up Day", "G")].title_held
-    assert by["Vol Romaji - Vol. 001.cbz"].target == "Vol Romaji [Vol English] - Vol. 001.cbz"
+    assert by["Vol Romaji - Vol. 001.cbz"].format_held                         # only the format (and title) changes
+    assert by["Vol Romaji [Vol English] - Vol. 002.cbz"].format_held           # only the format changes
+    assert by["Vol Romaji v04 (Digital) (Made Group).cbz"].format_held         # waited before too: held whole
+    assert not by["Vol Romaji [Vol English] - Vol. 3.cbz"].held                # padding: automatic, once, to the end
+    assert not by[fmd2(5, "0005", "Made Up Day", "G")].held
+    assert {f.name: f.target for f in s.renames} == {
+        "Vol Romaji - Vol. 001.cbz": "Vol. 001.cbz", "Vol Romaji [Vol English] - Vol. 002.cbz": "Vol. 002.cbz",
+        "Vol Romaji [Vol English] - Vol. 3.cbz": "Vol. 003.cbz",
+        "Vol Romaji v04 (Digital) (Made Group).cbz": "Vol. 004 [Made Group].cbz",
+        fmd2(5, "0005", "Made Up Day", "G"): "Ch. 0005.00 (Made Up Day) [G].cbz"}
+    plain = {f.name: f for f in real(db).preview_series(_sid(db, titled, "Plain Romaji")).files}
+    assert plain["Plain Romaji - Vol. 002.cbz"].format_held
+    assert sorted(n for n, f in plain.items() if f.status == RENAME and not f.held) == sorted([
+        "Plain Romaji v01 (Digital) (G).cbz", "Vol. 3.cbz", "Vol. 005 [no group].cbz"])
+    assert plain["Vol. 004 [G].cbz"].status == UNCHANGED
     assert rn.TITLE_NOTE in real(db).dry_run(root_ids=[titled.id]).warnings
 
 
-def test_the_automatic_pass_skips_title_changes_and_still_fixes_the_rest(db, titled):
+def test_a_namer_without_the_old_names_holds_every_volume_out_of_the_new_format(tmp_path):
+    from mangalist.parsing import parse_name
+
+    class Plain(FakeNamer):
+        titled_target_name = None
+
+    files = []
+    for name in ("Made Up v01 (Digital).cbz", "Vol. 2.cbz", "Vol. 002 [no group].cbz", fmd2(3, "0003")):
+        (tmp_path / name).write_bytes(b"x")
+        files.append((str(tmp_path / name), parse_name(name)))
+    by = {os.path.basename(f.path): f for f in rn.plan_files(files, namer=Plain(), series_title="Made Up")}
+    assert by["Made Up v01 (Digital).cbz"].format_held and by["Vol. 2.cbz"].format_held      # cannot tell: held
+    assert not by["Vol. 002 [no group].cbz"].held and not by[fmd2(3, "0003")].held   # already the format / a chapter
+    assert rn.in_volume_format("Vol. 001 [G].cbz") and rn.in_volume_format("Season 2 - Vol. 001.cbz")
+    assert not rn.in_volume_format("Made Up - Vol. 001 [G].cbz") and not rn.in_volume_format("Vol. 1.cbz")
+
+
+def test_the_automatic_pass_skips_format_changes_and_still_fixes_the_rest(db, titled):
     r = real(db)
     r.mark_guided([titled.id])
     report = r.automatic_pass()
-    folder = Path(titled.path) / "Vol Romaji [Vol English]"
-    names = sorted(os.listdir(folder))
-    assert report.renamed == 2 and report.held == 2 and "2 file(s) with a new series title wait" in report.summary()
-    assert names == sorted(["Vol Romaji - Vol. 001.cbz", "Vol Romaji v02 (Digital).cbz",
-                            "Vol Romaji [Vol English] - Vol. 003.cbz", "Ch. 0004.00 (Made Up Day) [G].cbz"])
+    names = sorted(os.listdir(Path(titled.path) / "Vol Romaji [Vol English]"))
+    plain = sorted(os.listdir(Path(titled.path) / "Plain Romaji"))
+    assert report.renamed == 5 and report.held == 4
+    assert "4 file(s) in the new volume name format wait" in report.summary()
+    assert names == sorted(["Vol Romaji - Vol. 001.cbz", "Vol Romaji [Vol English] - Vol. 002.cbz", "Vol. 003.cbz",
+                            "Vol Romaji v04 (Digital) (Made Group).cbz", "Ch. 0005.00 (Made Up Day) [G].cbz"])
+    assert plain == sorted(["Vol. 001 [G].cbz", "Plain Romaji - Vol. 002.cbz", "Vol. 003.cbz", "Vol. 004 [G].cbz",
+                            "Vol. 005.cbz"])
     rescan(db)
-    pending = real(db).dry_run(root_ids=[titled.id]).series[0]
-    assert len(pending.held_renames) == 2 and not pending.auto_renames  # still Rename pending, for the owner
-    assert real(db).automatic_pass().renamed == 0
+    pending = real(db).dry_run(root_ids=[titled.id]).series
+    assert sum(len(s.held_renames) for s in pending) == 4 and not any(s.auto_renames for s in pending)
+    assert real(db).automatic_pass().renamed == 0                               # still Rename pending, for the owner
 
 
-def test_the_owners_rename_applies_the_title_changes(db, titled):
+def test_the_owners_rename_applies_the_format_changes(db, titled):
     r = real(db)
     sid = _sid(db, titled, "Vol Romaji [Vol English]")
     dry = r.dry_run(series_ids=[sid])
     assert r.batches(dry.series)[0].n_files == 2                        # without the owner: only the other fixes
     res = r.apply(r.batches(dry.series, folders=True)[0])               # the window's Rename
-    assert res.renamed == 4
+    assert res.renamed == 5
     assert sorted(os.listdir(Path(titled.path) / "Vol Romaji [Vol English]")) == sorted([
-        "Vol Romaji [Vol English] - Vol. 001.cbz", "Vol Romaji [Vol English] - Vol. 002.cbz",
-        "Vol Romaji [Vol English] - Vol. 003.cbz", "Ch. 0004.00 (Made Up Day) [G].cbz"])
+        "Vol. 001.cbz", "Vol. 002.cbz", "Vol. 003.cbz", "Vol. 004 [Made Group].cbz",
+        "Ch. 0005.00 (Made Up Day) [G].cbz"])
+    rescan(db)
+    again = real(db).preview_series(sid)
+    assert not again.renames and all(f.status == UNCHANGED for f in again.files)    # stable: read back exactly
