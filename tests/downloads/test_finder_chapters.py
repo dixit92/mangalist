@@ -114,6 +114,38 @@ def test_a_source_listing_none_of_the_missing_chapters_within_its_numbers_is_dro
     assert f.reason == "MangaDex (EN) lacks ch. 5-6 (it has ch. 4-8) - Change source?"
 
 
+def test_a_source_whose_newest_is_below_every_missing_chapter_says_so(db, w):
+    # owner, 2026-10-15: an Auto series whose source stopped at ch. 49 while ch. 50-62 were out elsewhere was skipped
+    # in silence, pass after pass; now it waits under Found with Change source
+    saved(w)
+    w.suwayomi.chapter_list = [chapter(101, "3"), chapter(102, "4")]
+    w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
+    report = run(db, w)
+    (f,) = findings(db)
+    assert f.reason == "MangaDex (EN) has nothing past ch. 4; ch. 5-6 are not there yet - Change source?"
+    assert f.pick_key == f"chapters:{MANGADEX.id}:behind:4" and f.payload["type"] == "dropped"
+    assert enqueued(w) == [] and report.sent == 0
+    w.entries = wanted(w.series_id, w.folder, chapters=["5"])
+    run(db, w)
+    (f,) = findings(db)
+    assert f.reason == "MangaDex (EN) has nothing past ch. 4; ch. 5 is not there yet - Change source?"
+
+
+def test_a_skipped_source_behind_finding_comes_back_only_when_the_source_has_a_newer_chapter(db, w):
+    saved(w)
+    w.suwayomi.chapter_list = [chapter(101, "3"), chapter(102, "4")]
+    w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
+    run(db, w)
+    (f,) = findings(db)
+    FindingStore(db).set_status(f.id, "skipped")
+    run(db, w)
+    assert findings(db) == []                                                    # the skip holds ...
+    w.suwayomi.chapter_list.append(chapter(105, "4.5"))                          # ... until the source moves on
+    run(db, w)
+    (f,) = findings(db)
+    assert f.pick_key == f"chapters:{MANGADEX.id}:behind:4.5" and "nothing past ch. 4.5" in f.reason
+
+
 def test_a_saved_source_listing_no_chapters_at_all_is_dropped(db, w):
     # Suwayomi's "No chapters found" reads as an empty list (2026-10-11): still "Change source?", never silence
     saved(w)
@@ -154,14 +186,6 @@ def test_a_dropped_finding_is_reworded_when_found_again_and_sending_it_says_why(
     assert f.reason == "MangaDex (EN) lacks ch. 5-6 (it has ch. 4-8) - Change source?"
     assert send_finding(db, f.id, backend=w.backend) == ("Not sent: MangaDex (EN) lacks ch. 5-6 (it has ch. 4-8); use "
                                                          "Change source... in its chapters.")
-
-
-def test_a_source_that_is_only_behind_says_nothing(db, w):
-    saved(w)
-    w.suwayomi.chapter_list = [chapter(101, "4")]                                   # 5 and 6 are not out there yet
-    w.entries = wanted(w.series_id, w.folder, chapters=["5", "6"])
-    report = run(db, w)
-    assert findings(db) == [] and report.series_searched == 1 and report.lines == []
 
 
 def test_suwayomi_down_counts_one_error_and_says_nothing_dropped(db, w):

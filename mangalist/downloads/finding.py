@@ -69,6 +69,10 @@ REASON_SOURCE_TAKEN_DOWN = "taken down on {source}: its chapters there are marke
 REASON_SOURCE_NEVER = "{source} has never had chapters of the series - Change source?"
 REASON_SOURCE_EMPTY = "{source} lists no chapters of the series - Change source?"
 REASON_SOURCE_LACKS = "{source} lacks {missing} (it has {has}) - Change source?"
+#: Every missing chapter is newer than the source's newest (owner, 2026-10-15: an Auto series whose source stopped at
+#: ch. 49 while ch. 50-62 were out elsewhere was skipped in silence; "not out yet on this source" and "this source
+#: stopped" look the same here, so it is said, and Skip hides it until the source has a newer chapter).
+REASON_SOURCE_BEHIND = "{source} has nothing past {newest}; {missing} {verb} not there yet - Change source?"
 CHANGE_SOURCE = " - Change source?"
 
 
