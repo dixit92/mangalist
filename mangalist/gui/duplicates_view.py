@@ -5,7 +5,8 @@ Two sections, styled after the approved mockup (UI cycle, 2026-10-08):
 - **Same series in two folders** (:mod:`mangalist.same_series`; owner, 2026-10-17: "duplicate detection doesn't work
   across library roots") - one series by its MangaUpdates match in two separate folders, in one library folder or two:
   the two folders side by side (library, files, size, last change, match, the origin's status) with "Show in list",
-  "Open folder" and "Merge into..." (which folder is kept; :mod:`mangalist.series_merge`: the other folder's files move
+  "Open folder" and "Merge into..." (offered only when both matches are Confirmed, else disabled with the reason; which
+  folder is kept; :mod:`mangalist.series_merge`: the other folder's files move
   into it through the journal, nothing replaced, undoable - "Undo last merge" - then the kept folder's duplicate files
   are listed for review). Below them, parts of one franchise in different libraries: a notice with "Open folder" only -
   never merged, they may be kept apart on purpose ("I do it based on completed state").
@@ -481,9 +482,17 @@ class DuplicatesView(QWidget):
             action = menu.addAction(f"Keep {kept.where} (move {merged.name}'s files into it)")
             action.triggered.connect(lambda _=False, m=merged.folder, k=kept.folder: self.merge(m, k))
         merge.setMenu(menu)
+        blocked = pair.merge_blocked
+        if blocked:                                         # listed, but only Confirmed matches merge
+            merge.setEnabled(False)
+            merge.setToolTip(f"Not offered: {blocked}")
         head.addWidget(merge)
         self.merge_buttons.append(merge)
         box.addLayout(head)
+        if blocked:
+            note = _label(f"Merge is not offered: {blocked}.", "muted")
+            note.setWordWrap(True)
+            box.addWidget(note)
         side = QHBoxLayout()
         side.setSpacing(12)
         roots = self._db.list_roots()

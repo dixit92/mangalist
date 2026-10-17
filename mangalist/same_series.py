@@ -14,6 +14,11 @@ Confirmed or Auto (either source). Not counted: Needs review (the match may be w
 work, MangaPixer's "Don't match" and "Collection about", and any state MangaList does not know. Two folders that
 merely carry the same title are never grouped.
 
+**Merging needs Confirmed matches** (owner, 2026-10-17: "Confirmed only"): every duplicate is LISTED, but "Merge
+into..." is offered only when both sides' matches are Confirmed (MangaPixer-linked Confirmed, or the own matcher's
+Confirmed); a side on an Auto match shows why (:attr:`SamePair.merge_blocked`) and the merge itself refuses it
+(:func:`mangalist.series_merge.check_merge`).
+
 **How a group is read** (conservative: a merge is offered only where the two folders are plainly two copies of one
 series). Each series lies in a *unit*: its library folder and the folder at the top of it (the series folder itself,
 or the franchise folder it is a part of).
@@ -74,6 +79,7 @@ class SeriesCopy:
     title: str                          # the record's title (else the folder's name)
     link: str                           # "MangaPixer: Confirmed", "Own match: Auto" ...
     origin_status: Optional[str] = None  # "Complete", "Ongoing" ... as the record says
+    confirmed: bool = False             # the match is Confirmed (MangaPixer's or the own matcher's), not Auto
 
     @property
     def name(self) -> str:
@@ -114,6 +120,12 @@ class SamePair:
     @property
     def across_libraries(self) -> bool:
         return self.a.root_id != self.b.root_id
+
+    @property
+    def merge_blocked(self) -> Optional[str]:
+        """Why "Merge into..." is not offered (None: it is): both sides must have a CONFIRMED match (owner,
+        2026-10-17: "Confirmed only") - an Auto match may be wrong, and a merge would mix two series."""
+        return merge_refusal(self.copies)
 
     def merge_choices(self) -> List[Tuple[SeriesCopy, SeriesCopy]]:
         """The merges offered: (folder merged away, folder kept). A nested copy only goes into the folder it lies in -
@@ -159,6 +171,15 @@ class SameSeriesReport:
         return out
 
 
+def merge_refusal(copies: Sequence[SeriesCopy]) -> Optional[str]:
+    """Why these copies of one series may not be merged yet: a side whose match is only Auto (either source)."""
+    auto = [c for c in copies if not c.confirmed]
+    if not auto:
+        return None
+    names = " and ".join(f"{c.root_name} / {c.name}" for c in auto)
+    return f"confirm the match of {names} first (it is an Auto match; a merge needs both matches Confirmed)"
+
+
 # --- names -------------------------------------------------------------------------------------------------------
 
 _NOT_WORD = re.compile(r"[\W_]+", re.UNICODE)
@@ -202,6 +223,17 @@ def _copies(db) -> List[Tuple[str, SeriesCopy]]:
     """(record key, copy) of every present series with a trustworthy match, across every library folder: the series
     rows of the last scan, their own-matcher links and MangaPixer's items (no state is computed, no disk is read
     beyond resolving the library folders)."""
+    return [(key, copy) for key, copy in _matches(db) if key is not None]
+
+
+def matches_of(db, series_ids) -> Dict[int, Tuple[Optional[str], SeriesCopy]]:
+    """series id -> (record key or None, its copy) for *series_ids* (present series only): what the merge checks."""
+    wanted = {int(i) for i in series_ids if i is not None}
+    return {copy.series_id: (key, copy) for key, copy in _matches(db, wanted)}
+
+
+def _matches(db, only: Optional[set] = None) -> List[Tuple[Optional[str], SeriesCopy]]:
+    """(record key - None without a trustworthy match -, copy) of every present series (*only*: of these ids)."""
     from .models import MangaEntry
     from .wanted import apply_links_cache, load_links_cache, mangapixer_item, open_resolver, resolved_roots
 
@@ -216,11 +248,11 @@ def _copies(db) -> List[Tuple[str, SeriesCopy]]:
         _log.warning("Same series: MangaPixer's data unavailable; the own matcher's links are used", exc_info=True)
         resolver = None
     dirs = resolved_roots(db)
-    out: List[Tuple[str, SeriesCopy]] = []
+    out: List[Tuple[Optional[str], SeriesCopy]] = []
     for root in db.list_roots():
         stored, base = dirs.get(root.id, (root.path, Path(root.path)))
         for row in db.list_series(root.id):
-            if row.status != "present":
+            if row.status != "present" or (only is not None and row.id not in only):
                 continue
             folder = base.joinpath(*row.rel_path.split("/"))
             entry = MangaEntry(folder=folder, title=folder.name, english_title=None, root_id=root.id)
@@ -234,13 +266,11 @@ def _copies(db) -> List[Tuple[str, SeriesCopy]]:
                 except Exception:  # noqa: BLE001 - a folder MangaPixer cannot place: the own matcher's link
                     _log.debug("Same series: no MangaPixer item for %s", folder, exc_info=True)
             knowledge = from_mangapixer_item(item) if item is not None else from_own_matcher(entry)
-            key = match_key(knowledge)
-            if key is None:
-                continue
-            out.append((key, SeriesCopy(series_id=int(row.id), root_id=int(root.id), root_name=str(root.name),
-                                        rel_path=row.rel_path, folder=str(folder), files=int(row.n_archives or 0),
-                                        title=knowledge.title or folder.name, link=_link_text(knowledge),
-                                        origin_status=knowledge.origin_status)))
+            out.append((match_key(knowledge), SeriesCopy(
+                series_id=int(row.id), root_id=int(root.id), root_name=str(root.name), rel_path=row.rel_path,
+                folder=str(folder), files=int(row.n_archives or 0), title=knowledge.title or folder.name,
+                link=_link_text(knowledge), origin_status=knowledge.origin_status,
+                confirmed=knowledge.link_state == LINK_CONFIRMED)))
     return out
 
 
@@ -301,4 +331,4 @@ def find_same_series(db) -> SameSeriesReport:
 
 
 __all__ = ["TRUSTED_STATES", "KIND_DUPLICATE", "KIND_NESTED", "SeriesCopy", "SamePair", "FranchiseSplit",
-           "SameSeriesReport", "same_name", "match_key", "classify", "find_same_series"]
+           "SameSeriesReport", "same_name", "match_key", "merge_refusal", "matches_of", "classify", "find_same_series"]

@@ -52,6 +52,7 @@ def test_two_top_level_folders_across_libraries_are_a_duplicate(db, library, lib
         (("Manga-Ongoing / Summoned Partner", "Other-Ongoing / I Summoned a Partner"), "duplicate", True)]
     assert report.splits == []
     pair = report.pairs[0]
+    assert pair.merge_blocked is None                         # both Confirmed
     assert [(m.name, k.name) for m, k in pair.merge_choices()] == [("I Summoned a Partner", "Summoned Partner"),
                                                                     ("Summoned Partner", "I Summoned a Partner")]
     assert pair.a.files == 2 and pair.a.link == "Own match: Confirmed"
@@ -70,6 +71,8 @@ def test_two_top_level_folders_in_one_library_are_a_duplicate(db, library, two):
     report = same_series.find_same_series(db)
     assert [_where(p) for p in report.pairs] == [("Manga-Ongoing / Score of Love", "Manga-Ongoing / Score of Love (old)")]
     assert report.pairs[0].b.link == "Own match: Auto"
+    # listed, but not offered for a merge until the Auto side is confirmed (owner, 2026-10-17: "Confirmed only")
+    assert report.pairs[0].merge_blocked.startswith("confirm the match of Manga-Ongoing / Score of Love (old) first")
 
 
 def test_parts_of_one_franchise_folder_are_never_listed(db, library, two):

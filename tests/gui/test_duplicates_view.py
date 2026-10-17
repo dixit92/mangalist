@@ -286,10 +286,20 @@ def test_the_confirmation_lists_every_file_and_cancel_is_the_default(qapp, pair)
 
 # --- the series section -------------------------------------------------------------------------------------------
 
-def _copy(library, rel, series_id=0, *, files=1, status="Ongoing", link="Own match: Confirmed"):
+def _copy(library, rel, series_id=0, *, files=1, status="Ongoing", link="Own match: Confirmed", confirmed=True):
     return SeriesCopy(series_id=series_id, root_id=library.root.id, root_name=library.root.name, rel_path=rel,
                       folder=str(library.dir / rel), files=files, title="Example Record", link=link,
-                      origin_status=status)
+                      origin_status=status, confirmed=confirmed)
+
+
+def _confirm(library, rel, mu_id=4242):
+    from pathlib import Path
+
+    from mangalist import mu_cache
+    from mangalist.store.series import link_key
+
+    mu_cache.save_entry(Path(link_key(library.dir.resolve(), rel)), mu_id, "Example Record", "https://example.invalid/s",
+                        None, mu_confirmed=True)
 
 
 def test_same_series_in_two_folders_side_by_side(views, lib, tmp_path):
@@ -315,7 +325,7 @@ def test_same_series_in_two_folders_side_by_side(views, lib, tmp_path):
     button(view, "Open folder").click()
     assert shown == [one.folder] and opened == [one.folder]
     merge = view.merge_buttons
-    assert len(merge) == 1 and [a.text() for a in merge[0].menu().actions()] == [
+    assert len(merge) == 1 and merge[0].isEnabled() and [a.text() for a in merge[0].menu().actions()] == [
         f"Keep Manga / {S} (move Example Series (2)'s files into it)",
         "Keep Other / Example Series (2) (move Example Series's files into it)"]
     # the franchise split: a notice with Open folder only, never a merge
@@ -328,6 +338,18 @@ def test_same_series_in_two_folders_side_by_side(views, lib, tmp_path):
     view._render_series()                                            # (a hidden view renders when it is shown)
     assert view.same_series.pairs == [] and any("No series is held in two folders" in t for t in texts(view))
     assert not view.splits_heading.isVisibleTo(view)
+
+
+def test_a_pair_with_an_auto_match_is_listed_but_merge_is_disabled_with_the_reason(views, lib, tmp_path):
+    other = Library(lib.db, tmp_path / "other", "Other")
+    view = views.make()
+    auto = _copy(other, "Example Series (2)", link="MangaPixer: Auto", confirmed=False)
+    view.set_same_series(SameSeriesReport([SamePair("mu:1", "Example Record", _copy(lib, S), auto)]))
+    merge = view.merge_buttons[0]
+    assert not merge.isEnabled()
+    assert "confirm the match of Other / Example Series (2) first" in merge.toolTip()
+    assert any(t.startswith("Merge is not offered: confirm the match of Other / Example Series (2) first")
+               for t in texts(view))
 
 
 def test_a_nested_copy_offers_one_merge_only(views, lib):
@@ -352,6 +374,8 @@ def twins(lib, tmp_path):
     other.add("Example Series (EN)", "Series v02.cbz", size=20, mtime_ns=T0)
     lib.scan()
     other.scan()
+    _confirm(lib, S)
+    _confirm(other, "Example Series (EN)")
     return lib, other
 
 

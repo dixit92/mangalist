@@ -150,7 +150,8 @@ def test_a_nested_copy_merges_into_its_parent_within_one_library(db, library, tw
     make_archive(library / "Elder Knight Tale" / "Elder Knight Tale v01.cbz")
     make_archive(library / "Elder Knight Tale" / "Elder Knight Tale" / "Elder Knight Tale v02.cbz")
     scan(db)
-    parent = db.get_series(r1.id, "Elder Knight Tale").id
+    parent = _dress(db, r1, "Elder Knight Tale", mu_id=77, ledger=None)
+    _dress(db, r1, "Elder Knight Tale/Elder Knight Tale", mu_id=77, ledger=None)
     outer, inner = library / "Elder Knight Tale", library / "Elder Knight Tale" / "Elder Knight Tale"
     refused = series_merge.check_merge(db, outer, inner)
     assert not refused.ok and "lies inside the one merged away" in refused.refused
@@ -188,9 +189,15 @@ def test_held_replaced_chapters_and_other_refusals(db, library, library2, two):
     assert "the same" in series_merge.check_merge(db, same, same).refused
 
 
+def _confirm_both(db, two):
+    r1, r2 = two
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    return _dress(db, r1, "Summoned Partner", ledger=None)
+
+
 def test_exdev_says_move_them_yourself_and_changes_nothing(db, library, library2, two, monkeypatch):
     r1, _r2 = two
-    sid = db.get_series(r1.id, "Summoned Partner").id
+    sid = _confirm_both(db, two)
 
     def exdev(src, dst):
         raise OSError(errno.EXDEV, "Invalid cross-device link")
@@ -209,6 +216,7 @@ def test_a_running_scan_refuses_the_merge(db, library, library2, two):
 
     from mangalist.scan_lock import scan_lock
 
+    _confirm_both(db, two)
     check = series_merge.check_merge(db, library / "Summoned Partner", library2 / "Summoned Partner (EN)")
     held, release = threading.Event(), threading.Event()
 
@@ -227,3 +235,27 @@ def test_a_running_scan_refuses_the_merge(db, library, library2, two):
         t.join()
     assert res.status == "refused" and "A library scan is running" in res.message
     assert (library / "Summoned Partner" / "Summoned Partner v01.cbz").is_file()
+
+
+def test_an_auto_match_on_either_side_refuses_the_merge_until_it_is_confirmed(db, library, library2, two):
+    """Owner, 2026-10-17: "Confirmed only" - the pair is listed, but the merge waits for both matches Confirmed."""
+    r1, r2 = two
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    mu_cache.save_entry(Path(_key(r1, "Summoned Partner")), 4242, "Auto (MU)", "https://example.invalid/s", None,
+                        mu_confirmed=False, mu_band="auto")
+    check = series_merge.check_merge(db, library / "Summoned Partner", library2 / "Summoned Partner (EN)")
+    assert not check.ok and check.refused.startswith("confirm the match of Manga-Ongoing / Summoned Partner first")
+    res = series_merge.merge_folders(db, check)
+    assert res.status == "refused" and "confirm the match of" in res.message
+    assert (library / "Summoned Partner" / "Summoned Partner v01.cbz").is_file()
+    _dress(db, r1, "Summoned Partner", ledger=None)                          # confirmed now: it may merge
+    assert series_merge.check_merge(db, library / "Summoned Partner", library2 / "Summoned Partner (EN)").ok
+
+
+def test_unmatched_or_differently_matched_folders_are_never_merged(db, library, library2, two):
+    r1, r2 = two
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    gone, kept = library / "Summoned Partner", library2 / "Summoned Partner (EN)"
+    assert "has no confirmed MangaUpdates match" in series_merge.check_merge(db, gone, kept).refused
+    _dress(db, r1, "Summoned Partner", mu_id=5151, ledger=None)
+    assert series_merge.check_merge(db, gone, kept).refused == "the two folders are matched to different series"

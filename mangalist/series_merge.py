@@ -14,7 +14,9 @@ deeper: a name the kept folder already has (compared without case, as Windows an
 and reported, so the owner compares the two himself; so is a symbolic link, a MangaList lock file and a name Windows
 cannot hold. A nested copy (``Name/Name``) only goes into the folder it lies in (:meth:`SamePair.merge_choices`).
 
-**Refused up front, with the reason** (:func:`check_merge`; nothing moves): what Move to library refuses for the folder
+**Refused up front, with the reason** (:func:`check_merge`; nothing moves): two folders not matched to the same record,
+or a side whose match is not Confirmed (owner, 2026-10-17: "Confirmed only" - an Auto match, MangaPixer's or the own
+matcher's, may be wrong: "confirm the match of <folder> first"); what Move to library refuses for the folder
 that moves - a download in progress for the series (or a subseries inside it), replaced chapter files waiting for the
 owner's confirmation, replaced chapters held in the holding folder (:func:`mangalist.library_move._busy_reason`); a folder
 that is missing, outside every library folder or not scanned yet; the kept folder lying inside the merged one; nothing
@@ -189,6 +191,10 @@ def check_merge(db, merged_folder, kept_folder) -> MergeCheck:
         if why:
             check.refused = why
             return check
+    why = _match_refusal(db, check.merged_series_id, check.kept_series_id)
+    if why:
+        check.refused = why
+        return check
     try:
         with os.scandir(dst_dir) as it:
             there = {e.name.casefold() for e in it}
@@ -215,6 +221,22 @@ def check_merge(db, merged_folder, kept_folder) -> MergeCheck:
         check.refused = ("the folder is empty" if not check.left
                          else "nothing could move - every name in it is left where it is (see below)")
     return check
+
+
+def _match_refusal(db, merged_id: int, kept_id: int) -> Optional[str]:
+    """Why the two series may not be merged by their matches (None: they may): both must be matched to the SAME record,
+    and both matches Confirmed (owner, 2026-10-17: "Confirmed only")."""
+    from .same_series import matches_of, merge_refusal
+
+    found = matches_of(db, [merged_id, kept_id])
+    sides = [found.get(merged_id), found.get(kept_id)]
+    unmatched = [c for c in (s[1] for s in sides if s is not None and s[0] is None)]
+    if None in sides or unmatched:
+        names = " and ".join(f"{c.root_name} / {c.name}" for c in unmatched) or "a folder"
+        return f"{names} has no confirmed MangaUpdates match - match it first"
+    if sides[0][0] != sides[1][0]:
+        return "the two folders are matched to different series"
+    return merge_refusal([sides[0][1], sides[1][1]])
 
 
 def confirm_text(check: MergeCheck) -> Tuple[str, str, str]:
