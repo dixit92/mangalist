@@ -14,6 +14,9 @@ Owner, 2026-10-13: "we need a dark mode option. Switching from animefetch to Man
   ``-soft`` of its dark ``:root``), so a MangaPixer left on violet and MangaList's Dark look alike (owner, 2026-10-15:
   "Yes" to taking violet over the blue Dark first shipped with). Light keeps MangaList's blue. Every text token reads
   at WCAG AA (4.5:1) on the surfaces it is drawn on (``tests/test_palette.py``).
+- **Wanted** (empty folders: Wanted - official available / awaiting / scanlation, plain Wanted) is **orchid** in both
+  palettes (owner, 2026-10-16: "another hue"): it was violet, the same violet as Dark's accent. Orchid is a hue no other
+  badge or accent uses (``tests/test_palette.py`` keeps every badge text 40 degrees or more from it, and from the accent).
 - **Not tracked** (Track completion off in MangaPixer) has its own badge colour in both palettes (owner, 2026-10-15:
   "a new color ... Theme sensitive"): MangaPixer's teal, which no other state uses, so it no longer reads as the quiet
   grey of Up to date.
@@ -120,7 +123,7 @@ LIGHT = Palette(
     busy_row="#dce6fa", tooltip_bg="#161616", tooltip_text="#ffffff",
     ok_bg="#e7f3ec", ok_text="#1d5e36", warn_bg="#fdf0e3", warn_text="#8a3f00", bad_bg="#fbeaea", bad_text="#8b1d1d",
     info_bg="#e8eefb", info_text="#1f4fb8", neutral_bg="#ededea", neutral_text="#4a4a47", quiet_bg="#eef0f2",
-    quiet_text="#3a3f45", wanted_bg="#f1ecfa", wanted_text="#5a2d91",
+    quiet_text="#3a3f45", wanted_bg="#fbe8f6", wanted_text="#86206b",     # orchid, 2026-10-16 (was violet)
     untracked_bg="#e3f2ef", untracked_text="#00655a",       # added 2026-10-15: MangaPixer's light-base teal
     warn_line="#e8c9a4", warn_hover="#fae4cc", bad_fill="#8b1d1d", bad_fill_hover="#6e1616", bad_line="#d9a3a3",
     caution_text="#9a5b00", error_text="#b71c1c",
@@ -182,6 +185,11 @@ MP_VIOLET_SOFT = "#d8ccff"          # --mp-accent-soft (violet)
 # --mp-accent of the light base (violet): the deeper violet a primary button darkens to under the mouse, as blue's
 # tone 40 did (white on it 7.6:1).
 MP_VIOLET_DEEP = "#5b33c9"
+# The Wanted badge's own hue (owner, 2026-10-16, answer 81: "another hue" - it was the violet of Dark's accent): orchid, a
+# magenta between the accent's violet (hue 253) and the Missing chapters badge's red (hue 5 / 351), 62 and 45 degrees from
+# them; no other badge or accent sits within 60 degrees of it, in either palette.
+ORCHID = "#f5a3e0"                  # hue 315: the Wanted text in Dark (7.3:1 on its badge)
+ORCHID_STRONG = "#c2379d"           # the tint of the Wanted badge in Dark, as MP_SUCCESS_STRONG tints OK
 MP_TEAL = "#80cbc4"                 # --mp-teal
 MP_TEAL_LIGHT = "#00655a"           # --mp-teal on the light base
 MP_WARN = "#ffcc80"                 # --mp-warn
@@ -217,7 +225,7 @@ DARK = Palette(
     info_bg=mix(MP_BLUE_STRONG, _ON, 0.22), info_text=MP_BLUE,
     neutral_bg=MP_SURFACE_HIGH, neutral_text=MP_TEXT_SECONDARY,
     quiet_bg=mix(MP_INFO, _ON, 0.08), quiet_text=MP_TEXT_SECONDARY,
-    wanted_bg=mix(MP_VIOLET_STRONG, _ON, 0.22), wanted_text=MP_VIOLET,
+    wanted_bg=mix(ORCHID_STRONG, _ON, 0.22), wanted_text=ORCHID,
     untracked_bg=mix(MP_TEAL, _ON, 0.16), untracked_text=MP_TEAL,
     warn_line=mix(MP_WARN, _ON, 0.35), warn_hover=mix(MP_WARN_STRONG, _ON, 0.26), bad_fill=MP_ERROR_LIGHT,
     bad_fill_hover=MP_ERROR_STRONG_LIGHT, bad_line=mix(MP_ERROR, _ON, 0.40), caution_text=MP_CAUTION,

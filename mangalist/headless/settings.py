@@ -9,9 +9,9 @@ Variable                       Default             Meaning
 ``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the find pass runs (only with downloads on).
 ``MANGALIST_DOWNLOADS_SCHEDULE`` ``every 1h``      When to file finished downloads and remove completed
                                                    torrents (the ``downloads`` job; only with downloads on).
-``MANGALIST_CLEAN_RECORDS_SCHEDULE`` ``off``       When to clear finished download records (``daily@05:30``,
-                                                   ``weekly@sun 05:30`` or ``monthly@1 05:30``: the period is
-                                                   also how old a record must be to go). Off until chosen.
+``MANGALIST_CLEAN_RECORDS_SCHEDULE`` ``weekly@sun 05:30`` When to clear finished download records
+                                                   (``daily@05:30``, ``weekly@sun 05:30``, ``monthly@1 05:30`` or
+                                                   ``off``: the period is also how old a record must be to go).
 ``MANGALIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
 ``MANGALIST_MANGAPIXER_SYNC_SCHEDULE`` ``daily@03:15`` When to sync the MangaPixer source (before the rescan;
                                                    skipped while no MangaPixer server is set up).
@@ -63,7 +63,9 @@ DEFAULT_RESCAN = "daily@03:30"
 DEFAULT_DISPATCH = "daily@04:30"
 DEFAULT_MANGAPIXER = "daily@03:15"
 DEFAULT_DOWNLOADS_SCHEDULE = "every 1h"
-DEFAULT_CLEAN_RECORDS = "off"           # owner, 2026-10-15: a setting, user clearable - nothing is cleared until chosen
+# owner, 2026-10-15: a setting, user clearable; 2026-10-16 (answer 70, "Weekly"): a fresh install clears records older
+# than a week, weekly (Sunday 05:30, after the rescan and the find pass). A stored choice - Off included - is kept.
+DEFAULT_CLEAN_RECORDS = "weekly@sun 05:30"
 
 
 class ScheduleSpec(NamedTuple):

@@ -174,6 +174,10 @@ class TopBar(QWidget):
     def set_download_count(self, count: Optional[int]) -> None:
         self.tab_download.set_badge(count)
 
+    def set_download_busy(self, busy: bool) -> None:
+        """The Download tab's badge shows a spinner while its list waits for the series' states."""
+        self.tab_download.set_busy(busy)
+
     def set_current(self, tab: int) -> None:
         (self.tab_download if tab == TAB_DOWNLOAD else self.tab_list).setChecked(True)
 

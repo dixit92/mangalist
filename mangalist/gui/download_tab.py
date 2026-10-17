@@ -510,6 +510,13 @@ class DownloadTab(QWidget):
             self._show_series(self._current, now=False)      # its wanted volumes changed: look again
         self.count_changed.emit(self.badge_count())
 
+    def set_waiting(self, waiting: bool) -> None:
+        """The To get list is waiting for the series' states (the window sends it when they are in): the group chips
+        show a spinner in place of their count instead of the numbers of the list before. Found is not affected (its
+        findings are read from the ledger, not from states)."""
+        for group, chip in self.group_chips.items():
+            chip.set_busy(waiting and group != GROUP_FOUND)
+
     def badge_count(self) -> int:
         """The tab's badge: the series to get plus the findings waiting for the owner."""
         return len(self._by_folder) + len(self._findings)
