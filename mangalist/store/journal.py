@@ -80,6 +80,7 @@ import ctypes
 import errno
 import json
 import logging
+import math
 import os
 import shutil
 from contextlib import contextmanager
@@ -1073,23 +1074,27 @@ class MoveFollower:
 
     def __init__(self, journal: "Journal"):
         self.journal = journal
-        self._moves: Optional[Dict[str, List[Tuple[int, str]]]] = None
-        self._folders: List[Tuple[int, str, str]] = []          # (plan id, source key, destination) of folder moves
+        # A move's place is (plan id, step seq): a plan's own steps run in seq order, so the renamer's folder rename
+        # that follows its file renames in ONE plan is still "after" them (owner, 2026-10-17: completed torrents
+        # were not removed - the follower stopped at the old folder name).
+        self._moves: Optional[Dict[str, List[Tuple[Tuple[int, int], str]]]] = None
+        self._folders: List[Tuple[Tuple[int, int], str, str]] = []  # (place, source key, destination) of folder moves
         self._plans: List[Tuple[int, str]] = []                 # (id, created_at) of every plan
 
-    def _read(self) -> Dict[str, List[Tuple[int, str]]]:
+    def _read(self) -> Dict[str, List[Tuple[Tuple[int, int], str]]]:
         if self._moves is None:
-            moves: Dict[str, List[Tuple[int, str]]] = {}
+            moves: Dict[str, List[Tuple[Tuple[int, int], str]]] = {}
             try:
                 for plan in self.journal.list_plans():
                     self._plans.append((plan.id, plan.created_at))
                     for step in plan.steps:
                         if step.op != "move" or step.state != "done":
                             continue
-                        if step.is_dir:     # a moved folder (Move to library) carries every file inside it along
-                            self._folders.append((plan.id, _key(step.src), _norm(step.dst)))
+                        place = (plan.id, step.seq)
+                        if step.is_dir:     # a moved folder (Move to library, a series folder renamed to the scheme)
+                            self._folders.append((place, _key(step.src), _norm(step.dst)))   # carries its files along
                         else:
-                            moves.setdefault(_key(step.src), []).append((plan.id, step.dst))
+                            moves.setdefault(_key(step.src), []).append((place, step.dst))
             except Exception:  # noqa: BLE001 - no journal: the recorded path is all that is known
                 _log.debug("Journal: the applied moves could not be read", exc_info=True)
             self._moves = moves
@@ -1102,16 +1107,17 @@ class MoveFollower:
         return max((pid for pid, created in self._plans if created < when), default=0)
 
     def current_path(self, path: str, after_plan: int) -> str:
-        """*path* followed through the moves applied by plans after *after_plan*, each once, in plan order."""
+        """*path* followed through the moves applied by plans after *after_plan*, each once, in plan and step order."""
         moves = self._read()
         seen = set()
-        current, since = str(path), after_plan
+        current, since = str(path), (after_plan, math.inf)
         while (_key(current), since) not in seen:
             seen.add((_key(current), since))
             key = _key(current)
-            later = [(pid, dst) for pid, dst in moves.get(key, ()) if pid > since]
-            later += [(pid, dst + _norm(current)[len(src):]) for pid, src, dst in self._folders
-                      if pid > since and key.startswith(src.rstrip(os.sep) + os.sep) and len(_norm(current)) == len(key)]
+            later = [(place, dst) for place, dst in moves.get(key, ()) if place > since]
+            later += [(place, dst + _norm(current)[len(src):]) for place, src, dst in self._folders
+                      if place > since and key.startswith(src.rstrip(os.sep) + os.sep)
+                      and len(_norm(current)) == len(key)]
             if not later:
                 break
             since, current = min(later)
