@@ -325,6 +325,7 @@ def test_same_series_in_two_folders_side_by_side(views, lib, tmp_path):
     view.set_library_scope([other.root.id])                          # the twin lies in the other library: still shown
     assert len(view.same_series.pairs) == 1 and len(view.same_series.splits) == 1
     view.set_library_scope([999])
+    view._render_series()                                            # (a hidden view renders when it is shown)
     assert view.same_series.pairs == [] and any("No series is held in two folders" in t for t in texts(view))
     assert not view.splits_heading.isVisibleTo(view)
 

@@ -860,8 +860,8 @@ class DuplicatesView(QWidget):
         if scope == self._root_ids:
             return
         self._root_ids = scope
-        self._render_series()                               # the pairs touching the library picked (already found)
         if self.isVisible():
+            self._render_series()                           # the pairs touching the library picked (already found)
             self.refresh()
 
     def set_series_link(self, link: Optional[Callable[[str], Optional[str]]]) -> None:
