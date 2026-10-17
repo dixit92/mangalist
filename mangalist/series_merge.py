@@ -6,13 +6,26 @@ It reuses Move to library's machinery (:mod:`mangalist.library_move`): the same 
 handling and undo.
 
 **What moves.** Each direct child of the merged-away folder - a file, or a sub-folder as a whole (``Season 2``,
-``Extras``, a subseries) - under its own name into the kept folder: ONE journal plan (moves only, never deletes,
-write-ahead, crash recovery, undo) - within one library folder a plan of that root
-(:meth:`~mangalist.store.journal.Journal.plan`), across two a cross-root plan with files allowed
-(:meth:`~mangalist.store.journal.Journal.plan_across_roots` ``files=True``). Nothing is ever replaced or merged
-deeper: a name the kept folder already has (compared without case, as Windows and macOS shares do) is LEFT where it is
-and reported, so the owner compares the two himself; so is a symbolic link, a MangaList lock file and a name Windows
-cannot hold. A nested copy (``Name/Name``) only goes into the folder it lies in (:meth:`SamePair.merge_choices`).
+``Extras``, a subseries) - into the kept folder: ONE journal plan (moves only, write-ahead, crash recovery, undo) -
+within one library folder a plan of that root (:meth:`~mangalist.store.journal.Journal.plan`), across two a cross-root
+plan with files allowed (:meth:`~mangalist.store.journal.Journal.plan_across_roots` ``files=True``). Nothing is ever
+replaced. A FILE whose name the kept folder already has (compared without case, as Windows and macOS shares do) is
+compared by content (owner, 2026-10-17: "Both, by content"):
+
+- **byte-identical** (same size and the same SHA-256 of the whole file): the merged-away copy is offered for DELETION in
+  the confirmation, listed by name, and deleted after the owner's yes through :func:`mangalist.duplicates.delete_checked`
+  (size and time as listed, under the roots' locks) - only while the kept copy is still there as compared. A refused
+  delete is reported and the file stays (and so does its folder). A deleted copy cannot come back with Undo; the
+  confirmation says so;
+- **different content**: moved in, in the same plan, under a suffixed name that names the source library and keeps the
+  parsed chapter / volume number - ``Name v01 (from Other-Manga-Ongoing).cbz`` (or the tag inside the name's last
+  ``[...]`` / as ``{from ...}`` when the parser would otherwise read the name differently, :func:`suffixed_name`), with a
+  counter when that name is taken too - so the per-file duplicate review lists both and the owner picks. Undo puts it
+  back under its own name.
+
+A SUB-FOLDER whose name the kept folder has is left where it is and reported (owner: "leave and report"), and so is a
+symbolic link, a MangaList lock file and a name Windows cannot hold. A nested copy (``Name/Name``) only goes into the
+folder it lies in (:meth:`SamePair.merge_choices`).
 
 **Refused up front, with the reason** (:func:`check_merge`; nothing moves): two folders not matched to the same record,
 or a side whose match is not Confirmed (owner, 2026-10-17: "Confirmed only" - an Auto match, MangaPixer's or the own
@@ -47,9 +60,11 @@ download files into the kept folder.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -63,6 +78,7 @@ from .library_move import (
     _series_ids_under,
     _under,
 )
+from .duplicates import DiscardRefused, delete_checked, file_as_listed, human_size, other_numbers, stated_unit
 from .store.journal import ACROSS_FILESYSTEMS, Journal, PlanStateError, StepRefused
 from .store.lock import LOCK_NAME, LockError
 from .store.names import windows_name_problem
@@ -84,6 +100,22 @@ def _items(n: int) -> str:
     return f"{n} item" if n == 1 else f"{n} items"
 
 
+@dataclass(frozen=True)
+class Identical:
+    """A file of the merged-away folder byte-identical to the kept folder's file of the same name, as compared."""
+
+    path: str                           # the copy to delete (merged-away folder)
+    size: int
+    modified: str                       # ISO, as delete_checked compares it
+    kept_path: str                      # the copy that stays
+    kept_size: int
+    kept_modified: str
+
+    @property
+    def name(self) -> str:
+        return os.path.basename(self.path)
+
+
 @dataclass
 class MergeCheck:
     """What merging *merged_folder* into *kept_folder* would do: the moves, the names left where they are, or why not."""
@@ -97,12 +129,14 @@ class MergeCheck:
     merged_root_id: Optional[int] = None
     kept_root_id: Optional[int] = None
     moves: List[Tuple[str, str]] = field(default_factory=list)      # (src, dst) absolute
+    suffixed: List[Tuple[str, str]] = field(default_factory=list)   # (name, the new name it moves in under)
+    identical: List["Identical"] = field(default_factory=list)      # byte-identical copies offered for deletion
     left: List[Tuple[str, str]] = field(default_factory=list)       # (name, why it stays)
     refused: Optional[str] = None
 
     @property
     def ok(self) -> bool:
-        return self.refused is None and bool(self.moves)
+        return self.refused is None and bool(self.moves or self.identical)
 
     @property
     def across(self) -> bool:
@@ -119,6 +153,9 @@ class MergeResult:
     merged_folder: str = ""
     kept_folder: str = ""
     removed: bool = False               # the emptied folder was removed (undo: made again)
+    suffixed: List[Tuple[str, str]] = field(default_factory=list)
+    deleted: List[str] = field(default_factory=list)                # identical copies deleted (names)
+    not_deleted: List[Tuple[str, str]] = field(default_factory=list)  # (name, why the delete was refused)
 
     @property
     def ok(self) -> bool:
@@ -197,12 +234,14 @@ def check_merge(db, merged_folder, kept_folder) -> MergeCheck:
         return check
     try:
         with os.scandir(dst_dir) as it:
-            there = {e.name.casefold() for e in it}
+            there = {e.name.casefold(): e.name for e in it}
         with os.scandir(src_dir) as it:
             children = sorted(it, key=lambda e: (e.name.casefold(), e.name))
     except OSError as exc:
         check.refused = f"a folder cannot be read ({exc.strerror or exc})"
         return check
+    taken = set(there)                                  # names (case-folded) the kept folder will hold
+    same_named = []
     for e in children:
         name = e.name
         if name.startswith(LOCK_NAME):
@@ -212,15 +251,104 @@ def check_merge(db, merged_folder, kept_folder) -> MergeCheck:
         elif not (e.is_file(follow_symlinks=False) or e.is_dir(follow_symlinks=False)):
             check.left.append((name, "not a plain file or folder"))
         elif name.casefold() in there:
-            check.left.append((name, "the folder kept already has this name (nothing is replaced)"))
+            same_named.append(e)
         elif windows_name_problem(name):
             check.left.append((name, f"the name cannot be kept on Windows ({windows_name_problem(name)})"))
         else:
             check.moves.append((os.path.join(src_dir, name), os.path.join(dst_dir, name)))
-    if not check.moves:
+            taken.add(name.casefold())
+    from .classifier import parse_folder_name
+
+    title = parse_folder_name(os.path.basename(dst_dir))[0]
+    library = roots[rid_m].name
+    for e in same_named:                                # after the plain moves: a new name never takes one of theirs
+        name, src = e.name, os.path.join(src_dir, e.name)
+        other = os.path.join(dst_dir, there[name.casefold()])
+        if e.is_dir(follow_symlinks=False):
+            check.left.append((name, "the folder kept already has a folder of this name (sub-folders are not merged)"))
+            continue
+        if os.path.islink(other) or not os.path.isfile(other):
+            check.left.append((name, "the folder kept has a folder or link of this name (nothing is replaced)"))
+            continue
+        try:
+            same = same_content(src, other)
+            if same:
+                (size, modified), (ksize, kmodified) = file_as_listed(src), file_as_listed(other)
+        except (OSError, TypeError) as exc:
+            check.left.append((name, f"it cannot be read to compare ({getattr(exc, 'strerror', None) or exc})"))
+            continue
+        if same:
+            check.identical.append(Identical(src, size, modified, other, ksize, kmodified))
+            continue
+        new = suffixed_name(name, library, taken, title)
+        problem = windows_name_problem(new)
+        if problem:
+            check.left.append((name, f"the new name cannot be kept on Windows ({problem})"))
+            continue
+        taken.add(new.casefold())
+        check.moves.append((src, os.path.join(dst_dir, new)))
+        check.suffixed.append((name, new))
+    if not check.moves and not check.identical:
         check.refused = ("the folder is empty" if not check.left
                          else "nothing could move - every name in it is left where it is (see below)")
     return check
+
+
+# --- same-named files ----------------------------------------------------------------------------------------------
+
+_CHUNK = 1024 * 1024
+
+
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(_CHUNK), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def same_content(a: str, b: str) -> bool:
+    """Two plain files are byte-identical: the same size and the same SHA-256 of their whole content."""
+    if os.path.getsize(a) != os.path.getsize(b):
+        return False
+    return _sha256(a) == _sha256(b)
+
+
+def _reads_as(name: str, title: str):
+    """What the duplicate review reads from a file name: (kind, number) and the other numbers it states."""
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from .inventory import units_from_parsed
+    from .parsing import ParseContext, parse_name
+
+    units = units_from_parsed(name, parse_name(name, ParseContext(series_title=title)), 0)
+    stated = stated_unit([SimpleNamespace(**{k: getattr(u, k, None) for k in
+                                             ("kind", "vol_from", "vol_to", "ch_from", "ch_to", "group_name")})
+                          for u in units])
+    number = stated.number if stated is not None else Decimal(0)
+    return (stated.kind, stated.number) if stated else None, other_numbers(name, number, title)
+
+
+def suffixed_name(name: str, library: str, taken, title: str = "") -> str:
+    """A new name for a file of the library *library* whose name the kept folder has: a ``from <library>`` tag that
+    keeps what the duplicate review reads from the name (its chapter / volume number and the other numbers in it), so
+    the two copies are grouped there - ``(from X)`` after the name, else inside its last ``[...]``, else ``{from X}`` -
+    with a counter (``from X 2``) when that name is taken (*taken*: case-folded names). Never one in *taken*."""
+    stem, ext = os.path.splitext(name)
+    tag_name = re.sub(r"[\[\](){}]", "-", library).strip() or "another library"
+    want = _reads_as(name, title)
+    forms = [lambda t: f"{stem} ({t}){ext}", lambda t: f"{stem} {{{t}}}{ext}"]
+    if stem.endswith("]"):
+        forms.insert(1, lambda t: f"{stem[:-1]} ({t})]{ext}")
+    tag = f"from {tag_name}"
+    form = next((f for f in forms if _reads_as(f(tag), title) == want), forms[0])
+    counter = 1
+    while True:
+        candidate = form(tag + (f" {counter}" if counter > 1 else ""))
+        if candidate.casefold() not in taken:
+            return candidate
+        counter += 1
 
 
 def _match_refusal(db, merged_id: int, kept_id: int) -> Optional[str]:
@@ -241,23 +369,44 @@ def _match_refusal(db, merged_id: int, kept_id: int) -> Optional[str]:
 
 def confirm_text(check: MergeCheck) -> Tuple[str, str, str]:
     """(window title, text, the Merge button's label) of the confirmation."""
-    n = len(check.moves)
-    lines = [f"Move {_items(n)} from", f"    {check.merged_where}", "into", f"    {check.kept_where}?", ""]
-    lines += [f"    {os.path.basename(src)}" for src, _dst in check.moves[:12]]
-    if n > 12:
-        lines.append(f"    ... and {n - 12} more")
-    lines += ["", "Each file and sub-folder moves under its own name (nothing is copied, replaced or deleted). "
-                  "The folder kept keeps its MangaUpdates link, settings and download history; once the other folder "
-                  "is empty it is removed and its series joins the one kept. Then the duplicate files of the kept "
-                  f"folder are listed for you to review. {UNDO_HINT}"]
-    if check.across:
+    n, d = len(check.moves), len(check.identical)
+    renamed = dict((new, old) for old, new in check.suffixed)
+    plain = [src for src, dst in check.moves if os.path.basename(dst) not in renamed]
+    lines = [f"Merge {check.merged_where}", f"into {check.kept_where}?", ""]
+    if plain:
+        lines.append(f"Moved in under their own names ({_items(len(plain))}):")
+        lines += [f"    {os.path.basename(src)}" for src in plain[:12]]
+        if len(plain) > 12:
+            lines.append(f"    ... and {len(plain) - 12} more")
+    if check.suffixed:
+        lines += ["", f"Moved in under a new name - the folder kept has a different file of that name; the duplicate "
+                      f"review then lists both ({_items(len(check.suffixed))}):"]
+        lines += [f"    {old}  ->  {new}" for old, new in check.suffixed[:12]]
+        if len(check.suffixed) > 12:
+            lines.append(f"    ... and {len(check.suffixed) - 12} more")
+    if d:
+        lines += ["", f"{d} identical cop{'y' if d == 1 else 'ies'} will be DELETED - byte for byte the same as the "
+                      "file of that name in the folder kept. Deleted for good: Undo cannot bring "
+                      f"{'it' if d == 1 else 'them'} back."]
+        lines += [f"    {c.name}  ({human_size(c.size)})" for c in check.identical[:12]]
+        if d > 12:
+            lines.append(f"    ... and {d - 12} more")
+    lines += ["", "Nothing is copied or replaced. The folder kept keeps its MangaUpdates link, settings and download "
+                  "history; once the other folder is empty it is removed and its series joins the one kept. Then the "
+                  "duplicate files of the kept folder are listed for you to review."
+                  + (f" {UNDO_HINT} (the moves only)" if n else " Nothing moves, so there is nothing to undo.")]
+    if check.across and n:
         lines += ["", "The two folders are in different library folders: if the system refuses to move files between "
                       "them, MangaList says so and you move them by hand."]
     if check.left:
         lines += ["", "Left where they are:"] + [f"    {name} - {why}" for name, why in check.left[:12]]
         if len(check.left) > 12:
             lines.append(f"    ... and {len(check.left) - 12} more")
-    return "Merge into this folder?", "\n".join(lines), f"Merge {_items(n)}"
+    if n:
+        label = f"Merge {_items(n)}" + (f" and delete {d}" if d else "")
+    else:
+        label = f"Delete {d} identical cop{'y' if d == 1 else 'ies'}"
+    return "Merge into this folder?", "\n".join(lines), label
 
 
 # --- merging -----------------------------------------------------------------------------------------------------
@@ -296,7 +445,8 @@ def merge_folders(db, check: MergeCheck, *, journal: Optional[Journal] = None,
     if root_m is None or root_k is None:
         return _refusal("that library folder is no longer configured.", check)
     res = MergeResult(status="merged", message="", merged_folder=check.merged_folder, kept_folder=check.kept_folder,
-                      left=list(check.left))
+                      left=list(check.left), suffixed=list(check.suffixed))
+    plan = None
     with scan_lock(db, wait=scan_wait, what="Merge same series") as held:
         if not held:
             return _refusal(SCAN_RUNNING, check)
@@ -309,37 +459,48 @@ def merge_folders(db, check: MergeCheck, *, journal: Optional[Journal] = None,
         note = f"{check.merged_where} into {check.kept_where}"
         try:
             with journal.lock_roots(plan_roots) as locks:
-                try:
-                    if check.across:
-                        plan = journal.plan_across_roots(MERGE_REASON, check.moves, plan_roots, note=note, files=True)
-                    else:
-                        plan = journal.plan(MERGE_REASON, check.moves, root_path=root_k.path, note=note)
-                except StepRefused as exc:
-                    return _refusal(f"{exc}", check)
-                plan = journal.apply(plan.id, lock=locks)
-                res.plan_id = plan.id
-                res.moved = [(s.src, s.dst) for s in plan.steps if s.state == "done"]
+                if check.moves:
+                    try:
+                        if check.across:
+                            plan = journal.plan_across_roots(MERGE_REASON, check.moves, plan_roots, note=note,
+                                                             files=True)
+                        else:
+                            plan = journal.plan(MERGE_REASON, check.moves, root_path=root_k.path, note=note)
+                    except StepRefused as exc:
+                        return _refusal(f"{exc}", check)
+                    plan = journal.apply(plan.id, lock=locks)
+                    res.plan_id = plan.id
+                    res.moved = [(s.src, s.dst) for s in plan.steps if s.state == "done"]
                 identity = None
-                if plan.status == "applied":
+                if plan is None or plan.status == "applied":
+                    _delete_identical(check, [r.path for r in roots.values()], res)
                     res.removed = _remove_if_empty(check.merged_folder)
                     if res.removed:
                         identity = _fold_series(db, check.merged_series_id, check.kept_series_id)
-                _remember(db, plan.id, check, res.removed, identity)
+                if plan is not None:
+                    _remember(db, plan.id, check, res.removed, identity, res.deleted)
         except LockError as exc:
             return _refusal(_locks_text(exc, db), check)
-    if plan.status == "applied":
-        res.message = f"Merged {_items(len(res.moved))} of {check.merged_where} into {check.kept_where}"
+    if plan is None or plan.status == "applied":
+        res.message = (f"Merged {_items(len(res.moved))} of {check.merged_where} into {check.kept_where}"
+                       + (f" ({len(res.suffixed)} under a new name)" if res.suffixed else ""))
+        if res.deleted:
+            res.message += f"; deleted {len(res.deleted)} identical cop{'y' if len(res.deleted) == 1 else 'ies'}"
+        if res.not_deleted:
+            res.message += "; NOT deleted: " + "; ".join(f"{name} ({why})" for name, why in res.not_deleted[:6])
         if res.removed:
             res.message += "; the emptied folder was removed."
-        elif res.left:
-            res.message += (f"; left in {Path(check.merged_folder).name}: "
-                            + ", ".join(name for name, _why in res.left[:6]) + (" ..." if len(res.left) > 6 else "")
-                            + " (the folder kept has the same names - compare them yourself).")
+        elif res.left or res.not_deleted:
+            names = [name for name, _why in res.left] + [name for name, _why in res.not_deleted]
+            res.message += (f"; left in {Path(check.merged_folder).name}: " + ", ".join(names[:6])
+                            + (" ..." if len(names) > 6 else "") + " - so the folder stays.")
         else:
             res.message += "; the folder is not empty, so it was left."
-        res.message += f" {UNDO_HINT}"
-        _log.info("Merge: plan %d moved %d item(s) of %s into %s (folder removed: %s, left: %d)", plan.id,
-                  len(res.moved), check.merged_folder, check.kept_folder, res.removed, len(res.left))
+        res.message += f" {UNDO_HINT}" if plan is not None else " (Nothing moved: there is nothing to undo.)"
+        _log.info("Merge: %s moved %d item(s) of %s into %s (suffixed %d, deleted %d, not deleted %d, folder removed: "
+                  "%s, left: %d)", f"plan {plan.id}" if plan else "no plan", len(res.moved), check.merged_folder,
+                  check.kept_folder, len(res.suffixed), len(res.deleted), len(res.not_deleted), res.removed,
+                  len(res.left))
         return res
     failed = next((s for s in plan.steps if s.state == "failed"), None)
     refused = refusal_text(failed)
@@ -348,11 +509,30 @@ def merge_folders(db, check: MergeCheck, *, journal: Optional[Journal] = None,
     _log.warning("Merge: plan %d %s after %d of %d items: %s", plan.id, plan.status, len(res.moved), len(plan.steps), why)
     if res.moved:
         res.status = "partly"
-        res.message = f"Merged {len(res.moved)} of {_items(len(plan.steps))}; then: {why} {UNDO_HINT}"
+        res.message = (f"Merged {len(res.moved)} of {_items(len(plan.steps))}; then: {why} Nothing was deleted. "
+                       f"{UNDO_HINT}")
     else:
         res.status = "failed"
         res.message = why if refused else f"Merge: nothing moved - {why}"
     return res
+
+
+def _delete_identical(check: MergeCheck, root_dirs: List[str], res: MergeResult) -> None:
+    """Delete the byte-identical copies the owner confirmed - each through :func:`delete_checked` (as listed), and only
+    while the kept copy is still there as compared. The caller holds the roots' locks."""
+    for c in check.identical:
+        if file_as_listed(c.kept_path) != (c.kept_size, c.kept_modified):
+            res.not_deleted.append((c.name, "the copy in the folder kept changed or is gone since the comparison"))
+            continue
+        try:
+            delete_checked(c.path, c.size, c.modified, root_dirs)
+        except DiscardRefused as exc:
+            res.not_deleted.append((c.name, str(exc)))
+            _log.warning("Merge: identical copy not deleted: %s (%s)", c.path, exc)
+            continue
+        res.deleted.append(c.name)
+        _log.info("Merge: deleted %s (%d bytes, modified %s) - byte-identical to %s", c.path, c.size, c.modified,
+                  c.kept_path)
 
 
 def _remove_if_empty(folder: str) -> bool:
@@ -365,10 +545,11 @@ def _remove_if_empty(folder: str) -> bool:
     return True
 
 
-def _remember(db, plan_id: int, check: MergeCheck, removed: bool, identity: Optional[dict]) -> None:
+def _remember(db, plan_id: int, check: MergeCheck, removed: bool, identity: Optional[dict],
+              deleted: Optional[List[str]] = None) -> None:
     value = {"merged_folder": check.merged_folder, "kept_folder": check.kept_folder, "merged_where": check.merged_where,
              "kept_where": check.kept_where, "kept_series_id": check.kept_series_id, "removed": removed,
-             "identity": identity}
+             "identity": identity, "deleted": list(deleted or [])}
     with db.connect() as con:
         con.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     (f"{META_PREFIX}{plan_id}", json.dumps(value, ensure_ascii=False)))
@@ -547,6 +728,10 @@ def undo_merge(db, plan_id: int, *, journal: Optional[Journal] = None, scan_wait
     res = MergeResult(status="undone", message="", plan_id=plan_id, moved=back, merged_folder=merged, kept_folder=kept)
     if after.status == "undone":
         res.message = f"Moved {_items(len(back))} back to {meta.get('merged_where') or merged}."
+        gone = len(meta.get("deleted") or [])
+        if gone:
+            res.message += (f" The {gone} identical cop{'y' if gone == 1 else 'ies'} deleted at the merge cannot come "
+                            "back (the kept folder still has the same file).")
         _log.info("Merge: plan %d undone (%d item(s) back)", plan_id, len(back))
     else:
         stuck = next((s for s in after.steps if s.state == "done" and s.error), None)
@@ -557,5 +742,5 @@ def undo_merge(db, plan_id: int, *, journal: Optional[Journal] = None, scan_wait
     return res
 
 
-__all__ = ["MERGE_REASON", "UNDO_HINT", "EXDEV_TEXT", "REFUSED_TEXT", "MergeCheck", "MergeResult", "MergeRecord",
-           "check_merge", "confirm_text", "merge_folders", "last_merge", "undo_merge", "refusal_text"]
+__all__ = ["MERGE_REASON", "UNDO_HINT", "EXDEV_TEXT", "REFUSED_TEXT", "Identical", "MergeCheck", "MergeResult",
+           "MergeRecord", "same_content", "suffixed_name", "check_merge", "confirm_text", "merge_folders", "last_merge", "undo_merge", "refusal_text"]

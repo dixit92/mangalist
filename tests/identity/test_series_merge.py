@@ -70,30 +70,149 @@ def _ledger(db):
         return sorted(r[0] for r in con.execute("SELECT series_id FROM ledger"))
 
 
-def test_merge_across_libraries_moves_everything_but_a_name_the_kept_folder_has(db, library, library2, two):
+def test_a_same_named_file_with_other_content_moves_in_under_a_suffixed_name(db, library, library2, two):
+    """Owner, 2026-10-17: "Both, by content" - a different file of the same name moves in, named after its library, so
+    the per-file duplicate review lists both; the folder empties."""
+    from mangalist.duplicates import find_duplicate_files
+
     r1, r2 = two
     kept_id = _dress(db, r2, "Summoned Partner (EN)", kind="volumes", mode="auto")
-    gone_id = _dress(db, r1, "Summoned Partner", mu_id=4242)
+    _dress(db, r1, "Summoned Partner", mu_id=4242)
     check = series_merge.check_merge(db, library / "Summoned Partner", library2 / "Summoned Partner (EN)")
-    assert check.ok and check.across
-    assert sorted(Path(s).name for s, _d in check.moves) == ["Extras", "Summoned Partner v01.cbz"]
-    assert check.left == [("Summoned Partner v02.cbz", "the folder kept already has this name (nothing is replaced)")]
+    assert check.ok and check.across and check.identical == [] and check.left == []
+    assert check.suffixed == [("Summoned Partner v02.cbz", "Summoned Partner v02 (from Manga-Ongoing).cbz")]
+    assert sorted(Path(d).name for _s, d in check.moves) == [
+        "Extras", "Summoned Partner v01.cbz", "Summoned Partner v02 (from Manga-Ongoing).cbz"]
     title, text, button = series_merge.confirm_text(check)
-    assert button == "Merge 2 items" and "Manga-Ongoing / Summoned Partner" in text and "Left where they are:" in text
+    assert button == "Merge 3 items" and "Manga-Ongoing / Summoned Partner" in text
+    assert "Summoned Partner v02.cbz  ->  Summoned Partner v02 (from Manga-Ongoing).cbz" in text
     res = series_merge.merge_folders(db, check)
-    assert res.status == "merged" and not res.removed
-    assert "left in Summoned Partner: Summoned Partner v02.cbz" in res.message and series_merge.UNDO_HINT in res.message
+    assert res.status == "merged" and res.removed and "(1 under a new name)" in res.message
     kept = library2 / "Summoned Partner (EN)"
-    assert (kept / "Summoned Partner v01.cbz").is_file() and (kept / "Extras" / "Summoned Partner Art.cbz").is_file()
-    assert (library / "Summoned Partner" / "Summoned Partner v02.cbz").is_file()        # never replaced
-    # the folder still holds a file: it stays its own series; the moved archives belong to the kept one
-    assert db.get_series(r1.id, "Summoned Partner").id == gone_id
+    assert sorted(p.name for p in kept.iterdir()) == [
+        "Extras", "Summoned Partner v01.cbz", "Summoned Partner v02 (from Manga-Ongoing).cbz",
+        "Summoned Partner v02.cbz", "Summoned Partner v03.cbz"]
     moved = {a.rel_path: a.series_id for a in db.list_archives(r2.id)}
-    assert moved["Summoned Partner (EN)/Summoned Partner v01.cbz"] == kept_id
-    assert moved["Summoned Partner (EN)/Extras/Summoned Partner Art.cbz"] == kept_id
+    assert moved["Summoned Partner (EN)/Summoned Partner v02 (from Manga-Ongoing).cbz"] == kept_id
     assert not (library / LOCK_NAME).exists() and not (library2 / LOCK_NAME).exists()
-    rep = scan(db).identity
-    assert rep.archives_new == 0 and rep.archives_missing == 0
+    scan(db)
+    groups = find_duplicate_files(db)
+    assert [(g.kind, g.number, sorted(Path(f.path).name for f in g.files)) for g in groups] == [
+        ("volume", "2", ["Summoned Partner v02 (from Manga-Ongoing).cbz", "Summoned Partner v02.cbz"])]
+
+
+def test_undo_puts_a_suffixed_file_back_under_its_own_name(db, library, library2, two):
+    r1, r2 = two
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    _dress(db, r1, "Summoned Partner", ledger=None)
+    series_merge.merge_folders(db, series_merge.check_merge(db, library / "Summoned Partner",
+                                                            library2 / "Summoned Partner (EN)"))
+    res = series_merge.undo_merge(db, series_merge.last_merge(db).plan_id)
+    assert res.status == "undone"
+    assert sorted(p.name for p in (library / "Summoned Partner").iterdir()) == [
+        "Extras", "Summoned Partner v01.cbz", "Summoned Partner v02.cbz"]
+    assert sorted(p.name for p in (library2 / "Summoned Partner (EN)").iterdir()) == [
+        "Summoned Partner v02.cbz", "Summoned Partner v03.cbz"]
+    assert (library / "Summoned Partner" / "Summoned Partner v02.cbz").read_bytes() != (
+        library2 / "Summoned Partner (EN)" / "Summoned Partner v02.cbz").read_bytes()
+
+
+def test_a_taken_suffixed_name_gets_a_counter(db, library, library2, two):
+    r1, r2 = two
+    make_archive(library2 / "Summoned Partner (EN)" / "Summoned Partner v02 (from Manga-Ongoing).cbz", seed="third")
+    scan(db)
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    _dress(db, r1, "Summoned Partner", ledger=None)
+    check = series_merge.check_merge(db, library / "Summoned Partner", library2 / "Summoned Partner (EN)")
+    assert check.suffixed == [("Summoned Partner v02.cbz", "Summoned Partner v02 (from Manga-Ongoing 2).cbz")]
+    assert series_merge.merge_folders(db, check).removed
+    assert (library2 / "Summoned Partner (EN)" / "Summoned Partner v02 (from Manga-Ongoing).cbz").read_bytes() == (
+        make_archive(library / "x.cbz", seed="third").read_bytes())                     # never replaced
+
+
+def test_suffixed_name_keeps_what_the_review_reads():
+    taken = {"0002 [vol. 0001 ch. 1].cbz"}
+    assert series_merge.suffixed_name("Quest v01.cbz", "Other", set()) == "Quest v01 (from Other).cbz"
+    # an FMD2 name would read its index as a number after "(from ...)": the tag goes inside its brackets
+    assert series_merge.suffixed_name("0002 [Vol. 0001 Ch. 1].cbz", "Other", taken) == "0002 [Vol. 0001 Ch. 1 (from Other)].cbz"
+    assert series_merge.suffixed_name("Quest v01.cbz", "Odd [Lib]", {"quest v01 (from odd -lib-).cbz"}) == (
+        "Quest v01 (from Odd -Lib- 2).cbz")
+
+
+def test_a_byte_identical_copy_is_deleted_after_the_yes_and_the_folder_empties(db, library, library2, two):
+    r1, r2 = two
+    kept = library2 / "Summoned Partner (EN)"
+    make_archive(kept / "Summoned Partner v02.cbz")                                   # the same bytes as the other one
+    scan(db)
+    kept_id = _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    _dress(db, r1, "Summoned Partner", ledger=None)
+    check = series_merge.check_merge(db, library / "Summoned Partner", kept)
+    assert [c.name for c in check.identical] == ["Summoned Partner v02.cbz"] and check.suffixed == []
+    title, text, button = series_merge.confirm_text(check)
+    assert button == "Merge 2 items and delete 1"
+    assert "1 identical copy will be DELETED" in text and "Undo cannot bring it back" in text
+    res = series_merge.merge_folders(db, check)
+    assert res.removed and res.deleted == ["Summoned Partner v02.cbz"] and "deleted 1 identical copy" in res.message
+    assert not (library / "Summoned Partner").exists() and (kept / "Summoned Partner v02.cbz").is_file()
+    assert db.get_series(r2.id, "Summoned Partner (EN)").id == kept_id
+    undo = series_merge.undo_merge(db, series_merge.last_merge(db).plan_id)
+    assert undo.status == "undone" and "The 1 identical copy deleted at the merge cannot come back" in undo.message
+    assert sorted(p.name for p in (library / "Summoned Partner").iterdir()) == ["Extras", "Summoned Partner v01.cbz"]
+
+
+def test_same_size_with_other_bytes_is_not_identical(db, library, library2, two):
+    kept = library2 / "Summoned Partner (EN)" / "Summoned Partner v02.cbz"
+    other = library / "Summoned Partner" / "Summoned Partner v02.cbz"
+    assert kept.stat().st_size == other.stat().st_size and not series_merge.same_content(str(kept), str(other))
+
+
+def test_a_refused_delete_is_reported_and_the_file_and_folder_stay(db, library, library2, two):
+    import os
+
+    r1, r2 = two
+    kept = library2 / "Summoned Partner (EN)"
+    make_archive(kept / "Summoned Partner v02.cbz")
+    scan(db)
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    gone_id = _dress(db, r1, "Summoned Partner", ledger=None)
+    check = series_merge.check_merge(db, library / "Summoned Partner", kept)
+    copy = library / "Summoned Partner" / "Summoned Partner v02.cbz"
+    os.utime(copy, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))       # changed since it was listed
+    res = series_merge.merge_folders(db, check)
+    assert res.status == "merged" and res.deleted == [] and not res.removed
+    assert res.not_deleted == [("Summoned Partner v02.cbz", "it changed since the list was made")]
+    assert "NOT deleted: Summoned Partner v02.cbz" in res.message and "so the folder stays" in res.message
+    assert copy.is_file() and db.get_series(r1.id, "Summoned Partner").id == gone_id   # its own series still
+
+
+def test_only_identical_copies_means_a_delete_and_nothing_to_undo(db, library, library2):
+    make_archive(library / "Lone Copy" / "Lone Copy v01.cbz")
+    make_archive(library2 / "Lone Copy (EN)" / "Lone Copy v01.cbz")
+    r1 = db.add_root(str(library), "Manga-Ongoing")
+    r2 = db.add_root(str(library2), "Manga-Concluded")
+    scan(db)
+    _dress(db, r1, "Lone Copy", ledger=None)
+    kept_id = _dress(db, r2, "Lone Copy (EN)", ledger=None)
+    check = series_merge.check_merge(db, library / "Lone Copy", library2 / "Lone Copy (EN)")
+    assert check.ok and check.moves == [] and series_merge.confirm_text(check)[2] == "Delete 1 identical copy"
+    assert "nothing to undo" in series_merge.confirm_text(check)[1]
+    res = series_merge.merge_folders(db, check)
+    assert res.removed and res.deleted == ["Lone Copy v01.cbz"] and "nothing to undo" in res.message
+    assert db.get_series(r1.id, "Lone Copy") is None and db.get_series(r2.id, "Lone Copy (EN)").id == kept_id
+    assert series_merge.last_merge(db) is None
+
+
+def test_a_same_named_sub_folder_is_left_and_reported(db, library, library2, two):
+    r1, r2 = two
+    make_archive(library2 / "Summoned Partner (EN)" / "Extras" / "Other Art.cbz")
+    scan(db)
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    _dress(db, r1, "Summoned Partner", ledger=None)
+    check = series_merge.check_merge(db, library / "Summoned Partner", library2 / "Summoned Partner (EN)")
+    assert check.left == [("Extras", "the folder kept already has a folder of this name (sub-folders are not merged)")]
+    res = series_merge.merge_folders(db, check)
+    assert not res.removed and "left in Summoned Partner: Extras" in res.message
+    assert (library / "Summoned Partner" / "Extras" / "Summoned Partner Art.cbz").is_file()
 
 
 def test_a_merge_that_empties_the_folder_removes_it_and_folds_its_series_into_the_kept_one(db, library, library2, apart):

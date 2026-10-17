@@ -410,6 +410,7 @@ def test_merge_refused_while_a_download_is_in_progress(views, twins):
     asked = []
     view = views.make(confirm_merge=lambda check: asked.append(check) or True)
     view.merge(str(lib.dir / S), str(other.dir / "Example Series (EN)"))
+    wait_until(views.qapp, lambda: not view._merging)
     assert asked == [] and "Not merged: a download is in progress" in view.report.text()
     assert os.path.exists(lib.dir / S / "Series v01.cbz")
 
@@ -418,6 +419,7 @@ def test_merge_cancelled_moves_nothing(views, twins):
     lib, other = twins
     view = views.make(confirm_merge=lambda check: False)
     view.merge(str(lib.dir / S), str(other.dir / "Example Series (EN)"))
+    wait_until(views.qapp, lambda: not view._merging)
     assert view.status.text() == "Nothing was merged." and os.path.exists(lib.dir / S / "Series v01.cbz")
 
 

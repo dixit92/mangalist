@@ -561,12 +561,13 @@ class DuplicatesView(QWidget):
         if self._blocked:
             self._show_report([f"Not merged: {self._blocked}."], error=True)
             return
-        try:
-            check = series_merge.check_merge(self._db, merged_folder, kept_folder)
-        except Exception as exc:  # noqa: BLE001 - said, nothing moved
-            _log.warning("Merge: the check failed", exc_info=True)
-            self._show_report([f"Not merged: {exc}"], error=True)
-            return
+        # same-named files are compared by content (a hash of each): off the UI thread
+        self._run_merge("Comparing the two folders...",
+                        lambda db=self._db: series_merge.check_merge(db, merged_folder, kept_folder), self._checked)
+
+    def _checked(self, check: series_merge.MergeCheck) -> None:
+        self._merging = ""
+        self._update_summary()
         if not check.ok:
             lines = [f"Not merged: {check.refused}."] + [f"Left where it is: {name} - {why}" for name, why in check.left[:8]]
             self._show_report(lines, error=True)
@@ -591,15 +592,15 @@ class DuplicatesView(QWidget):
             return
         self._run_merge("Moving the files back...", lambda db=self._db: series_merge.undo_merge(db, record.plan_id))
 
-    def _run_merge(self, text: str, fn) -> None:
+    def _run_merge(self, text: str, fn, done=None) -> None:
         self._merging = text
         self.report.hide()
         self._update_summary()
-        self._start(fn, self._merged, self._merge_failed)
+        self._start(fn, done or self._merged, self._merge_failed)
 
     def _merged(self, result: series_merge.MergeResult) -> None:
         self._merging = ""
-        self._show_report([result.message], error=result.status not in ("merged", "undone"))
+        self._show_report([result.message], error=result.status not in ("merged", "undone") or bool(result.not_deleted))
         if result.moved:
             self._after_apply = True                        # busy until the rescan that follows
             kept = result.kept_folder if result.status in ("merged", "partly") else ""
