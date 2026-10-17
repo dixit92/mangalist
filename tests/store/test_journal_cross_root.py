@@ -208,3 +208,18 @@ def test_files_filed_before_a_folder_move_are_followed_into_the_new_folder(journ
     assert follower.current_path(str(filed), plan.id) == str(filed)               # only moves after the given plan
     journal.undo(plan.id)
     assert MoveFollower(journal).current_path(str(filed), before.id) == str(filed)   # an undone move is not followed
+
+
+def test_a_file_renamed_then_its_folder_renamed_in_the_same_plan_is_followed_through_both(journal, roots):
+    """The renamer's plan: the files first (inside the old folder), then the series folder - a later step of the same
+    plan is after the file's rename, so the follower carries on into the new folder."""
+    ongoing, _ = roots
+    filed = ongoing / "Quiet Harbor" / "Quiet Harbor v01.cbz"
+    plan = journal.plan("rename to the scheme", [(filed, ongoing / "Quiet Harbor" / "Vol. 001.cbz"),
+                                                 (ongoing / "Quiet Harbor", ongoing / "Quiet Harbor [Renamed]")],
+                        root_path=ongoing)
+    journal.apply(plan.id)
+    renamed = ongoing / "Quiet Harbor [Renamed]" / "Vol. 001.cbz"
+    assert renamed.is_file()
+    assert MoveFollower(journal).current_path(str(filed), plan.id - 1) == str(renamed)
+    assert MoveFollower(journal).current_path(str(filed), plan.id) == str(filed)   # the plan itself: not after it

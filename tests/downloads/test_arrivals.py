@@ -455,6 +455,25 @@ def test_filed_files_renamed_to_the_scheme_still_let_the_torrent_go(ledger, sent
     assert new.read_bytes() == PACK["Series A v02 (Digital).cbz"]                 # the renamed file survives
 
 
+def test_files_and_their_series_folder_renamed_in_one_plan_still_let_the_torrent_go(ledger, sent, qbt, series):
+    # owner, 2026-10-17: "Why are these still in qbittorrent even after they are complete?" - the renamer renames the
+    # files and then their series folder in ONE plan; the check followed the files and stopped at the old folder
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    journal = Journal(ledger.store)
+    folder = sdir.parent / "Series A [Renamed]"
+    plan = journal.plan("rename to the scheme", [(str(sdir / "Series A v02 (Digital).cbz"), str(sdir / "Vol. 002.cbz")),
+                                                 (str(sdir / "Series A v03 (Digital).cbz"), str(sdir / "Vol. 003.cbz")),
+                                                 (str(sdir), str(folder))], root_path=str(sdir.parent))
+    journal.apply(plan.id)
+    assert (folder / "Vol. 002.cbz").exists() and not sdir.exists()
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [sent.id] and status(ledger, sent) == S.REMOVED
+    assert (folder / "Vol. 003.cbz").read_bytes() == PACK["Series A v03 (Digital).cbz"]
+
+
 def test_a_filed_file_that_is_really_gone_still_keeps_the_torrent(ledger, sent, qbt, series):
     _, sdir = series
     qbt.set(HASH, state="uploading", progress=1.0)
