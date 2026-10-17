@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.45] - 2026-10-17
+
+The forty-fourth MangaList release (testing build): completed torrents are removed again after a rename to the folder scheme.
+
+- **Remove Completed after a folder rename.** A torrent whose volumes were filed before their series folder was renamed to the scheme stayed in qBittorrent at its seed goal ("… is no longer in the library"): MangaList followed the files' renames but not the folder's rename made in the same step. It now follows both, so those torrents are removed on the next downloads pass; Remove now works for them again too, and a replaced volume's check after an upgrade finds it in the renamed folder.
+
 ## [2026.10.44] - 2026-10-17
 
 The forty-third MangaList release (testing build): the same series in two folders, found across every library and merged in one undoable step.
