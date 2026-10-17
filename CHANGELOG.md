@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.42] - 2026-10-17
+
+The forty-first MangaList release (testing build): a finished unlicensed series whose every volume you hold is Complete.
+
+- **No "Vol. 9+" past a finished series' final volume.** When the original edition is finished and you hold every one of its volumes, an unlicensed series is Complete, even where MangaDex's volume list stops short (its translation stopped partway through the last volume). A series still ongoing in the original keeps the open-ended gap, and a volume you lack is still a gap.
+
 ## [2026.10.41] - 2026-10-17
 
 The fortieth MangaList release (testing build): chapter 0 the way MangaPixer counts it, and MangaDex's readable chapters as a chapter target.
