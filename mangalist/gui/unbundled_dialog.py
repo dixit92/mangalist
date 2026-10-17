@@ -38,14 +38,19 @@ def question_text(title: str, ask: UnbundledAsk) -> str:
     """The question's text (rich text) for the series *title*."""
     known = (f" It maps volumes up to {html.escape(ask.mapped_volume)}, which ends with chapter "
              f"{html.escape(ask.mapped_end)}." if ask.mapped_volume and ask.mapped_end else
-             " It maps none of the volumes you hold.")
+             " It maps none of the volumes." if ask.not_held else " It maps none of the volumes you hold.")
+    newest = ("the newest volume out in English, which the folder does not hold yet" if ask.not_held
+              else "the newest volume you hold")
+    after = (f"the first one after volume {html.escape(ask.volume)}" if ask.not_held
+             else "the first one after your volumes")
     again = ""
     if ask.stale:
         again = (f"<br><br>You set the first chapter for volume {html.escape(ask.given_for or '')}; volume "
-                 f"{html.escape(ask.volume)} arrived since, so it may hold chapters after that one.")
+                 f"{html.escape(ask.volume)} {'came out in English' if ask.not_held else 'arrived'} since, so it may hold "
+                 "chapters after that one.")
     return (f"<b>{html.escape(title)}</b>: MangaPixer's volume list does not say which chapter volume "
-            f"{html.escape(ask.volume)} - the newest volume you hold - ends with.{known}{again}<br><br>"
-            "Which is the <b>first chapter to get</b>, the first one after your volumes? MangaList asks once and "
+            f"{html.escape(ask.volume)} - {newest} - ends with.{known}{again}<br><br>"
+            f"Which is the <b>first chapter to get</b>, {after}? MangaList asks once and "
             f"remembers it for this series; change it later from the row menu ({html.escape(UNBUNDLED_FIRST_MENU)}).")
 
 

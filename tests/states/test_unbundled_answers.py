@@ -51,22 +51,24 @@ def choice(first, for_volume):
 
 
 def test_without_an_answer_nothing_more_is_compared_and_the_series_asks():
-    off = state(k(volumes=UNMAPPED), unbundled=False, held_volumes=["1", "2"])
-    on = state(k(volumes=UNMAPPED), held_volumes=["1", "2"])
+    off = state(k(volumes=UNMAPPED), unbundled=False, held_volumes=["1", "2", "3"])
+    on = state(k(volumes=UNMAPPED), held_volumes=["1", "2", "3"])
     assert (on.state, on.gaps) == (off.state, off.gaps)
     ask = on.unbundled_ask
-    assert (ask.volume, ask.mapped_volume, ask.mapped_end, ask.current, ask.needed) == ("2", "1", "8", None, True)
-    assert ask.suggestion == 17 == unbundled_suggestion(k(volumes=UNMAPPED).volumes, Decimal(2))   # 8 per volume
+    assert (ask.volume, ask.mapped_volume, ask.mapped_end, ask.current, ask.needed) == ("3", "1", "8", None, True)
+    assert ask.suggestion == 25 == unbundled_suggestion(k(volumes=UNMAPPED).volumes, Decimal(3))   # 8 per volume
+    assert not ask.not_held
     assert ATTENTION_UNBUNDLED_START in on.needs_attention and ATTENTION_UNBUNDLED_START not in off.needs_attention
     assert any("set the first chapter to get" in r for r in on.reasons)
     assert off.unbundled_ask is None
 
 
 def test_the_answer_says_where_the_chapters_start():
-    st = state(k(volumes=UNMAPPED), choice("17", "2"), held_volumes=["1", "2"])
-    assert gaps(st, GAP_CHAPTER) == [("17", "41")] and st.state == State.MISSING_VOLUMES       # volume 3 still missing
-    assert any(r.startswith("Unbundled chapters from chapter 17 (your first chapter to get") for r in st.reasons)
-    assert st.unbundled_ask.current == "17" and not st.unbundled_ask.needed
+    st = state(k(volumes=UNMAPPED), choice("25", "3"), held_volumes=["1", "2"])
+    assert gaps(st, GAP_CHAPTER) == [("25", "41")] and st.state == State.MISSING_VOLUMES       # volume 3 still missing
+    assert gaps(st, GAP_VOLUME) == [("3", None)]
+    assert any(r.startswith("Unbundled chapters from chapter 25 (your first chapter to get") for r in st.reasons)
+    assert st.unbundled_ask.current == "25" and not st.unbundled_ask.needed
     assert ATTENTION_UNBUNDLED_START not in st.needs_attention
 
 
@@ -77,6 +79,16 @@ def test_held_chapters_after_the_answer_count_and_the_unmapped_volume_keeps_its_
     assert gaps(st, GAP_CHAPTER) == [("31", "41")]
     off = state(k(volumes=UNMAPPED), unbundled=False, **held)
     assert ("9", "16") in gaps(off, GAP_CHAPTER)          # the mixed-folder rule alone cannot tell (no answer)
+
+
+def test_the_question_is_about_the_newest_volume_out_not_the_newest_held():
+    # owner, 2026-10-17: volumes 1-2 held, 1-13 out in English, no volume list - the question was about volume 2,
+    # whose chapters volumes 3-13 bring; it is about volume 13, the first chapter after the volumes out
+    st = state(k(volumes=UNMAPPED), held_volumes=["1", "2"])
+    ask = st.unbundled_ask
+    assert (ask.volume, ask.not_held, ask.needed) == ("3", True, True) and gaps(st, GAP_VOLUME) == [("3", None)]
+    old = state(k(volumes=UNMAPPED), choice("17", "2"), held_volumes=["1", "2"])   # an answer given for volume 2
+    assert old.unbundled_ask.stale and not gaps(old, GAP_CHAPTER)                   # asked again, nothing assumed
 
 
 def test_a_newer_unmapped_volume_makes_it_ask_again():
