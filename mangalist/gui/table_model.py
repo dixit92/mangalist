@@ -227,6 +227,12 @@ class MangaTableModel(QAbstractTableModel):
         # series folder -> (volume numbers, chapter numbers) held by more than one file (lane C's finder, counted by
         # the window off the UI thread)
         self._dupe_files: Dict[str, Tuple[int, int]] = {}
+        # Same series in two folders (mangalist.same_series, found by the window off the UI thread; None until then:
+        # the MangaUpdates title decides, as before): folder -> [(the other folder, "Library / folder")], and the pairs
+        # as (record, title, (folder a, folder b), (root a, root b)). A twin in ANOTHER library counts (owner,
+        # 2026-10-17).
+        self._same: Optional[Dict[str, List[Tuple[str, str]]]] = None
+        self._same_pairs: List[Tuple[str, str, Tuple[str, str], Tuple[int, int]]] = []
         # series folder -> how many files the renamer would rename (Rename pending; counted off the UI thread)
         self._rename_counts: Dict[str, int] = {}
         # folder -> the Title's automatic-downloads chip: the series' own mode where it differs from the default
@@ -709,10 +715,25 @@ class MangaTableModel(QAbstractTableModel):
             return ()
         return tuple(self._dupe_map.get(e.mu_title.strip().lower(), ()))
 
+    def set_same_series(self, report) -> None:
+        """The series held in two folders (a :class:`mangalist.same_series.SameSeriesReport`): from now on they - and
+        no longer a shared MangaUpdates title - make the Duplicates cell, the chip's count and :meth:`duplicate_series`."""
+        self._same = {f: [(c.folder, c.where) for c in copies] for f, copies in report.others_by_folder().items()}
+        self._same_pairs = [(p.key, p.title, p.folders, (p.a.root_id, p.b.root_id)) for p in report.pairs]
+        if self._entries:
+            self.dataChanged.emit(self.index(0, COL_DUPE), self.index(len(self._entries) - 1, COL_DUPE),
+                                  [Qt.DisplayRole, Qt.ToolTipRole, Qt.UserRole])
+
+    def _same_others(self, row: int) -> List[Tuple[str, str]]:
+        return (self._same or {}).get(str(self._entries[row].folder), []) if self.in_scope(row) else []
+
     def is_duplicate(self, row: int) -> bool:
-        """Return True if this row shares an MU title with another row (of the library picked, if any)."""
+        """Return True if this row shares an MU title with another row (of the library picked, if any) - or, once the
+        window found them, when the series is held in another folder too (any library: :meth:`set_same_series`)."""
         if row < 0 or row >= len(self._entries) or not self.in_scope(row):
             return False
+        if self._same is not None:
+            return bool(self._same_others(row))
         e = self._entries[row]
         if e.mu_title is None:
             return False
@@ -723,6 +744,9 @@ class MangaTableModel(QAbstractTableModel):
         """Return list of other row indices that share the same MU title."""
         if row < 0 or row >= len(self._entries) or not self.in_scope(row):
             return []
+        if self._same is not None:
+            others = {f for f, _where in self._same_others(row)}
+            return [r for r, e in enumerate(self._entries) if str(e.folder) in others]
         e = self._entries[row]
         if e.mu_title is None:
             return []
@@ -792,7 +816,7 @@ class MangaTableModel(QAbstractTableModel):
         vols, chs = self.duplicate_files_at(row)
         parts = [f"{vols} vol." if vols else "", f"{chs} ch." if chs else ""]
         if self.is_duplicate(row):
-            others = len(self.get_duplicate_rows(row))
+            others = len(self._same_others(row)) if self._same is not None else len(self.get_duplicate_rows(row))
             parts.append(f"+{others} folder{'s' if others != 1 else ''}")
         return " · ".join(p for p in parts if p)
 
@@ -804,12 +828,21 @@ class MangaTableModel(QAbstractTableModel):
                                              f"{chs} chapter number{'s' if chs != 1 else ''}" if chs else "") if t)
             lines.append(f"{what} held by more than one file (right-click: Review duplicate files)")
         if self.is_duplicate(row):
-            other_folders = [str(self._entries[r].folder.name) for r in self.get_duplicate_rows(row)]
+            other_folders = ([where for _f, where in self._same_others(row)] if self._same is not None
+                             else [str(self._entries[r].folder.name) for r in self.get_duplicate_rows(row)])
             lines.append(f"The same series (MangaUpdates match) is also in: {', '.join(other_folders)}")
         return "\n".join(lines) or None
 
     def duplicate_series(self) -> List[DuplicateSeries]:
-        """The series held in more than one folder (the same MangaUpdates title), for the Duplicates view."""
+        """The series held in more than one folder (the same MangaUpdates title; once the window found them, the
+        same series in two folders with one of them in the library picked), for the Duplicates chip."""
+        if self._same is not None:
+            series: Dict[str, Tuple[str, List[str]]] = {}         # record -> (title, its folders), in pair order
+            for key, title, folders, roots in self._same_pairs:
+                if self._scope is None or self._scope in roots:
+                    held = series.setdefault(key, (title, []))[1]
+                    held.extend(f for f in folders if f not in held)
+            return [DuplicateSeries(title=t, folders=tuple(f)) for t, f in series.values()]
         out = []
         for rows in self._dupe_map.values():
             if len(rows) > 1:
