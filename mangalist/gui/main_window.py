@@ -370,6 +370,7 @@ class MainWindow(QMainWindow):
         self._dupe_file_groups: Optional[int] = None
         self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
         self._dupe_call = None
+        self._same_call = None                      # the same series in two folders, being looked for
         self._wanted_series: List[WantedSeries] = []
         self._wanted_cache: Dict[int, tuple] = {}    # id(entry) -> (entry, its state, series id, its To get entries)
         self._dupe_per_folder: Dict[str, Tuple[int, int]] = {}
@@ -526,6 +527,8 @@ class MainWindow(QMainWindow):
         view = lanes.duplicates_view_class()(self._db, self)
         view.show_in_list.connect(self.show_folder_in_list)
         view.files_deleted.connect(self._on_files_deleted)
+        if hasattr(view, "folders_merged"):         # same series in two folders: a merge (or its undo) moved files
+            view.folders_merged.connect(self._on_folders_merged)
         if hasattr(view, "set_series_link"):
             view.set_series_link(self.mangapixer_series_url)
         lst.set_duplicates_widget(view)
@@ -640,7 +643,7 @@ class MainWindow(QMainWindow):
             self._status_label.setText("Showing all entries" + where)
         elif dupes:
             series, numbers = len(self._model.duplicate_series()), self._scoped_file_groups()
-            self._status_label.setText(f"Duplicates{where}: {series} series in more than one folder, "
+            self._status_label.setText(f"Duplicates{where}: {series} series in two folders, "
                                        f"{numbers} number{'s' if numbers != 1 else ''} held by more than one file")
         else:
             self._status_label.setText(f"Showing {self._proxy.rowCount()} series: {chip_label(key)}{where}")
@@ -1094,8 +1097,38 @@ class MainWindow(QMainWindow):
         self._start_scan([r for r in roots if r.id in scopes], scopes)
         return True
 
+    def _on_folders_merged(self, paths, kept: str) -> None:
+        """The duplicates view merged one series folder into another (or undid it): the identity moved in the database
+        (examined mark, link), both folders are rescanned, and the kept folder's duplicate files are opened for review."""
+        self._apply_identity_changes([(p, kept) for p in paths if kept and p != kept])
+        self._scan_note = "Folders merged" if kept else "Merge undone"      # said with the scan's result
+        if not self._scan_paths(paths):
+            self._scan_note = None
+        if kept:
+            self.review_duplicates(kept)
+
+    def _count_same_series(self) -> None:
+        """The same series in two folders (mangalist.same_series), off the UI thread: the Duplicates column and chip."""
+        if self._same_call is not None:
+            return
+        from .background import start_call
+
+        finder, db = lanes.find_same_series_function(), self._db
+
+        def done(report) -> None:
+            self._model.set_same_series(report)
+            self._update_counts()
+
+        def finished() -> None:
+            self._same_call = None
+
+        self._same_call = start_call(lambda: finder(db), done,
+                                     lambda msg: _log.warning("Looking for series in two folders failed: %s", msg),
+                                     finished)
+
     def _count_duplicate_files(self) -> None:
         """Lane C's duplicate-numbers finder, off the UI thread, for the Duplicates chip's count."""
+        self._count_same_series()
         finder = lanes.find_duplicate_files_function()
         if self._dupe_call is not None:
             return
@@ -1425,6 +1458,7 @@ class MainWindow(QMainWindow):
         self._show_roots()
         # MangaPixer's titles and volume lists name the files: a volume learned, a new title -> Rename pending again.
         self._count_rename_pending()
+        self._count_same_series()                   # its matches decide which folders hold the same series
 
     def _mp_item_for(self, entry: MangaEntry):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
@@ -2908,6 +2942,8 @@ class MainWindow(QMainWindow):
             self._auto_modes.stop()
         if self._dupe_call is not None:
             self._dupe_call.abandon()
+        if self._same_call is not None:
+            self._same_call.abandon()
         if self._scan_retry is not None:
             self._scan_retry.stop()
         if self._rename_call is not None and hasattr(self._rename_call, "abandon"):

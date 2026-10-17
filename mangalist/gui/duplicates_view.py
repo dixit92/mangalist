@@ -2,15 +2,21 @@
 
 Two sections, styled after the approved mockup (UI cycle, 2026-10-08):
 
-- **Series in more than one folder** - the folders of one series side by side (root, file count, size, last change) with
-  "Show in list" and "Open folder". Listing only: nothing here deletes a folder.
+- **Same series in two folders** (:mod:`mangalist.same_series`; owner, 2026-10-17: "duplicate detection doesn't work
+  across library roots") - one series by its MangaUpdates match in two separate folders, in one library folder or two:
+  the two folders side by side (library, files, size, last change, match, the origin's status) with "Show in list",
+  "Open folder" and "Merge into..." (offered only when both matches are Confirmed, else disabled with the reason; which
+  folder is kept; :mod:`mangalist.series_merge`: the other folder's files move
+  into it through the journal, nothing replaced, undoable - "Undo last merge" - then the kept folder's duplicate files
+  are listed for review). Below them, parts of one franchise in different libraries: a notice with "Open folder" only -
+  never merged, they may be kept apart on purpose ("I do it based on completed state").
 - **Duplicate files within a series** - the same chapter / volume number in more than one file of one folder
   (:func:`mangalist.duplicates.find_duplicate_files`, MangaPixer's rule). Every file has Keep / Discard; the default keeps the
   newest (the largest of equally new ones) of each number and never discards them all. "Apply" lists every file to be
   deleted and asks; only then are they deleted (no holding folder), unless a scan or a filing holds the root's lock.
 
-The scan of the duplicates and the deletion run off the UI thread. Deleting goes through
-:func:`mangalist.duplicates.discard_duplicates` only.
+The scan of the duplicates, the deletion and a merge run off the UI thread. Deleting goes through
+:func:`mangalist.duplicates.discard_duplicates` only; a merge deletes nothing (moves only).
 """
 
 from __future__ import annotations
@@ -30,6 +36,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QMenu,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -50,6 +58,8 @@ from ..duplicates import (
     largest,
     newest,
 )
+from .. import series_merge
+from ..same_series import FranchiseSplit, SamePair, SameSeriesReport, SeriesCopy, find_same_series
 from . import theme
 from .background import BackgroundCall, start_call
 from .links import open_folder as open_folder_default, open_link
@@ -268,10 +278,12 @@ class _FileRow(QFrame):
 
 
 class DuplicatesView(QWidget):
-    """Series held in more than one folder, and duplicate files to keep or discard.
+    """The same series in two folders (to merge), and duplicate files to keep or discard.
 
     ``show_in_list(folder)``: the owner wants that series in the List. ``files_deleted(paths)``: these files were deleted
     (the shell rescans). ``groups_found(n)``: the number of duplicate numbers the last scan found (for a chip's count).
+    ``folders_merged(paths, kept)``: a merge (or its undo) moved files between these folders - the shell rescans them
+    and, when *kept* is given, opens this view on the kept folder's duplicate files.
 
     Each series card has its own Apply (that series only) and, when the shell gives :meth:`set_series_link`, "Open in
     MangaPixer" (the series' page there, to judge the copies in its reader). :meth:`focus_series` shows one series only.
@@ -280,16 +292,26 @@ class DuplicatesView(QWidget):
     show_in_list = Signal(str)
     files_deleted = Signal(list)
     groups_found = Signal(int)
+    folders_merged = Signal(list, str)
 
     def __init__(self, db, parent=None, *, confirm: Optional[Callable[[Sequence[DuplicateFile]], bool]] = None,
-                 open_folder: Optional[Callable[[str], object]] = None):
+                 open_folder: Optional[Callable[[str], object]] = None,
+                 confirm_merge: Optional[Callable[[series_merge.MergeCheck], bool]] = None,
+                 confirm_undo: Optional[Callable[[series_merge.MergeRecord], bool]] = None):
         super().__init__(parent)
         self.setObjectName("DuplicatesView")
         theme.bind_sheet(self, style)
         self._db = db
         self._confirm = confirm or (lambda files: _ask_confirmation(self, files))
         self._open_folder = open_folder or open_folder_default
+        self._confirm_merge = confirm_merge or (lambda check: _ask_merge(self, check))
+        self._confirm_undo = confirm_undo or (lambda record: _ask_undo(self, record))
         self._series: List[DuplicateSeries] = []
+        self._same = SameSeriesReport()                     # what the last refresh found (every library)
+        self._same_error = ""
+        self._last_merge: Optional[series_merge.MergeRecord] = None
+        self._merging = ""                                  # "Merging folders..." while a merge / its undo runs
+        self.merge_buttons: List[QPushButton] = []
         self._groups: List[DuplicateGroup] = []
         self._rows: Dict[str, _FileRow] = {}               # path -> its row
         self._by_group: List[Tuple[DuplicateGroup, List[_FileRow]]] = []
@@ -325,16 +347,34 @@ class DuplicatesView(QWidget):
         outer.addWidget(self._scroll, 1)
 
         self.series_heading = _label("", "heading")
+        self.undo_merge_button = _button("Undo last merge", "link")
+        self.undo_merge_button.setToolTip("Move the files of the last merge back where they were")
+        self.undo_merge_button.clicked.connect(lambda: self.undo_last_merge())
+        self.undo_merge_button.hide()
         self.series_box = QVBoxLayout()
         self.series_box.setSpacing(10)
+        self.splits_heading = _label("", "heading")
+        self.splits_note = _label("Parts of one franchise (the same MangaUpdates match) kept in different library "
+                                  "folders - perhaps on purpose, by completed state. Nothing is merged here; this is "
+                                  "only so you know.", "muted")
+        self.splits_note.setWordWrap(True)
+        self.splits_box = QVBoxLayout()
+        self.splits_box.setSpacing(10)
         self.files_heading = _label("", "heading")
         self.show_all_button = _button("Show all series", "link")
         self.show_all_button.clicked.connect(lambda: self.focus_series(None))
         self.show_all_button.hide()
         self.files_box = QVBoxLayout()
         self.files_box.setSpacing(10)
-        self._body_layout.addWidget(self.series_heading)
+        series_head = QHBoxLayout()
+        series_head.addWidget(self.series_heading, 1)
+        series_head.addWidget(self.undo_merge_button)
+        self._body_layout.addLayout(series_head)
         self._body_layout.addLayout(self.series_box)
+        self._body_layout.addSpacing(6)
+        self._body_layout.addWidget(self.splits_heading)
+        self._body_layout.addWidget(self.splits_note)
+        self._body_layout.addLayout(self.splits_box)
         self._body_layout.addSpacing(14)
         files_head = QHBoxLayout()
         files_head.addWidget(self.files_heading, 1)
@@ -380,47 +420,119 @@ class DuplicatesView(QWidget):
         self._render_files()
         self._update_summary()
 
-    # --- the series held in more than one folder ----------------------------------------------------------
+    # --- the same series in two folders --------------------------------------------------------------------
 
     def set_series_duplicates(self, groups: Sequence[DuplicateSeries]) -> None:
+        """The shell's series in more than one folder (by MangaUpdates title; :class:`DuplicateSeries`). Kept for the
+        shell's interface: the section shows what :func:`mangalist.same_series.find_same_series` finds (every
+        :meth:`refresh`, or :meth:`set_same_series`), which also sees a twin in another library."""
         self._series = list(groups)
+
+    def set_same_series(self, report: SameSeriesReport, last_merge: Optional[series_merge.MergeRecord] = None) -> None:
+        """Show *report* (every library; the Library picker narrows it) and the merge that can be undone."""
+        self._same = report
+        self._last_merge = last_merge
         self._render_series()
+
+    @property
+    def same_series(self) -> SameSeriesReport:
+        """What the section shows: the pairs and splits touching the library picked."""
+        return self._same.scoped(self._root_ids)
 
     def _render_series(self) -> None:
         _clear(self.series_box)
-        n = len(self._series)
-        self.series_heading.setText("SERIES IN MORE THAN ONE FOLDER" + (f"  ·  {n}" if n else ""))
-        if not n:
-            self.series_box.addWidget(_label("No series is held in more than one folder.", "muted"))
-            return
-        roots = self._db.list_roots()
-        for series in self._series:
-            card = _frame("card")
-            box = QVBoxLayout(card)
-            box.setContentsMargins(16, 12, 16, 14)
-            box.setSpacing(10)
-            head = QHBoxLayout()
-            head.addWidget(_label(series.title, "title"))
-            head.addWidget(_label(f"{len(series.folders)} folders", "pill"), 0, Qt.AlignVCenter)
-            head.addStretch(1)
-            box.addLayout(head)
-            side = QHBoxLayout()
-            side.setSpacing(12)
-            for folder in series.folders:
-                side.addWidget(self._folder_panel(folder, roots), 1)
-            box.addLayout(side)
-            self.series_box.addWidget(card)
+        _clear(self.splits_box)
+        self.merge_buttons = []
+        shown = self.same_series
+        n = len(shown.pairs)
+        self.series_heading.setText("SAME SERIES IN TWO FOLDERS" + (f"  ·  {n}" if n else ""))
+        self.undo_merge_button.setVisible(self._last_merge is not None)
+        if self._last_merge is not None:
+            self.undo_merge_button.setText(self._last_merge.label)
+        if self._same_error:
+            self.series_box.addWidget(_label(f"Could not look for series in two folders: {self._same_error}", "error"))
+        elif not n:
+            self.series_box.addWidget(_label("Looking for series in two folders..." if self._scanning
+                                             else "No series is held in two folders.", "muted"))
+        for pair in shown.pairs:
+            self.series_box.addWidget(self._pair_card(pair))
+        k = len(shown.splits)
+        self.splits_heading.setText(f"PARTS OF ONE FRANCHISE IN DIFFERENT LIBRARIES  ·  {k}")
+        self.splits_heading.setVisible(bool(k))
+        self.splits_note.setVisible(bool(k))
+        for split in shown.splits:
+            self.splits_box.addWidget(self._split_card(split))
 
-    def _folder_panel(self, folder: str, roots) -> QFrame:
-        root_name, files, size, mtime_ns = self._folder_stats(folder, roots)
+    def _pair_card(self, pair: SamePair) -> QFrame:
+        card = _frame("card")
+        box = QVBoxLayout(card)
+        box.setContentsMargins(16, 12, 16, 14)
+        box.setSpacing(10)
+        head = QHBoxLayout()
+        head.addWidget(_label(pair.title, "title"))
+        where = ("a copy inside the series folder" if pair.kind == "nested"
+                 else "in two libraries" if pair.across_libraries else "in one library")
+        head.addWidget(_label(where, "pill"), 0, Qt.AlignVCenter)
+        head.addStretch(1)
+        merge = _button("Merge into...", "link")
+        merge.setToolTip("Move the files of one folder into the other (nothing is replaced or deleted; undoable), then "
+                         "review the duplicate files of the folder kept")
+        menu = QMenu(merge)
+        for merged, kept in pair.merge_choices():
+            action = menu.addAction(f"Keep {kept.where} (move {merged.name}'s files into it)")
+            action.triggered.connect(lambda _=False, m=merged.folder, k=kept.folder: self.merge(m, k))
+        merge.setMenu(menu)
+        blocked = pair.merge_blocked
+        if blocked:                                         # listed, but only Confirmed matches merge
+            merge.setEnabled(False)
+            merge.setToolTip(f"Not offered: {blocked}")
+        head.addWidget(merge)
+        self.merge_buttons.append(merge)
+        box.addLayout(head)
+        if blocked:
+            note = _label(f"Merge is not offered: {blocked}.", "muted")
+            note.setWordWrap(True)
+            box.addWidget(note)
+        side = QHBoxLayout()
+        side.setSpacing(12)
+        roots = self._db.list_roots()
+        for copy in pair.copies:
+            side.addWidget(self._folder_panel(copy, roots), 1)
+        box.addLayout(side)
+        return card
+
+    def _split_card(self, split: FranchiseSplit) -> QFrame:
+        card = _frame("card")
+        box = QVBoxLayout(card)
+        box.setContentsMargins(16, 12, 16, 12)
+        box.setSpacing(6)
+        head = QHBoxLayout()
+        head.addWidget(_label(split.title, "title"))
+        head.addWidget(_label(f"{len(split.copies)} parts", "pill"), 0, Qt.AlignVCenter)
+        head.addStretch(1)
+        box.addLayout(head)
+        for copy in split.copies:
+            line = QHBoxLayout()
+            line.addWidget(_Elided(copy.where), 1)
+            state = " · ".join(t for t in (f"{copy.files} files", copy.origin_status or "") if t)
+            line.addWidget(_label(state, "muted"))
+            open_ = _button("Open folder", "link")
+            open_.clicked.connect(lambda _=False, f=copy.folder: self._open_folder(f))
+            line.addWidget(open_)
+            box.addLayout(line)
+        return card
+
+    def _folder_panel(self, copy: SeriesCopy, roots) -> QFrame:
+        _root, files, size, mtime_ns = self._folder_stats(copy.folder, roots)
         panel = _frame("folder")
         box = QVBoxLayout(panel)
         box.setContentsMargins(12, 10, 12, 10)
         box.setSpacing(6)
-        box.addWidget(_Elided(folder))
+        box.addWidget(_Elided(copy.folder))
         grid = QVBoxLayout()
         grid.setSpacing(2)
-        for name, value in (("Root", root_name), ("Files", files), ("Size", size), ("Last change", mtime_ns)):
+        for name, value in (("Library", copy.root_name), ("Files", files), ("Size", size), ("Last change", mtime_ns),
+                            ("Match", copy.link), ("Status", copy.origin_status or "-")):
             line = QHBoxLayout()
             key = _label(name, "muted")
             key.setMinimumWidth(84)
@@ -430,14 +542,75 @@ class DuplicatesView(QWidget):
         box.addLayout(grid)
         buttons = QHBoxLayout()
         show = _button("Show in list", "link")
-        show.clicked.connect(lambda _=False, f=folder: self.show_in_list.emit(f))
+        show.clicked.connect(lambda _=False, f=copy.folder: self.show_in_list.emit(f))
         open_ = _button("Open folder", "link")
-        open_.clicked.connect(lambda _=False, f=folder: self._open_folder(f))
+        open_.clicked.connect(lambda _=False, f=copy.folder: self._open_folder(f))
         buttons.addWidget(show)
         buttons.addWidget(open_)
         buttons.addStretch(1)
         box.addLayout(buttons)
         return panel
+
+    # --- merge ----------------------------------------------------------------------------------------------
+
+    def merge(self, merged_folder: str, kept_folder: str) -> None:
+        """Merge *merged_folder* into *kept_folder* (:mod:`mangalist.series_merge`) - after the owner has seen what
+        moves and said yes. Refusals are said, nothing moves."""
+        if self._applying or self._merging or self._scanning:
+            return
+        if self._blocked:
+            self._show_report([f"Not merged: {self._blocked}."], error=True)
+            return
+        # same-named files are compared by content (a hash of each): off the UI thread
+        self._run_merge("Comparing the two folders...",
+                        lambda db=self._db: series_merge.check_merge(db, merged_folder, kept_folder), self._checked)
+
+    def _checked(self, check: series_merge.MergeCheck) -> None:
+        self._merging = ""
+        self._update_summary()
+        if not check.ok:
+            lines = [f"Not merged: {check.refused}."] + [f"Left where it is: {name} - {why}" for name, why in check.left[:8]]
+            self._show_report(lines, error=True)
+            return
+        if not self._confirm_merge(check):
+            self.report.hide()
+            self.status.setText("Nothing was merged.")
+            return
+        self._run_merge("Merging folders...", lambda db=self._db: series_merge.merge_folders(db, check))
+
+    def undo_last_merge(self) -> None:
+        """Undo the last merge (after the owner said yes)."""
+        if self._applying or self._merging or self._scanning:
+            return
+        record = series_merge.last_merge(self._db)
+        if record is None:
+            self._last_merge = None
+            self._render_series()
+            self._show_report(["There is no merge to undo."], error=False)
+            return
+        if not self._confirm_undo(record):
+            return
+        self._run_merge("Moving the files back...", lambda db=self._db: series_merge.undo_merge(db, record.plan_id))
+
+    def _run_merge(self, text: str, fn, done=None) -> None:
+        self._merging = text
+        self.report.hide()
+        self._update_summary()
+        self._start(fn, done or self._merged, self._merge_failed)
+
+    def _merged(self, result: series_merge.MergeResult) -> None:
+        self._merging = ""
+        self._show_report([result.message], error=result.status not in ("merged", "undone") or bool(result.not_deleted))
+        if result.moved:
+            self._after_apply = True                        # busy until the rescan that follows
+            kept = result.kept_folder if result.status in ("merged", "partly") else ""
+            self.folders_merged.emit(result.paths, kept)
+        self.refresh()
+
+    def _merge_failed(self, message: str) -> None:
+        self._merging = ""
+        self._show_report([f"The merge stopped: {message}"], error=True)
+        self.refresh()
 
     def _folder_stats(self, folder: str, roots) -> Tuple[str, str, str, str]:
         """(root name, file count, size, last change) of a series folder as the last scan recorded it."""
@@ -462,7 +635,7 @@ class DuplicatesView(QWidget):
 
     def refresh(self) -> None:
         """Re-read the duplicate files (off the UI thread)."""
-        if self._applying:
+        if self._applying or self._merging:
             return
         self._generation += 1
         generation = self._generation
@@ -470,17 +643,21 @@ class DuplicatesView(QWidget):
         self._scan_error = ""
         self._update_summary()
         db, root_ids = self._db, self._root_ids
-        self._start(lambda: find_duplicate_files(db, root_ids=root_ids),
-                    lambda groups: self._scanned(generation, groups),
+        self._start(lambda: (find_duplicate_files(db, root_ids=root_ids), *_same_series_of(db)),
+                    lambda found: self._scanned(generation, *found),
                     lambda message: self._scan_failed(generation, message))
 
-    def _scanned(self, generation: int, groups: List[DuplicateGroup]) -> None:
+    def _scanned(self, generation: int, groups: List[DuplicateGroup], same: Optional[SameSeriesReport] = None,
+                 last_merge=None, same_error: str = "") -> None:
         if generation != self._generation:
             return                                          # a newer scan is on its way
         self._scanning = False
         if not self._blocked:
             self._after_apply = False
         self._groups = list(groups)
+        if same is not None or same_error:
+            self._same, self._last_merge, self._same_error = same or SameSeriesReport(), last_merge, same_error
+        self._render_series()
         self._render_files()
         self._update_summary()
         self.groups_found.emit(len(self._groups))
@@ -618,6 +795,8 @@ class DuplicatesView(QWidget):
 
     def busy_text(self) -> str:
         """What the view is busy with, or "" (shown next to the moving bar)."""
+        if self._merging:
+            return self._merging
         if self._applying:
             n = self._deleting
             return f"Deleting {n} file{'s' if n != 1 else ''}..."
@@ -630,7 +809,7 @@ class DuplicatesView(QWidget):
     def _update_summary(self) -> None:
         discards = [r.file for _g, rows in self._by_group for r in rows if r.discard]
         total = sum(f.size for f in discards)
-        busy = self._applying or self._scanning
+        busy = self._applying or self._scanning or bool(self._merging)
         working = self.busy_text()
         self.busy_bar.setVisible(bool(working))
         self._body.setEnabled(not working)                  # no Keep / Discard while the list is about to change
@@ -649,7 +828,7 @@ class DuplicatesView(QWidget):
         self.apply_selected_button.setText(f"Apply to selected ({n_series} series, {picked_files} "
                                            f"file{'s' if picked_files != 1 else ''})")
         self.apply_selected_button.setEnabled(bool(picked_files) and not busy and not self._blocked)
-        self.refresh_button.setEnabled(not self._applying)
+        self.refresh_button.setEnabled(not self._applying and not self._merging)
         self.status.setProperty("role", "busy" if working else "muted")
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)
@@ -692,6 +871,7 @@ class DuplicatesView(QWidget):
             return
         self._root_ids = scope
         if self.isVisible():
+            self._render_series()                           # the pairs touching the library picked (already found)
             self.refresh()
 
     def set_series_link(self, link: Optional[Callable[[str], Optional[str]]]) -> None:
@@ -791,6 +971,39 @@ class DuplicatesView(QWidget):
     def closeEvent(self, event) -> None:
         self.stop()
         super().closeEvent(event)
+
+
+def _same_series_of(db) -> Tuple[Optional[SameSeriesReport], Optional[series_merge.MergeRecord], str]:
+    """(every series in two folders, the merge that can be undone, why not found) - off the UI thread; a failure here
+    must not hide the duplicate files."""
+    try:
+        return find_same_series(db), series_merge.last_merge(db), ""
+    except Exception as exc:  # noqa: BLE001 - said in the section
+        _log.warning("Same series: looking for series in two folders failed", exc_info=True)
+        return None, None, str(exc) or type(exc).__name__
+
+
+def _ask_merge(parent: QWidget, check: series_merge.MergeCheck) -> bool:
+    title, text, label = series_merge.confirm_text(check)
+    return _ask(parent, title, text, label)
+
+
+def _ask_undo(parent: QWidget, record: series_merge.MergeRecord) -> bool:
+    return _ask(parent, "Undo the last merge?",
+                f"Move {record.count} item{'s' if record.count != 1 else ''} back from\n    {record.kept_folder}\nto\n"
+                f"    {record.merged_folder}?\n\n(merged {record.created_at})", "Move back")
+
+
+def _ask(parent: QWidget, title: str, text: str, label: str) -> bool:
+    box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=parent)
+    yes = box.addButton(label, QMessageBox.ButtonRole.AcceptRole)
+    no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(no)
+    try:
+        box.exec()
+        return box.clickedButton() is yes
+    finally:
+        box.deleteLater()
 
 
 def _clear(layout) -> None:

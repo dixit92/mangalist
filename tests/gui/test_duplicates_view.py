@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 from mangalist.duplicates import find_duplicate_files, human_size  # noqa: E402
 from mangalist.gui import duplicates_view  # noqa: E402
 from mangalist.gui.duplicates_view import ConfirmDiscardDialog, DuplicatesView  # noqa: E402
-from mangalist.gui.shell import DuplicateSeries  # noqa: E402
+from mangalist.same_series import FranchiseSplit, SamePair, SameSeriesReport, SeriesCopy  # noqa: E402
 from mangalist.store.lock import LOCK_NAME, RootLock  # noqa: E402
 from tests.duplicates.conftest import Library, db, lib  # noqa: E402,F401
 from tests.gui.conftest import wait_until  # noqa: E402
@@ -88,7 +88,7 @@ def button(view, text):
 def test_an_empty_library_says_so_and_cannot_apply(views):
     view = views.scanned()
     assert any("No number is held by more than one file" in t for t in texts(view))
-    assert any("No series is held in more than one folder" in t for t in texts(view))
+    assert any("No series is held in two folders" in t for t in texts(view))
     assert not view.apply_button.isEnabled()
 
 
@@ -286,7 +286,23 @@ def test_the_confirmation_lists_every_file_and_cancel_is_the_default(qapp, pair)
 
 # --- the series section -------------------------------------------------------------------------------------------
 
-def test_series_in_more_than_one_folder_side_by_side(views, lib, tmp_path):
+def _copy(library, rel, series_id=0, *, files=1, status="Ongoing", link="Own match: Confirmed", confirmed=True):
+    return SeriesCopy(series_id=series_id, root_id=library.root.id, root_name=library.root.name, rel_path=rel,
+                      folder=str(library.dir / rel), files=files, title="Example Record", link=link,
+                      origin_status=status, confirmed=confirmed)
+
+
+def _confirm(library, rel, mu_id=4242):
+    from pathlib import Path
+
+    from mangalist import mu_cache
+    from mangalist.store.series import link_key
+
+    mu_cache.save_entry(Path(link_key(library.dir.resolve(), rel)), mu_id, "Example Record", "https://example.invalid/s",
+                        None, mu_confirmed=True)
+
+
+def test_same_series_in_two_folders_side_by_side(views, lib, tmp_path):
     other = Library(lib.db, tmp_path / "other", "Other")
     lib.add(S, "Series v01.cbz", size=1024, mtime_ns=T0)
     lib.add(S, "Series v02.cbz", size=2048, mtime_ns=T0 + 1_000_000_000)
@@ -296,24 +312,115 @@ def test_series_in_more_than_one_folder_side_by_side(views, lib, tmp_path):
     opened, shown = [], []
     view = views.make(open_folder=opened.append)
     view.show_in_list.connect(shown.append)
-    one, two = str(lib.dir / S), str(other.dir / "Example Series (2)")
-    view.set_series_duplicates([DuplicateSeries(S, (one, two))])
+    one, two = _copy(lib, S, status="Complete"), _copy(other, "Example Series (2)", link="MangaPixer: Auto")
+    split = FranchiseSplit("mu:2", "Split Saga", (_copy(lib, "Split Saga/Blue Arc"), _copy(other, "Split Saga/Red Arc")))
+    view.set_same_series(SameSeriesReport([SamePair("mu:1", "Example Record", one, two)], [split]))
     text = " ".join(texts(view))
-    assert "SERIES IN MORE THAN ONE FOLDER" in text and "2 folders" in text
-    assert "Manga" in text and "Other" in text                       # the roots
+    assert "SAME SERIES IN TWO FOLDERS" in text and "in two libraries" in text
+    assert "Manga" in text and "Other" in text                       # the libraries
     assert "3.0 KB" in text and "4.0 KB" in text                      # the sizes
+    assert "Complete" in text and "MangaPixer: Auto" in text          # what tells the copies apart
     assert [b.text() for b in view.findChildren(QPushButton)].count("Show in list") == 2
     button(view, "Show in list").click()
     button(view, "Open folder").click()
-    assert shown == [one] and opened == [one]
-    view.set_series_duplicates([])
-    assert any("No series is held in more than one folder" in t for t in texts(view))
+    assert shown == [one.folder] and opened == [one.folder]
+    merge = view.merge_buttons
+    assert len(merge) == 1 and merge[0].isEnabled() and [a.text() for a in merge[0].menu().actions()] == [
+        f"Keep Manga / {S} (move Example Series (2)'s files into it)",
+        "Keep Other / Example Series (2) (move Example Series's files into it)"]
+    # the franchise split: a notice with Open folder only, never a merge
+    assert "PARTS OF ONE FRANCHISE IN DIFFERENT LIBRARIES  ·  1" in text and "Split Saga" in text
+    assert view.splits_heading.isVisibleTo(view) and len(view.merge_buttons) == 1
+    assert [b.text() for b in view.findChildren(QPushButton)].count("Open folder") == 4
+    view.set_library_scope([other.root.id])                          # the twin lies in the other library: still shown
+    assert len(view.same_series.pairs) == 1 and len(view.same_series.splits) == 1
+    view.set_library_scope([999])
+    view._render_series()                                            # (a hidden view renders when it is shown)
+    assert view.same_series.pairs == [] and any("No series is held in two folders" in t for t in texts(view))
+    assert not view.splits_heading.isVisibleTo(view)
+
+
+def test_a_pair_with_an_auto_match_is_listed_but_merge_is_disabled_with_the_reason(views, lib, tmp_path):
+    other = Library(lib.db, tmp_path / "other", "Other")
+    view = views.make()
+    auto = _copy(other, "Example Series (2)", link="MangaPixer: Auto", confirmed=False)
+    view.set_same_series(SameSeriesReport([SamePair("mu:1", "Example Record", _copy(lib, S), auto)]))
+    merge = view.merge_buttons[0]
+    assert not merge.isEnabled()
+    assert "confirm the match of Other / Example Series (2) first" in merge.toolTip()
+    assert any(t.startswith("Merge is not offered: confirm the match of Other / Example Series (2) first")
+               for t in texts(view))
+
+
+def test_a_nested_copy_offers_one_merge_only(views, lib):
+    view = views.make()
+    outer, inner = _copy(lib, "Elder Tale"), _copy(lib, "Elder Tale/Elder Tale")
+    view.set_same_series(SameSeriesReport([SamePair("mu:1", "Elder Tale", outer, inner, "nested")]))
+    assert "a copy inside the series folder" in " ".join(texts(view))
+    assert [a.text() for a in view.merge_buttons[0].menu().actions()] == [
+        "Keep Manga / Elder Tale (move Elder Tale's files into it)"]
 
 
 def test_a_series_folder_that_was_never_scanned_shows_dashes(views, lib):
     view = views.make()
-    view.set_series_duplicates([DuplicateSeries("Unscanned", (str(lib.dir / "Unscanned"), str(lib.dir / "Other")))])
+    view.set_same_series(SameSeriesReport([SamePair("mu:1", "Unscanned", _copy(lib, "Unscanned"), _copy(lib, "Other"))]))
     assert "-" in texts(view)
+
+
+@pytest.fixture
+def twins(lib, tmp_path):
+    other = Library(lib.db, tmp_path / "other", "Other")
+    lib.add(S, "Series v01.cbz", size=10, mtime_ns=T0)
+    other.add("Example Series (EN)", "Series v02.cbz", size=20, mtime_ns=T0)
+    lib.scan()
+    other.scan()
+    _confirm(lib, S)
+    _confirm(other, "Example Series (EN)")
+    return lib, other
+
+
+def test_merge_into_moves_the_files_then_undo_moves_them_back(views, twins, qapp):
+    lib, other = twins
+    asked, merged = [], []
+    view = views.make(confirm_merge=lambda check: asked.append(check) or True,
+                      confirm_undo=lambda record: asked.append(record) or True)
+    view.folders_merged.connect(lambda paths, kept: merged.append((sorted(paths), kept)))
+    gone, kept = str(lib.dir / S), str(other.dir / "Example Series (EN)")
+    view.merge(gone, kept)
+    wait_until(qapp, lambda: not view._merging and not view._scanning)
+    assert asked[0].moves and sorted(os.listdir(kept)) == ["Series v01.cbz", "Series v02.cbz"]
+    assert not os.path.exists(gone)                                  # emptied, so removed
+    assert merged == [(sorted([gone, kept]), kept)]
+    assert "Merged 1 item of Manga / Example Series into Other / Example Series (EN)" in view.report.text()
+    assert view.undo_merge_button.isVisibleTo(view)
+    assert view.undo_merge_button.text() == "Undo last merge (1 item back to Example Series)"
+    view.undo_merge_button.click()
+    wait_until(qapp, lambda: not view._merging and not view._scanning)
+    assert os.listdir(gone) == ["Series v01.cbz"] and os.listdir(kept) == ["Series v02.cbz"]
+    assert merged[-1] == (sorted([gone, kept]), "") and "Moved 1 item back" in view.report.text()
+    assert not view.undo_merge_button.isVisibleTo(view)
+
+
+def test_merge_refused_while_a_download_is_in_progress(views, twins):
+    lib, other = twins
+    with lib.db.connect() as con:
+        con.execute("INSERT INTO ledger (created_at, updated_at, series_id, request, tool, status) VALUES"
+                    " ('2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', ?, '{}', 'qbittorrent', 'sent')",
+                    (lib.series_id(S),))
+    asked = []
+    view = views.make(confirm_merge=lambda check: asked.append(check) or True)
+    view.merge(str(lib.dir / S), str(other.dir / "Example Series (EN)"))
+    wait_until(views.qapp, lambda: not view._merging)
+    assert asked == [] and "Not merged: a download is in progress" in view.report.text()
+    assert os.path.exists(lib.dir / S / "Series v01.cbz")
+
+
+def test_merge_cancelled_moves_nothing(views, twins):
+    lib, other = twins
+    view = views.make(confirm_merge=lambda check: False)
+    view.merge(str(lib.dir / S), str(other.dir / "Example Series (EN)"))
+    wait_until(views.qapp, lambda: not view._merging)
+    assert view.status.text() == "Nothing was merged." and os.path.exists(lib.dir / S / "Series v01.cbz")
 
 
 def test_a_file_in_a_subfolder_shows_its_place(views, lib):

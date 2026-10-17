@@ -64,7 +64,9 @@ moves (an older build reads them as moves), with these specifics:
   so two cross-root plans can never deadlock; a root that is busy refuses the whole plan before anything moves (the
   locks already taken are released).
 - A step is ONE rename of the folder: its source must be a real folder (not a symlink), the destination's parent must
-  exist (no folders are created), the destination must not exist (no-replace).
+  exist (no folders are created), the destination must not exist (no-replace). A plan made with ``files=True`` (the
+  merge of two series folders, :mod:`mangalist.series_merge`) may also move plain files, each checked against its size
+  and stat signature when it applies, as within a root.
 - Across filesystems the rename is TRIED (owner, 2026-10-15: "MangaList should attempt to move it and raise an error to
   the user to make them move it themselves if refused by the system"): the two sides' devices are not compared when
   planning; a step whose rename meets ``EXDEV`` (another filesystem, or a FUSE / SMB share that cannot rename between its
@@ -515,12 +517,16 @@ class Journal:
         return self.get_plan(plan_id)
 
     def plan_across_roots(self, reason: str, moves: Iterable[Union[Move, Tuple]], roots: Sequence,
-                          note: Optional[str] = None) -> Plan:
+                          note: Optional[str] = None, *, files: bool = False) -> Plan:
         """Check *moves* - whole folders, each from inside one of *roots* into another place inside one of them (Move to
         library: a series folder from one library root into another) - and record them as one plan that holds every
         root's lock while it applies or undoes (see "Cross-root plans" above). Raises :class:`StepRefused` (nothing
         recorded) for the first step that is not allowed. The two sides' devices are not compared: the rename is tried
-        when the plan applies, and a refusal (``EXDEV`` or another) fails that step with nothing moved."""
+        when the plan applies, and a refusal (``EXDEV`` or another) fails that step with nothing moved.
+
+        *files*: plain files may be moved too (the merge of one series folder into another,
+        :mod:`mangalist.series_merge`), each recorded with its size and stat signature like a move within a root, so a
+        file that changed since the plan was made is not moved. Never a symbolic link."""
         plan_roots = sorted({_norm(r) for r in roots}, key=os.path.normcase)
         if len(plan_roots) < 2:
             raise StepRefused("a cross-root plan needs two library roots")
@@ -551,8 +557,10 @@ class Journal:
                 raise StepRefused(f"{where}: a folder cannot move into itself or its own parent")
             if any(_same_or_inside(src, s) or _same_or_inside(s, src) for s in sources):
                 raise StepRefused(f"{where}: the folder is listed twice, or inside another folder of the plan")
-            if not exists_exact(src) or os.path.islink(src) or not os.path.isdir(src):
-                raise StepRefused(f"{where}: the source is not a folder (gone, a file or a symbolic link)")
+            is_file = files and exists_exact(src) and not os.path.islink(src) and os.path.isfile(src)
+            if not is_file and (not exists_exact(src) or os.path.islink(src) or not os.path.isdir(src)):
+                raise StepRefused(f"{where}: the source is not a folder (gone, a file or a symbolic link)"
+                                  if not files else f"{where}: the source is gone, or a symbolic link")
             parent = os.path.dirname(dst)
             if not os.path.isdir(parent):
                 raise StepRefused(f"{where}: the destination's folder {parent} does not exist")
@@ -564,7 +572,11 @@ class Journal:
                 raise StepRefused(f"{where}: {name!r}: {problem}")
             sources.append(src)
             taken[os.path.normcase(dst)] = True
-            rows.append((i, src, dst))
+            size = sig = None
+            if is_file:
+                size = os.stat(src).st_size
+                sig = content_signature(src, "stat")
+            rows.append((i, src, dst, not is_file, size, sig))
         if not rows:
             raise StepRefused("a plan needs at least one move")
         now = utcnow()
@@ -576,10 +588,11 @@ class Journal:
             con.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                         (f"{PLAN_ROOTS_META}{plan_id}", json.dumps(plan_roots, ensure_ascii=False)))
             con.executemany("INSERT INTO journal_steps (plan_id, seq, op, src, dst, is_dir, src_size, src_signature,"
-                            " state, updated_at) VALUES (?,?, 'move', ?,?, 1, NULL, NULL, 'planned', ?)",
-                            [(plan_id, i, s, d, now) for i, s, d in rows])
-        _log.info("Journal: plan %d (%s) recorded: %d folder%s across %d roots", plan_id, reason, len(rows),
-                  "" if len(rows) == 1 else "s", len(plan_roots))
+                            " state, updated_at) VALUES (?,?, 'move', ?,?,?,?,?, 'planned', ?)",
+                            [(plan_id, i, s, d, 1 if isd else 0, sz, sg, now) for i, s, d, isd, sz, sg in rows])
+        _log.info("Journal: plan %d (%s) recorded: %d %s across %d roots", plan_id, reason, len(rows),
+                  ("folder" if len(rows) == 1 else "folders") if not files else
+                  ("item" if len(rows) == 1 else "items"), len(plan_roots))
         return self.get_plan(plan_id)
 
     def plan_roots(self, plan: Plan) -> List[str]:

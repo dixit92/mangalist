@@ -37,6 +37,28 @@ def _entry(title, mu=None):
     return e
 
 
+def same_from_entries(get_entries):
+    """A stand-in for :func:`mangalist.same_series.find_same_series` over the window's rows (the tests give their
+    matches in memory): rows with the same MangaUpdates title are duplicates of each other, in any library."""
+    from itertools import combinations
+
+    from mangalist.same_series import SamePair, SameSeriesReport, SeriesCopy
+
+    def find(db):
+        groups = {}
+        for e in list(get_entries()):
+            if e.mu_title:
+                groups.setdefault(e.mu_title.strip().lower(), []).append(e)
+        pairs = []
+        for key, rows in groups.items():
+            copies = [SeriesCopy(0, e.root_id or 0, f"root {e.root_id}", Path(e.folder).name, str(e.folder),
+                                 len(e.files), e.mu_title.strip(), "Own match: Auto") for e in rows]
+            pairs += [SamePair(key, copies[0].title, a, b) for a, b in combinations(copies, 2)]
+        return SameSeriesReport(pairs)
+
+    return find
+
+
 class FakeDownloadTab(QWidget):
     """Lane B's interface (gui/shell.py)."""
 
@@ -103,8 +125,12 @@ def make_window(qapp, monkeypatch):
         monkeypatch.setattr(lanes, "duplicates_view_class", lambda: dupes)
         monkeypatch.setattr(lanes, "open_settings_function", lambda: settings)
         monkeypatch.setattr(lanes, "find_duplicate_files_function", lambda: finder)
+        rows = []
+        monkeypatch.setattr(lanes, "find_same_series_function",
+                            lambda: same_from_entries(lambda: rows[0]._model.entries() if rows else []))
         win = mw.MainWindow()
         made.append(win)
+        rows.append(win)
         if entries:
             win._model.set_state_providers(
                 knowledge_for=lambda e: from_mangapixer_item(item()) if e.title == QUEST else None,
@@ -237,7 +263,7 @@ def test_the_duplicates_column_counts_each_series_and_review_opens_on_it(make_wi
     quest = LIB / QUEST
     groups = [_group(quest, "volume"), _group(quest, "chapter"), _group(quest, "chapter")]
     win = make_window(dupes=FocusingDuplicatesView, finder=lambda db: groups)
-    wait_until(qapp, lambda: win._dupe_file_groups == 3)
+    wait_until(qapp, lambda: win._dupe_file_groups == 3 and win._same_call is None)
     model = win._model
     text = {model.entry_at(r).title: model.data(model.index(r, COL_DUPE)) for r in range(model.rowCount())}
     assert text[QUEST] == "1 vol. · 2 ch." and text[PLAIN] == ""
@@ -509,3 +535,25 @@ def test_an_empty_folder_of_a_known_library_is_offline_and_keeps_its_rows(make_w
     finally:
         mw.scan_and_record_library = real
     assert len(got) == 1 and isinstance(got[0], LibraryScan)
+
+
+class MergingDuplicatesView(FocusingDuplicatesView):
+    """The view with "Merge into..." (same series in two folders, 2026-10-17)."""
+
+    folders_merged = Signal(list, str)
+
+
+def test_a_merge_rescans_both_folders_and_opens_the_kept_folders_duplicate_files(make_window):
+    win = make_window(dupes=MergingDuplicatesView)
+    view = win._duplicates_view
+    scans = []
+    win._start_scan = lambda roots=None, scopes=None: scans.append((roots, scopes))
+    library = SimpleNamespace(id=1, name="Library", path="/lib")
+    win._roots = lambda: [library]
+    kept = str(LIB / TWIN_A)
+    view.folders_merged.emit([str(LIB / TWIN_B), kept], kept)
+    assert scans == [([library], {1: {TWIN_A, TWIN_B}})]                       # both folders, nothing else
+    assert win._list.current_filter() == "duplicates" and view.focus[-1] == kept
+    assert win._scan_note == "Folders merged"
+    view.folders_merged.emit([str(LIB / TWIN_B), kept], "")                   # its undo: a rescan, no review
+    assert len(scans) == 2 and view.focus == [kept]

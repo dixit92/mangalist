@@ -32,3 +32,10 @@ def find_duplicate_files_function() -> Callable:
     from ..duplicates import find_duplicate_files
 
     return find_duplicate_files
+
+
+def find_same_series_function() -> Callable:
+    """``find_same_series(db) -> SameSeriesReport`` (:mod:`mangalist.same_series`)."""
+    from ..same_series import find_same_series
+
+    return find_same_series

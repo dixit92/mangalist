@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from mangalist import config  # noqa: E402
 from mangalist.gui import lanes  # noqa: E402
 from mangalist.gui.main_window import _count_by_folder  # noqa: E402
-from mangalist.gui.table_model import COL_LIBRARY  # noqa: E402
+from mangalist.gui.table_model import COL_DUPE, COL_LIBRARY  # noqa: E402
 from mangalist.identity.backfill import backfill_signatures  # noqa: E402
 from mangalist.knowledge import from_mangapixer_item  # noqa: E402
 from mangalist.scanner import scan_one_root  # noqa: E402
@@ -24,7 +24,7 @@ from mangalist.states import InventorySnapshot  # noqa: E402
 from ..identity.conftest import make_archive as unique_archive  # noqa: E402
 from ..states.helpers import TODAY, item  # noqa: E402
 from .conftest import FakeBackend, qapp, settle_states, wait_until  # noqa: E402,F401
-from .test_shell_window import FakeDownloadTab, FakeDuplicatesView  # noqa: E402
+from .test_shell_window import FakeDownloadTab, FakeDuplicatesView, same_from_entries  # noqa: E402
 
 MANGA, MANHWA, COMICS = "Manga", "Manhwa", "Comics"
 GAPPY = {"Example Quest", "Korean Quest"}          # series with gaps (volumes 2.. are missing)
@@ -96,8 +96,12 @@ def lib(qapp, tmp_path, monkeypatch):
         monkeypatch.setattr(lanes, "duplicates_view_class", lambda: dupes or FakeDuplicatesView)
         monkeypatch.setattr(lanes, "open_settings_function", lambda: (lambda parent, db, backend, section=None: None))
         monkeypatch.setattr(lanes, "find_duplicate_files_function", lambda: finder or (lambda db: []))
+        rows = []
+        monkeypatch.setattr(lanes, "find_same_series_function",
+                            lambda: same_from_entries(lambda: rows[0]._model.entries() if rows else []))
         win = mw.MainWindow()
         made.append(win)
+        rows.append(win)
         win._model.set_state_providers(
             knowledge_for=lambda e: from_mangapixer_item(item()) if e.title in GAPPY else None,
             inventory_for=lambda e: InventorySnapshot(held_volumes=["1"]), needs_kind_for=lambda e: False, today=TODAY)
@@ -125,9 +129,20 @@ def _two_libraries(lib, **kw):
         if e.title.startswith("Twin Series"):
             e.mu_id, e.mu_title, e.mu_band = 1, "Twin", "auto"
     win._model.set_entries(win._model.entries())
+    _find_same_series(win)
     win._refresh_derived()
     settle_states(win)
     return win
+
+
+def _find_same_series(win):
+    """Look for the same series in two folders again (the twins' matches were given after the scan) and wait for it."""
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    wait_until(app, lambda: win._same_call is None)
+    win._count_same_series()
+    wait_until(app, lambda: win._same_call is None)
 
 
 # --- the picker ---------------------------------------------------------------------------------------------------
@@ -196,17 +211,22 @@ def test_a_remembered_library_that_is_gone_falls_back_to_all(lib):
     assert win._top.library_picker.isHidden()                      # one root left: no picker, every series shows
 
 
-def test_the_duplicates_chip_counts_inside_the_picked_library(lib, qapp):
+def test_the_duplicates_chip_counts_a_twin_in_another_library_too(lib, qapp):
+    """Owner, 2026-10-17: "duplicate detection doesn't work across library roots" - a series of the picked library
+    whose twin lies in another library counts (it did not before)."""
     win = _two_libraries(lib, finder=lambda db: [])
     lst = win._list
     twins = lambda: sorted(len(d.folders) for d in win._model.duplicate_series())  # noqa: E731
     assert twins() == [3] and lst.chips["duplicates"].count == 1    # one series in 3 folders: all libraries
     lib.pick(win, MANGA)
-    assert twins() == [2] and lst.chips["duplicates"].count == 1
+    assert twins() == [3] and lst.chips["duplicates"].count == 1
     lib.pick(win, MANHWA)
-    assert twins() == [] and lst.chips["duplicates"].count == 0     # its only twin lies in another library
-    assert win._model.is_duplicate(next(r for r in range(win._model.rowCount())
-                                        if win._model.entry_at(r).title == "Twin Series (old)")) is False
+    assert twins() == [3] and lst.chips["duplicates"].count == 1     # its twins lie in another library: still flagged
+    row = next(r for r in range(win._model.rowCount()) if win._model.entry_at(r).title == "Twin Series (old)")
+    assert win._model.is_duplicate(row) is True
+    assert win._model.data(win._model.index(row, COL_DUPE)) == "+2 folders"
+    lib.pick(win, MANGA)
+    assert win._model.is_duplicate(row) is False                     # not in the picked library itself
 
 
 def test_the_duplicates_view_gets_only_the_picked_librarys_series(lib):
@@ -220,7 +240,7 @@ def test_the_duplicates_view_gets_only_the_picked_librarys_series(lib):
     win._list.chips["duplicates"].click()
     assert [len(g.folders) for g in win._duplicates_view.groups] == [3]
     lib.pick(win, MANGA)
-    assert [len(g.folders) for g in win._duplicates_view.groups] == [2]
+    assert [len(g.folders) for g in win._duplicates_view.groups] == [3]       # the twin in Manhwa too
     assert win._duplicates_view.scopes[-1] == [lib.root(win, MANGA).id]
     lib.pick(win, "All libraries")
     assert win._duplicates_view.scopes[-1] is None and [len(g.folders) for g in win._duplicates_view.groups] == [3]
@@ -239,7 +259,7 @@ def test_the_duplicate_file_count_follows_the_library(lib, qapp):
     win._on_duplicate_files_counted(_count_by_folder(groups))
     assert win._list.chips["duplicates"].count == 1 + 3
     lib.pick(win, MANHWA)
-    assert win._scoped_file_groups() == 1 and win._list.chips["duplicates"].count == 0 + 1
+    assert win._scoped_file_groups() == 1 and win._list.chips["duplicates"].count == 1 + 1
     lib.pick(win, MANGA)
     assert win._scoped_file_groups() == 2 and win._list.chips["duplicates"].count == 1 + 2
 

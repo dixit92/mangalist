@@ -22,9 +22,12 @@ Provided by lane C
 ``mangalist.gui.duplicates_view.DuplicatesView(QWidget)``
     ``__init__(self, db, parent=None)``
     ``set_series_duplicates(self, groups: Sequence[DuplicateSeries]) -> None`` - series in more than one folder (the shell
-    knows them from its table)
-    ``refresh(self) -> None`` - re-read the duplicate files
-    signals ``show_in_list(str)`` (a folder), ``files_deleted(list)`` (absolute paths; the shell rescans)
+    knows them from its table; since 2026-10-17 the view shows the same series in two folders it finds itself,
+    :mod:`mangalist.same_series`, with "Merge into...")
+    ``refresh(self) -> None`` - re-read the duplicate files (and the same series in two folders)
+    signals ``show_in_list(str)`` (a folder), ``files_deleted(list)`` (absolute paths; the shell rescans), optional
+    ``folders_merged(list, str)`` (the two folders a merge or its undo touched - the shell rescans them - and the kept
+    folder, whose duplicate files the shell then opens for review; "" after an undo)
     Discarding deletes the chosen files after an explicit confirmation (owner, 2026-10-08: no holding folder).
 
 Provided by lane A
