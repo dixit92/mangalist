@@ -1,0 +1,106 @@
+<!doctype html>
+<!-- Throwaway research prototype (lane fe, 2026-10-16): the List tab as a no-build page. 692 made-up series x 21
+     columns, MangaPixer-style tokens (dark / light), chips with counts, sort, filter, details panel, live row updates.
+     Never merged; the point is the measurements printed by bench() and the screenshot. -->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MangaList (prototype)</title>
+<style>
+@font-face{font-family:"IBM Plex Sans";font-weight:400;src:url("../mangalist/assets/fonts/IBMPlexSans-Regular.ttf")}@font-face{font-family:"IBM Plex Sans";font-weight:500;src:url("../mangalist/assets/fonts/IBMPlexSans-Medium.ttf")}@font-face{font-family:"IBM Plex Sans";font-weight:600;src:url("../mangalist/assets/fonts/IBMPlexSans-SemiBold.ttf")}@font-face{font-family:"IBM Plex Sans";font-weight:700;src:url("../mangalist/assets/fonts/IBMPlexSans-Bold.ttf")}@font-face{font-family:"IBM Plex Mono";font-weight:400;src:url("../mangalist/assets/fonts/IBMPlexMono-Regular.ttf")}
+:root{--bg:#121212;--surface:#1c1c26;--sub:#14141c;--hi:#2a2a36;--text:#e6e6ee;--t2:#c8c8d4;--muted:#9a9aa8;--line:rgb(255 255 255/.09);
+ --accent:#b39dff;--accent-fill:#7c4dff;--accent-bg:rgb(124 77 255/.22);--sel:rgb(124 77 255/.16);
+ --ok:#81c784;--ok-bg:rgb(76 175 80/.2);--warn:#ffcc80;--warn-bg:rgb(255 179 0/.16);--bad:#ff8a80;--bad-bg:rgb(244 67 54/.2);--info:#90caf9;--info-bg:rgb(100 181 246/.12);
+ --font:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;--r:8px}
+:root[data-theme=light]{--bg:#f3f3f1;--surface:#fff;--sub:#fafaf8;--hi:#ededea;--text:#161616;--t2:#3a3a38;--muted:#5a5a57;--line:#dcdcd8;
+ --accent:#1f4fb8;--accent-fill:#1f4fb8;--accent-bg:#e8eefb;--sel:#eef3fd;--ok:#1b5e20;--ok-bg:#e6f2e8;--warn:#8a4b00;--warn-bg:#fdf0dc;--bad:#a4262c;--bad-bg:#fbe7e8;--info:#1f4fb8;--info-bg:#e8eefb}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.4 var(--font);display:grid;grid-template-rows:auto auto 1fr auto}
+header{display:flex;align-items:center;gap:20px;padding:0 20px;height:56px;background:var(--sub);border-bottom:1px solid var(--line)}
+header b{font-size:17px}.tab{height:56px;display:flex;align-items:center;border-bottom:2px solid var(--accent);color:var(--text);font-weight:600}
+.sp{flex:1}.muted{color:var(--muted)}
+button,input{font:inherit;color:inherit}
+.btn{border:1px solid var(--line);background:transparent;border-radius:999px;padding:6px 16px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.btn:hover{background:var(--hi)}.btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bar{display:flex;gap:10px;align-items:center;padding:12px 20px;background:var(--sub);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.bar input{width:280px;padding:7px 12px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface)}
+.chip{border:1px solid var(--line);border-radius:999px;padding:5px 12px;background:transparent;cursor:pointer;color:var(--t2)}
+.chip b{font:500 12px var(--mono);color:var(--muted);margin-left:6px}.chip[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+.main{display:grid;grid-template-columns:1fr 360px;min-height:0}
+.wrap{overflow:auto;background:var(--surface);min-height:0}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{position:sticky;top:0;background:var(--sub);text-align:left;font:600 11px var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap;user-select:none}
+th[aria-sort=ascending]::after{content:" \25B2"}th[aria-sort=descending]::after{content:" \25BC"}
+td{padding:0 12px;height:38px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+tr:hover td{background:var(--hi)}tr[aria-selected=true] td{background:var(--sel)}
+td.n{text-align:right;font:12px var(--mono)}td.m{font:12px var(--mono)}.sec{color:var(--t2)}
+.badge{font-weight:600;font-size:12px;padding:2px 9px;border-radius:999px}
+.b-warn{background:var(--warn-bg);color:var(--warn)}.b-bad{background:var(--bad-bg);color:var(--bad)}.b-ok{background:var(--ok-bg);color:var(--ok)}.b-info{background:var(--info-bg);color:var(--info)}.b-q{background:var(--hi);color:var(--t2)}
+aside{background:var(--sub);border-left:1px solid var(--line);padding:20px;overflow:auto}
+aside h2{margin:0 0 4px;font-size:18px}aside dl{display:grid;grid-template-columns:90px 1fr;gap:6px 12px;margin:16px 0}aside dt{color:var(--muted)}aside dd{margin:0}
+footer{padding:8px 20px;background:var(--sub);border-top:1px solid var(--line);color:var(--muted);font-size:13px;display:flex;gap:20px}
+.live{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}
+</style>
+</head>
+<body>
+<header><b>MangaList</b><span class="tab">List</span><span class="sp"></span><span class="muted" id="status"></span>
+ <button class="btn">Add series&hellip;</button><button class="btn" id="theme">Theme</button></header>
+<div class="bar"><input id="q" placeholder="Filter title, English title, kind" aria-label="Filter series"><span id="chips" style="display:contents"></span></div>
+<div class="main"><div class="wrap" id="wrap"><table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table></div>
+<aside id="side"><span class="muted">Select a series to see its details</span></aside></div>
+<footer><span id="count"></span><span id="live"><span class="live"></span>live: 0 updates</span></footer>
+<script>
+"use strict";
+const ALL=["Title","State","Gaps","Files","Kind","English","Alt title","Subfolders","Vol %","Ch %","Both %","Last modified","MU title","Licensed","Behind","Completed","Official source","Duplicates","Library","Rename","Examined"];
+const H=location.hash,COLS=H.includes("six")?["Title","State","Gaps","Files","Kind","English"]:ALL,VIRT=H.includes("virt");
+const STATES=["Missing volumes","Missing chapters","Upgrade available","Up to date","Complete","Can't tell","Not tracked"];
+const BADGE={"Missing volumes":"warn","Missing chapters":"bad","Upgrade available":"info","Up to date":"q","Complete":"ok","Can't tell":"q","Not tracked":"q"};
+let seed=7;const rnd=()=>(seed=(seed*1664525+1013904223)>>>0)/4294967296;
+const W1=["Hollow","Glass","Paper","Umbral","Saffron","Cinder","Velvet","Opal","Tin","Moth","Brine","Ashen","Wren","Tallow","Midnight","Quiet"],W2=["Lantern","Orchard","Tide","Ferry","Station","Choir","Harbor","Kitchen","Moon","Library","Bone","Prince","Weather","Thread","Tailor","Bakery"],W3=["Club","Diary","Blues","Archive","Garden","Post Office","Cartographer","Gods"];
+const rows=[];for(let i=0;i<692;i++){const st=STATES[Math.floor(rnd()**1.6*STATES.length)];const t=`${W1[i%16]} ${W2[Math.floor(i/16)%16]}${i>256?" "+W3[i%8]:""}${i>400?" "+(i%7+2):""}`;
+ rows.push({id:i,Title:t,State:st,Gaps:st.startsWith("Missing")?(st[8]=="v"?"Vol. ":"Ch. ")+(1+i%9)+"-"+(3+i%12):"",Files:1+Math.floor(rnd()*80),Kind:rnd()<.8?"Volumes":"Chapters",English:rnd()<.6?"Example Press":"","Alt title":rnd()<.3?t+" (alt)":"",Subfolders:i%5==0?2:0,"Vol %":Math.round(rnd()*100),"Ch %":Math.round(rnd()*100),"Both %":0,"Last modified":`2026-${String(1+i%10).padStart(2,"0")}-${String(1+i%27).padStart(2,"0")}`,"MU title":t,Licensed:rnd()<.7?"yes":"no",Behind:rnd()<.2?"behind":"",Completed:rnd()<.4?"yes":"no","Official source":rnd()<.5?"BookWalker":"",Duplicates:rnd()<.05?"2":"",Library:["Manga","Light novels","Comics"][i%3],Rename:rnd()<.1?"12":"",Examined:rnd()<.3?"yes":""});}
+const NUM=new Set(["Files","Subfolders","Vol %","Ch %","Both %","Rename"]),MONO=new Set(["Gaps","Last modified"]);
+let sortCol="Title",sortDir=1,filter="",chip=null,sel=null;const trs=new Map();
+const $=id=>document.getElementById(id);
+function cell(r,c){const v=r[c];if(c=="State")return`<td><span class="badge b-${BADGE[v]}">${v}</span></td>`;
+ return`<td class="${NUM.has(c)?"n":MONO.has(c)?"m":c=="Title"?"":"sec"}">${c=="Title"?`<b style="font-weight:500">${v}</b>`:v}</td>`}
+function build(r){const tr=document.createElement("tr");tr.dataset.id=r.id;tr.innerHTML=COLS.map(c=>cell(r,c)).join("");trs.set(r.id,tr);return tr}
+function visible(){const q=filter.toLowerCase();return rows.filter(r=>(!chip||r.State==chip)&&(!q||(r.Title+" "+r.English+" "+r.Kind).toLowerCase().includes(q)))}
+let cur=[];const RH=38;
+function paintWindow(){const w=$("wrap"),body=$("body");const first=Math.max(0,Math.floor(w.scrollTop/RH)-8),last=Math.min(cur.length,first+Math.ceil(w.clientHeight/RH)+16);
+ const frag=document.createDocumentFragment();const top=document.createElement("tr");top.innerHTML=`<td colspan="${COLS.length}" style="height:${first*RH}px;padding:0;border:0"></td>`;frag.appendChild(top);
+ for(let i=first;i<last;i++){const r=cur[i];frag.appendChild(trs.get(r.id)||build(r))}
+ const bot=document.createElement("tr");bot.innerHTML=`<td colspan="${COLS.length}" style="height:${(cur.length-last)*RH}px;padding:0;border:0"></td>`;frag.appendChild(bot);body.replaceChildren(frag)}
+$("wrap").addEventListener("scroll",()=>{if(VIRT)paintWindow()});
+function render(){const v=visible();v.sort((a,b)=>{const x=a[sortCol],y=b[sortCol];return (typeof x=="number"?x-y:String(x).localeCompare(String(y)))*sortDir});
+ cur=v;if(VIRT)paintWindow();else{const body=$("body"),frag=document.createDocumentFragment();for(const r of v)frag.appendChild(trs.get(r.id)||build(r));body.replaceChildren(frag)}$("count").textContent=v.length+" series";return v.length}
+function heads(){$("head").innerHTML=COLS.map(c=>`<th data-c="${c}" aria-sort="${c==sortCol?(sortDir>0?"ascending":"descending"):"none"}">${c}</th>`).join("")}
+function chips(){const n={};rows.forEach(r=>n[r.State]=(n[r.State]||0)+1);$("chips").innerHTML=[[null,"All",rows.length],...STATES.map(s=>[s,s,n[s]||0])].map(([k,l,c])=>`<button class="chip" data-k="${k}" aria-pressed="${k==chip||(k===null&&!chip)}">${l}<b>${c}</b></button>`).join("")}
+$("head").onclick=e=>{const c=e.target.dataset.c;if(!c)return;sortDir=c==sortCol?-sortDir:1;sortCol=c;heads();render()};
+$("q").oninput=e=>{filter=e.target.value;render()};
+$("chips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;chip=b.dataset.k=="null"?null:b.dataset.k;chips();render()};
+$("body").onclick=e=>{const tr=e.target.closest("tr");if(!tr)return;if(sel)sel.removeAttribute("aria-selected");sel=tr;tr.setAttribute("aria-selected","true");const r=rows[+tr.dataset.id];
+ $("side").innerHTML=`<h2>${r.Title}</h2><div class="muted">${r["MU title"]} &middot; MangaPixer: confirmed</div><dl><dt>State</dt><dd><span class="badge b-${BADGE[r.State]}">${r.State}</span></dd><dt>Gaps</dt><dd class="m">${r.Gaps||"-"}</dd><dt>Holds</dt><dd>${r.Files} files</dd><dt>English</dt><dd>${r.English||"-"}</dd><dt>Folder</dt><dd class="m">/lib/${r.Title}</dd></dl>`};
+$("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme=="dark"?"light":"dark"};
+// Live updates: what an SSE message "rows changed" would do - patch only the changed rows' cells in place.
+let updates=0;function patch(ids){for(const id of ids){const r=rows[id];r.State=STATES[(STATES.indexOf(r.State)+1)%STATES.length];const tr=trs.get(id);if(tr)tr.innerHTML=COLS.map(c=>cell(r,c)).join("");updates++}
+ $("live").lastChild.textContent="live: "+updates+" updates"}
+function ms(f){const t=performance.now();f();return +(performance.now()-t).toFixed(1)}
+async function frame(){await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}
+async function timed(f){const t=performance.now();f();await frame();return +(performance.now()-t).toFixed(1)}
+async function bench(){const out={};heads();chips();
+ out.first_render_ms=await timed(()=>render());
+ out.sort_title_desc_ms=await timed(()=>{sortDir=-1;heads();render()});
+ out.sort_files_ms=await timed(()=>{sortCol="Files";sortDir=1;heads();render()});
+ out.filter_key_ms=await timed(()=>{filter="har";render()});out.filter_clear_ms=await timed(()=>{filter="";render()});
+ out.chip_ms=await timed(()=>{chip="Complete";chips();render()});await timed(()=>{chip=null;chips();render()});
+ const ids=Array.from({length:50},(_,i)=>i*13);out.live_50_rows_ms=await timed(()=>patch(ids));
+ out.live_burst_20x50_ms=await timed(()=>{for(let k=0;k<20;k++)patch(ids.map(x=>x+k))});
+ out.dom_nodes=document.getElementsByTagName("*").length;out.html_bytes=document.documentElement.outerHTML.length;
+ // Persistent connection cost proxy: none here (the page is static); see the note for SSE.
+ return out}
+window.bench=bench;
+heads();chips();render();$("status").textContent="Scanned 692 folders";
+</script>
+</body></html>
