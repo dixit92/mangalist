@@ -147,6 +147,7 @@ class MangaDexSeries:
     anilist_id: Optional[int] = None        # from links.al, when MangaDex lists it (AniList keeps the official English
                                             # title apart from fan titles; MangaDex's English alternatives mix both)
     english_alts: List[str] = field(default_factory=list)   # every English alternative title MangaDex lists
+    anilist_english: Optional[str] = None   # AniList's English title, once official_english asked (None: none known)
     year: Optional[int] = None
     status: Optional[str] = None
     original_language: Optional[str] = None
@@ -263,9 +264,11 @@ def official_english(md: MangaDexSeries, *,
         _log.info("Add a series: AniList lookup failed (%s)", type(exc).__name__)
         return md
     english = str((media or {}).get("english_title") or "").strip()
-    if not english or (md.romaji_title and _same(english, md.romaji_title)):
+    if not english:
         return md
-    return replace(md, english_title=english, title=english)
+    if md.romaji_title and _same(english, md.romaji_title):
+        return replace(md, anilist_english=english)
+    return replace(md, english_title=english, title=english, anilist_english=english)
 
 
 def mangadex_for_mu(mu_id: int, title: str, *, get: Callable[[str], Dict[str, Any]] = _http_get_json
@@ -315,10 +318,14 @@ class SeriesInfo:
     latest_chapter: Optional[float] = None
     associated: List[str] = field(default_factory=list)
     english_title: Optional[str] = None
+    mu_associated: List[str] = field(default_factory=list)   # MangaUpdates' own associated titles (no MangaDex ones)
     mangadex_id: Optional[str] = None
     mangadex_title: Optional[str] = None
     detail: Optional[Dict[str, Any]] = None  # MangaUpdates' full record, for the progress fields
     mangadex_romaji: Optional[str] = None    # MangaDex's romanised title (a series without a MangaUpdates match)
+    anilist_id: Optional[int] = None         # the AniList record MangaDex links (where the official English title is)
+    official_english: Optional[str] = None   # AniList's English title (the folder scheme's English part, answer 76)
+    mangadex_english: Optional[str] = None   # MangaDex's only English title (None: none, or several)
 
     @property
     def matched(self) -> bool:
@@ -329,11 +336,18 @@ class SeriesInfo:
         """The folder scheme's romaji: MangaUpdates' title, else MangaDex's romanised (or main) title."""
         return self.mu_title or self.mangadex_romaji or self.title
 
+    @property
+    def scheme_alts(self) -> List[str]:
+        """The alternative titles an official short name comes from: MangaUpdates' own when matched - the Renamer reads
+        the same (MangaPixer's record, or the links cache this match is saved to), so the romaji part is MangaUpdates'
+        in both (owner, answer 78) - else every title known."""
+        return list(self.mu_associated) if self.matched and self.mu_associated else list(self.associated)
+
     def scheme_name(self) -> Optional[str]:
         """The library's folder name for the series, ``<romaji> [<English>]`` (:mod:`mangalist.folder_scheme`)."""
         from .folder_scheme import scheme_name
 
-        return scheme_name(self.romaji, self.english_title, alt_titles=self.associated)
+        return scheme_name(self.romaji, self.english_title, alt_titles=self.scheme_alts)
 
     def summary(self) -> List[str]:
         """The lines the dialog shows under the title."""
@@ -373,16 +387,28 @@ def info_from_mu(detail: Mapping[str, Any], mangadex: Optional[MangaDexSeries] =
         licensed=detail["licensed"] if isinstance(detail.get("licensed"), bool) else None,
         latest_chapter=latest,
         associated=list(dict.fromkeys(assoc + (list(mangadex.english_alts) if mangadex else []))),
+        mu_associated=list(dict.fromkeys(assoc)),
         english_title=mangadex.english_title if mangadex else None,
         mangadex_id=mangadex.id if mangadex else None, mangadex_title=mangadex.title if mangadex else None,
-        mangadex_romaji=mangadex.romaji_title if mangadex else None, detail=dict(detail))
+        mangadex_romaji=mangadex.romaji_title if mangadex else None, detail=dict(detail),
+        **_english_fields(mangadex))
 
 
 def info_from_mangadex(md: MangaDexSeries) -> SeriesInfo:
     """A series with no MangaUpdates match (yet): MangaDex's own facts."""
     return SeriesInfo(title=md.title, year=str(md.year) if md.year else None, associated=list(md.alt_titles),
                       english_title=md.english_title, mangadex_id=md.id, mangadex_title=md.title,
-                      mangadex_romaji=md.romaji_title)
+                      mangadex_romaji=md.romaji_title, **_english_fields(md))
+
+
+def _english_fields(md: Optional[MangaDexSeries]) -> Dict[str, Any]:
+    """The English-title facts of MangaDex's record for :class:`SeriesInfo` (what the Renamer's English titles cache
+    keeps for the series, :func:`record_english`)."""
+    if md is None:
+        return {}
+    alts = list(md.english_alts or ())
+    return {"anilist_id": md.anilist_id, "official_english": md.anilist_english,
+            "mangadex_english": alts[0] if len(alts) == 1 else None}
 
 
 @dataclass
@@ -518,7 +544,7 @@ def propose_names(info: SeriesInfo) -> List[str]:
 
     romaji, english = info.romaji, info.english_title
     schemed: List[str] = []
-    alts = info.associated               # a long romaji: its official short name (folder_scheme.short_name_candidates)
+    alts = info.scheme_alts              # a long romaji: its official short name (folder_scheme.short_name_candidates)
     first = scheme_name(romaji, english, alt_titles=alts)
     if first:
         schemed.append(first)
@@ -688,9 +714,23 @@ def record_mu_match(folder: Path, info: SeriesInfo, progress: Optional[Mapping[s
     :func:`mangalist.gui.mu_worker._detail_progress` builds them (``mu_cache.save_entry``'s keyword arguments)."""
     if info.mu_id is None:
         raise ValueError("the series has no MangaUpdates match")
-    titles = list(dict.fromkeys([info.mu_title or info.title, *info.associated]))
+    titles = list(dict.fromkeys([info.mu_title or info.title, *info.scheme_alts]))
     mu_cache.save_entry(folder, info.mu_id, info.mu_title or info.title, info.mu_url, info.licensed, mu_confirmed=True,
                         mu_associated=titles, **dict(progress or {}))
+
+
+def record_english(db, info: SeriesInfo) -> None:
+    """Keep what Add series learnt about the series' English title (AniList's official one through MangaDex's link,
+    MangaDex's only English title) in the Renamer's cache (:mod:`mangalist.english_titles`): the Renamer names the
+    folder the same way and needs no lookup of its own. Only when MangaDex's record was read (else nothing is known)."""
+    from .english_titles import SeriesRef, record
+
+    if info.mangadex_id is None:
+        return
+    ref = SeriesRef.of(info.romaji, {"mu_id": info.mu_id, "mangadex_id": info.mangadex_id,
+                                     "anilist_id": info.anilist_id})
+    if ref is not None:
+        record(db, ref, info.official_english, mangadex_english=info.mangadex_english, mangadex_id=info.mangadex_id)
 
 
 def record_source(db, series_id: int, choice: SourceChoice) -> None:
@@ -723,6 +763,10 @@ def add_series(db, root, name: str, info: SeriesInfo, *, source: Optional[Source
         except Exception:  # noqa: BLE001
             _log.warning("Add a series: could not record the MangaUpdates match of %r", name, exc_info=True)
             result.notes.append("The MangaUpdates match was not saved: use Fix MangaUpdates match... on the series.")
+    try:
+        record_english(db, info)
+    except Exception:  # noqa: BLE001 - the Renamer looks it up itself then
+        _log.info("Add a series: could not keep the English title of %r", name, exc_info=True)
     if source is not None and result.series_id is not None:
         try:
             record_source(db, result.series_id, source)

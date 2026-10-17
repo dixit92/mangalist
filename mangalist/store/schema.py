@@ -440,6 +440,22 @@ _V8_ROOT_AUTO_MODE = """
 ALTER TABLE roots ADD COLUMN auto_mode TEXT;             -- off | notify | auto; NULL = the default setting
 """
 
+# Official English titles (owner, 2026-10-16, answer 76: the folder scheme's English part is the official one, as
+# animefetch takes MAL's): what AniList (through MangaDex's links) said about each series, cached so a scan or a dry run
+# never asks the network (mangalist.english_titles). Keyed by the series' record: 'mu:<MangaUpdates id>' or
+# 'md:<MangaDex id>' (a series MangaUpdates does not list).
+_V9_ENGLISH_TITLES = """
+CREATE TABLE IF NOT EXISTS english_titles (
+    key              TEXT PRIMARY KEY,                   -- mu:<id> | md:<uuid>
+    english          TEXT,                               -- AniList's title.english (the official one); NULL: none
+    mangadex_english TEXT,                               -- MangaDex's only English title, when it lists exactly one
+    anilist_id       INTEGER,
+    mangadex_id      TEXT,
+    status           TEXT    NOT NULL,                   -- found | none | failed
+    checked_at       TEXT    NOT NULL
+);
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
@@ -450,6 +466,7 @@ MIGRATIONS: List[Tuple[int, str]] = [
     (6, _V6_REPLACEMENTS),
     (7, _V7_FINDINGS),
     (8, _V8_ROOT_AUTO_MODE),
+    (9, _V9_ENGLISH_TITLES),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

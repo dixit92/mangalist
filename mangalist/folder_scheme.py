@@ -9,15 +9,23 @@ The rules follow animefetch's show folders (``animefetch/placement.py``: ``clean
   the series has one, animefetch's rule (``placement.short_name_candidates``; owner, 2026-10-16: "a long romaji stays
   full if official name isn't there"): see :func:`short_name_candidates`. Without one the full romaji stays - a title
   is never cut at a subtitle separator any more.
-- **English** - the English title, in square brackets after the romaji. It is LEFT OUT when it is unknown or when it is
-  the romaji again written differently (compared on letters and digits only, accents folded: ``86 Eighty-Six`` /
-  ``86 -Eighty Six-``), so a series without an English title is just ``<romaji>``. MangaUpdates and MangaPixer do not
-  say which of a series' alternative titles is the English one, so the English title comes from (see
-  :func:`english_from_folder`): the folder's own ``[English]`` part (the owner's), else - for a top-level folder - a
-  final ``(English)`` after a romaji name, or the folder's whole name when it reads as English (more English words
-  than romaji particles, or one of the record's alternative titles that is not romaji), else MangaDex's English title
-  when the caller has one (Add series).
-- **Characters** (animefetch's ``clean_name``, plus Windows' rules): ``:`` dropped (``Re:Zero`` -> ``ReZero``), ``/``
+- **English** - the series' **official English title**, in square brackets after the romaji (owner, 2026-10-16,
+  answer 76: "How does animefetch do it?" - animefetch takes MyAnimeList's official English title): AniList's English
+  title (``title.english``, the licensed one), looked up through MangaDex's links and cached
+  (:mod:`mangalist.english_titles`). Only when it is not known (no AniList record, or no English title there) the
+  older sources are used, in this order (:func:`titles_for`): the folder's own ``[English]`` part, else - for a
+  top-level folder - a final ``(English)`` after a romaji name, or the folder's whole name when it reads as English
+  (more English words than romaji particles, or one of the record's alternative titles that is not romaji)
+  (:func:`english_from_folder`), else MangaDex's English title (its only English alternative title; Add series:
+  MangaDex's English). The bracket is LEFT OUT when there is no English title, or when the folder's romaji part - the
+  short name or the full romaji - is the English title written differently (compared on letters and digits only,
+  accents folded: ``86 Eighty-Six`` / ``86 -Eighty Six-``; owner, answer 86: "As long as it doesn't become "Tearmoon
+  Empire [Tearmoon Empire]""), so a series without an English title is just ``<romaji>``. An official title that is
+  the full romaji or its short name again (AniList lists no English name) is no English title: the next source is used. An English title
+  that repeats the romaji part in front of a subtitle separator keeps only the subtitle (``Noragami: Stray God`` ->
+  ``Noragami [Stray God]``, the owner's form; :func:`english_remainder`).
+- **Characters** (animefetch's ``clean_name``, plus Windows' rules): typographic quotes, dashes, the ellipsis
+  character and non-breaking spaces in plain ASCII (:func:`fold_typography`), ``:`` dropped (``Re:Zero`` -> ``ReZero``), ``/``
   -> ``-``, ``\\ * ? " < > |`` and control characters dropped, ``[ ]`` inside a part -> ``( )`` (the scheme's own
   brackets stay unambiguous), white space collapsed, no leading dot (a hidden folder is never scanned), no trailing dot
   or space, a Windows reserved name suffixed (:func:`mangalist.store.names.windows_safe_name`). Articles and other
@@ -25,6 +33,12 @@ The rules follow animefetch's show folders (``animefetch/placement.py``: ``clean
 - **Length**: the name is at most :data:`MAX_FOLDER_BYTES` (255) bytes of UTF-8; when a Windows server name is set the
   folder's whole Windows path must also leave room for a chapter file below it (:func:`fit_name`). A name too long is
   cut in this order: the English part (ending with ``…``, then left out), then the romaji.
+- **Long paths** (owner, 2026-10-16, answer 85: "Cut the English for those."): when the full path of the series'
+  longest file - ``<library folder>/<folder name>/<file>`` as MangaList sees it, the file under the name the scheme
+  gives it (a file in a subfolder with its subfolder) - would be longer than :data:`MAX_PATH_CHARS` (255) characters
+  with the ``[English]`` part, the part is left out for that series (whole, never cut with ``…``). The caller works
+  out the room the name has (:func:`name_room`) and passes it as *max_chars* to :func:`scheme_name`. 255 characters
+  exactly still keeps the English part.
 """
 
 from __future__ import annotations
@@ -36,6 +50,7 @@ from typing import Iterable, Optional, Sequence, Tuple
 
 LONG_TITLE = 50                 # animefetch's LONG_TITLE: a longer romaji title uses an official short name
 MAX_FOLDER_BYTES = 255
+MAX_PATH_CHARS = 255            # answer 85: a longer path of the series' longest file loses the folder's [English] part
 ELLIPSIS = "…"
 #: The shortest file name the length rule must leave room for under the folder (a chapter in the file scheme).
 PROBE_FILE = "Ch. 0000.00 Vol. 000.cbz"
@@ -116,11 +131,30 @@ def parse_folder(name: str) -> Tuple[str, Optional[str]]:
 
 # --- cleaning --------------------------------------------------------------------------------------------------
 
+#: Typographic punctuation folded to plain ASCII (integrator, 2026-10-16: AniList's curly apostrophes and dashes must
+#: never rename a folder by themselves): quotes, apostrophes, dashes, the ellipsis character, non-breaking spaces.
+_TYPOGRAPHY = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u2032": "'", "\u02bc": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"', "\u2033": '"',
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
+    "\u2026": "...", "\u00a0": " ", "\u202f": " ", "\u2007": " ", "\u2009": " ",
+})
+
+
+def fold_typography(text: Optional[str]) -> str:
+    """*text* with typographic quotes, apostrophes, dashes, the ellipsis character and non-breaking spaces written in
+    plain ASCII (``Let’s Run — An Inn…`` -> ``Let's Run - An Inn...``)."""
+    return (text or "").translate(_TYPOGRAPHY)
+
+
 def clean_part(text: Optional[str]) -> str:
     """One part of the folder name (the romaji or the English title) in the scheme's characters: see the module
     docstring. Empty when nothing usable is left."""
-    t = unicodedata.normalize("NFC", text or "")
-    t = _CONTROL.sub(" ", t).replace(":", "").replace("/", "-")
+    t = fold_typography(unicodedata.normalize("NFC", text or ""))
+    # a subtitle's colon (": ") becomes " - " like the owner's own names and Add series' cleaning ("My Monster Secret -
+    # Actually, I Am", not "...Secret Actually, I Am"); a colon inside a word goes, as animefetch does ("ReZero")
+    t = _CONTROL.sub(" ", t)
+    t = re.sub(r"\s*:(?=\s)", " -", t).replace(":", "").replace("/", "-")
     t = _DROPPED.sub("", t).replace("[", "(").replace("]", ")")
     t = _SPACES.sub(" ", t).strip().lstrip(".").strip()
     return t.rstrip(". ")
@@ -163,7 +197,8 @@ def short_name_candidates(title: Optional[str], english: Optional[str] = None,
     - an alternative title that looks like a short romaji name: ASCII only, at most four words, shorter than the full
       title, at least :data:`MIN_SHORT_LETTERS` letters, no brackets (``Beast Tamer (AUTHOR)`` is a disambiguation,
       not a name), not all capitals (an acronym), not reading as English (:func:`looks_english`) nor holding the
-      English title, and related to the romaji (:func:`_short_tier`: its head, romaji words or a shared word, or one
+      English title - unless it IS the English title (owner, answer 86: the folder is then that name alone, never
+      ``Tearmoon Empire [Tearmoon Empire]``), and related to the romaji (:func:`_short_tier`: its head, romaji words or a shared word, or one
       coined word). Cleaned like the romaji (``DanMachi: Side Story`` -> ``DanMachi Side Story``);
     - the part before a colon of an English title, when it is one or two words (``BOFURI: I Don't Want to Get Hurt...``
       -> ``Bofuri``: an all-capitals head longer than three letters is written in title case, as animefetch does). The
@@ -185,7 +220,7 @@ def short_name_candidates(title: Optional[str], english: Optional[str] = None,
         name = clean_part(text)
         if (not name or not name.isascii() or len(name) >= len(full) or len(name.split()) > 4
                 or _letters(name) < MIN_SHORT_LETTERS or _NOT_A_NAME.search(name) or same_title(name, full)
-                or looks_english(name) or (eng and title_key(eng) in title_key(name))):
+                or looks_english(name) or (eng and title_key(eng) in title_key(name) and not same_title(name, eng))):
             return
         tier = _short_tier(name, full)
         if tier is not None and not any(same_title(name, k) for k in found):
@@ -266,19 +301,56 @@ def fit_name(romaji: str, english: Optional[str], fits=None) -> str:
 
 
 def scheme_name(romaji: Optional[str], english: Optional[str] = None, *, fits=None,
-                alt_titles: Iterable[str] = ()) -> Optional[str]:
+                alt_titles: Iterable[str] = (), max_chars: Optional[int] = None) -> Optional[str]:
     """The scheme's folder name for a series called *romaji* (its MangaUpdates title) with the English title *english*
     (None: unknown) and the alternative titles *alt_titles* (where an official short name of a long romaji comes from:
     :func:`short_romaji`); None without a usable romaji title. The bracket is left out when the English title is the
-    romaji (or its short form) written differently."""
+    romaji, its short form, or the short name is the English title (answer 86), written differently; and when the name
+    with it would be longer than *max_chars* characters (answer 85: the room :func:`name_room` leaves for the folder
+    name below the path limit; None: no path limit)."""
     full = clean_part(romaji)
     if not full:
         return None
     short = short_romaji(romaji, english, alt_titles)
-    eng = clean_part(english) if english else ""
+    eng = clean_part(english_remainder(english, (full, short))) if english else ""
     if eng and (same_title(eng, short) or same_title(eng, full)):
         eng = ""
+    if eng and max_chars is not None and len(_windows_safe(_render(short, eng))) > max_chars:
+        eng = ""
     return fit_name(short, eng or None, fits) or None
+
+
+_SUBTITLE_SEP = re.compile(r"^(?:\s*[:：]\s*|\s+-\s+|\s*[~～]\s*)")
+
+
+def english_remainder(english: Optional[str], romaji_parts: Iterable[str]) -> str:
+    """*english* without a repeated title in front (integrator, 2026-10-16: AniList's ``Noragami: Stray God`` in a
+    ``Noragami`` folder is ``Noragami [Stray God]``, the owner's own form): when it starts with one of *romaji_parts*
+    (the full romaji, the short name; compared like :func:`same_title`) followed by a subtitle separator (``: ``,
+    `` - ``, `` ~``, ``～``), only what follows. A title that merely goes on (``Grand Blue Dreaming`` for ``Grand
+    Blue``) is kept whole. Typography folded first (:func:`fold_typography`); "" when nothing meaningful remains."""
+    eng = fold_typography(english).strip()
+    for part in sorted({p for p in romaji_parts if p and title_key(p)}, key=len, reverse=True):
+        want = title_key(part)
+        for i in range(1, len(eng)):
+            head = title_key(eng[:i])
+            if head == want and eng[i].isalnum() is False:
+                m = _SUBTITLE_SEP.match(eng[i:])
+                if m:
+                    rest = eng[i + m.end():].strip(" ~～-:：")
+                    return rest if title_key(rest) and rest != eng else ""
+            if len(head) > len(want):
+                break
+    return eng
+
+
+def name_room(root_path: Optional[str], longest_file: Optional[str]) -> Optional[int]:
+    """How many characters a series folder's name may have so that ``<root_path>/<name>/<longest_file>`` stays within
+    :data:`MAX_PATH_CHARS` (answer 85); *longest_file* is the longest path of a file below the folder, relative to it
+    (``Vol. 001 [Group].cbz``, ``Extras/Side Story.cbz``). None without a library folder or a file."""
+    if not root_path or not longest_file:
+        return None
+    return MAX_PATH_CHARS - len(str(root_path).rstrip("/\\")) - len(longest_file) - 2
 
 
 def windows_fits(root_path: str, server: Optional[str]):
@@ -351,30 +423,48 @@ def english_from_folder(folder_name: str, romaji: Optional[str], alt_titles: Ite
     return None
 
 
+ENGLISH_OFFICIAL, ENGLISH_FOLDER, ENGLISH_OTHER = "official", "folder", "other"   # where SeriesTitles.english came from
+
+
 @dataclass(frozen=True)
 class SeriesTitles:
-    """The titles a series folder is named by: *romaji* (MangaUpdates' title) and *english* (None: not known)."""
+    """The titles a series folder is named by: *romaji* (MangaUpdates' title) and *english* (None: not known);
+    *english_from* says where the English title came from (:data:`ENGLISH_OFFICIAL`: AniList's official title,
+    :data:`ENGLISH_FOLDER`: the folder's name, :data:`ENGLISH_OTHER`: a title the caller knew, e.g. MangaDex's)."""
 
     romaji: str
     english: Optional[str] = None
     source: str = ""                 # where the romaji came from ("MangaPixer", "MangaUpdates match", ...)
     alt_titles: Tuple[str, ...] = ()  # the record's alternative titles (an official short name of a long romaji)
+    english_from: str = ""
 
-    def name(self, fits=None) -> Optional[str]:
-        return scheme_name(self.romaji, self.english, fits=fits, alt_titles=self.alt_titles)
+    def name(self, fits=None, max_chars: Optional[int] = None) -> Optional[str]:
+        return scheme_name(self.romaji, self.english, fits=fits, alt_titles=self.alt_titles, max_chars=max_chars)
 
 
 def titles_for(folder_name: str, romaji: Optional[str], alt_titles: Iterable[str] = (), *, top_level: bool = True,
-               english: Optional[str] = None, source: str = "") -> Optional[SeriesTitles]:
-    """A series' :class:`SeriesTitles`: *romaji* from its record, the English title from the folder
-    (:func:`english_from_folder`), else *english* (a title the caller knows, e.g. MangaDex's). None without a romaji
-    title (the folder cannot be named: it is left alone)."""
+               english: Optional[str] = None, source: str = "", official: Optional[str] = None
+               ) -> Optional[SeriesTitles]:
+    """A series' :class:`SeriesTitles`: *romaji* from its record; the English title is *official* (AniList's official
+    English title, :mod:`mangalist.english_titles`) when known, else the folder's (:func:`english_from_folder`), else
+    *english* (a title the caller knows, e.g. MangaDex's only English title). None without a romaji title (the folder
+    cannot be named: it is left alone)."""
     if not clean_part(romaji):
         return None
     alts = tuple(a.strip() for a in alt_titles or () if isinstance(a, str) and a.strip())
     eng = english_from_folder(folder_name, romaji, alts, top_level=top_level) if folder_name else None
-    return SeriesTitles(str(romaji).strip(), eng or (english.strip() if english and english.strip() else None), source,
-                        alts)
+    parts = (clean_part(romaji), short_romaji(romaji, official, alts)) if official else ()
+    if official and clean_part(official) and not any(same_title(official, p) for p in parts):
+        # AniList's "English" title that is only the romaji (or its short name) again is no English title: the next
+        # source is asked. The folder's own English that is the same title (case and punctuation aside) keeps the
+        # owner's spelling: casing or a hyphen alone never renames a folder.
+        if eng and (same_title(eng, official) or same_title(eng, english_remainder(official, parts))):
+            return SeriesTitles(str(romaji).strip(), eng, source, alts, ENGLISH_OFFICIAL)
+        return SeriesTitles(str(romaji).strip(), official.strip(), source, alts, ENGLISH_OFFICIAL)
+    if eng:
+        return SeriesTitles(str(romaji).strip(), eng, source, alts, ENGLISH_FOLDER)
+    other = english.strip() if english and english.strip() else None
+    return SeriesTitles(str(romaji).strip(), other, source, alts, ENGLISH_OTHER if other else "")
 
 
 def english_candidates(alt_titles: Iterable[str], romaji: Optional[str], limit: int = 6) -> Sequence[str]:
@@ -394,7 +484,8 @@ def english_candidates(alt_titles: Iterable[str], romaji: Optional[str], limit: 
 
 
 __all__ = [
-    "ELLIPSIS", "ENGLISH_WORDS", "LONG_TITLE", "MAX_FOLDER_BYTES", "ROMAJI_WORDS", "SeriesTitles", "clean_part",
+    "ELLIPSIS", "ENGLISH_FOLDER", "ENGLISH_OFFICIAL", "ENGLISH_OTHER", "ENGLISH_WORDS", "LONG_TITLE",
+    "MAX_FOLDER_BYTES", "MAX_PATH_CHARS", "ROMAJI_WORDS", "name_room", "SeriesTitles", "english_remainder", "fold_typography", "clean_part",
     "english_candidates", "english_from_folder", "fit_name", "looks_english", "parse_folder", "romaji_like",
     "same_title", "scheme_name", "short_name_candidates", "short_romaji", "title_key", "titles_for", "windows_fits",
 ]
