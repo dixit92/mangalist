@@ -1655,6 +1655,9 @@ class MainWindow(QMainWindow):
             self._duplicates_view.refresh()
         self._start_signatures()
         self._run_after_add()
+        retire = getattr(self._download_tab, "retire_stale_findings", None)
+        if callable(retire):
+            retire()                            # findings whose gaps this scan shows filled leave Found
 
         if self._cfg.get("mu_autostart"):
             self._start_mu_lookup(list(entries))

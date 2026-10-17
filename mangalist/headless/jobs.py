@@ -398,6 +398,17 @@ class _Recorded:
             except Exception as exc:  # noqa: BLE001
                 _log.exception("Rescan: the signature backfill failed")
                 out["signatures"] = {"error": str(exc) or type(exc).__name__}
+        try:
+            from ..downloads.finder import retire_filled
+
+            # a gap filled any other way (files that arrived otherwise, a rename, a rule change) leaves Found now, not
+            # at the next filing or find pass (owner, 2026-10-16: "how are series removed from found if no missing
+            # chapters are there")
+            retired = retire_filled(db)
+            if retired:
+                out["findings_retired"] = retired
+        except Exception:  # noqa: BLE001 - housekeeping; the next find pass retires them anyway
+            _log.warning("Rescan: retiring filled findings failed", exc_info=True)
         _log.info("Rescan recorded: %s", out)
         return out
 
