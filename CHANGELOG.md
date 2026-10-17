@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.44] - 2026-10-17
+
+The forty-third MangaList release (testing build): the same series in two folders, found across every library and merged in one undoable step.
+
+- **Same series in two folders.** Series matched to the same MangaUpdates series in two separate folders - in two libraries, or a folder holding a copy of itself - are listed in the Duplicates view, and the Duplicates count includes them. Parts of one franchise inside its folder are never listed; parts of a franchise kept in different libraries are shown as a notice only (never offered a merge).
+- **Merge into…** moves one folder's files into the other in one step that Undo last merge puts back, never replacing a file. Offered only when both folders' matches are Confirmed. A file name both folders hold is compared by content: an identical copy is listed and deleted only after your yes (it cannot be undone); a different one moves in as "<name> (from <library>)", so the per-file duplicate review shows both and you pick. Afterwards the emptied folder is removed, the kept series keeps its history, and the duplicate review opens on it. A sub-folder name both folders hold is left in place and reported.
+
 ## [2026.10.43] - 2026-10-17
 
 The forty-second MangaList release (testing build): the Rename window's file menu, faster rescans, MangaPixer kept in step after a rename, and Unbundled chapters after the newest volume out.
