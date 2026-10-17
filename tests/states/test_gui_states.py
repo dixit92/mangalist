@@ -215,7 +215,7 @@ def test_detail_panel_shows_state_gaps_holds_and_links(window):
     assert d._lbl_gaps.text() == "Ch. 3, 5" and "Missing chapters:" in d._lbl_gaps.toolTip()
     assert d._lbl_holds.text() == "Chapters 1-2, 4" and d._lbl_english.text() == "Not licensed"
     assert d._lbl_mangapixer.text() == "-" and not d._lbl_mangapixer.isVisibleTo(d)    # no MangaPixer: no row
-    assert d._eng_label.text() == "Bravo Chapters · MangaUpdates: matched"
+    assert d._eng_label.text() == "MangaUpdates: matched"           # the matched title repeats the folder's: left out
     assert '<a href="https://www.amazon.com/s?k=Bravo+Chapters&amp;i=stripbooks">Amazon (search)</a>' in \
         d._links_label.text()
     assert not d._links_label.openExternalLinks()          # through gui.links: copied where there is no browser

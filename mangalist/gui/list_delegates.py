@@ -1,5 +1,6 @@
-"""The List tab's table cells as the mockup draws them: the title with the matched series' title under it, the state
-as a coloured badge, numbers and gaps in IBM Plex Mono, the English / Kind columns in the secondary ink.
+"""The List tab's table cells as the mockup draws them: the title with the matched series' title under it (only when it
+says something new), the state as a coloured badge with its flags, numbers and gaps in IBM Plex Mono, the English / Kind
+columns in the secondary ink.
 
 Each delegate lets the style draw the cell first (background, the examined / review tints, the selection, the row rule)
 and then paints its text on top, so the model's roles keep working unchanged."""
@@ -10,9 +11,10 @@ from typing import List, Tuple
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
-from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem, QToolTip
 
 from . import busy, theme
+from .list_text import same_title
 from .table_model import MODE_CHIP_ROLE, PENDING_ROLE, REVIEW_ROLE, STATE_ROLE, SUBTITLE_ROLE, state_text
 
 ROW_HEIGHT = 50                 # two lines of the Title cell with the mockup's 9 px padding
@@ -20,6 +22,8 @@ TITLE_PAD = 20                  # the first column's left padding
 CELL_PAD = 12
 SPINNER_PX = 14                 # the busy indicator of a State cell that waits for its state
 PENDING_TEXT = "Checking…"
+FLAG_GAP = 8                    # between the badge and its flags
+FLAG_SEP = "  ·  "              # between two flags
 CHIP_AUTO = "Auto"              # the accent chip; Notify / Off are muted (owner decisions 2026-10-10, 2026-10-11)
 
 
@@ -34,15 +38,26 @@ def _draw_cell(option: QStyleOptionViewItem, painter: QPainter, index, delegate:
     return opt
 
 
+def shown_subtitle(title: str, subtitle: str, review: bool) -> str:
+    """The second line of a Title cell: the matched series' title, or "" when it only repeats the folder's (case, spaces
+    and punctuation aside; for a subseries ``Parent / Part``, the part's). A match that needs review keeps it, in
+    orange, whatever it says (UI taste review 2026-10-16)."""
+    if not subtitle or review:
+        return subtitle
+    if same_title(subtitle, title) or same_title(subtitle, title.rsplit(" / ", 1)[-1]):
+        return ""
+    return subtitle
+
+
 class TitleDelegate(QStyledItemDelegate):
     """The folder's title (medium weight) over the matched series' title (smaller, muted; orange when the match
-    needs review)."""
+    needs review). A matched title that only repeats the folder's is left out and the title sits centred alone."""
 
     def paint(self, painter: QPainter, option, index) -> None:
         opt = _draw_cell(option, painter, index, self)
         title = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
-        subtitle = str(index.data(SUBTITLE_ROLE) or "")
         review = bool(index.data(REVIEW_ROLE))
+        subtitle = shown_subtitle(title, str(index.data(SUBTITLE_ROLE) or ""), review)
         rect = QRectF(opt.rect).adjusted(TITLE_PAD, 0, -CELL_PAD, 0)
         main = theme.font(13, 500)
         small = theme.font(12, 400)
@@ -93,8 +108,22 @@ def _paint_mode_chip(painter: QPainter, rect: QRectF, text: str) -> float:
     return width
 
 
+def fit_flags(flags, width: int, fm: QFontMetrics) -> str:
+    """The flags that fit whole in *width* px, then ``+N`` for the ones that do not: never a flag cut short ("Missing
+    volumes  Up..." - UI taste review 2026-10-16); the tooltip names them all. "" when not even ``+N`` fits."""
+    flags = list(flags)
+    for n in range(len(flags), -1, -1):
+        rest = len(flags) - n
+        parts = flags[:n] + ([f"+{rest}"] if rest else [])
+        text = FLAG_SEP.join(parts)
+        if text and fm.horizontalAdvance(text) <= width:
+            return text
+    return ""
+
+
 class StateBadgeDelegate(QStyledItemDelegate):
-    """The state as a rounded badge in its colours, its flags (``Upcoming``, ``Needs attention``) after it.
+    """The state as a rounded badge in its colours, its flags (``Upcoming``, ``Needs attention``) after it - whole
+    flags only, ``+1`` for those without room (:func:`fit_flags`), all of them in the tooltip.
 
     A series whose state is still being worked out in the background and has none to show (a series seen for the first
     time, 0.1-1 s after a scan: UI performance stage 2) paints a small spinner and "Checking…" instead of an empty cell
@@ -114,7 +143,6 @@ class StateBadgeDelegate(QStyledItemDelegate):
                 self._paint_pending(painter, opt)
             return
         label = st.reasons[0] if st.state.value == "Not a series" and st.reasons else st.state.value
-        flags = "  ·  ".join(st.flags)
         bg, fg = theme.badge_colors(st.state.value)
         badge_font = theme.font(12, 600)
         fm = QFontMetrics(badge_font)
@@ -133,15 +161,30 @@ class StateBadgeDelegate(QStyledItemDelegate):
         shown = label if text_w + 16 <= box.width() else fm.elidedText(label, Qt.TextElideMode.ElideRight,
                                                                          int(box.width() - 16))
         painter.drawText(box.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, shown)
-        if flags:
+        if st.flags:
             small = theme.font(12, 400)
-            painter.setFont(small)
-            painter.setPen(QColor(theme.MUTED_2))
-            rest = QRectF(box.right() + 8, rect.top(), rect.right() - box.right() - 8, rect.height())
-            if rest.width() > 20:
-                painter.drawText(rest, Qt.AlignmentFlag.AlignVCenter,
-                                 QFontMetrics(small).elidedText(flags, Qt.TextElideMode.ElideRight, int(rest.width())))
+            rest = QRectF(box.right() + FLAG_GAP, rect.top(), rect.right() - box.right() - FLAG_GAP, rect.height())
+            shown_flags = fit_flags(st.flags, int(rest.width()), QFontMetrics(small))
+            if shown_flags:
+                painter.setFont(small)
+                painter.setPen(QColor(theme.MUTED_2))
+                painter.drawText(rest, Qt.AlignmentFlag.AlignVCenter, shown_flags)
         painter.restore()
+
+    def helpEvent(self, event, view, option, index) -> bool:
+        """The cell's tooltip (the state, why, and each flag explained), plus any flag the tooltip does not name yet
+        (an edition, Unbundled, Upgrade available): a flag the cell had no room for is never out of reach."""
+        st = index.data(STATE_ROLE) if index.isValid() else None
+        if event is None or view is None or st is None:
+            return super().helpEvent(event, view, option, index)
+        tip = str(index.data(Qt.ItemDataRole.ToolTipRole) or "")
+        missing = [f for f in st.flags if f not in tip]
+        if missing:
+            tip = "\n".join(t for t in (tip, FLAG_SEP.join(missing)) if t)
+        if not tip:
+            return super().helpEvent(event, view, option, index)
+        QToolTip.showText(event.globalPos(), tip, view)
+        return True
 
     def _paint_pending(self, painter: QPainter, opt: QStyleOptionViewItem) -> None:
         pal = theme.current()

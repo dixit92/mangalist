@@ -4,14 +4,20 @@ volumes" (to the Download tab), the official sources and the folder's files. The
 Notify / Auto / the default, naming whose default) and Unbundled chapters a switch (owner, 2026-10-13: series actions
 everywhere) - the window sets them through the same calls as the row menu.
 
-Collapsible (owner, 2026-10-08): the close button asks the window to hide it (:attr:`DetailPanel.close_requested`)."""
+Collapsible (owner, 2026-10-08): the close button asks the window to hide it (:attr:`DetailPanel.close_requested`).
+
+The panel is as wide as the splitter makes it, never wider: no row may set its minimum width (UI taste review
+2026-10-16: the Unbundled check box's one-line label made the content 410 px in a 368 px view, cutting off the close
+button and the ends of the lines). Text wraps, a word too long for the panel is cut at the panel's edge, and the body
+ignores its rows' minimum width altogether, so a future row that forgets this cuts only itself."""
 
 from __future__ import annotations
 
 import html
 from typing import List, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,12 +38,14 @@ from ..models import MangaEntry
 from ..states import ATTENTION_LABELS, SeriesState
 from . import theme
 from .automation_rules import MODE_LABELS, MODES, default_entry_label, default_entry_tip
-from .list_text import UNBUNDLED_HELP, english_text, holds_text, match_text, unbundled_detail
+from .list_text import UNBUNDLED_HELP, english_text, holds_text, match_text, same_title, unbundled_detail
 from .links import open_link
 
 MAX_SAMPLE_FILES = 30
 LABEL_WIDTH = 96
 EMPTY_TEXT = "Select a series to see its details"
+UNBUNDLED_TEXT = "Also the chapters after the last volume"
+COMBO_MIN_WIDTH = 120           # the Automatic picker shrinks to this (its longest entry is wider than a narrow panel)
 
 
 def _label(text: str = "", *, role: Optional[str] = None, mono: bool = False, wrap: bool = True,
@@ -48,6 +56,8 @@ def _label(text: str = "", *, role: Optional[str] = None, mono: bool = False, wr
     if mono:
         lbl.setProperty("mono", True)
     lbl.setWordWrap(wrap)
+    if wrap:
+        lbl.setMinimumWidth(1)          # wraps to the panel; a word longer than the panel is cut, not the panel widened
     if selectable:
         lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     return lbl
@@ -57,6 +67,55 @@ def badge_style(state_value: Optional[str]) -> str:
     bg, fg = theme.badge_colors(state_value)
     return (f"QLabel {{ background: {bg}; color: {fg}; border-radius: 10px; padding: 2px 8px; font-size: 12px; "
             f"font-weight: 600; }}")
+
+
+class _ClickLabel(QLabel):
+    """A label that reports a left click (the text of a :class:`WrapCheck`)."""
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+class WrapCheck(QWidget):
+    """A check box whose text wraps: a QCheckBox's own text never does, and its full width became the details panel's
+    minimum width. :attr:`box` is a plain text-less QCheckBox (its signals and state work as before, its accessible
+    name is the text); a click on the text clicks it. Disabling the row greys both."""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        self.box = QCheckBox()
+        self.box.setAccessibleName(text)
+        self.label = _ClickLabel(text)
+        self.label.setWordWrap(True)
+        self.label.setMinimumWidth(1)
+        self.label.clicked.connect(lambda: self.box.click() if self.box.isEnabled() else None)
+        row.addWidget(self.box, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(self.label, 1)
+
+    def text(self) -> str:
+        return self.label.text()
+
+
+class _Body(QWidget):
+    """The scrolled body. When its layout changed (another series, a row shown or hidden) it asks the scroll area to
+    measure it again: the scroll area otherwise noticed a taller body only when its width changed too, and kept the
+    old height - the rows squeezed into the view, no scroll bar."""
+
+    def __init__(self, scroll: QScrollArea):
+        super().__init__()
+        self._scroll = scroll
+
+    def event(self, event: QEvent) -> bool:
+        handled = super().event(event)
+        if event.type() == QEvent.Type.LayoutRequest:      # the layout has just been redone
+            QCoreApplication.postEvent(self._scroll, QEvent(QEvent.Type.LayoutRequest))
+        return handled
 
 
 class DetailPanel(QWidget):
@@ -77,8 +136,10 @@ class DetailPanel(QWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
-        body = QWidget()
+        body = _Body(scroll)
         body.setObjectName("details")
+        # The scroll area makes the body as wide as the view, never wider: its rows' minimum widths are not asked.
+        body.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         scroll.setWidget(body)
         root = QVBoxLayout(body)
         root.setContentsMargins(20, 20, 20, 20)
@@ -127,6 +188,7 @@ class DetailPanel(QWidget):
         self.auto_combo.setObjectName("detailAutoMode")
         self.auto_combo.setAccessibleName("Automatic downloads")
         self.auto_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.auto_combo.setMinimumWidth(COMBO_MIN_WIDTH)      # as wide as its entries when there is room, else shrinks
         self.auto_combo.activated.connect(lambda i: self.auto_mode_chosen.emit(self.auto_combo.itemData(i)))
         self.auto_combo.setVisible(False)
         auto_cell = QWidget()
@@ -135,9 +197,10 @@ class DetailPanel(QWidget):
         al.addWidget(self._lbl_auto, 1)
         al.addWidget(self.auto_combo)
         al.addStretch(0)
-        self.unbundled_check = QCheckBox("Also the chapters after the last volume")
+        self.unbundled_row = WrapCheck(UNBUNDLED_TEXT)
+        self.unbundled_row.setToolTip(UNBUNDLED_HELP)
+        self.unbundled_check = self.unbundled_row.box
         self.unbundled_check.setObjectName("detailUnbundled")
-        self.unbundled_check.setToolTip(UNBUNDLED_HELP)
         self.unbundled_check.clicked.connect(self.unbundled_toggled)
         self._lbl_kind = _label("-")
         self._path_label = _label("", mono=True)
@@ -147,7 +210,7 @@ class DetailPanel(QWidget):
                                      ("mangapixer", "MangaPixer", self._lbl_mangapixer),
                                      ("download", "Download", self._lbl_download),
                                      ("auto", "Automatic", auto_cell),
-                                     ("unbundled", "Unbundled", self.unbundled_check),
+                                     ("unbundled", "Unbundled", self.unbundled_row),
                                      ("kind", "Kind", self._lbl_kind),
                                      ("folder", "Folder", self._path_label)):
             self._add_row(key, caption, widget)
@@ -249,8 +312,8 @@ class DetailPanel(QWidget):
         self.unbundled_check.blockSignals(True)
         self.unbundled_check.setChecked(bool(on))
         self.unbundled_check.blockSignals(False)
-        self.unbundled_check.setEnabled(available)
-        self.unbundled_check.setToolTip(UNBUNDLED_HELP if available else "Not available until the folder is scanned")
+        self.unbundled_row.setEnabled(available)
+        self.unbundled_row.setToolTip(UNBUNDLED_HELP if available else "Not available until the folder is scanned")
 
     def set_download(self, text: Optional[str], tooltip: str = "") -> None:
         """The selected series' download status ("Downloading", "Filed v03-v05", ...), or None for none."""
@@ -290,8 +353,11 @@ class DetailPanel(QWidget):
         self._title_label.setText(title)
         match = match_text(knowledge)
         matched = (knowledge.title if knowledge is not None and knowledge.matched else None) or ""
+        if same_title(matched, entry.title):
+            matched = ""                    # the title just above says it already
         sub = " · ".join(t for t in (matched, match) if t)
-        if entry.english_title and entry.english_title != matched:
+        if entry.english_title and not (same_title(entry.english_title, matched)
+                                        or same_title(entry.english_title, entry.title)):
             sub = " · ".join(t for t in (entry.english_title, sub) if t)
         self._eng_label.setText(sub)
         self._eng_label.setVisible(bool(sub))
