@@ -15,8 +15,8 @@
   registered but DISABLED unless downloads are turned on. Nothing is ever dispatched on discovery - only in these
   scheduled passes (or the owner's Find now). Settings > Automation calls it "Find and send missing volumes and
   chapters".
-- ``clean-records``: the clean-up of finished download records (:mod:`mangalist.headless.records_job`) - off until
-  the owner picks Daily, Weekly or Monthly in Settings > Scheduled tasks.
+- ``clean-records``: the clean-up of finished download records (:mod:`mangalist.headless.records_job`) - weekly
+  by default (records older than a week); the owner picks Off, Daily, Weekly or Monthly in Settings > Scheduled tasks.
 - ``downloads``: the volumes MVP's arrivals pass (:mod:`mangalist.headless.downloads_job`) - file finished
   ``mangalist`` torrents into their series folders and remove completed ones. Enabled only with downloads on.
 
@@ -398,6 +398,17 @@ class _Recorded:
             except Exception as exc:  # noqa: BLE001
                 _log.exception("Rescan: the signature backfill failed")
                 out["signatures"] = {"error": str(exc) or type(exc).__name__}
+        try:
+            from ..downloads.finder import retire_filled
+
+            # a gap filled any other way (files that arrived otherwise, a rename, a rule change) leaves Found now, not
+            # at the next filing or find pass (owner, 2026-10-16: "how are series removed from found if no missing
+            # chapters are there")
+            retired = retire_filled(db)
+            if retired:
+                out["findings_retired"] = retired
+        except Exception:  # noqa: BLE001 - housekeeping; the next find pass retires them anyway
+            _log.warning("Rescan: retiring filled findings failed", exc_info=True)
         _log.info("Rescan recorded: %s", out)
         return out
 

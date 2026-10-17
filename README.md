@@ -53,8 +53,8 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 (default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1` (below).
 
 The schedules (`MANGALIST_RESCAN_SCHEDULE`, `MANGALIST_MANGAPIXER_SYNC_SCHEDULE`, `MANGALIST_DOWNLOADS_SCHEDULE`,
-`MANGALIST_DISPATCH_SCHEDULE`, and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records, off
-by default) and the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run
+`MANGALIST_DISPATCH_SCHEDULE`, and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records,
+default `weekly@sun 05:30`: records older than a week; `off` to stop) and the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run
 defaults**: you change them in **Settings > Scheduled tasks** (one list: each task with its time, last run, next run
 and **Run now**; the full re-read offers every 6 hours, every 12 hours or daily) and **Settings > Logging**, the
 container's background runner picks the change
@@ -137,9 +137,12 @@ python -m pytest -q
 The tests never touch the network. A few optional live checks against the real MangaUpdates API (public titles from
 the golden set only) run with `MANGALIST_LIVE_MU=1 python -m pytest -q tests/golden/test_live_mangaupdates.py`.
 
-Series folders are named `Romanized Title [English Title]` - MangaUpdates' title, then the English title in brackets
-when MangaList knows it (just `Romanized Title` otherwise), like animefetch's show folders. Add series proposes that
-name; the Renamer lists a folder named differently as Rename pending and renames it only when you press Rename.
+Series folders are named `Romanized Title [English Title]` - MangaUpdates' title, then the official English title in
+brackets (AniList's, found through MangaDex's links; else the folder's own English title), just `Romanized Title`
+otherwise, like animefetch's show folders. The official titles are looked up in the background when the Renamer opens
+and cached, so a scan never asks the network. When the path of a series' longest file would pass 255 characters, its
+folder name leaves the English part out. Add series proposes that name; the Renamer lists a folder named differently as
+Rename pending and renames it only when you press Rename.
 
 ## MangaUpdates matching
 

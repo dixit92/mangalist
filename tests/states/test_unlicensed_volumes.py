@@ -92,6 +92,51 @@ def test_a_newest_volume_the_list_does_not_map_is_not_compared_either_way():
     assert not s.gaps and s.unbundled_ask is not None and s.unbundled_ask.needed
 
 
+def test_a_newest_volume_the_list_does_not_map_counts_the_original_editions_volumes():
+    # owner, 2026-10-16 (question 83: "yes"): the original edition's volume count gives the volume gaps there
+    s = state(unlicensed(origin_volumes=8), volumes=("1", "2", "3", "4"))
+    assert s.state == State.MISSING_VOLUMES and s.gaps_text == "Vol. 5-8" and not s.missing_chapters
+    assert s.gaps[0].note == "original edition, 8 volumes; not licensed in English"
+    assert not any(g.open_end for g in s.gaps)                      # volume 8 is not mapped: no chapter past it known
+    why = " ".join(s.reasons)
+    assert "the original edition has 8 volumes - counted as missing volumes" in why
+    assert "turn on Unbundled chapters" in why and "out past volume 4" not in why     # volume 4's end is not known
+    # a hole below the newest volume too
+    s = state(unlicensed(origin_volumes=5), volumes=("1", "3", "4"))
+    assert s.gaps_text == "Vol. 2, 5"
+
+
+def test_the_count_adds_to_the_scanlation_volumes_and_their_gaps_are_never_searched():
+    s = state(unlicensed(origin_volumes=7, scan_latest_volume=5), volumes=("1", "2", "3", "4"))
+    assert s.gaps_text == "Vol. 5-7" and [g.note for g in s.gaps][:1] == ["scanlation"]
+    k = unlicensed(origin_volumes=6, source="mangapixer")
+    s = state(k, volumes=("1", "2", "3", "4"))
+    volumes = find_volumes_availability(series_id=7, folder="/lib/Example Sage", title="Example Sage",
+                                        english_title=None, knowledge=k, state=s, held=("1", "2", "3", "4"))
+    (w,) = wanted_series(folder="/lib/Example Sage", title="Example Sage", english_title=None, state=s, knowledge=k,
+                         held=("1", "2", "3", "4"), series_id=7, volumes=volumes)
+    assert w.group == GROUP_VOLUMES and w.gaps == "Vol. 5-6" and not w.findable
+
+
+def test_every_original_volume_held_reads_up_to_date_or_complete():
+    s = state(unlicensed(origin_volumes=4), volumes=("1", "2", "3", "4"))
+    assert s.state == State.UP_TO_DATE and not s.gaps
+    assert "The folder holds every volume of the original edition (4)" in s.reasons
+    done = unlicensed(origin_volumes=4, origin_status="Complete", translation_complete=True)
+    assert state(done, volumes=("1", "2", "3", "4")).state == State.COMPLETE
+
+
+def test_with_unbundled_on_or_no_count_the_unmapped_volume_compares_as_before():
+    s = state(unlicensed(origin_volumes=8), volumes=("1", "2", "3", "4"), unbundled=True)
+    assert not s.gaps and s.unbundled_ask is not None and s.unbundled_ask.needed      # the first chapter to get
+    s = state(unlicensed(), volumes=("1", "2", "3", "4"))                              # no count: Can't tell
+    assert s.state == State.CANT_TELL and not s.gaps
+    # a licensed series is not counted this way
+    licensed = own(licensed_en=True, latest_chapter="45", volumes=LIST_1_3, origin_volumes=8,
+                   english_publishers=(EnglishPublisher("Example Press", volumes=3),))
+    assert not state(licensed, volumes=("1", "2", "3", "4")).missing_volumes
+
+
 def test_scanlation_volumes_past_the_list_leave_no_open_end():
     # MangaUpdates' scanlated volumes 4-5 are gaps; volume 5 is not mapped, so it may hold chapters 31-45
     s = state(unlicensed(scan_latest_volume=5))

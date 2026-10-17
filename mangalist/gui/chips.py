@@ -10,8 +10,9 @@ from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import QLayout, QLayoutItem, QPushButton, QSizePolicy, QStyle, QStyleOptionButton
 
-from . import theme
+from . import busy, theme
 
+_SPIN_PX = 11                   # a busy chip's / tab's spinner, in place of its number
 _CHIP_PAD = 12
 _CHIP_GAP = 5
 _TAB_PAD = 18
@@ -26,8 +27,36 @@ def _frame(button: QPushButton, painter: QPainter) -> None:
     button.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, painter, button)
 
 
-class ChipButton(QPushButton):
-    """A checkable state chip: ``Missing volumes 14``."""
+class _BusyMixin:
+    """A count that is being worked out shows a small spinner in place of the number (:mod:`.busy`; owner, 2026-10-16:
+    "keep a spinner if measured time for any UI element can go over 0.5s"). One shared clock repaints it, and lets go
+    of the widget when :meth:`set_busy` is turned off."""
+
+    _busy = False
+
+    @property
+    def busy(self) -> bool:
+        return self._busy
+
+    def set_busy(self, busy_: bool) -> None:
+        busy_ = bool(busy_)
+        if busy_ == self._busy:
+            return
+        self._busy = busy_
+        if busy_:
+            busy.clock().watch(self._busy_tick)
+        else:
+            busy.clock().unwatch(self._busy_tick)
+        self.updateGeometry()
+        self.update()
+
+    def _busy_tick(self) -> bool:
+        self.update()
+        return self._busy
+
+
+class ChipButton(_BusyMixin, QPushButton):
+    """A checkable state chip: ``Missing volumes 14``. Busy (:meth:`set_busy`): a spinner where the count is."""
 
     def __init__(self, label: str, key: Optional[str] = None, parent=None):
         super().__init__(label, parent)
@@ -54,12 +83,16 @@ class ChipButton(QPushButton):
     def _fonts(self):
         return theme.font(13, 600 if self.isChecked() else 400), theme.font(13, 400)
 
+    def _count_width(self, small) -> int:
+        """The width of the count (the spinner when busy) with its gap; 0 for none."""
+        if self._busy:
+            return _CHIP_GAP + _SPIN_PX
+        return _CHIP_GAP + QFontMetrics(small).horizontalAdvance(str(self._count)) if self._count is not None else 0
+
     def sizeHint(self) -> QSize:
         main, small = self._fonts()
         bold = theme.font(13, 600)               # measured bold so a chip does not jump when checked
-        width = QFontMetrics(bold).horizontalAdvance(self.text()) + 2 * _CHIP_PAD
-        if self._count is not None:
-            width += _CHIP_GAP + QFontMetrics(small).horizontalAdvance(str(self._count))
+        width = QFontMetrics(bold).horizontalAdvance(self.text()) + 2 * _CHIP_PAD + self._count_width(small)
         return QSize(width + 2, 32)
 
     def minimumSizeHint(self) -> QSize:
@@ -73,15 +106,18 @@ class ChipButton(QPushButton):
         if not self.isEnabled():
             color = QColor(theme.DISABLED)
         rect = self.rect()
-        width = QFontMetrics(main).horizontalAdvance(self.text())
-        if self._count is not None:
-            width += _CHIP_GAP + QFontMetrics(small).horizontalAdvance(str(self._count))
+        width = QFontMetrics(main).horizontalAdvance(self.text()) + self._count_width(small)
         x = (rect.width() - width) / 2
         p.setFont(main)
         p.setPen(color)
         label_w = QFontMetrics(main).horizontalAdvance(self.text())
         p.drawText(QRectF(x, 0, label_w + 1, rect.height()), Qt.AlignmentFlag.AlignVCenter, self.text())
-        if self._count is not None:
+        if self._busy:
+            dim = QColor(color)
+            dim.setAlphaF(0.7)
+            busy.paint_spinner(p, QRectF(x + label_w + _CHIP_GAP, (rect.height() - _SPIN_PX) / 2, _SPIN_PX, _SPIN_PX),
+                               dim.name(QColor.NameFormat.HexArgb), track=None)
+        elif self._count is not None:
             dim = QColor(color)
             dim.setAlphaF(0.7)
             p.setFont(small)
@@ -91,8 +127,9 @@ class ChipButton(QPushButton):
         p.end()
 
 
-class TabButton(QPushButton):
-    """A top-bar tab: its label, the accent underline when current, and an optional count pill (``Download 31``)."""
+class TabButton(_BusyMixin, QPushButton):
+    """A top-bar tab: its label, the accent underline when current, and an optional count pill (``Download 31``).
+    Busy (:meth:`set_busy`): the pill holds a spinner in place of the number."""
 
     def __init__(self, label: str, parent=None):
         super().__init__(label, parent)
@@ -115,13 +152,15 @@ class TabButton(QPushButton):
             self.update()
 
     def _pill_width(self) -> int:
+        if self._busy:
+            return _SPIN_PX + 14
         if self._badge is None:
             return 0
         return QFontMetrics(theme.font(12, 600)).horizontalAdvance(str(self._badge)) + 16
 
     def sizeHint(self) -> QSize:
         width = QFontMetrics(theme.font(theme.BASE_PX, 600)).horizontalAdvance(self.text()) + 2 * _TAB_PAD
-        if self._badge is not None:
+        if self._badge is not None or self._busy:
             width += _PILL_GAP + self._pill_width()
         return QSize(width, 56)
 
@@ -140,7 +179,7 @@ class TabButton(QPushButton):
         label_w = QFontMetrics(main).horizontalAdvance(self.text())
         x = _TAB_PAD
         p.drawText(QRectF(x, 0, label_w + 1, rect.height() - 3), Qt.AlignmentFlag.AlignVCenter, self.text())
-        if self._badge is not None:
+        if self._badge is not None or self._busy:
             pill = theme.font(12, 600)
             w = self._pill_width()
             h = 20
@@ -149,9 +188,13 @@ class TabButton(QPushButton):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(theme.ACCENT_TINT))
             p.drawRoundedRect(box, 10, 10)
-            p.setFont(pill)
-            p.setPen(QColor(theme.ACCENT))
-            p.drawText(box, Qt.AlignmentFlag.AlignCenter, str(self._badge))
+            if self._busy:
+                busy.paint_spinner(p, QRectF(box.center().x() - _SPIN_PX / 2, box.center().y() - _SPIN_PX / 2,
+                                             _SPIN_PX, _SPIN_PX), theme.ACCENT, track=None)
+            else:
+                p.setFont(pill)
+                p.setPen(QColor(theme.ACCENT))
+                p.drawText(box, Qt.AlignmentFlag.AlignCenter, str(self._badge))
         p.end()
 
 

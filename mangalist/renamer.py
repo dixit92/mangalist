@@ -838,12 +838,15 @@ def _parse_context(title: Optional[str], kind_hint: Optional[str], scheme: Optio
     return None
 
 
-def _default_title_for(db) -> Callable[[Any, Any], Optional[Tuple[str, Tuple[str, ...]]]]:
-    """The series' record title (the romaji of the folder scheme, :mod:`mangalist.folder_scheme`) and its alternative
-    titles: MangaPixer's record (its own matched item, not a parent's; owner, 2026-10-10: "the series title =
-    MangaPixer's title"), else MangaList's own MangaUpdates match when it is confirmed or automatic (a series added
-    with Add series before MangaPixer has matched it), else None (no title: the folder keeps its name and volume names
-    use it)."""
+def _default_title_for(db) -> Callable[[Any, Any], Optional[Tuple[str, Tuple[str, ...], Dict[str, Any]]]]:
+    """The series' record title (the romaji of the folder scheme, :mod:`mangalist.folder_scheme`), its alternative
+    titles and the record's ids (``{mu_id, mangadex_id, anilist_id}``: where :mod:`mangalist.english_titles` looks up
+    the official English title): MangaPixer's record (its own matched item, not a parent's; owner, 2026-10-10: "the
+    series title = MangaPixer's title"; ids from the record and MangaPixer's MangaDex / AniList companions), else
+    MangaList's own MangaUpdates match when it is confirmed or automatic (a series added with Add series before
+    MangaPixer has matched it; its MangaUpdates id), else None (no title: the folder keeps its name and volume names
+    use it). The romaji is MangaUpdates' spelling in both (owner, answer 78: "standardize the romaji if full to
+    MangaUpdates"); only a series MangaUpdates does not list (MangaPixer's MangaDex record) has MangaDex's title."""
     resolver = None
     links: Optional[Dict[str, Any]] = None
 
@@ -865,7 +868,14 @@ def _default_title_for(db) -> Callable[[Any, Any], Optional[Tuple[str, Tuple[str
         if not isinstance(title, str) or not title.strip():
             return None
         alts = tuple(a.strip() for a in record.get("altTitles") or () if isinstance(a, str) and a.strip())
-        return title.strip(), alts
+        item = res.item if isinstance(getattr(res, "item", None), dict) else {}
+        companions = item.get("companions") if isinstance(item.get("companions"), dict) else {}
+        anilist = companions.get("anilist") if isinstance(companions.get("anilist"), dict) else {}
+        mangadex_record = record.get("provider") == "mangadex"
+        ids = {"mu_id": None if mangadex_record else record.get("externalId"),
+               "mangadex_id": record.get("externalId") if mangadex_record else companions.get("mangadex"),
+               "anilist_id": anilist.get("id")}
+        return title.strip(), alts, ids
 
     def own_match(root, series):
         nonlocal links
@@ -875,7 +885,7 @@ def _default_title_for(db) -> Callable[[Any, Any], Optional[Tuple[str, Tuple[str
             links = {}
             try:
                 with db.connect() as con:
-                    for r in con.execute("SELECT folder, mu_title, mu_associated, mu_confirmed, mu_band"
+                    for r in con.execute("SELECT folder, mu_id, mu_title, mu_associated, mu_confirmed, mu_band"
                                          " FROM links_cache"):
                         links[os.path.normcase(r["folder"])] = r
             except Exception:  # noqa: BLE001 - no links cache: no title from it
@@ -898,9 +908,9 @@ def _default_title_for(db) -> Callable[[Any, Any], Optional[Tuple[str, Tuple[str
             alts = tuple(a.strip() for a in json.loads(row["mu_associated"] or "[]") if isinstance(a, str) and a.strip())
         except (TypeError, ValueError):
             alts = ()
-        return title.strip(), alts
+        return title.strip(), alts, {"mu_id": row["mu_id"]}
 
-    def title_for(root, series) -> Optional[Tuple[str, Tuple[str, ...]]]:
+    def title_for(root, series) -> Optional[Tuple[str, Tuple[str, ...], Dict[str, Any]]]:
         return mangapixer(root, series) or own_match(root, series)
 
     return title_for
@@ -1046,6 +1056,7 @@ class Renamer:
         self._request_scans = request_scans
         self.batch_size = max(1, int(batch_size))
         self._manual: Dict[str, FileUnits] = {}         # path -> what the owner says it holds (this session)
+        self._english: Optional[Dict[str, Any]] = None  # the official English titles cache (read once per dry run)
 
     def set_file_units(self, path: str, units: Optional[FileUnits]) -> None:
         """What *path* holds, as the owner says (None forgets it): the next preview names it by these numbers. Kept for
@@ -1098,34 +1109,97 @@ class Renamer:
             return None
         return target if target and not _name_problem(target) else None
 
-    def _record_titles(self, root, series) -> Tuple[Optional[str], Tuple[str, ...]]:
-        """The series' record title and alternative titles (see :func:`_default_title_for`); (None, ()) without one."""
+    def _record(self, root, series) -> Tuple[Optional[str], Tuple[str, ...], Dict[str, Any]]:
+        """The series' record title, alternative titles and record ids (see :func:`_default_title_for`); (None, (), {})
+        without one."""
         if self._title_for is None:
             self._title_for = _default_title_for(self.db)
         try:
             got = self._title_for(root, series)
         except Exception:  # noqa: BLE001
-            return None, ()
+            return None, (), {}
         if isinstance(got, tuple):
-            title, alts = (got + ((),))[:2]
-            return (title if isinstance(title, str) and title.strip() else None), tuple(alts or ())
-        return (got if isinstance(got, str) and got.strip() else None), ()
+            title, alts, ids = (got + ((), {}))[:3]
+            return ((title if isinstance(title, str) and title.strip() else None), tuple(alts or ()),
+                    dict(ids) if isinstance(ids, dict) else {})
+        return (got if isinstance(got, str) and got.strip() else None), (), {}
+
+    def _record_titles(self, root, series) -> Tuple[Optional[str], Tuple[str, ...]]:
+        """The series' record title and alternative titles (see :func:`_default_title_for`); (None, ()) without one."""
+        title, alts, _ids = self._record(root, series)
+        return title, alts
+
+    def english_cache(self) -> Dict[str, Any]:
+        """The cached official English titles (:class:`mangalist.english_titles.EnglishEntry` by key), read once and
+        again at each dry run - never the network."""
+        if self._english is None:
+            from .english_titles import EnglishTitles
+
+            self._english = EnglishTitles(self.db).load()
+        return self._english
+
+    def english_ref(self, root, series):
+        """The :class:`mangalist.english_titles.SeriesRef` of a series (what its official English title is looked up
+        by), or None (no record title / id)."""
+        from .english_titles import SeriesRef
+
+        title, _alts, ids = self._record(root, series)
+        return SeriesRef.of(title, ids) if title else None
 
     def series_titles(self, root, series):
         """The :class:`~mangalist.folder_scheme.SeriesTitles` of a series (its romaji and English titles), or None
-        when it has no record title yet."""
+        when it has no record title yet. The English title is the cached official one (AniList's, owner answer 76),
+        else the folder's, else MangaDex's only English title (:func:`mangalist.folder_scheme.titles_for`)."""
+        from .english_titles import SeriesRef
         from .folder_scheme import titles_for
 
         rel = series.rel_path or ""
-        romaji, alts = self._record_titles(root, series)
+        romaji, alts, ids = self._record(root, series)
         if romaji is None:
             return None
-        return titles_for(rel.rsplit("/", 1)[-1], romaji, alts, top_level="/" not in rel)
+        ref = SeriesRef.of(romaji, ids)
+        entry = self.english_cache().get(ref.key) if ref is not None else None
+        return titles_for(rel.rsplit("/", 1)[-1], romaji, alts, top_level="/" not in rel,
+                          official=getattr(entry, "english", None), english=getattr(entry, "mangadex_english", None))
 
-    def scheme_folder_name(self, root, series, fits=None) -> Optional[str]:
-        """The scheme's name ``<romaji> [<English>]`` for the series' folder (None: no record title)."""
+    def scheme_folder_name(self, root, series, fits=None, max_chars: Optional[int] = None) -> Optional[str]:
+        """The scheme's name ``<romaji> [<English>]`` for the series' folder (None: no record title); *max_chars*: the
+        room the path limit leaves for the name (:func:`mangalist.folder_scheme.name_room`, answer 85)."""
         titles = self.series_titles(root, series)
-        return titles.name(fits) if titles is not None else None
+        return titles.name(fits, max_chars) if titles is not None else None
+
+    def english_refs(self, root_ids: Optional[Sequence[int]] = None, series_ids: Optional[Sequence[int]] = None
+                     ) -> List[Any]:
+        """The :class:`~mangalist.english_titles.SeriesRef` of every present series of the given roots (None: every
+        root) or series whose official English title is not cached or is old (cheap: the database only)."""
+        from .english_titles import EnglishTitles
+
+        wanted = {int(s) for s in series_ids} if series_ids is not None else None
+        roots = self.db.list_roots()
+        if root_ids is not None:
+            roots = [r for r in roots if r.id in {int(i) for i in root_ids}]
+        refs = []
+        for root in roots:
+            for series in self.db.list_series(root.id):
+                if getattr(series, "status", "present") != "present" or (wanted is not None and series.id not in wanted):
+                    continue
+                ref = self.english_ref(root, series)
+                if ref is not None:
+                    refs.append(ref)
+        return EnglishTitles(self.db).due(refs, cached=self.english_cache())
+
+    def fill_english(self, refs: Optional[Sequence[Any]] = None, *, should_stop: Optional[Callable[[], bool]] = None,
+                     **fetchers):
+        """Look up the official English titles of *refs* (None: every series due) on the network and cache them
+        (:func:`mangalist.english_titles.fill`, polite and batched; a minute or two for a whole library the first
+        time - call it off the UI thread). The next dry run uses them. Returns the
+        :class:`~mangalist.english_titles.FillReport`."""
+        from .english_titles import fill
+
+        refs = self.english_refs() if refs is None else refs
+        report = fill(self.db, refs, should_stop=should_stop, **fetchers)
+        self._english = None
+        return report
 
     def series_title(self, root, series) -> str:
         """The series' title (owner, 2026-10-15, answer 12): the folder scheme's ``<romaji> [<English>]``, else - no
@@ -1146,16 +1220,40 @@ class Renamer:
         romaji, _alts = self._record_titles(root, series)
         return romaji or os.path.basename(folder)
 
+    def longest_file(self, root, series, plans: Sequence[FilePlan]) -> str:
+        """The longest path of a file below the series folder, relative to it, under the name the scheme gives it
+        (*plans*: a planned rename's target, else the file's name) - with the files of its subseries folders under
+        their names now (answer 85: the folder name's room, :func:`mangalist.folder_scheme.name_room`)."""
+        folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
+        paths = []
+        for f in plans:
+            name = f.target if f.status == RENAME and f.target else os.path.basename(f.path)
+            sub = os.path.relpath(os.path.dirname(f.path), folder)
+            paths.append(name if sub in (".", "") else f"{sub.replace(os.sep, '/')}/{name}")
+        rel = series.rel_path or ""
+        if rel and "/" not in rel:
+            try:
+                with self.db.connect() as con:
+                    for r in con.execute("SELECT s.rel_path AS sub, u.rel_path AS file FROM units u JOIN series s"
+                                         " ON s.id = u.series_id WHERE s.root_id = ? AND substr(s.rel_path, 1, ?) = ?",
+                                         (root.id, len(rel) + 1, rel + "/")):
+                        paths.append(f"{r['sub'][len(rel) + 1:]}/{r['file']}")
+            except Exception:  # noqa: BLE001 - the series' own files only
+                _log.debug("Renamer: no subseries files for %s", rel, exc_info=True)
+        return max(paths, key=len, default="")
+
     def _plan_folder(self, root, series, preview: SeriesPreview, names_of: Callable[[str], Set[str]],
                      server: Optional[str]) -> None:
-        """The series folder's status in *preview* (top-level series only)."""
-        from .folder_scheme import windows_fits
+        """The series folder's status in *preview* (top-level series only; after its files are planned: the folder's
+        name has the room the path of its longest file leaves, answer 85)."""
+        from .folder_scheme import name_room, windows_fits
 
         rel = series.rel_path or ""
         if not rel or "/" in rel:
             return
         try:
-            target = self.scheme_folder_name(root, series, windows_fits(root.path, server))
+            room = name_room(root.path, self.longest_file(root, series, preview.files))
+            target = self.scheme_folder_name(root, series, windows_fits(root.path, server), room)
         except Exception:  # noqa: BLE001 - one odd title must not stop the preview
             _log.warning("Renamer: naming the folder of %s failed; left alone", rel, exc_info=True)
             preview.folder_status, preview.folder_reason = LEFT_ALONE, "naming the folder failed"
@@ -1233,13 +1331,14 @@ class Renamer:
             preview.analysed = self._analysed(self.db, series)
         except Exception:  # noqa: BLE001 - not known
             preview.analysed = None
-        self._plan_folder(root, series, preview, names_of or _listing_cache(),
-                          getattr(limits, "windows_server", None) if limits is not None else None)
+        server = getattr(limits, "windows_server", None) if limits is not None else None
         if not files:
+            self._plan_folder(root, series, preview, names_of or _listing_cache(), server)
             preview.error = "no files recorded for this series (rescan first)"
             return preview
         preview.files = plan_files(files, namer=self.namer, series_title=title, volume_of=self._volume_of(series.id),
                                    limits=limits, legacy_title=self.legacy_title(root, series))
+        self._plan_folder(root, series, preview, names_of or _listing_cache(), server)
         if self._manual:
             preview.files = [replace(f, reason=f.reason or MANUAL_REASON)
                              if f.status in (RENAME, UNCHANGED) and os.path.normpath(f.path) in self._manual else f
@@ -1254,6 +1353,7 @@ class Renamer:
         root = self.db.get_root(series.root_id)
         if root is None:
             raise LookupError(f"the library of series {series_id} is no longer configured")
+        self._english = None                            # official English titles found since the last look
         preview = self._preview(root, series, self.files_of(root, series), self.limits())
         self._log_preview([preview], f"series {preview.title!r}")
         return preview
@@ -1271,6 +1371,7 @@ class Renamer:
         elif wanted_series is None:
             roots = [r for r in roots if r.enforce_naming != ENFORCE_OFF]
         dry = DryRun()
+        self._english = None                            # official English titles found since the last look
         todo = []
         for root in roots:
             for series in self.db.list_series(root.id):

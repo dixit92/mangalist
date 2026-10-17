@@ -179,6 +179,7 @@ def test_forget_needs_a_missing_row_and_drops_its_data(db, library):
     for p in (library / "Old Title").iterdir():
         p.unlink()
     (library / "Old Title").rmdir()
+    (library / "Other Title").mkdir()       # the library is not left empty (an empty one could be an unmounted share)
     scan(db)
     assert carry_mod.missing_count(db) == 1
     archive_ids = {a.id for a in db.list_archives(series_id=old_id)}

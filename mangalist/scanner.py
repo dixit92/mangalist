@@ -25,7 +25,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Callable, Collection, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .classifier import annotate_file, classify, parse_folder_name
 from .models import FileHit, MangaEntry
@@ -306,12 +306,52 @@ def is_top_name(name: str) -> bool:
 
 
 def root_is_empty(folder: Path) -> bool:
-    """True for a folder that exists, can be read and has nothing in it (not even a hidden entry): an empty library.
-    False for anything else, including a folder that is missing or cannot be listed - those are errors, not emptiness."""
+    """True for a folder that exists, can be read and has nothing in it but hidden entries (``.DS_Store``, ``.Trash``:
+    no series folder, no archive): an empty library - or the mountpoint of a share that is not mounted. False for
+    anything else, including a folder that is missing or cannot be listed - those are errors, not emptiness."""
     try:
-        return folder.is_dir() and next(iter(folder.iterdir()), None) is None
+        return folder.is_dir() and all(p.name.startswith(".") for p in folder.iterdir())
     except OSError:
         return False
+
+
+#: A root scan's error when the library's folder is empty but the database knows series in it (owner, 2026-10-16,
+#: question 71: "add a guard"): an unmounted share looks exactly like an empty library.
+OFFLINE_EMPTY = "the folder is empty - is the share mounted? Nothing was changed"
+
+
+def _known_series(db, root_id: Optional[int]) -> int:
+    """How many present series the library database knows in root *root_id* (0 without a database or a root id). A
+    database that cannot be read counts as knowing some: then nothing is judged gone."""
+    if db is None or root_id is None:
+        return 0
+    try:
+        return sum(1 for s in db.list_series(root_id) if getattr(s, "status", "present") == "present")
+    except Exception:  # noqa: BLE001 - not readable: treat the root as known, never as emptied
+        _log.warning("Reading the series of root %s failed; its empty folder is not recorded", root_id, exc_info=True)
+        return 1
+
+
+def _moved_away(db, root_id: Optional[int], elsewhere: Collection[Tuple[str, int]] = ()) -> bool:
+    """Every archive the database has present in root *root_id* is in another root now - the same file name and size
+    (recorded, or in *elsewhere*: ``(file name, size)`` of other roots read in the same scan), or the same content
+    signature: the library's series were moved out of it (Move to library, or by hand), not a share that went offline.
+    False when it holds no archive, or the database cannot be read. Identity itself pairs the moved archives by their
+    signatures once the root is recorded (:mod:`mangalist.identity.moves`)."""
+    if db is None or root_id is None:
+        return False
+    try:
+        mine = db.list_archives(root_id=root_id, status="present")
+        if not mine:
+            return False
+        others = [a for a in db.list_archives(status="present") if a.root_id != root_id]
+    except Exception:  # noqa: BLE001 - not readable: not shown to have moved
+        _log.debug("Reading the archives for root %s failed", root_id, exc_info=True)
+        return False
+    names = {(a.rel_path.rsplit("/", 1)[-1], a.size) for a in others} | set(elsewhere)
+    signatures = {a.signature for a in others if a.signature}
+    return all((a.rel_path.rsplit("/", 1)[-1], a.size) in names or (a.signature and a.signature in signatures)
+               for a in mine)
 
 
 def scan_root(
@@ -404,6 +444,7 @@ class RootScan:
     loose: List[LooseArchive] = field(default_factory=list)
     scope: Optional[frozenset] = None             # a folder-level scan: the root's direct children read (None: all)
     empty: bool = False                           # the root is a readable folder with nothing in it: an empty library
+    offline: bool = False                         # ... but the database knows series in it: not read (OFFLINE_EMPTY)
 
 
 @dataclass
@@ -450,11 +491,24 @@ def scan_one_root(
     db=None,
     label: bool = False,
     only: Optional[Iterable[str]] = None,
+    known: Optional[object] = None,
+    elsewhere: Collection[Tuple[str, int]] = (),
 ) -> RootScan:
     """Scan one ``store.Root``-like (``id``, ``name``, ``path``, ``exclusions``, ``naming_scheme``). A root that
     cannot be read comes back with ``error`` set and no entries. *label* puts the root's name before each folder
     in *progress* (several roots in one scan); *db* supplies the stored "volumes or chapters?" answers. *only*: read
-    just these direct children of the root (a folder-level scan; ``RootScan.scope``)."""
+    just these direct children of the root (a folder-level scan; ``RootScan.scope``). *known*: the library database
+    the scan is recorded in (default *db*) - an empty root of a library it knows series of is not read (below);
+    *elsewhere*: ``(file name, size)`` of the archives other roots of the same scan hold (:func:`_moved_away`).
+
+    An **empty root** (a readable folder with nothing but hidden entries, :func:`root_is_empty`): when the database
+    knows present series in it, it is treated as offline, not as an empty library (owner, 2026-10-16, question 71: "add
+    a guard" - an unmounted share's mountpoint looks exactly like an empty library, and recording it would mark every
+    series missing and break their identity and carry-over): ``error`` = :data:`OFFLINE_EMPTY`, ``offline`` set, no
+    entries, so nothing is recorded, for a full scan and a folder scan alike - unless its archives are all in other
+    roots now (:func:`_moved_away`: its series were moved out, the case identity carries over). A library already
+    empty in the database (none known, or all missing) is an empty library (``empty``; owner, 2026-10-15: "Library
+    Empty"): a folder scan of it is read whole, so the record judges every row of the root, as a full scan does."""
     name = getattr(root, "name", "") or str(root.path)
     folder = Path(root.path)
     try:
@@ -462,14 +516,16 @@ def scan_one_root(
     except OSError:
         pass
     scope = None if only is None else frozenset(n for n in only if is_top_name(n))
-    empty = scope is not None and root_is_empty(folder)
+    rid = getattr(root, "id", None)
+    empty = root_is_empty(folder)
+    guard = known if known is not None else db
+    if empty and _known_series(guard, rid) and not _moved_away(guard, rid, elsewhere):
+        _log.warning("Scan: the folder of root %s (%s) is empty but its series are known - is the share mounted? "
+                     "Nothing recorded", name, folder)
+        return RootScan(root_id=rid, root_name=name, folder=folder, scope=scope, error=OFFLINE_EMPTY, offline=True)
     if empty:
-        # A folder scan of a library whose last series went (moved or deleted; owner, 2026-10-15: "Library Empty"): the
-        # root exists and can be read, so it is an empty library, not an offline share. It is read whole (it is empty),
-        # so the record judges every row of the root, exactly as a full scan of an empty root does. A root that is
-        # missing, not a folder or unreadable still comes back as an error below.
-        scope = None
-    rs = RootScan(root_id=getattr(root, "id", None), root_name=name, folder=folder, scope=scope, empty=empty)
+        scope = None                        # an empty library: read whole (it is empty)
+    rs = RootScan(root_id=rid, root_name=name, folder=folder, scope=scope, empty=empty)
     loose: List[Path] = []
     prog = progress
     if progress and label:
@@ -488,8 +544,6 @@ def scan_one_root(
     except (OSError, NotADirectoryError) as exc:
         rs.error = str(exc)
         _log.warning("Scan: cannot read the root %s (%s); its series are left as they were", name, exc)
-    if scope is None and not rs.error and not rs.entries and not rs.loose and root_is_empty(folder):
-        rs.empty = True                     # a full scan of a library with nothing in it says so too
     rs.loose = [LooseArchive(rs.root_id, name, p) for p in loose]
     if scope is None:
         _log.debug("Scan: root %s - %d series folders, %d loose archives", name, len(rs.entries), len(rs.loose))
@@ -513,6 +567,11 @@ def scan_library(
         rs = scan_one_root(root, progress, db=db, label=many)
         result.roots.append(rs)
         result.loose.extend(rs.loose)
+    for at, (root, rs) in enumerate(zip(roots, list(result.roots))):
+        if rs.offline:                  # its series may have moved to a root read in this scan: read it again
+            elsewhere = {(f.path.name, f.size) for other in result.roots if other is not rs
+                         for e in other.entries for f in e.files}
+            result.roots[at] = scan_one_root(root, progress, db=db, label=many, elsewhere=elsewhere)
     return result
 
 
@@ -554,16 +613,18 @@ def scan_and_record_library(
     many = len(roots) > 1
     recorded = False
     started = time.monotonic()
-    for number, root in enumerate(roots, start=1):
+    def read(root, at: Optional[int] = None) -> None:
+        nonlocal recorded
         name = getattr(root, "name", "") or str(root.path)
-        if on_start is not None:
-            on_start(number, len(roots), name)
         rid = getattr(root, "id", None)
         only = scopes.get(rid) if scopes is not None and rid in scopes else None
         tick = (lambda: progress(0, 0, "")) if progress is not None else None     # stops a wait like a scan
         with (scan_lock(db, what=f"the scan of {name}", on_wait=on_wait, tick=tick) if db is not None else _no_lock()):
-            rs = scan_one_root(root, progress, label=many, only=only)
-            result.roots.append(rs)
+            rs = scan_one_root(root, progress, label=many, only=only, known=db)
+            if at is None:
+                result.roots.append(rs)
+            else:
+                result.roots[at] = rs
             result.loose.extend(rs.loose)
             renamed: List[tuple] = []
             if db is not None and not rs.error and rs.root_id is not None:
@@ -577,6 +638,16 @@ def scan_and_record_library(
         result.renamed.extend(renamed)
         if on_root is not None:
             on_root(rs, renamed)
+
+    for number, root in enumerate(roots, start=1):
+        if on_start is not None:
+            on_start(number, len(roots), getattr(root, "name", "") or str(root.path))
+        read(root)
+    # An empty root read before the root its series moved to: once that one is recorded, the move is plain - read the
+    # empty root again (it is recorded as an empty library now, and identity carries its series over).
+    for at, (root, rs) in enumerate(zip(roots, list(result.roots))):
+        if rs.offline and db is not None and _moved_away(db, rs.root_id):
+            read(root, at)
     if recorded and pair and (not result.folders_only or result.series_changed or result.renamed):
         try:
             refresh_mangapixer_pairing(db)

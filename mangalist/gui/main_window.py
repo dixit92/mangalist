@@ -145,7 +145,8 @@ class ScanWorker(QObject):
             return
         if self._stop:
             return
-        if not result.entries and result.errors and len(result.errors) == len(self._roots):
+        failed = [rs for rs in result.roots if rs.error and not rs.offline]    # an offline share is not a failure
+        if not result.entries and failed and len(failed) == len(self._roots):
             _log.error("Scan failed: no root could be read (%s)", "; ".join(result.errors))
             self.failed.emit("\n".join(result.errors))
             return
@@ -310,8 +311,10 @@ class MainWindow(QMainWindow):
         "Last Modified", "Subfolders", "Vol %", "Ch %", "Both %", "Rename",
     ]
     _DEFAULT_SHOWN = frozenset({"Title", "State", "Gaps", "English", "Verdict", "Files"})
-    _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 170, COL_GAPS: 160, COL_ENGLISH: 150, COL_VERDICT: 100,
-                       COL_FILES: 80, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180,
+    # Title stretches into what the others leave (ListTab.fit_title_column); State fits the longest badge and a flag;
+    # the six default columns fit a 1200 px window beside the details panel (UI taste review 2026-10-16).
+    _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 204, COL_GAPS: 110, COL_ENGLISH: 120, COL_VERDICT: 88,
+                       COL_FILES: 72, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180,
                        COL_LIBRARY: 130, COL_RENAME: 90, COL_MTIME: 150}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
@@ -394,6 +397,7 @@ class MainWindow(QMainWindow):
         # _background for a synchronous call and _make_renamer for one with a fake namer.
         self._renamer_window = None
         self._rename_call = None
+        self._wanted_waiting = False                # the Download tab's counts show spinners (_set_wanted_waiting)
         self._rename_again = False
         self._rename_again_folders: Optional[set] = None   # the queued count's folders (None: every series)
         self._renamer_runner = None                 # the Renamer window's runner (None: its own threads)
@@ -704,8 +708,8 @@ class MainWindow(QMainWindow):
         if self._thread is not None:
             lst.set_empty("Scanning your library…", self._scan_label, can_add=False, busy=True)
         elif not roots:
-            lst.set_empty("No library folder yet", "Add the folder that holds your series folders. MangaList scans it "
-                          "and shows every series here.", can_add=True)
+            lst.set_empty("No library folder yet", "Add the folder that holds your series folders, and MangaList lists "
+                          "every series in it here.", can_add=True)
         else:
             names = ", ".join(r.name for r in roots)
             lst.set_empty("No series to show", f"Rescan to read {names}, or add another library folder.",
@@ -838,7 +842,9 @@ class MainWindow(QMainWindow):
             del cache[key]
         rows = model.scope_rows()               # the library picked
         if model.states_pending(rows):
+            self._set_wanted_waiting(True)      # (spinners where the counts of the list before stand)
             return                              # some states are being computed: the list follows when they are in
+        self._set_wanted_waiting(False)
         for row in rows:
             entry = model.entry_at(row)
             st = model.state_at(row)
@@ -859,6 +865,27 @@ class MainWindow(QMainWindow):
             return
         self._wanted_series = out
         self._download_tab.set_wanted(out)
+
+    def _set_wanted_waiting(self, waiting: bool) -> None:
+        """The Download tab's counts (its chips and the tab's badge) show a spinner while its list waits for the picked
+        library's states (up to about a second after a scan, a library's first visit): owner, 2026-10-16, answer 80."""
+        if waiting == self._wanted_waiting:
+            return
+        self._wanted_waiting = waiting
+        tab = self._download_tab
+        if tab is not None and callable(getattr(tab, "set_waiting", None)):
+            tab.set_waiting(waiting)
+        self._top.set_download_busy(waiting)
+
+    def _update_busy_counts(self) -> None:
+        """Spinners on the chips whose count a background job is still working out: Rename pending (a subprocess count,
+        35-50 s on 700 series) and Duplicates (the duplicate-numbers finder)."""
+        keys = set()
+        if self._rename_call is not None or self._rename_again:
+            keys.add("rename")
+        if self._dupe_call is not None:
+            keys.add(DUPLICATES)
+        self._list.set_busy_counts(keys)
 
     def _wanted_groups(self, folder: str) -> List[str]:
         return [w.group for w in self._wanted_series if w.folder == folder]
@@ -1079,9 +1106,11 @@ class MainWindow(QMainWindow):
             self._dupe_call = self._process_runner(process_pool.duplicate_counts, (str(db.path),),
                                                    self._on_duplicate_files_counted, failed,
                                                    self._on_duplicate_count_finished)
+            self._update_busy_counts()
             return
         self._dupe_call = start_call(lambda: _count_by_folder(finder(db)), self._on_duplicate_files_counted,
                                      failed, self._on_duplicate_count_finished)
+        self._update_busy_counts()
 
     def _on_duplicate_files_counted(self, counted) -> None:
         total, per_folder = counted
@@ -1116,6 +1145,7 @@ class MainWindow(QMainWindow):
 
     def _on_duplicate_count_finished(self) -> None:
         self._dupe_call = None
+        self._update_busy_counts()
 
     # --- The renamer -------------------------------------------------------
 
@@ -1136,6 +1166,7 @@ class MainWindow(QMainWindow):
                 self._rename_again, self._rename_again_folders = True, want
             elif self._rename_again_folders is not None:
                 self._rename_again_folders = None if want is None else self._rename_again_folders | want
+            self._update_busy_counts()
             return
         self._rename_again, self._rename_again_folders = False, None
         counted = lambda counts: self._on_rename_counted(counts, want)                     # noqa: E731
@@ -1151,6 +1182,7 @@ class MainWindow(QMainWindow):
                                         counted, failed, self._on_rename_count_finished)
             if self._rename_call is token:
                 self._rename_call = call
+            self._update_busy_counts()
             return
         entries = self._model.entries()
         if want is not None:
@@ -1158,6 +1190,7 @@ class MainWindow(QMainWindow):
         renamer = self._make_renamer()
         self._rename_call = self._background(lambda: renamer.pending_counts(entries), counted, failed,
                                              self._on_rename_count_finished)
+        self._update_busy_counts()
 
     def _in_subprocess(self) -> bool:
         """Do the long counts run in a subprocess (the real background runner, subprocesses not switched off)?"""
@@ -1176,6 +1209,7 @@ class MainWindow(QMainWindow):
         self._rename_call = None
         if self._rename_again:
             self._count_rename_pending(self._rename_again_folders)
+        self._update_busy_counts()
 
     def open_renamer(self, scope):
         """The Renamer window on *scope* (:class:`.renamer_view.Scope`); one window, re-aimed when it is open."""
@@ -1511,7 +1545,9 @@ class MainWindow(QMainWindow):
     def _on_root_scanned(self, rs: RootScan, renamed) -> None:
         """A library folder was read and recorded: its series replace its old rows now, before the next folder is read."""
         self._apply_root_scan(rs, renamed)
-        if rs.error:
+        if rs.offline:                      # owner, 2026-10-16: an empty folder of a known library is not recorded
+            self._status_label.setText(f"{rs.root_name}: {rs.error}")
+        elif rs.error:
             self._status_label.setText(f"{rs.root_name}: not reachable")
         elif rs.empty:
             self._status_label.setText(f"{rs.root_name}: {LIBRARY_EMPTY}")
@@ -1590,14 +1626,14 @@ class MainWindow(QMainWindow):
         if isinstance(result, LibraryScan):
             shown, self._scan_applied = self._scan_applied, set()      # this scan's roots; the next one starts empty
             for rs in result.roots:         # normally all shown already, root by root
-                if rs.error:
+                if rs.error and not rs.offline:     # an offline share's rows stay as they were (nothing changed)
                     self._drop_root_rows(rs.root_id)
                 elif rs.root_id not in shown:
                     self._apply_root_scan(rs, result.renamed if len(result.roots) == 1 else ())
             self._scan_applied = set()
             entries: List[MangaEntry] = result.entries
             loose = result.loose
-            errors = result.errors
+            errors = [f"{rs.root_name}: {rs.error}" for rs in result.roots if rs.error and not rs.offline]
             renamed = result.renamed
             partial = len(result.roots) < len(self._roots())
         else:  # a plain list of entries
@@ -1609,8 +1645,13 @@ class MainWindow(QMainWindow):
         # The counts are in the footer (_update_counts); the message says what else the scan found.
         folders_only = isinstance(result, LibraryScan) and result.folders_only
         empty_roots = [rs.root_name for rs in result.roots if rs.empty] if isinstance(result, LibraryScan) else []
+        offline = [f"{rs.root_name}: {rs.error}" for rs in result.roots if rs.offline] \
+            if isinstance(result, LibraryScan) else []
         all_empty = bool(empty_roots) and len(empty_roots) == len(result.roots)
-        if all_empty:
+        all_offline = bool(offline) and len(offline) == len(result.roots)
+        if all_offline:
+            text, offline = "; ".join(offline), []     # owner, 2026-10-16: "is the share mounted? Nothing was changed"
+        elif all_empty:
             text = f"{', '.join(empty_roots)}: {LIBRARY_EMPTY}"      # owner, 2026-10-15: not "Scan failed"
         elif folders_only:
             n = sum(len(rs.scope) for rs in result.roots)
@@ -1619,7 +1660,9 @@ class MainWindow(QMainWindow):
             text = f"Scanned {len(entries)} folder(s)"
         if empty_roots and not all_empty:
             text += f"  —  {', '.join(empty_roots)}: {LIBRARY_EMPTY}"
-        if partial and isinstance(result, LibraryScan) and not folders_only and not all_empty:
+        if offline:
+            text += "  —  " + "; ".join(offline)
+        if partial and isinstance(result, LibraryScan) and not folders_only and not all_empty and not all_offline:
             text += " in " + ", ".join(rs.root_name for rs in result.roots)
         tips = []
         if loose:
@@ -1655,6 +1698,9 @@ class MainWindow(QMainWindow):
             self._duplicates_view.refresh()
         self._start_signatures()
         self._run_after_add()
+        retire = getattr(self._download_tab, "retire_stale_findings", None)
+        if callable(retire):
+            retire()                            # findings whose gaps this scan shows filled leave Found
 
         if self._cfg.get("mu_autostart"):
             self._start_mu_lookup(list(entries))
@@ -2042,8 +2088,7 @@ class MainWindow(QMainWindow):
                 ok = header.restoreState(QByteArray.fromHex(state_hex.encode()))
                 if ok and header.count() == len(COLUMNS):
                     # Re-apply stretch/movable settings after restore (Qt may reset them)
-                    header.setStretchLastSection(True)
-                    header.setSectionsMovable(True)
+                    self._list.apply_column_geometry(self._DEFAULT_WIDTHS, restored=True)
                     return
                 # Section count mismatch (e.g. new column added) — discard stale state.
                 self._cfg[self._CFG_COLUMNS] = ""
@@ -2054,8 +2099,7 @@ class MainWindow(QMainWindow):
         for col, width in self._DEFAULT_WIDTHS.items():
             header.resizeSection(col, width)
         # Ensure settings are applied after default order too
-        header.setStretchLastSection(True)
-        header.setSectionsMovable(True)
+        self._list.apply_column_geometry(self._DEFAULT_WIDTHS, restored=False)
 
     def _save_column_state(self) -> None:
         state = self._table.horizontalHeader().saveState()
@@ -2094,9 +2138,9 @@ class MainWindow(QMainWindow):
         return hidden
 
     def _keep_last_column_readable(self) -> None:
-        """The last column stretches into what is left of the view, which can be a sliver with its header cut off;
-        its right edge then sits at the view's edge where it cannot be dragged (owner, 2026-10-11: "the last column
-        gets cut off"). Give it at least its header's width: the table then scrolls sideways instead."""
+        """The last column gets at least its header's (and its default) width: when it stretched into what was left of
+        the view it could be a sliver with its header cut off (owner, 2026-10-11: "the last column gets cut off"); the
+        Title column stretches now, and a column shown or moved to the end still must not arrive as a sliver."""
         header = self._table.horizontalHeader()
         shown = [header.logicalIndex(v) for v in range(header.count())
                  if not header.isSectionHidden(header.logicalIndex(v))]

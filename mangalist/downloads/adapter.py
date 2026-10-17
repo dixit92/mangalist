@@ -672,6 +672,13 @@ class Backend:
 
         return send_finding(self.db, finding_id, backend=self, wanted=self._wanted)
 
+    def retire_filled(self) -> int:
+        """Retire the waiting findings none of whose numbers is still missing (any thread; reads the wanted list - a
+        few seconds on a large library). Returns how many."""
+        from .finder import retire_filled
+
+        return retire_filled(self.db, wanted=self._wanted)
+
     def skip_finding(self, finding_id: int) -> None:
         """The owner skipped it: never offered again. Quick."""
         from ..store.findings import SKIPPED, WAITING, FindingConflict, FindingStore

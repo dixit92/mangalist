@@ -350,3 +350,73 @@ def test_the_owners_rename_applies_the_format_changes(db, titled):
     rescan(db)
     again = real(db).preview_series(sid)
     assert not again.renames and all(f.status == UNCHANGED for f in again.files)    # stable: read back exactly
+
+
+# --- official English titles and long paths (owner, 2026-10-16, answers 76 and 85) ------------------------------------
+
+def _official(db, key, english):
+    from mangalist.english_titles import FOUND, EnglishEntry, EnglishTitles
+
+    EnglishTitles(db).save([EnglishEntry(key, FOUND, "2026-10-16T00:00:00Z", english)])
+
+
+def test_the_cached_official_english_title_names_the_folder(db, library):
+    root = make_library(db, library, {"Old Name [Folder English]": {"Ch. 0001.00 [G].cbz": payload("a1")}})
+    sid = _sid(db, root, "Old Name [Folder English]")
+    lookup = lambda root_, series: ("Made Up Romaji", (), {"mu_id": 4242})      # noqa: E731
+    r = make(db, title_for=lookup)
+    assert r.preview_series(sid).folder_target == "Made Up Romaji [Folder English]"     # nothing cached: the folder's
+    ref = r.english_ref(root, db.get_series(root.id, "Old Name [Folder English]"))
+    assert ref.key == "mu:4242" and [x.key for x in r.english_refs()] == ["mu:4242"]
+    _official(db, "mu:4242", "The Official English")
+    assert r.preview_series(sid).folder_target == "Made Up Romaji [The Official English]"   # the official one wins
+    assert r.english_refs() == []                                    # cached: nothing to look up
+    assert make(db, title_for=lambda root_, series: ("Made Up Romaji", ())).english_refs() == []   # no id: no lookup
+
+
+def test_fill_english_asks_the_network_once_and_the_next_dry_run_uses_it(db, library):
+    from types import SimpleNamespace
+
+    root = make_library(db, library, {"Old Name": {"Ch. 0001.00 [G].cbz": payload("b1")}})
+    r = make(db, title_for=lambda root_, series: ("Made Up Romaji", (), {"mu_id": 7, "mangadex_id": "md-7"}))
+    record = SimpleNamespace(id="md-7", mu_id=7, anilist_id=77, english_alts=[], english_title=None)
+    asked = []
+    report = r.fill_english(mangadex_many=lambda ids: asked.append(ids) or {"md-7": record},
+                            anilist_many=lambda ids: {77: "The Looked Up English"}, sleep=lambda s: None)
+    assert report.found == 1 and asked == [["md-7"]]
+    assert r.dry_run().series[0].folder_target == "Made Up Romaji [The Looked Up English]"
+    assert r.fill_english(mangadex_many=lambda ids: asked.append(ids) or {}).looked == 0 and len(asked) == 1
+    assert root is not None
+
+
+def test_a_long_path_drops_the_english_part_and_255_keeps_it(db, library):
+    romaji, english = "Made Up Romaji", "The Made Up English"
+    full = f"{romaji} [{english}]"
+    head, tail = "Ch. 0001.00 (", ") [G].cbz"
+    at_limit = 255 - len(str(library)) - len(full) - 2                  # the longest file's name length at 255
+    long_name = head + "t" * (at_limit - len(head) - len(tail)) + tail
+    root = make_library(db, library, {"Old Name": {"Ch. 0001.00 [G].cbz": payload("c1")}})
+    sid = _sid(db, root, "Old Name")
+    lookup = lambda root_, series: (romaji, (), {"mu_id": 8})            # noqa: E731
+    _official(db, "mu:8", english)
+    # the file's name after the rename counts (the scheme's name), not the one it has now
+    s = make(db, title_for=lookup, namer=FakeNamer(overrides={"Ch. 0001.00 [G].cbz": long_name})).preview_series(sid)
+    assert len(os.path.join(str(library), s.folder_target, long_name)) == 255 and s.folder_target == full
+    longer = long_name.replace("(t", "(tt", 1)                           # 256 characters: the English part goes
+    s = make(db, title_for=lookup, namer=FakeNamer(overrides={"Ch. 0001.00 [G].cbz": longer})).preview_series(sid)
+    assert s.folder_target == romaji
+    assert make(db, title_for=lookup).preview_series(sid).folder_target == full     # short names: kept
+
+
+def test_a_long_file_in_a_subfolder_counts_too(db, library):
+    romaji, english = "Made Up Romaji", "The Made Up English"
+    sub = "Side 1 - Made Up Spin Off"
+    room = 255 - len(str(library)) - len(f"{romaji} [{english}]") - 2 - len(sub) - 1
+    long_name = "Ch. 0001.00 (" + "s" * (room + 1 - len("Ch. 0001.00 () [G].cbz")) + ") [G].cbz"
+    root = make_library(db, library, {"Old Name": {"Ch. 0001.00 [G].cbz": payload("d1"),
+                                                   f"{sub}/{long_name}": payload("d2")}})
+    _official(db, "mu:9", english)
+    r = make(db, title_for=lambda root_, series: (romaji, (), {"mu_id": 9}) if series.rel_path == "Old Name"
+             else ("Made Up Gaiden", ()))
+    parent = next(s for s in r.dry_run(root_ids=[root.id]).series if s.title == "Old Name")
+    assert parent.folder_target == romaji                                 # 256 with the English part: left out

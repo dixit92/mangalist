@@ -15,7 +15,8 @@ from mangalist.store.names import windows_name_problem
     ("Made Up Romaji", "", "Made Up Romaji"),
     ("Made Up Romaji", "made-up ROMAJI", "Made Up Romaji"),              # the romaji again, written differently
     ("Made Up Rōmaji", "Made Up Romaji", "Made Up Rōmaji"),              # accents folded for the comparison
-    ("Re:Made Up", "Re Made Up: The Story", "ReMade Up [Re Made Up The Story]"),     # colons dropped, as animefetch
+    ("Re:Made Up", "Re Made Up: The Story", "ReMade Up [The Story]"),     # colons dropped; the repeated romaji too
+    ("Re:Made Up", "The Story: Re Made Up", "ReMade Up [The Story - Re Made Up]"),     # colons dropped, as animefetch
     ('Made/Up \\ "Odd" <Title>? *', None, "Made-Up Odd Title"),
     ("Made Up [Tag] Romaji", "English [Note]", "Made Up (Tag) Romaji [English (Note)]"),  # brackets stay unambiguous
     ("  Spaced   out  ", None, "Spaced out"),
@@ -37,11 +38,11 @@ LONG = "Made Up Romaji wa Hontou ni: Nagai Nagai Fukudai ga Tsuzuku Monogatari d
 def test_a_long_romaji_without_an_official_short_name_stays_whole():
     """Owner, 2026-10-16: "a long romaji stays full if official name isn't there" - never cut at a subtitle."""
     assert len(LONG) > fs.LONG_TITLE
-    whole = "Made Up Romaji wa Hontou ni Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"     # only the colon dropped
+    whole = "Made Up Romaji wa Hontou ni - Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"   # the colon reads " - "
     assert fs.short_romaji(LONG) == whole
     assert fs.scheme_name(LONG, "The Made Up Story") == f"{whole} [The Made Up Story]"
     assert fs.short_romaji(LONG, "The Made Up Story", ["The Made Up Story", "Nagai Monogatari desu yo ne"]) == whole
-    assert fs.short_romaji("Made Up: Subtitle", None, ["Made Up"]) == "Made Up Subtitle"   # not long: never shortened
+    assert fs.short_romaji("Made Up: Subtitle", None, ["Made Up"]) == "Made Up - Subtitle"   # not long: never shortened
 
 
 @pytest.mark.parametrize("alts, english, short", [
@@ -81,8 +82,8 @@ def test_the_short_name_choice_is_deterministic():
 def test_the_folder_name_with_a_short_name_keeps_the_english_bracket():
     alts = ["NagaMono", "The Made Up Story"]
     assert fs.scheme_name(LONG, "The Made Up Story", alt_titles=alts) == "NagaMono [The Made Up Story]"
-    assert fs.scheme_name(LONG, "NagaMono", alt_titles=["NagaMono", "Naga-Mono"]) == \
-        "Made Up Romaji wa Hontou ni Nagai Nagai Fukudai ga Tsuzuku Monogatari desu [NagaMono]"   # the English is not one
+    # the short name IS the English title (answer 86, 2026-10-16): that name alone, no bracket, never the long romaji
+    assert fs.scheme_name(LONG, "NagaMono", alt_titles=["NagaMono", "Naga-Mono"]) == "NagaMono"
     titles = fs.titles_for("NagaMono [The Made Up Story]", LONG, alts)
     assert titles.name() == "NagaMono [The Made Up Story]"                     # stable: a renamed folder reads back
     assert fs.titles_for("NagaMono", LONG, alts).english is None               # the folder's name is the short name
@@ -164,3 +165,137 @@ def test_parse_folder_matches_the_scanners_reading():
 
     for name in ("Made Up [English]", "Made Up", "Made Up [Tag] Rest", "Made Up [A] [B]"):
         assert fs.parse_folder(name) == parse_folder_name(name)
+
+
+# --- the official English title (owner, 2026-10-16, answer 76) --------------------------------------------------------
+
+def test_the_official_english_title_comes_before_the_folders():
+    t = fs.titles_for("Made Up Folder [Folder English]", "Made Up Romaji", official="The Official English")
+    assert (t.english, t.english_from) == ("The Official English", fs.ENGLISH_OFFICIAL)
+    assert t.name() == "Made Up Romaji [The Official English]"
+    folder = fs.titles_for("Made Up Folder [Folder English]", "Made Up Romaji", english="MangaDex English")
+    assert (folder.english, folder.english_from) == ("Folder English", fs.ENGLISH_FOLDER)     # then the folder's
+    other = fs.titles_for("Made Up Romaji", "Made Up Romaji", english="MangaDex English")
+    assert (other.english, other.english_from) == ("MangaDex English", fs.ENGLISH_OTHER)      # then MangaDex's
+    none = fs.titles_for("Made Up Romaji", "Made Up Romaji", official="  ")
+    assert (none.english, none.english_from) == (None, "")
+    renamed = t.name()                                              # stable once renamed
+    assert fs.titles_for(renamed, "Made Up Romaji", official="The Official English").name() == renamed
+
+
+# --- answer 86: "As long as it doesn't become "Tearmoon Empire [Tearmoon Empire]"" ---------------------------------
+
+LONG_ROMAJI = "Made Up Kingdom Monogatari: Dantoudai kara Hajimaru, Hime no Tensei Gyakuten Story"   # over 50
+
+
+@pytest.mark.parametrize("romaji, english, alts, name", [
+    ("Made Up Empire", "Made-Up EMPIRE", (), "Made Up Empire"),               # the full romaji is the English title
+    ("Made Up Empire", "Made Up Empire!", (), "Made Up Empire"),              # punctuation only
+    ("Made Up Empire", "Made Up Empire Story", (), "Made Up Empire [Made Up Empire Story]"),   # a longer title stays
+    (LONG_ROMAJI, "Made Up Kingdom", ("Made Up Kingdom",), "Made Up Kingdom"),   # the short name IS the English
+    (LONG_ROMAJI, "The Princess of Made Up Kingdom", ("Made Up Kingdom",),
+     "Made Up Kingdom [The Princess of Made Up Kingdom]"),
+])
+def test_no_bracket_when_the_romaji_part_is_the_english_title(romaji, english, alts, name):
+    assert fs.scheme_name(romaji, english, alt_titles=alts) == name
+
+
+def test_the_short_name_equal_to_the_english_title_is_never_doubled():
+    # an English-looking alternative title chosen as the short name, and the English title is the same title
+    assert "Made Up Kingdom" in fs.short_name_candidates(LONG_ROMAJI, None, ("Made Up Kingdom",))
+    for english in ("Made Up Kingdom", "made up kingdom", "Made-Up Kingdom."):
+        name = fs.scheme_name(LONG_ROMAJI, english, alt_titles=("Made Up Kingdom",))
+        assert "[" not in name
+
+
+# --- answer 85: "Cut the English for those." ----------------------------------------------------------------------
+
+def test_name_room_is_what_the_path_limit_leaves():
+    root = "/data/Made Up Library"
+    file = "Vol. 001 [Made Up Group].cbz"
+    room = fs.name_room(root, file)
+    assert room == fs.MAX_PATH_CHARS - len(root) - len(file) - 2
+    assert fs.name_room(root + "/", file) == room                    # a trailing slash is not counted twice
+    assert fs.name_room(None, file) is None and fs.name_room(root, "") is None
+
+
+def test_a_path_over_255_characters_drops_the_english_part_whole():
+    romaji, english = "Made Up Romaji", "The Made Up English Title"
+    full = f"{romaji} [{english}]"
+    root = "/data/" + "r" * 40
+    file = "Ch. 0001.00 (" + "t" * (fs.MAX_PATH_CHARS - len(root) - len(full) - 2 - len("Ch. 0001.00 () [G].cbz")) \
+        + ") [G].cbz"
+    assert len(f"{root}/{full}/{file}") == fs.MAX_PATH_CHARS        # exactly 255: kept
+    assert fs.scheme_name(romaji, english, max_chars=fs.name_room(root, file)) == full
+    longer = file.replace("(t", "(tt", 1)                            # 256: the English part goes, never cut with "…"
+    assert fs.scheme_name(romaji, english, max_chars=fs.name_room(root, longer)) == romaji
+    assert fs.scheme_name(romaji, english, max_chars=None) == full  # no path limit known: kept
+    assert fs.titles_for("Folder", romaji, official=english).name(max_chars=5) == romaji   # the romaji is never cut by it
+
+
+# --- integrator, 2026-10-16: the owner's folder style, no needless renames ------------------------------------------
+
+@pytest.mark.parametrize("romaji, english, alts, name", [
+    ("Madeupgami", "Madeupgami: Stray Made Up", (), "Madeupgami [Stray Made Up]"),      # the romaji repeated: dropped
+    ("Madeupgami", "MADEUPGAMI - Stray Made Up", (), "Madeupgami [Stray Made Up]"),     # any case, " - "
+    ("Madeupgami", "Madeupgami ~Stray Made Up~", (), "Madeupgami [Stray Made Up]"),
+    ("Madeupgami", "Madeupgami～Stray Made Up", (), "Madeupgami [Stray Made Up]"),
+    ("Made-Up-sama wa Kokurasetai: Tensai-tachi no Nagai Fukudai Monogatari desu yo",
+     "Made-Up-sama: Love is Made Up", ("Made-Up-sama",), "Made-Up-sama [Love is Made Up]"),   # the short name repeated
+    ("Grand Made Up", "Grand Made Up Dreaming", (), "Grand Made Up [Grand Made Up Dreaming]"),   # goes on: kept whole
+    ("Madeupgami", "Madeupgami:", (), "Madeupgami"),                                    # nothing left: no bracket
+    ("Madeupgami", "Madeupgamiland: Stray", (), "Madeupgami [Madeupgamiland - Stray]"),   # not the same word
+])
+def test_a_repeated_title_is_stripped_from_the_english_part(romaji, english, alts, name):
+    assert fs.scheme_name(romaji, english, alt_titles=alts) == name
+    assert fs.titles_for(name, romaji, alts, official=english).name() == name       # stable once renamed
+
+
+def test_the_fallback_english_is_stripped_too():
+    t = fs.titles_for("Madeupgami [Madeupgami - Stray Made Up]", "Madeupgami")
+    assert t.english_from == fs.ENGLISH_FOLDER and t.name() == "Madeupgami [Stray Made Up]"
+
+
+def test_typography_is_folded_to_plain_ascii():
+    assert fs.fold_typography("Let’s “Go” – Now—Then… End") == \
+        "Let's \"Go\" - Now-Then... End"
+    assert fs.scheme_name("Made Up Romaji", "Let’s Run a Made Up Inn — Again") == \
+        "Made Up Romaji [Let's Run a Made Up Inn - Again]"
+    assert fs.scheme_name("Made’s Romaji") == "Made's Romaji"
+    folder = "Made Up Romaji [Let's Run a Made Up Inn]"                 # the owner's plain apostrophe: no rename
+    assert fs.titles_for(folder, "Made Up Romaji", official="Let’s Run a Made Up Inn").name() == folder
+
+
+def test_an_official_english_title_that_is_the_romaji_counts_as_none():
+    t = fs.titles_for("Made Up Sumi [Snow and Made Up Ink]", "Made Up Sumi", official="Made-Up SUMI")
+    assert (t.english, t.english_from) == ("Snow and Made Up Ink", fs.ENGLISH_FOLDER)
+    other = fs.titles_for("Made Up Sumi", "Made Up Sumi", official="Made Up Sumi", english="Made Up MangaDex English")
+    assert (other.english, other.english_from) == ("Made Up MangaDex English", fs.ENGLISH_OTHER)
+    assert fs.titles_for("Made Up Sumi", "Made Up Sumi", official="Made Up Sumi").name() == "Made Up Sumi"
+
+
+def test_the_folders_spelling_of_the_official_title_is_kept():
+    folder = "Made Up Maou-sama! [The Made Up Devil Is a Part Timer!]"     # official: other casing and a hyphen
+    t = fs.titles_for(folder, "Made Up Maou-sama!", official="The Made Up Devil is a Part-Timer!")
+    assert t.english_from == fs.ENGLISH_OFFICIAL and t.name() == folder
+    t = fs.titles_for("Madeupgami [Stray Made Up]", "Madeupgami", official="Madeupgami: STRAY MADE-UP")
+    assert t.name() == "Madeupgami [Stray Made Up]"                       # the remainder is the folder's title too
+    t = fs.titles_for("Madeupgami [Another Made Up]", "Madeupgami", official="Madeupgami: Stray Made Up")
+    assert t.name() == "Madeupgami [Stray Made Up]"                       # a different title: the official one
+
+
+def test_an_official_title_that_is_the_short_name_counts_as_none():
+    folder = "NagaMono [NagaMono - The Made Up Story]"
+    t = fs.titles_for(folder, LONG, ["NagaMono"], official="NagaMono")
+    assert t.english_from == fs.ENGLISH_FOLDER and t.name() == "NagaMono [The Made Up Story]"
+    assert fs.titles_for("NagaMono", LONG, ["NagaMono"], official="NagaMono").name() == "NagaMono"
+
+
+@pytest.mark.parametrize("raw, clean", [
+    ("Made Up Secret: Actually, I Am", "Made Up Secret - Actually, I Am"),     # a subtitle colon reads as " - "
+    ("Made:Up Zero", "MadeUp Zero"),                                            # inside a word it goes (animefetch)
+    ("Made Up Ii?: Gaiden", "Made Up Ii - Gaiden"),
+])
+def test_a_subtitle_colon_becomes_a_dash(raw, clean):
+    # the owner's own folders write subtitles with " - " (2026-10-16)
+    assert fs.clean_part(raw) == clean

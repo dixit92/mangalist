@@ -228,6 +228,7 @@ class DownloadTab(QWidget):
         self._replaced = replaced if replaced is not None else replaced_service(backend)
         self._confirm_delete = confirm_delete
         self._replaced_call = None
+        self._retire_call = None                       # retiring filled findings (retire_stale_findings)
         self._wanted: List[WantedSeries] = []
         self._entries: Dict[str, List[WantedSeries]] = {}
         self._by_folder: Dict[str, WantedSeries] = {}
@@ -509,6 +510,13 @@ class DownloadTab(QWidget):
             self._show_series(self._current, now=False)      # its wanted volumes changed: look again
         self.count_changed.emit(self.badge_count())
 
+    def set_waiting(self, waiting: bool) -> None:
+        """The To get list is waiting for the series' states (the window sends it when they are in): the group chips
+        show a spinner in place of their count instead of the numbers of the list before. Found is not affected (its
+        findings are read from the ledger, not from states)."""
+        for group, chip in self.group_chips.items():
+            chip.set_busy(waiting and group != GROUP_FOUND)
+
     def badge_count(self) -> int:
         """The tab's badge: the series to get plus the findings waiting for the owner."""
         return len(self._by_folder) + len(self._findings)
@@ -772,12 +780,42 @@ class DownloadTab(QWidget):
 
     def open_chapters_of(self, series_id: int) -> bool:
         """Open a series in Missing chapters - its chapters panel, where its source is picked (Found's Change source…).
-        False when the series is not in that group (nothing changes)."""
+        False when the series is not in that group (nothing changes): its findings are stale - they are retired now
+        instead of waiting for the next filing or find pass (owner, 2026-10-16)."""
         folder = self.folder_of_series(series_id)
         if folder is None or self._chapters_entry(folder) is None:
-            self.found.say("This series has no missing chapters to look up any more.", "warn")
+            if self.retire_stale_findings(done_text="Nothing is missing for this series any more: its finding left "
+                                                    "Found."):
+                self.found.say("This series has no missing chapters to look up any more - clearing Found…", "")
+            else:
+                self.found.say("This series has no missing chapters to look up any more.", "warn")
             return False
         return self.select_series(folder, GROUP_CHAPTERS)
+
+    def retire_stale_findings(self, done_text: Optional[str] = None) -> bool:
+        """Retire the waiting findings whose gaps are filled (off the UI thread), then reload Found. False when the
+        backend cannot or a retire runs already."""
+        backend = self._backend
+        if (backend is None or self._stopped or not callable(getattr(backend, "retire_filled", None))
+                or self._retire_call is not None):
+            return False
+
+        def done(retired) -> None:
+            if retired:
+                _log.info("Found: %d finding(s) retired - their gaps are filled", retired)
+            self.reload_found()
+            if done_text:
+                self.found.say(done_text, "ok")
+
+        def failed(message: str) -> None:
+            _log.warning("Found: retiring filled findings failed: %s", message)
+
+        def finished() -> None:
+            self._retire_call = None
+
+        self._retire_call = start_call(backend.retire_filled, done, failed, finished)
+        self._calls.append(self._retire_call)        # abandoned on close, like the tab's other calls
+        return True
 
     def current_folder(self) -> Optional[str]:
         return self._current

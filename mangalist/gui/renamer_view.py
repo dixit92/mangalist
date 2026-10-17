@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Set, Tuple
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -289,6 +289,9 @@ class RenamerWindow(QDialog):
         self._awaiting: Set[int] = set()    # libraries renamed, their rescan not reported yet (library_rescanned)
         self._busy = False
         self._changing = False
+        self._closed = False
+        self._english_call = None           # the background lookup of official English titles (answer 76)
+        self._english_scope: Optional[Scope] = None   # the scope it was started for (once per scope)
         self._build()
         self.refresh()
 
@@ -327,7 +330,13 @@ class RenamerWindow(QDialog):
         self.warning_label = QLabel()
         self.warning_label.setWordWrap(True)
         self.warning_label.setProperty("tone", "warn")
-        for w in (self.summary_label, self.patterns_label, self.warning_label):
+        # owner, 2026-10-16 (answer 76): the folder names' English part is the official English title, looked up in the
+        # background when the window opens (cached afterwards); this line says so while it runs
+        self.english_label = QLabel()
+        self.english_label.setWordWrap(True)
+        self.english_label.setProperty("role", "muted")
+        self.english_label.setVisible(False)
+        for w in (self.summary_label, self.patterns_label, self.warning_label, self.english_label):
             outer.addWidget(w)
 
         self.tabs = QTabWidget()
@@ -530,6 +539,61 @@ class RenamerWindow(QDialog):
             return
         self._dry = dry
         self._fill(dry)
+        self._look_up_english()
+
+    # --- official English titles (answer 76) ----------------------------------------------------------------------
+
+    def _look_up_english(self) -> None:
+        """The official English titles of the scope's series that are not cached yet (or are old) are looked up in the
+        background, once per scope (:meth:`mangalist.renamer.Renamer.fill_english`: AniList through MangaDex's links,
+        batched and rate-limited); the preview is looked at again when one changed. Never blocks the window, never
+        renames anything: a new English title only changes what the preview proposes."""
+        refs_of = getattr(self._renamer, "english_refs", None)
+        fill = getattr(self._renamer, "fill_english", None)
+        if refs_of is None or fill is None or self._english_call is not None or self._english_scope == self._scope:
+            return
+        scope = self._english_scope = self._scope
+        kwargs = ({"series_ids": list(scope.ids)} if scope.kind == SCOPE_SERIES
+                  else {"root_ids": list(scope.ids)} if scope.kind == SCOPE_ROOT else {})
+        # two steps, both off the UI thread: which series are due (the database), then the lookup (the network)
+        self._english_call = self._run(lambda: refs_of(**kwargs), lambda refs: self._english_due(refs, fill),
+                                       self._english_failed)
+
+    def _english_due(self, refs, fill) -> None:
+        self._english_call = None
+        if self._closed or not refs:
+            return
+        self.english_label.setText(f"Looking up the official English titles of {_plural(len(refs), 'series', 'series')} "
+                                   "(AniList) in the background; the preview updates when they arrive.")
+        self.english_label.setVisible(True)
+        self._english_call = self._run(lambda: fill(refs, should_stop=lambda: self._closed),
+                                       self._english_found, self._english_failed)
+
+    def _english_found(self, report) -> None:
+        self._english_call = None
+        if self._closed:
+            return
+        changed = bool(getattr(report, "changed", None))
+        summary = report.summary() if hasattr(report, "summary") else ""
+        self.english_label.setText(summary + (" The preview shows them." if changed else ""))
+        self.english_label.setVisible(bool(summary))
+        if changed:
+            self._refresh_when_idle()
+
+    def _english_failed(self, message: str) -> None:
+        self._english_call = None
+        _log.warning("Renamer window: looking up official English titles failed: %s", message)
+        if not self._closed:
+            self.english_label.setText("The official English titles could not be looked up now; the names use the "
+                                       "titles known so far.")
+
+    def _refresh_when_idle(self) -> None:
+        if self._closed:
+            return
+        if self._busy or self._awaiting:
+            QTimer.singleShot(500, self._refresh_when_idle)
+            return
+        self.refresh()
 
     def _fill(self, dry: DryRun) -> None:
         series = dry.series
@@ -959,4 +1023,9 @@ class RenamerWindow(QDialog):
         if call is not None and hasattr(call, "abandon"):
             call.abandon()
         self._call = None
+        self._closed = True                 # the English lookup stops at its next request (what it found is cached)
+        english = self._english_call
+        if english is not None and hasattr(english, "abandon"):
+            english.abandon()
+        self._english_call = None
         super().closeEvent(event)

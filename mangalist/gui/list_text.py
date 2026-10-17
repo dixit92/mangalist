@@ -102,6 +102,17 @@ def match_text(knowledge: Optional[SeriesKnowledge]) -> str:
     return text + " (MangaDex record)" if knowledge.mangadex_record else text
 
 
+def same_title(a: Optional[str], b: Optional[str]) -> bool:
+    """Whether two titles say the same thing, ignoring case, spaces and punctuation (``Ashen Prince`` and
+    ``ashen prince!`` do; ``Brine and Bone`` and ``Brine & Bone`` do not): the matched series' title is shown under the
+    folder's only when it says something new (UI taste review 2026-10-16: half of each row repeated the title)."""
+    def key(text: Optional[str]) -> str:
+        raw = (text or "").strip()
+        letters = "".join(ch for ch in raw.casefold() if ch.isalnum())
+        return letters or raw.casefold()
+    return key(a) == key(b)
+
+
 def group_gaps_text(state: SeriesState, group: str) -> str:
     """One group's part of the gaps: ``Vol. 21-23``, ``Ch. 41-44``, ``Upgrade vol. 13``."""
     if group == GROUP_VOLUMES:

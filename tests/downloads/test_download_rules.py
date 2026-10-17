@@ -85,7 +85,7 @@ def test_schedule_rows_read_the_container_environment():
     assert rows == {"Rescan the library": ("daily 03:30", False), "Sync with MangaPixer": ("daily 03:15", False),
                     "File finished downloads": ("every hour (and Check downloads now)", False),
                     SCHEDULE_BY_JOB["dispatch-batch"].label: ("daily 04:30 (and Find now)", False),   # the find pass
-                    "Clear finished download records": ("off", False)}
+                    "Clear finished download records": ("every Sunday 05:30 (records older than a week)", False)}
     rows = {w: (when, env) for w, when, env in rules.schedule_rows(
         {"MANGALIST_RESCAN_SCHEDULE": "off", "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00",
          "MANGALIST_DOWNLOADS_SCHEDULE": "banana"})}

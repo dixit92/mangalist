@@ -6,8 +6,9 @@ what was finished more than a day ago, Weekly more than a week ago, Monthly more
 "finished" and which stay however old they are is :meth:`mangalist.store.downloads.DownloadLedger.clear_finished`'s
 business (nothing in progress, nothing filed or failed, nothing a replaced-chapters batch still points at).
 
-Off until the owner picks a period (``schedule_clean_records`` in Settings > Scheduled tasks, or
-``MANGALIST_CLEAN_RECORDS_SCHEDULE``); a "Run now" while it is off is skipped with that reason.
+Weekly on a fresh install (owner, 2026-10-16: "Weekly"); the owner picks another period or Off
+(``schedule_clean_records`` in Settings > Scheduled tasks, or ``MANGALIST_CLEAN_RECORDS_SCHEDULE``) and a stored choice
+is kept; a "Run now" while it is off is skipped with that reason.
 """
 
 from __future__ import annotations

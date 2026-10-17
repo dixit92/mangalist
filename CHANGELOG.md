@@ -7,6 +7,18 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.40] - 2026-10-16
+
+The thirty-ninth MangaList release (testing build): official English titles in folder names, an unmounted library left alone, Found clearing itself, spinners while things load, and the List's layout defects fixed. Database schema 9.
+
+- **Official English titles.** The English part of a folder name ("<romaji> [<English>]") is the series' official English title from AniList (found through MangaPixer or MangaDex, kept in the database so scans never wait for it), in the form you already use: a repeated title is left out ("Noragami [Stray God]"), punctuation is plain, a subtitle's colon reads " - ", and your own English stays when AniList's is only the romaji. No bracket when the name would repeat itself, or where a file's path would pass 255 characters. The new names wait for your Rename like every folder rename.
+- **An unmounted library is left alone.** A library that had series and is suddenly empty (its share not mounted) is treated as offline - "is the share mounted? Nothing was changed" - instead of marking every series missing (one library would have lost 304 series and 8136 files to "missing").
+- **Found clears itself.** A finding whose gap was filled another way leaves Found after every scan, and at once when Change source finds nothing missing.
+- **Unbundled chapters:** a volume not out in English becomes an upgrade (its chapters are got as chapters, the volume replaces them later); an unlicensed series whose newest volume MangaPixer does not map counts the original edition's volumes.
+- **Spinners.** A series whose state is still being worked out shows "Checking…" with a spinner; the Rename pending, Duplicates and To get counts spin while they run.
+- **Looks.** The Wanted badges are orchid, apart from the accent; the details panel fits its width (the close button is no longer cut off); the State column shows whole flags ("+2") instead of "Up..."; the matched title shows only when it differs from the folder name; at 1200 pixels every column stays in view; a first-run screen with one button.
+- **The clean-up of finished download records** is weekly by default on a new install.
+
 ## [2026.10.39] - 2026-10-16
 
 The thirty-eighth MangaList release (testing build): shorter names - volume files without the series title and official short folder names - and two rare freezes fixed.

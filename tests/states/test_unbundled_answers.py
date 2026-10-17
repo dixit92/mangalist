@@ -124,8 +124,9 @@ def test_the_chapters_of_an_original_volume_not_out_in_english_are_wanted_as_cha
     knowledge = k(volumes=vols, record__englishPublishers=[])
     off = state(knowledge, unbundled=False, held_volumes=["1"])
     on = state(knowledge, held_volumes=["1"])
-    assert gaps(off, GAP_VOLUME) == gaps(on, GAP_VOLUME) == [("2", None), ("3", None)]    # the volumes stay gaps
-    assert not gaps(off, GAP_CHAPTER)
+    assert gaps(off, GAP_VOLUME) == [("2", None), ("3", None)] and not gaps(off, GAP_CHAPTER)
+    # the volumes are kept as upgrades (owner, 2026-10-16, question 73: "Keep both, treat the volume as an upgrade")
+    assert not gaps(on, GAP_VOLUME) and gaps(on, GAP_UPGRADE) == [("2", None), ("3", None)]
     assert gaps(on, GAP_CHAPTER) == [("9", "41")]          # not only 25-41: 9-24 may be out in English already
     assert "Unbundled chapters after chapter 8 (the end of volume 1)" in on.reasons
 

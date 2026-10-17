@@ -240,6 +240,26 @@ def test_change_source_for_a_series_no_longer_missing_chapters_says_so(qapp):
     assert "no missing chapters" in tab.found.status_label.text()
 
 
+def test_change_source_for_a_series_no_longer_missing_retires_its_finding(qapp):
+    # owner, 2026-10-16: "how are series removed from found if no missing chapters are there" - at once, not at the
+    # next filing or find pass
+    class Retiring(FakeFindingBackend):
+        def retire_filled(self):
+            self.retired_calls = getattr(self, "retired_calls", 0) + 1
+            gone = [f for f in self.found if f.series_id == 1 and f.status == "waiting"]
+            self.found = [replace(f, status="gone") if f in gone else f for f in self.found]
+            return len(gone)
+
+    backend = Retiring(found=[replace(DROPPED, series_id=1)] + FOUND[:1], last_run=find_run())
+    tab, _b, _c, _a = make(qapp, backend)
+    tab.show_group(GROUP_FOUND)
+    before = len(tab.found.rows)
+    assert not tab.open_chapters_of(1) and tab._group == GROUP_FOUND
+    wait_until(qapp, lambda: tab._retire_call is None)
+    assert backend.retired_calls == 1 and len(tab.found.rows) < before
+    assert "left Found" in tab.found.status_label.text()
+
+
 def test_one_series_shown_has_its_mode_and_switching_to_auto_is_stored(qapp):
     tab, backend, _c, _a = make(qapp)
     changed = []

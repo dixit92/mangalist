@@ -535,3 +535,39 @@ def test_format_changes_are_marked_in_the_preview_and_listed_to_check(qapp, db, 
         assert (library / "Vol Romaji [Vol English]" / "Vol. 002 [G].cbz").exists()
     finally:
         win.deleteLater()
+
+
+# --- official English titles looked up in the background (owner, 2026-10-16, answer 76) ------------------------------
+
+def test_the_window_looks_up_official_english_titles_once_and_shows_them(qapp, db, made):
+    from mangalist.english_titles import FOUND, EnglishEntry, EnglishTitles, FillReport, SeriesRef
+
+    class Looking(Renamer):
+        refs_asked, fills = [], []
+
+        def english_refs(self, root_ids=None, series_ids=None):
+            self.refs_asked.append((root_ids, series_ids))
+            return [] if self.fills else [SeriesRef("mu:31")]
+
+        def fill_english(self, refs=None, *, should_stop=None, **fetchers):
+            self.fills.append([r.key for r in refs])
+            EnglishTitles(self.db).save([EnglishEntry("mu:31", FOUND, "2026-10-16T00:00:00Z", "The Official English")])
+            return FillReport(looked=1, found=1, changed=["mu:31"])
+
+    hooks = Recorder()
+    r = Looking(db, namer=FakeNamer(), title_for=lambda root, series: ("Made Up Romaji", (), {"mu_id": 31})
+                if series.rel_path == "Series A" else None, rescan=hooks.rescan, request_scans=hooks.request_scans)
+    win = _window(qapp, r, Scope.root(made.id, "Manga"))
+    assert r.fills == [["mu:31"]] and r.refs_asked == [([made.id], None)]       # once, for the window's scope
+    series_a = next(s for s in win.dry_run.series if s.title == "Series A")
+    assert series_a.folder_target == "Made Up Romaji [The Official English]"    # looked at again with it
+    assert "1 found for the 1 series looked up" in win.english_label.text() and not win.english_label.isHidden()
+    win.refresh()
+    assert len(r.fills) == 1                                                     # not again for the same scope
+    win.close()
+
+
+def test_the_window_without_anything_to_look_up_says_nothing(qapp, db, made):
+    win = _window(qapp, _renamer(db), Scope.all())                  # no record titles: no lookup
+    assert win.english_label.isHidden() and win.english_label.text() == ""
+    win.close()

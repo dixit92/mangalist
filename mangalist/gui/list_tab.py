@@ -2,14 +2,20 @@
 counts, Details, MU lookup / Stop), the table - or the duplicates view, or an empty state - beside the collapsible details panel, and
 the footer (counts, messages, scan and signing progress).
 
+The table's Title column takes the width the other columns leave (they keep their own, remembered widths), so the
+numbers sit beside their labels and Kind and Files stay in view at 1200 px (UI taste review 2026-10-16). The empty state
+(no series yet: no library folder, a first scan, nothing found) is an icon, a heading, one sentence and the button; the
+filter bar with its chips and the details panel have nothing to say then and stay hidden until there is a library.
+
 A view only: the main window owns the model and every action (it connects to the widgets exposed here)."""
 
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QByteArray, QEvent, QObject, QRectF, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
@@ -27,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..states import State
+from . import theme
 from .chips import ChipButton, FlowLayout
 from .detail_panel import DetailPanel
 from .list_delegates import ROW_HEIGHT, MonoDelegate, SecondaryDelegate, StateBadgeDelegate, TitleDelegate
@@ -50,8 +57,39 @@ _CHIP_KEYS = {key for key, _ in CHIPS}
 #: The other state filters (Wanted, Upcoming, Needs attention, ...) sit behind "More".
 MORE_FILTERS: List[Tuple[str, str]] = [(k, label) for k, label in STATE_FILTERS if k not in _CHIP_KEYS]
 
+BUSY_COUNT = "…"                    # a More-menu entry whose count is being worked out
 PAGE_TABLE, PAGE_DUPLICATES, PAGE_EMPTY = 0, 1, 2
 DETAILS_WIDTH = 380
+#: The Title column stretches into what the others leave, but never below this: the table scrolls sideways instead.
+TITLE_MIN_WIDTH = 180
+EMPTY_ICON_PX = 72
+
+# The empty state's folder (Feather's "folder"), stroked in the accent (``%(ink)s``) on a soft accent circle - drawn in
+# code like the top bar's gear and re-drawn on a theme switch.
+_FOLDER_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" '
+    'stroke="%(ink)s" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
+)
+
+
+def empty_icon(size: int = EMPTY_ICON_PX, ratio: float = 2.0) -> QPixmap:
+    """The empty state's icon in the palette in force: a folder in the accent on a circle of the accent's tint."""
+    pal = theme.current()
+    pm = QPixmap(int(size * ratio), int(size * ratio))
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(pal.accent_tint))
+    p.drawEllipse(QRectF(0, 0, pm.width(), pm.height()))
+    inner = pm.width() * 0.44
+    off = (pm.width() - inner) / 2
+    QSvgRenderer(QByteArray((_FOLDER_SVG % {"ink": pal.accent}).encode("utf-8"))).render(
+        p, QRectF(off, off, inner, inner))
+    p.end()
+    pm.setDevicePixelRatio(ratio)
+    return pm
 
 
 class ListTab(QWidget):
@@ -64,10 +102,14 @@ class ListTab(QWidget):
         super().__init__(parent)
         self._filter: Optional[str] = None
         self._counts: Dict[Optional[str], Optional[int]] = {}
+        self._busy_keys: frozenset = frozenset()        # the filters whose count is being worked out (a spinner)
+        self._details_wanted = True                     # the owner's choice; the panel also waits for a library
+        self._has_library = True                        # False while the empty state shows (no series at all)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        outer.addWidget(self._build_filter_bar())
+        self.filter_bar = self._build_filter_bar()
+        outer.addWidget(self.filter_bar)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -161,7 +203,9 @@ class ListTab(QWidget):
         table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
+        header.setStretchLastSection(False)                 # the Title column fills the rest instead (fit_title_column)
+        header.sectionResized.connect(self._on_section_resized)
+        table.viewport().installEventFilter(self)
         # by pixel: a column at a time never brought the last column fully into view (owner, 2026-10-11)
         table.setHorizontalScrollMode(QTableView.ScrollMode.ScrollPerPixel)
         header.setSectionsMovable(True)
@@ -185,6 +229,13 @@ class ListTab(QWidget):
         col.setContentsMargins(40, 40, 40, 40)
         col.setSpacing(10)
         col.addStretch(1)
+        self.empty_icon = QLabel()
+        self.empty_icon.setObjectName("emptyIcon")
+        self.empty_icon.setPixmap(empty_icon())
+        self.empty_icon.setFixedSize(EMPTY_ICON_PX, EMPTY_ICON_PX)
+        theme.on_retheme(self.empty_icon, lambda: self.empty_icon.setPixmap(empty_icon()))
+        col.addWidget(self.empty_icon, 0, Qt.AlignmentFlag.AlignHCenter)
+        col.addSpacing(6)
         self.empty_title = QLabel("No library folder yet")
         self.empty_title.setObjectName("emptyTitle")
         self.empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -200,8 +251,9 @@ class ListTab(QWidget):
         self.btn_add_root = QPushButton("Add a library folder…")
         self.btn_add_root.setProperty("variant", "primary")
         self.btn_add_root.clicked.connect(self.add_root_clicked)
-        for w in (self.empty_title, self.empty_text):
-            col.addWidget(w)
+        col.addWidget(self.empty_title)
+        col.addWidget(self.empty_text)
+        col.addSpacing(6)
         col.addWidget(self.empty_progress, 0, Qt.AlignmentFlag.AlignHCenter)
         col.addWidget(self.btn_add_root, 0, Qt.AlignmentFlag.AlignHCenter)
         col.addStretch(2)
@@ -252,6 +304,7 @@ class ListTab(QWidget):
         self.chip_more.setChecked(in_more)
         self.chip_more.setText(f"{dict(MORE_FILTERS)[key]} ▾" if in_more else "More ▾")
         self.chip_more.set_count(self._counts.get(key) if in_more else None)
+        self.chip_more.set_busy(in_more and key in self._busy_keys)
         if emit:
             self.filter_changed.emit(key)
 
@@ -265,10 +318,32 @@ class ListTab(QWidget):
         for key, act in self._more_actions.items():
             n = counts.get(key)
             label = dict(MORE_FILTERS)[key]
-            act.setText(f"{label}   {n}" if n is not None else label)
+            if key in self._busy_keys:
+                act.setText(f"{label}   {BUSY_COUNT}")
+            else:
+                act.setText(f"{label}   {n}" if n is not None else label)
+
+    def set_busy_counts(self, keys) -> None:
+        """The filters (*keys*) whose count is still being worked out in the background (Rename pending, Duplicates:
+        the long counts of a subprocess, tens of seconds on a big library): their chips show a spinner in place of the
+        number, the "More" menu a "…" - never a count that is not final yet (owner, 2026-10-16, answer 80)."""
+        self._busy_keys = frozenset(keys)
+        for key, chip in self.chips.items():
+            chip.set_busy(key in self._busy_keys)
+        self.chip_more.set_busy(self._filter in self._more_actions and self._filter in self._busy_keys)
+        self.set_counts(self._counts)
 
     def show_page(self, page: int) -> None:
+        """Show the table, the duplicates view or the empty state. The empty state shows only while there is no series
+        at all: the filter bar (the chips all at 0, a search with nothing to search, Rename library / MU lookup with
+        nothing to act on) and the details panel ("select a series") hide with it, and come back with the first series -
+        the owner's choice for the panel (collapsed or not) is kept meanwhile."""
         self.stack.setCurrentIndex(page)
+        has_library = page != PAGE_EMPTY
+        if has_library != self._has_library:
+            self._has_library = has_library
+            self.filter_bar.setVisible(has_library)
+            self._apply_details()
 
     def set_duplicates_widget(self, widget: QWidget) -> None:
         self._duplicates_slot.layout().addWidget(widget)
@@ -282,18 +357,70 @@ class ListTab(QWidget):
             self.empty_progress.setRange(0, 0)
 
     def details_visible(self) -> bool:
-        return not self.details.isHidden()
+        """The owner's choice: the panel shown (it still waits for a library: :meth:`show_page`)."""
+        return self._details_wanted
 
     def set_details_visible(self, visible: bool, emit: bool = False) -> None:
-        self.details.setVisible(visible)
-        self.btn_details.setVisible(not visible)
-        if visible:
+        self._details_wanted = bool(visible)
+        self._apply_details()
+        if emit:
+            self.details_toggled.emit(visible)
+
+    def _apply_details(self) -> None:
+        shown = self._details_wanted and self._has_library
+        self.details.setVisible(shown)
+        self.btn_details.setVisible(self._has_library and not self._details_wanted)
+        if shown:
             sizes = self.splitter.sizes()
             if len(sizes) == 2 and sizes[1] < 200:
                 total = sum(sizes) or (DETAILS_WIDTH * 3)
                 self.splitter.setSizes([max(total - DETAILS_WIDTH, 200), DETAILS_WIDTH])
-        if emit:
-            self.details_toggled.emit(visible)
+
+    # --- the columns' geometry ------------------------------------------------------------------------------
+
+    def apply_column_geometry(self, defaults: Dict[int, int], restored: bool) -> None:
+        """After the window set the columns (its remembered layout when *restored*, else *defaults*' widths): the Title
+        column fills the rest (:meth:`fit_title_column`), the others keep their widths. A layout remembered from before (when the LAST column
+        stretched) gets that column's default width back - its width was what the window left over, not a choice;
+        every other remembered width wins."""
+        header = self.table.horizontalHeader()
+        if restored and header.stretchLastSection():
+            shown = [header.logicalIndex(v) for v in range(header.count())
+                     if not header.isSectionHidden(header.logicalIndex(v))]
+            if shown and shown[-1] != COL_TITLE and shown[-1] in defaults:
+                header.setStretchLastSection(False)
+                header.resizeSection(shown[-1], defaults[shown[-1]])
+        header.setStretchLastSection(False)
+        header.setSectionsMovable(True)
+        self.fit_title_column()
+
+    def fit_title_column(self) -> None:
+        """The Title column takes what the other columns leave of the table's width; when that is under
+        ``TITLE_MIN_WIDTH`` (many columns shown, a narrow window) it stays that wide and the table scrolls sideways.
+
+        Done by hand, not with Qt's stretch mode (``gui/tables.py``: a stretched column cannot be dragged and squeezes
+        the others until their headers are cut off): every column stays interactive, the others are never squeezed, and
+        a drag of the Title column holds until the window or another column changes size."""
+        if getattr(self, "table", None) is None:
+            return
+        header = self.table.horizontalHeader()
+        if header.isSectionHidden(COL_TITLE):
+            return
+        others = sum(header.sectionSize(c) for c in range(header.count())
+                     if c != COL_TITLE and not header.isSectionHidden(c))
+        width = max(self.table.viewport().width() - others, TITLE_MIN_WIDTH)
+        if header.sectionSize(COL_TITLE) != width:
+            header.resizeSection(COL_TITLE, width)
+
+    def _on_section_resized(self, logical: int, _old: int, _new: int) -> None:
+        if logical != COL_TITLE:                            # (the Title column's own: this fit, or the owner's drag)
+            self.fit_title_column()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        table = getattr(self, "table", None)                # (not yet while the table is being built)
+        if event.type() == QEvent.Type.Resize and table is not None and obj is table.viewport():
+            self.fit_title_column()
+        return super().eventFilter(obj, event)
 
     def set_mu_running(self, running: bool) -> None:
         self.btn_mu_start.setVisible(not running)

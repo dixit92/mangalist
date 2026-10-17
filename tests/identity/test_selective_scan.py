@@ -228,26 +228,87 @@ def test_a_name_that_is_not_one_folder_is_ignored(tmp_path):
     assert result.roots[0].scope == frozenset() and dump(lib.db) == before
 
 
-def test_a_folder_scan_of_a_library_that_is_now_empty_says_so_and_records_it(tmp_path):
-    """Owner, 2026-10-15: a library whose last series left is "Library Empty", not a failed scan. The root exists and
-    can be read, so it is read whole: every row of it is judged gone, as a full scan of an empty root does."""
+def _empty(lib, root_name, *hidden):
+    shutil.rmtree(lib.p(root_name))
+    lib.p(root_name).mkdir()
+    for name in hidden:
+        lib.p(root_name, name).write_text("x")
+
+
+def test_a_known_library_whose_folder_is_now_empty_is_offline_and_nothing_changes(tmp_path):
+    """Owner, 2026-10-16 (question 71: "add a guard"): an unmounted share's mountpoint looks like an empty library. The
+    database knows series there, so a folder scan and a full scan alike record nothing: no series marked missing, no
+    archive gone (identity and carry-over stay as they were) - the root reports the offline error instead."""
+    from mangalist.scanner import OFFLINE_EMPTY
+
     lib = Lib(tmp_path, "lib")
-    shutil.rmtree(lib.p("Completed"))
-    lib.p("Completed").mkdir()
+    before = dump(lib.db)
+    _empty(lib, "Completed")
+    for result in (scan_and_record_folders(lib.root("Completed"), ["Omega"], lib.db),
+                   scan_and_record_library([lib.root("Completed")], lib.db),
+                   scan_and_record_library(lib.db.list_roots(), lib.db)):
+        rs = next(r for r in result.roots if r.root_name == "Completed")
+        assert rs.offline and rs.error == OFFLINE_EMPTY and not rs.empty and not rs.entries
+        assert f"Completed: {OFFLINE_EMPTY}" in result.errors
+        assert dump(lib.db) == before
+    assert OFFLINE_EMPTY == "the folder is empty - is the share mounted? Nothing was changed"
+    assert lib.db.get_series(lib.done.id, "Omega").status == "present"
+    assert lib.db.archive_at(lib.done.id, "Sigma/Sigma v01.cbz").status == "present"
+
+
+def test_hidden_entries_alone_still_look_empty(tmp_path):
+    lib = Lib(tmp_path, "lib")
+    before = dump(lib.db)
+    _empty(lib, "Completed", ".DS_Store")
+    (lib.p("Completed") / ".Trash").mkdir()
+    rs = scan_and_record_library([lib.root("Completed")], lib.db).roots[0]
+    assert rs.offline and dump(lib.db) == before
+
+
+def test_the_other_libraries_of_the_scan_are_recorded_as_usual(tmp_path):
+    lib = Lib(tmp_path, "lib")
+    _empty(lib, "Completed")
+    lib.p("Manga", "Beta", "Beta ch003.cbz").unlink()
+    result = scan_and_record_library(lib.db.list_roots(), lib.db)
+    assert {r.root_name: r.offline for r in result.roots} == {"Manga": False, "Completed": True}
+    assert lib.db.archive_at(lib.manga.id, "Beta/Beta ch003.cbz").status != "present"
+    assert lib.db.get_series(lib.done.id, "Omega").status == "present"
+
+
+def test_a_library_already_empty_in_the_database_is_recorded_as_empty(tmp_path):
+    """Owner, 2026-10-15: "Library Empty" - a library none of whose series is present (a new empty root, or one whose
+    series were all recorded gone) is an empty library: no error, a folder scan is read whole."""
+    lib = Lib(tmp_path, "lib")
+    (tmp_path / "Fresh").mkdir()
+    empty_root = lib.db.add_root(str(tmp_path / "Fresh"), "Fresh")
+    result = scan_and_record_library([lib.db.get_root(empty_root.id)], lib.db)
+    assert result.roots[0].empty and not result.errors and not result.roots[0].offline
+    # every series of a library already recorded missing (it went while MangaList watched it)
+    shutil.rmtree(lib.p("Completed", "Omega"))
+    shutil.rmtree(lib.p("Completed", "Sigma"))
+    lib.p("Completed", "notes.txt").write_text("x")    # not empty yet: the series are recorded missing as usual
+    scan_and_record_library([lib.root("Completed")], lib.db)
+    assert lib.db.get_series(lib.done.id, "Omega").status == "missing"
+    lib.p("Completed", "notes.txt").unlink()
     result = scan_and_record_folders(lib.root("Completed"), ["Omega"], lib.db)
     rs = result.roots[0]
-    assert rs.empty and not result.errors and not rs.entries and rs.scope is None and not result.folders_only
-    assert lib.db.get_series(lib.done.id, "Omega").status == "missing"
-    assert lib.db.get_series(lib.done.id, "Sigma").status == "missing"          # not only the named folder
-    assert lib.db.get_series(lib.manga.id, "Alpha").status == "present"         # other libraries are untouched
+    assert rs.empty and not result.errors and rs.scope is None and not result.folders_only
 
 
-def test_a_full_scan_of_an_empty_library_is_marked_empty_too(tmp_path):
+def test_the_headless_rescan_records_nothing_for_a_known_empty_library(tmp_path):
+    from mangalist.headless.jobs import JobContext, StoreRootsProvider, make_rescan
+    from mangalist.scanner import OFFLINE_EMPTY
+
     lib = Lib(tmp_path, "lib")
-    shutil.rmtree(lib.p("Completed"))
-    lib.p("Completed").mkdir()
-    result = scan_and_record_library([lib.root("Completed")], lib.db)
-    assert result.roots[0].empty and not result.errors
+    before = dump(lib.db)
+    _empty(lib, "Completed")
+    res = make_rescan(StoreRootsProvider(env={}, db=lib.db), backfill=False, renames=None)(JobContext())
+    assert res.status == "error" and res.message == "1 of 2 roots scanned"
+    errors = [r.get("error") for r in res.extra["roots"] if r.get("error")]
+    assert errors == [OFFLINE_EMPTY]
+    after = dump(lib.db)
+    assert [x for x in after["series"] if '"Completed"' in x] == [x for x in before["series"] if '"Completed"' in x]
+    assert lib.db.get_series(lib.done.id, "Omega").status == "present"
 
 
 def test_a_root_that_is_gone_or_holds_something_is_not_an_empty_library(tmp_path):
