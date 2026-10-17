@@ -120,3 +120,13 @@ def test_retry_mangapixer_scans_asks_only_when_the_requests_are_on(cache):
     assert due == datetime(2999, 1, 1, tzinfo=timezone.utc) and "pending" in summary
     set_flag(db, KEY_SCAN_AFTER_FILING, False)
     assert renamer.retry_mangapixer_scans(db) == ("", None)
+
+
+def test_the_sync_after_a_rename_is_a_scheduled_style_run(cache):
+    from mangalist import renamer
+
+    message, before = renamer.sync_mangapixer_after_rename(cache.store)
+    assert message == "skipped: no MangaPixer source configured" and before == 0
+    cache.set_connection(base_url="http://127.0.0.1:9", token="mpx_test")
+    cache.mark_token_rejected()                                         # a refused token stays a stop
+    assert renamer.sync_mangapixer_after_rename(cache.store)[0].startswith("skipped: MangaPixer refused the token")

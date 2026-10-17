@@ -1259,7 +1259,7 @@ class MainWindow(QMainWindow):
         """The Renamer window renamed (or put back) files: rescan the folders it renamed in (both sides of each step,
         from the journal) so the table and Rename pending follow; a library the journal names nothing in is read
         whole."""
-        self._retry_pending_scans()
+        self._retry_pending_scans(sync_after=True)
         roots = [r for r in self._roots() if r.id in set(root_ids)]
         self._status_label.setText(f"Files renamed in {len(roots)} librar{'y' if len(roots) == 1 else 'ies'} - "
                                    "rescanning")
@@ -1278,15 +1278,21 @@ class MainWindow(QMainWindow):
         else:
             self._start_scan(roots, scopes)
 
-    def _retry_pending_scans(self) -> None:
+    def _retry_pending_scans(self, sync_after: bool = False) -> None:
         """A rename or an add asked MangaPixer for a scan; one it held back (cooldown, a scan running) is asked again
-        when it is due, not at the next hourly pass (owner, 2026-10-17)."""
+        when it is due, not at the next hourly pass (owner, 2026-10-17). *sync_after* (a rename): once the scans have
+        started, MangaPixer's export is read again, so renamed folders find their series."""
         if self._db is None:
             return
         if self._scan_retry is None:
             from .scan_retry import ScanRetry
-            self._scan_retry = ScanRetry(self._db, self)
-        self._scan_retry.check()
+            self._scan_retry = ScanRetry(self._db, self, on_synced=self._after_rename_sync)
+        self._scan_retry.check(sync_after=sync_after)
+
+    def _after_rename_sync(self, carry_before: int) -> None:
+        """MangaPixer's export was read again after a rename: the renamed folders find their series."""
+        self._after_mangapixer_changed(carry_before)
+        self._show_roots()
 
     def _on_series_reread(self, root_ids, series_ids) -> None:
         """A "volumes or chapters?" answer (or a deleted stray file) in the Renamer window: rescan only those series'

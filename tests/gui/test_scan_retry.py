@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from mangalist.gui.scan_retry import MARGIN_MS, MAX_WAIT_MS, ScanRetry
+from mangalist.gui.scan_retry import MARGIN_MS, MAX_WAIT_MS, SYNC_DELAY_MS, ScanRetry
 
 NOW = datetime(2026, 10, 17, 4, 46, tzinfo=timezone.utc)
 
@@ -16,8 +16,9 @@ class _Call:
         self.abandoned = True
 
 
-def _retry(qapp, answers):
-    """A ScanRetry whose background calls run at once; *answers* are what each retry returns."""
+def _retry(qapp, answers, synced=None):
+    """A ScanRetry whose background calls run at once; *answers* are what each retry returns (a sync answers
+    ``("ok: ...", 7)``); *synced* collects the carry ids handed to ``on_synced``."""
     asked = []
 
     def start(fn, on_done, on_error):
@@ -29,7 +30,8 @@ def _retry(qapp, answers):
             on_done(fn() if answer is None else answer)
         return None
 
-    r = ScanRetry(object(), retry=lambda db: ("", None), start=start, now=lambda: NOW)
+    r = ScanRetry(object(), retry=lambda db: ("", None), sync=lambda db: ("ok: 2 libraries", 7),
+                  on_synced=(synced.append if synced is not None else None), start=start, now=lambda: NOW)
     return r, asked
 
 
@@ -66,3 +68,31 @@ def test_a_failed_retry_leaves_it_to_the_hourly_pass_and_stop_ends_it(qapp):
     r.check()
     assert not r.armed                                              # stopped for good (the window closed)
 
+
+
+def test_after_a_rename_mangapixer_is_read_again_once_every_scan_has_started(qapp):
+    # owner, 2026-10-17: renamed series showed "needs review" until the 12-hourly sync
+    synced = []
+    r, asked = _retry(qapp, [("", NOW + timedelta(minutes=4)), ("MangaPixer scans: 1 started", None), ("", None),
+                             ("ok: 2 libraries", 7)], synced)                # retry, retry, retry, then the sync
+    r.check(sync_after=True)
+    r._fire()                                                       # still pending: no sync yet
+    assert r.armed and not r.sync_armed
+    r._fire()                                                       # started: the sync waits for MangaPixer's scan
+    assert not r.armed and r.sync_armed and r._sync_timer.interval() == SYNC_DELAY_MS
+    r.check(sync_after=True)                                        # another batch: one sync after the last one
+    assert not r.sync_armed
+    r._fire()
+    assert r.sync_armed
+    r._fire_sync()
+    assert synced == [7] and not r.sync_armed and asked == [1, 1, 1, 1]
+    r._fire_sync()                                                  # once only
+    assert synced == [7]
+
+
+def test_an_add_or_a_check_without_a_rename_does_not_sync(qapp):
+    synced = []
+    r, _ = _retry(qapp, [("", None)], synced)
+    r.check()
+    r._fire()
+    assert not r.sync_armed and synced == []
