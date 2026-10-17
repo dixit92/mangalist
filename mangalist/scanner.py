@@ -836,19 +836,30 @@ WIDEN_MIN = 20                  # a scope of more folders than this, and over a 
 WIDEN_FRACTION = 1 / 3
 
 
-def _deepest_root(path: str, roots: Sequence) -> Optional[Tuple[object, str]]:
-    """(the root holding *path* - the deepest one when roots nest -, *path* relative to it in '/' form, "" for the
-    root itself), or None outside every root. The root is tried as configured and resolved."""
-    norm = os.path.normcase(os.path.abspath(path))
-    best = None
+def _root_bases(roots: Sequence) -> List[Tuple[object, List[str]]]:
+    """Each root with its normalised base paths - as configured and resolved. Resolving stats the share, so a caller
+    with many paths does it once (2026-10-17: a rename of 2,813 files resolved every root per file - the window froze
+    for 3 s)."""
+    out = []
     for r in roots:
         bases = {os.path.abspath(str(r.path))}
         try:
             bases.add(str(Path(r.path).resolve()))
         except OSError:
             pass
-        for base in bases:
-            nb = os.path.normcase(base).rstrip("/\\")
+        out.append((r, sorted(os.path.normcase(b).rstrip("/\\") for b in bases)))
+    return out
+
+
+def _deepest_root(path: str, roots: Sequence, bases: Optional[List[Tuple[object, List[str]]]] = None
+                  ) -> Optional[Tuple[object, str]]:
+    """(the root holding *path* - the deepest one when roots nest -, *path* relative to it in '/' form, "" for the
+    root itself), or None outside every root. The root is tried as configured and resolved (*bases*: from
+    :func:`_root_bases`, computed here when not given)."""
+    norm = os.path.normcase(os.path.abspath(path))
+    best = None
+    for r, nbs in (bases if bases is not None else _root_bases(roots)):
+        for nb in nbs:
             if norm == nb or norm.startswith(nb + os.sep):
                 if best is None or len(nb) > best[2]:
                     rel = os.path.abspath(path)[len(nb):].lstrip("/\\").replace("\\", "/")
@@ -861,8 +872,9 @@ def folder_scopes(roots: Sequence, paths: Iterable) -> Scopes:
     lies in; a path that is a root itself scans that root whole. Paths outside every root are left out (logged) - they
     never mean "every root" (the log showed "files filed for 1 series" followed by a scan of all seven roots)."""
     out: Scopes = {}
+    bases = _root_bases(roots)
     for p in paths:
-        hit = _deepest_root(os.fspath(p), roots)
+        hit = _deepest_root(os.fspath(p), roots, bases)
         if hit is None:
             _log.info("Scan scope: %s is in no library folder; not scanned", p)
             continue

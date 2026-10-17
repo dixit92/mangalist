@@ -437,6 +437,42 @@ def discard_duplicates(db, selections: Sequence[Tuple[DuplicateGroup, Collection
     return outcomes
 
 
+def file_as_listed(path: str) -> Optional[Tuple[int, str]]:
+    """(size, modified) of *path* as :func:`delete_checked` compares them, or None when it cannot be read."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_size, iso_from_ns(st.st_mtime_ns)
+
+
+def discard_file(db, path: str, size: int, modified: str) -> DiscardOutcome:
+    """Delete ONE stray file the owner chose in the Rename window (a hiatus notice, an announcement page) after the
+    caller has had the owner's confirmation (owner, 2026-10-17). Every guard of :func:`delete_checked` holds - inside a
+    root, no link, a plain file, unchanged since the owner was shown *size* / *modified* - under the root's lock."""
+    root_dirs = [r.path for r in db.list_roots()]
+    target = os.path.normpath(os.fspath(path))
+    root_dir = _root_holding(target, root_dirs)
+    if root_dir is None:
+        return _not_deleted(target, "it is outside every configured root")
+    lock, why = _take(root_dir)
+    if lock is None:
+        return _not_deleted(target, why)
+    try:
+        delete_checked(target, size, modified, root_dirs)
+    except DiscardRefused as exc:
+        return _not_deleted(target, str(exc))
+    finally:
+        lock.release()
+    _log.info("Deleted a stray file from the Rename window: %s (%d bytes, modified %s)", target, size, modified)
+    return DiscardOutcome(target, True)
+
+
+def _not_deleted(path: str, reason: str) -> DiscardOutcome:
+    _log.warning("Stray file not deleted: %s (%s)", path, reason)
+    return DiscardOutcome(path, False, reason)
+
+
 def busy_reason(db, paths: Iterable[str]) -> Optional[str]:
     """Why a discard of *paths* cannot start now - another instance (a scan's filing, a plan) holds the lock of a root
     they lie in - or None. A look only: :func:`discard_duplicates` takes the lock itself."""

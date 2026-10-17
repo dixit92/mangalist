@@ -49,6 +49,7 @@ from ..scanner import (
     journal_mark,
     merge_scopes,
     scan_and_record_library,
+    series_scopes,
     widen_scopes,
 )
 from ..store import Journal, Root, RootError
@@ -401,6 +402,7 @@ class MainWindow(QMainWindow):
         self._rename_again = False
         self._rename_again_folders: Optional[set] = None   # the queued count's folders (None: every series)
         self._renamer_runner = None                 # the Renamer window's runner (None: its own threads)
+        self._scan_retry = None                     # retries the MangaPixer scans it held back (after a rename / an add)
         from .background import start_call as _start_call
 
         self._background = _start_call
@@ -1226,6 +1228,7 @@ class MainWindow(QMainWindow):
         win.rescan_follows = True           # _on_library_renamed rescans; the window looks again after it
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         win.library_changed.connect(self._on_library_renamed)
+        win.series_changed.connect(self._on_series_reread)
         win.duplicates_requested.connect(self.review_duplicates)
         win.destroyed.connect(lambda *_a: setattr(self, "_renamer_window", None))
         self._renamer_window = win
@@ -1256,6 +1259,7 @@ class MainWindow(QMainWindow):
         """The Renamer window renamed (or put back) files: rescan the folders it renamed in (both sides of each step,
         from the journal) so the table and Rename pending follow; a library the journal names nothing in is read
         whole."""
+        self._retry_pending_scans(sync_after=True)
         roots = [r for r in self._roots() if r.id in set(root_ids)]
         self._status_label.setText(f"Files renamed in {len(roots)} librar{'y' if len(roots) == 1 else 'ies'} - "
                                    "rescanning")
@@ -1273,6 +1277,38 @@ class MainWindow(QMainWindow):
             self._start_scan(roots)
         else:
             self._start_scan(roots, scopes)
+
+    def _retry_pending_scans(self, sync_after: bool = False) -> None:
+        """A rename or an add asked MangaPixer for a scan; one it held back (cooldown, a scan running) is asked again
+        when it is due, not at the next hourly pass (owner, 2026-10-17). *sync_after* (a rename): once the scans have
+        started, MangaPixer's export is read again, so renamed folders find their series."""
+        if self._db is None:
+            return
+        if self._scan_retry is None:
+            from .scan_retry import ScanRetry
+            self._scan_retry = ScanRetry(self._db, self, on_synced=self._after_rename_sync)
+        self._scan_retry.check(sync_after=sync_after)
+
+    def _after_rename_sync(self, carry_before: int) -> None:
+        """MangaPixer's export was read again after a rename: the renamed folders find their series."""
+        self._after_mangapixer_changed(carry_before)
+        self._show_roots()
+
+    def _on_series_reread(self, root_ids, series_ids) -> None:
+        """A "volumes or chapters?" answer (or a deleted stray file) in the Renamer window: rescan only those series'
+        folders (the journal names nothing, which read the whole library - 11 s for one answer; owner, 2026-10-17). A library
+        whose series the database no longer knows is read whole, so the window's wait for it always ends."""
+        roots = [r for r in self._roots() if r.id in set(root_ids)]
+        if not roots:
+            return
+        try:
+            scopes: Dict[int, Optional[set]] = dict(series_scopes(self._db, series_ids))
+        except Exception:  # noqa: BLE001 - read the libraries whole
+            _log.warning("Reading the series' folders failed", exc_info=True)
+            scopes = {}
+        for r in roots:
+            scopes.setdefault(r.id, None)
+        self._start_scan(roots, {r.id: scopes[r.id] for r in roots})
 
     # --- Slots -----------------------------------------------------------
 
@@ -1780,6 +1816,7 @@ class MainWindow(QMainWindow):
             self._after_add = (getattr(dlg, "next_step", None), str(dlg.outcome.folder), dlg.outcome.series_id)
             scopes = folder_scopes([dlg.root], [dlg.outcome.folder]) if getattr(dlg.outcome, "folder", None) else {}
             self._start_scan([dlg.root], scopes or None)          # the new folder only
+            self._retry_pending_scans()
 
     def _run_after_add(self) -> None:
         """After the rescan that follows Add series: the finish step's choice (lane A, owner 2026-10-15, answer 5). The
@@ -2871,6 +2908,8 @@ class MainWindow(QMainWindow):
             self._auto_modes.stop()
         if self._dupe_call is not None:
             self._dupe_call.abandon()
+        if self._scan_retry is not None:
+            self._scan_retry.stop()
         if self._rename_call is not None and hasattr(self._rename_call, "abandon"):
             self._rename_call.abandon()
         if self._renamer_window is not None:

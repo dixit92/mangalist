@@ -67,6 +67,7 @@ import re
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequence, Set, Tuple
 
@@ -956,6 +957,34 @@ def request_mangapixer_scans(db, series_ids: Sequence[int]) -> str:
     if not libraries:
         return ""
     return request_scans(cache, libraries).summary()
+
+
+def sync_mangapixer_after_rename(db) -> Tuple[str, int]:
+    """Re-read MangaPixer's export once the scans a rename asked for have run (owner, 2026-10-17: renamed series showed
+    "needs review" until the 12-hourly sync - MangaPixer matches folders by name). (the sync's message, the carry id
+    before it - the caller applies the carries the sync made.) A scheduled-style run: a refused token stays a stop."""
+    from .identity.carry import last_carry_id
+    from .services.mangapixer import open_cache
+    from .services.mangapixer.sync import sync_all
+
+    before = last_carry_id(db)
+    result = sync_all(open_cache(db), manual=False)
+    return f"{result.status}: {result.message}", before
+
+
+def retry_mangapixer_scans(db) -> Tuple[str, Optional[datetime]]:
+    """Ask again for the pending MangaPixer scans that are due (a request MangaPixer held back - its 5-minute cooldown,
+    a scan running); (the summary, "" when nothing was asked; when the next pending one is due, or None). The open
+    window retries at that time (owner, 2026-10-17: a rename's scan otherwise waited for the next hourly pass)."""
+    from .downloads.options import KEY_SCAN_AFTER_FILING, get_flag
+    from .services.mangapixer import open_cache
+    from .services.mangapixer.scans import next_due, request_scans
+
+    if not get_flag(db, KEY_SCAN_AFTER_FILING):
+        return "", None
+    cache = open_cache(db)
+    summary = request_scans(cache).summary() if cache.pending_scans() else ""
+    return summary, next_due(cache)
 
 
 # --- what the owner says a file holds ---------------------------------------------------------------------------

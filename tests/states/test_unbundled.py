@@ -143,14 +143,12 @@ def test_licensed_without_an_english_volume_list_the_held_volumes_list_still_say
 # --- where it has no effect ----------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("inv", [
-    dict(held_chapters=chapters(1, 30)),                           # a chapter folder: compared on chapters already
-    dict(),                                                        # nothing held (an empty folder below)
-])
-def test_no_effect_without_volumes(inv):
-    empty = not inv
-    off = state(k(), unbundled=False, empty=empty, **inv)
-    on = state(k(), empty=empty, **inv)
+def test_no_effect_on_a_chapter_folder():
+    # a chapter folder is compared on chapters already. (An empty folder wants the chapters after the newest English
+    # volume since 2026-10-17 - test_unbundled_empty_folder.py.)
+    inv = dict(held_chapters=chapters(1, 30))
+    off = state(k(), unbundled=False, **inv)
+    on = state(k(), **inv)
     assert (on.state, on.gaps, on.reasons) == (off.state, off.gaps, off.reasons)
 
 

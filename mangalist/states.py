@@ -91,7 +91,7 @@ import re
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Collection, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, runtime_checkable
+from typing import Any, Collection, Dict, Iterable, List, Optional, Protocol, Sequence, Set, Tuple, runtime_checkable
 
 from .knowledge import (
     ANSWER_CANT_TELL,
@@ -351,6 +351,8 @@ class UnbundledAsk:
     current: Optional[str] = None        # the owner's answer in force (None: not given yet, or given before a newer
                                          # unmapped volume arrived - :attr:`given_for`)
     given_for: Optional[str] = None      # the newest held volume when the answer was given
+    not_held: bool = False               # :attr:`volume` is out in English but not held (the folder lacks it, or is
+                                         # empty): its chapters come with it, so the question is about the chapters after it
 
     @property
     def needed(self) -> bool:
@@ -756,8 +758,11 @@ def _evaluate(
             return finish(State.WANTED, reasons=["Empty folder; the series is not matched yet"])
         if k.licensed:
             if out_vols:
-                return finish(State.WANTED_OFFICIAL, [Gap(GAP_VOLUME, v.volume, note=_date_note(v)) for v in out_vols],
-                              [f"Empty folder; {len(out_vols)} English volume(s) out"])
+                gaps = [Gap(GAP_VOLUME, v.volume, note=_date_note(v)) for v in out_vols]
+                reasons = [f"Empty folder; {len(out_vols)} English volume(s) out"]
+                if unbundled:
+                    gaps += _empty_unbundled_chapters(k, held, gaps, unbundled, out_vols, extra_target, reasons, common)
+                return finish(State.WANTED_OFFICIAL, gaps, reasons)
             # No English volume (a webtoon never gets one): the chapters up to the latest known one, which the
             # Download tab offers from Suwayomi (owner, 2026-10-11: an empty licensed webtoon offered nothing)
             target = _chapter_target(k, extra_target)
@@ -1188,8 +1193,14 @@ def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap], choic
     MangaPixer's volume list. When the list does not map the newest held volume, the owner's "first chapter to get"
     (*choice*'s ``first_chapter``, given while ``for_volume`` was the newest held volume) says where to start - a guess
     could ask for chapters that volume holds; without an answer in force the caller compares the folder as without the
-    setting."""
-    top = max(held.volumes)
+    setting. The newest volume is the newest held one or the newest the folder lacks while it is out (owner,
+    2026-10-17: volumes 1-2 held, 1-13 out in English, no list - the question was about volume 2, whose chapters volumes
+    3-13 bring; an empty folder has only the volumes out)."""
+    lacking = [to_decimal(g.start) for g in gaps if g.kind == GAP_VOLUME and not g.open_end]   # an upgrade's chapters
+                                                                    # are collected as chapters (question 73): not here
+    lacking = [n for n in lacking if n is not None and n not in original_only]
+    top = max([*held.volumes, *lacking])
+    not_held = top not in held.volumes
     mapped = {to_decimal(v.volume): v for v in k.volumes or () if v.has_chapters}
     ask: Optional[UnbundledAsk] = None
     assumed: Tuple[Decimal, ...] = ()
@@ -1204,7 +1215,7 @@ def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap], choic
                            mapped_end=fmt_num(end) if end is not None else None,
                            suggestion=unbundled_suggestion(k.volumes, top, _chapter_target(k), k.origin_volumes),
                            current=fmt_num(first) if first is not None and not stale else None,
-                           given_for=fmt_num(given_for) if given_for is not None else None)
+                           given_for=fmt_num(given_for) if given_for is not None else None, not_held=not_held)
         if first is None or first <= 0:
             return _UnbundledStart(None, f"Unbundled chapters: the volume list does not say which chapter volume "
                                          f"{fmt_num(top)} ends with - set the first chapter to get", ask=ask)
@@ -1232,6 +1243,31 @@ def _unbundled_start(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap], choic
     else:
         why = f"Unbundled chapters after chapter {fmt_num(after)} (the end of volume {fmt_num(last)})"
     return _UnbundledStart(after, why, inclusive, ask, assumed)
+
+
+def _empty_unbundled_chapters(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap], choice: Any,
+                              out_vols: Sequence[VolumeInfo], extra_target: Optional[Decimal], reasons: List[str],
+                              common: Dict[str, Any]) -> List[Gap]:
+    """An empty folder with Unbundled Chapters on (owner, 2026-10-17: "if I click unbundle, it should let me get the
+    volumes and the chapters after the volumes"): the chapters after the newest English volume out, up to the chapter
+    target - where the volume list says where that volume ends, else from the owner's "first chapter to get" (asked
+    as for a folder whose newest volume the list does not map). Adds the reason, and the question to *common*."""
+    target = _chapter_target(k, extra_target)
+    numbers = [n for n in (to_decimal(v.volume) for v in out_vols) if n is not None]
+    if target is None or not numbers:
+        return []
+    start = _unbundled_start(k, held, gaps, choice)
+    reasons.append(start.why)
+    if start.ask is not None:
+        common["unbundled_ask"] = start.ask
+        if start.ask.needed:
+            common["needs_attention"] = tuple(dict.fromkeys(common["needs_attention"] + (ATTENTION_UNBUNDLED_START,)))
+    if start.after is None:
+        return []
+    missing = sorted(c for c in _whole_numbers(start.after, target) if start.wants(c))
+    if target != target.to_integral_value() and start.wants(target):
+        missing.append(target)
+    return _chapter_gaps(missing)
 
 
 def _empty_folder_chapters(target: Decimal) -> List[Decimal]:
