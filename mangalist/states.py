@@ -21,10 +21,11 @@ The rules, in order (the full table is in the lane note):
 2. **Nothing known** (no linked record, or no number to compare with) -> *Can't tell*.
 3. Gaps: **volumes** - an English volume that is out, not held as a volume and not wholly held as
    chapters is missing (in a folder that holds volumes, or holds nothing but volumes' worth); a volume
-   whose chapters are all held as chapters is an **upgrade**. Without an English edition, the
+   whose chapters are all held as chapters is an **upgrade** (a listed chapter 0 - a prologue MangaDex puts in
+   volume 1 - only when a file numbered 0 is held: MangaPixer 1.43.2's rule, owner 2026-10-16). Without an English edition, the
    scanlation's latest volume is the target for a folder that holds volumes. **Chapters** (a folder
    that holds chapter files; an unlicensed folder of volumes only with Unbundled Chapters on, below) -
-   every whole chapter from the first expected one up to the latest known one (MangaUpdates' latest
+   every whole chapter from the first expected one (1; a lone chapter 0 is never missing) up to the latest known one (MangaUpdates' latest
    chapter, the English chapter count, the finished total - the largest) that is held neither as a
    chapter nor inside a held volume, plus the latest chapter itself when it is a decimal (``24.5``).
    An **unlicensed folder that holds volumes only**, Unbundled Chapters off (owner, 2026-10-15:
@@ -51,7 +52,10 @@ counted by the volume files the folder holds, no upgrade is offered and the stat
 only where nothing else tells: when MangaUpdates, the English edition and a finished total give no chapter target, or
 when without it the state would be *Can't tell*. Not "the highest wins" everywhere: MangaPixer reads MangaDex's list
 with its unavailable (taken-down) chapters, and on the owner's library (2026-10-13) 19 of the 95 series it would raise
-list chapters MangaDex no longer serves (the lane note "MangaPixer Export Fields" has the measurement).
+list chapters MangaDex no longer serves (the lane note "MangaPixer Export Fields" has the measurement). Where MangaPixer
+(1.43.0) exports the **readable** list too (``mangadexReleased.readable``, taken-down chapters left out), its highest
+whole chapter is a chapter target for every series instead - the largest of the targets wins - and the released
+list's latest chapter is not used (owner, 2026-10-13, answer 8); nothing readable adds no target.
 
 **Unbundled Chapters** (a per-series setting, :mod:`mangalist.unbundled`; owner, 2026-10-11: "a setting to convert a
 volume-only series to a volumes + unbundled chapters series, with both upgrade and new missing chapter downloads
@@ -615,17 +619,42 @@ def compute_state(
     ``for_volume`` are the owner's "first chapter to get", used where the volume list does not map the newest held
     volume.
 
-    MangaDex's highest whole English chapter (:attr:`~mangalist.knowledge.SeriesKnowledge.mangadex_latest`) is a chapter
-    target only where nothing else tells (see the module docstring): the state is computed without it first, and again
-    with it when there is no other target or the first answer is *Can't tell*.
+    MangaDex's readable English chapters (:attr:`~mangalist.knowledge.SeriesKnowledge.mangadex_readable`, MangaPixer
+    1.43.0), where known: their highest whole chapter joins the chapter target of every series (the largest wins, as
+    with the other sources); nothing readable adds no target, and the released list's latest chapter is then not used
+    at all. Where they are not known yet, MangaDex's highest whole English chapter listed
+    (:attr:`~mangalist.knowledge.SeriesKnowledge.mangadex_latest`, taken-down ones included) is a chapter target only
+    where nothing else tells (see the module docstring): the state is computed without it first, and again with it
+    when there is no other target or the first answer is *Can't tell*.
     """
     args = dict(folder_empty=folder_empty, needs_kind=needs_kind, requested=requested, rename_pending=rename_pending,
                 rename_count=rename_count, behind_override=behind_override, today=today or _dt.date.today(),
                 restarts=restarts, unbundled=unbundled)
     st = _evaluate(inventory, knowledge, **args)
     k = knowledge
-    extra = k.mangadex_latest if k is not None and k.matched and not k.tracking_off and not k.edition_label else None
-    if extra is None or st.state in (State.NOT_A_SERIES, State.NOT_TRACKED):
+    if k is None or not k.matched or k.tracking_off or k.edition_label or st.state in (State.NOT_A_SERIES,
+                                                                                       State.NOT_TRACKED):
+        return st
+    readable = k.mangadex_readable
+    if readable is not None:
+        # Owner, 2026-10-13 (answer 8): the readable list has only chapters a source can give, so it counts everywhere -
+        # the new chapters MangaUpdates has not recorded yet show, and taken-down chapters make no gap.
+        extra = readable.latest_whole
+        if extra is not None and k.finished_in_origin and k.total_chapters is not None and extra > k.total_chapters:
+            # a finished series' known total caps it: MangaDex's readable list can number an extra after the last
+            # chapter, and a Complete series must not turn Missing chapters for it (integrator, 2026-10-17)
+            extra = k.total_chapters
+        base = _chapter_target(k)
+        if extra is None or (base is not None and extra <= base):
+            return st
+        alt = _evaluate(inventory, knowledge, extra_target=extra, **args)
+        if alt.state == st.state and alt.gaps == st.gaps:
+            return st
+        told = "nothing else gives a latest chapter" if base is None else f"MangaUpdates says {fmt_num(base)}"
+        return replace(alt, reasons=alt.reasons + (f"MangaDex has readable English chapters up to {fmt_num(extra)} "
+                                                   f"({told})",))
+    extra = k.mangadex_latest
+    if extra is None:
         return st
     base = _chapter_target(k)
     if base is not None and not (extra > base and st.state == State.CANT_TELL):
@@ -948,21 +977,42 @@ def _date_note(v: VolumeInfo) -> Optional[str]:
     return f"English {v.english_date}" if v.english_date else None
 
 
+def _holds_zero(held: _Held) -> bool:
+    """The folder holds a file numbered 0 (``0``, ``0.5``, a range from 0) or a volume that collects it."""
+    return (any(Decimal(0) <= c < 1 for c in held.chapters | held.covered)
+            or any(lo < 1 and hi >= 0 for lo, hi in held.chapter_ranges))
+
+
+def _counted(held: _Held, numbers: Set[Decimal]) -> Set[Decimal]:
+    """The chapters of *numbers* (a volume's mapped chapters) that must be held for the volume to count as held as
+    chapters. A listed chapter 0 (``0``, ``0.5``) - a prologue, a pilot, an announcement MangaDex lists in volume 1, and
+    many releases have none - counts only when a file numbered 0 is held (owner, 2026-10-16, MangaPixer 1.43.2's rule:
+    a volume "0-6" with chapters 1-6 held showed chapter 0 as missing): so a volume "0-6" is held as chapters once 1-6
+    are. A volume that maps nothing but chapter 0 keeps it (else nothing would be needed at all)."""
+    rest = {c for c in numbers if not Decimal(0) <= c < 1}
+    if rest == numbers or not rest or _holds_zero(held):
+        return numbers
+    return rest
+
+
 def _range_held(held: _Held, lo: Optional[Decimal], hi: Optional[Decimal]) -> bool:
+    """Every chapter the volume list maps to a volume (``lo``-``hi``: both ends and the whole numbers between) is held -
+    a listed chapter 0 only when a file numbered 0 is (:func:`_counted`)."""
     if lo is None or hi is None:
         return False
-    numbers = _whole_numbers(lo, hi) | {lo, hi}
+    numbers = _counted(held, _whole_numbers(lo, hi) | {lo, hi})
     return all(held.holds_chapter(c) for c in numbers)
 
 
 def _original_as_upgrade(g: Gap, k: SeriesKnowledge, held: _Held, wanted: Collection[Decimal]) -> Gap:
     """A missing original-edition volume *g* (not out in English) as an upgrade when Unbundled chapters gets its
-    chapters: every whole chapter the volume list maps to it is held or *wanted* as a chapter. Else *g* as it is (its
-    chapters lie before where the unbundled chapters start, so only the volume brings them)."""
+    chapters: every whole chapter the volume list maps to it is held or *wanted* as a chapter (a listed chapter 0 only
+    when a file numbered 0 is held, :func:`_counted`). Else *g* as it is (its chapters lie before where the unbundled
+    chapters start, so only the volume brings them)."""
     v = next((x for x in k.volumes or () if x.has_chapters and to_decimal(x.volume) == to_decimal(g.start)), None)
     lo = to_decimal(v.chapters_from) if v is not None else None
     hi = to_decimal(v.chapters_to) if v is not None else None
-    numbers = _whole_numbers(lo, hi) if lo is not None and hi is not None and lo <= hi else set()
+    numbers = _counted(held, _whole_numbers(lo, hi)) if lo is not None and hi is not None and lo <= hi else set()
     if not numbers or not all(c in wanted or held.holds_chapter(c) for c in numbers):
         return g
     return Gap(GAP_UPGRADE, g.start, note=f"original volume; chapters {v.chapters_from}-{v.chapters_to} come as chapters "

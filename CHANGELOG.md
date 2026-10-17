@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.41] - 2026-10-17
+
+The fortieth MangaList release (testing build): chapter 0 the way MangaPixer counts it, and MangaDex's readable chapters as a chapter target.
+
+- **Chapter 0 counts only when you hold it** (as in MangaPixer 1.43.2). MangaDex often lists a prologue as chapter 0; a volume listed as chapters 0-6 now counts as held - and as an upgrade - when you hold chapters 1-6.
+- **MangaDex's readable chapters.** Where MangaPixer exports the chapters MangaDex can actually serve (taken-down ones left out), their latest one joins every series' chapter target, so new chapters MangaUpdates has not recorded yet show as missing - never a gap for a chapter MangaDex took down. A finished series' known total caps it, so a Complete series stays Complete. The readable list fills in as MangaPixer re-reads each series.
+
 ## [2026.10.40] - 2026-10-16
 
 The thirty-ninth MangaList release (testing build): official English titles in folder names, an unmounted library left alone, Found clearing itself, spinners while things load, and the List's layout defects fixed. Database schema 9.

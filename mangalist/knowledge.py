@@ -204,17 +204,40 @@ class Completion:
 
 
 @dataclass(frozen=True)
+class MangaDexReadable:
+    """What MangaDex still serves of its released list (MangaPixer 1.43.0 ``companions.mangadexReleased.readable``): the
+    readable chapters only, without the taken-down ones (owner, 2026-10-13, answer 8: "ask MangaPixer to also export the
+    readable-only latest chapter")."""
+
+    latest_whole_chapter: Optional[str]     # the highest WHOLE readable chapter, exact (``18``); None: nothing readable
+    chapters: int                           # whole readable chapters (parts count once)
+
+    @property
+    def latest_whole(self) -> Optional[Decimal]:
+        """The highest whole readable chapter (MangaPixer exports it floored already; floored again here), None for
+        none / 0."""
+        d = to_decimal(self.latest_whole_chapter)
+        if d is None:
+            return None
+        whole = d.to_integral_value(rounding="ROUND_FLOOR")
+        return whole if whole > 0 else None
+
+
+@dataclass(frozen=True)
 class MangaDexReleased:
     """What MangaDex lists as released in one language (MangaPixer 1.42.0 ``companions.mangadexReleased``).
 
     MangaPixer reads MangaDex's aggregate WITH its unavailable chapters (taken down, usually on a licence): both numbers
     can name chapters no source can give (2026-10-13: one licensed series listed 179 English chapters, none readable),
-    so the states use it only where nothing else tells (:func:`mangalist.states.compute_state`)."""
+    so the states use them only where nothing else tells. :attr:`readable` (MangaPixer 1.43.0; None until MangaPixer
+    next reads the series' list) leaves the taken-down ones out: where it is known, its latest chapter is a chapter
+    target for every series instead (:func:`mangalist.states.compute_state`)."""
 
     language: str                       # casefolded (``en``)
     latest_chapter: Optional[str]       # the highest chapter listed, exact (``18``, ``12.5``); None when none is listed
     chapters: int                       # whole chapters listed (parts such as 4.1 and 4.2 count once)
     fetched_at: Optional[str] = None
+    readable: Optional[MangaDexReadable] = None
 
     @property
     def latest_whole(self) -> Optional[Decimal]:
@@ -241,7 +264,23 @@ def mangadex_released_of(item: Any) -> Optional[MangaDexReleased]:
     if not language:
         return None
     return MangaDexReleased(language=language, latest_chapter=exact_str(released.get("latestChapter")),
-                            chapters=chapters, fetched_at=_s(released.get("fetchedAt")))
+                            chapters=chapters, fetched_at=_s(released.get("fetchedAt")),
+                            readable=_mangadex_readable_of(released.get("readable")))
+
+
+def _mangadex_readable_of(block: Any) -> Optional[MangaDexReadable]:
+    """``mangadexReleased.readable`` (MangaPixer 1.43.0), or None: absent (not read since), or malformed - both read as
+    unknown, never as "nothing readable" (that is ``latestWholeChapter: null``)."""
+    if not isinstance(block, Mapping):
+        return None
+    chapters = block.get("chapters")
+    if isinstance(chapters, bool) or not isinstance(chapters, int) or chapters < 0:
+        return None
+    latest = block.get("latestWholeChapter")
+    if latest is not None and (isinstance(latest, bool) or not isinstance(latest, (str, int, float))
+                               or to_decimal(latest) is None):
+        return None
+    return MangaDexReadable(latest_whole_chapter=exact_str(latest) if latest is not None else None, chapters=chapters)
 
 
 @dataclass(frozen=True)
@@ -380,6 +419,13 @@ class SeriesKnowledge:
         states compare with English editions, and MangaPixer reads the list in its preferred language."""
         r = self.mangadex_released
         return r.latest_whole if r is not None and r.language == "en" else None
+
+    @property
+    def mangadex_readable(self) -> Optional[MangaDexReadable]:
+        """MangaDex's readable English chapters (:attr:`MangaDexReleased.readable`), or None while not known (MangaPixer
+        has not read the list since 1.43.0, or reads it in another language)."""
+        r = self.mangadex_released
+        return r.readable if r is not None and r.language == "en" else None
 
     @property
     def edition_label(self) -> Optional[str]:
