@@ -7,13 +7,19 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from mangalist.gui.unbundled_dialog import question_text
+import pytest
+
 from mangalist.knowledge import EnglishPublisher, from_mangapixer_item
 from mangalist.states import (ATTENTION_UNBUNDLED_START, GAP_CHAPTER, GAP_VOLUME, InventorySnapshot, State,
                               compute_state)
 from mangalist.unbundled import UnbundledChoice
 
 from .helpers import TODAY, item, own, vol
+
+
+def question_text(title, ask):
+    """The dialog's wording (Qt): checked where PySide6 is installed - this file also runs in the no-Qt job."""
+    return pytest.importorskip("mangalist.gui.unbundled_dialog").question_text(title, ask)
 
 
 def k(**changes):
@@ -55,8 +61,6 @@ def test_where_the_list_does_not_map_the_newest_volume_the_first_chapter_to_get_
     ask = st.unbundled_ask
     assert (ask.volume, ask.mapped_volume, ask.mapped_end, ask.needed, ask.not_held) == ("3", "1", "8", True, True)
     assert ATTENTION_UNBUNDLED_START in st.needs_attention
-    text = question_text("Example", ask)
-    assert "the newest volume out in English, which the folder does not hold yet" in text and "after volume 3" in text
     answered = empty(k(volumes=UNMAPPED), unbundled=UnbundledChoice(Decimal(30), Decimal(3)))
     assert gaps(answered, GAP_CHAPTER) == [("30", "41")] and not answered.unbundled_ask.needed
     assert ATTENTION_UNBUNDLED_START not in answered.needs_attention
@@ -64,6 +68,8 @@ def test_where_the_list_does_not_map_the_newest_volume_the_first_chapter_to_get_
     newer = dict(UNMAPPED, items=UNMAPPED["items"] + [vol("4", None, None, "2026-01-01", "released")])
     again = empty(k(volumes=newer), unbundled=UnbundledChoice(Decimal(30), Decimal(3)))
     assert again.unbundled_ask.needed and again.unbundled_ask.stale and not gaps(again, GAP_CHAPTER)
+    text = question_text("Example", ask)                                # last: skipped without Qt
+    assert "the newest volume out in English, which the folder does not hold yet" in text and "after volume 3" in text
 
 
 def test_an_english_volume_count_without_a_list_asks_then_wants_the_chapters_from_the_answer():
