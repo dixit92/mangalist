@@ -137,9 +137,12 @@ python -m pytest -q
 The tests never touch the network. A few optional live checks against the real MangaUpdates API (public titles from
 the golden set only) run with `MANGALIST_LIVE_MU=1 python -m pytest -q tests/golden/test_live_mangaupdates.py`.
 
-Series folders are named `Romanized Title [English Title]` - MangaUpdates' title, then the English title in brackets
-when MangaList knows it (just `Romanized Title` otherwise), like animefetch's show folders. Add series proposes that
-name; the Renamer lists a folder named differently as Rename pending and renames it only when you press Rename.
+Series folders are named `Romanized Title [English Title]` - MangaUpdates' title, then the official English title in
+brackets (AniList's, found through MangaDex's links; else the folder's own English title), just `Romanized Title`
+otherwise, like animefetch's show folders. The official titles are looked up in the background when the Renamer opens
+and cached, so a scan never asks the network. When the path of a series' longest file would pass 255 characters, its
+folder name leaves the English part out. Add series proposes that name; the Renamer lists a folder named differently as
+Rename pending and renames it only when you press Rename.
 
 ## MangaUpdates matching
 

@@ -37,9 +37,10 @@ def test_a_schema_7_database_upgrades_and_keeps_everything_else(tmp_path):
     con.close()
 
     st = store.Store(path, import_legacy=False)
-    assert st.schema_version() == 8
+    assert st.schema_version() == schema.SCHEMA_VERSION >= 8
     with st.connect() as c:
-        assert {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")} == tables_before
+        tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert tables - {"english_titles"} == tables_before      # schema 9 adds the English titles cache only
         assert _columns(c, "roots") == roots_before | {"auto_mode"}
         assert c.execute("SELECT auto_mode FROM roots").fetchone()[0] is None      # existing libraries: the default
     root = st.list_roots()[0]

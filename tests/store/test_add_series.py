@@ -244,7 +244,7 @@ def test_the_folder_scheme_is_proposed_first():
     info = A.info_from_mu(mu_record(title="Romaji Title"), A.mangadex_from_record(md_body(title="Romaji Title",
                                                                                           english="English: Title")))
     names = A.propose_names(info)
-    assert names[0] == "Romaji Title [English Title]"               # MangaUpdates' title, MangaDex's English title
+    assert names[0] == "Romaji Title [English - Title]"             # MangaUpdates' title, MangaDex's English title
     assert names[0] == info.scheme_name()
     assert "Romaji Title" in names and "English - Title" in names
     assert "Made Up Series (Alt)" in names and not any("メ" in n for n in names)
@@ -591,3 +591,30 @@ def test_a_mangadex_link_prefers_anilists_english_title():
     out = f.lookup(f"https://mangadex.org/title/{UUID}/slug")
     assert out.info.english_title == "The Licensed Title"
 
+
+
+# --- the official English title in the Renamer's cache (owner, 2026-10-16, answer 76) ---------------------------------
+
+def test_add_series_keeps_anilists_english_title_for_the_renamer(db, tmp_path):
+    from mangalist import english_titles as E
+
+    body = {"result": "ok", "data": _md_item(1000, ["A Fan Title", "The Licensed Title"], al=55)}
+    f = Fakes({1000: mu_record(1000, title="Made Up Romaji")}, md=body)
+    f.anilist[55] = {"english_title": "The Licensed Title"}
+    info = f.lookup(f"https://mangadex.org/title/{UUID}/slug").info
+    assert (info.official_english, info.anilist_id, info.mangadex_english) == ("The Licensed Title", 55, None)
+    A.record_english(db, info)
+    entry = E.EnglishTitles(db).load()["mu:1000"]
+    assert (entry.english, entry.anilist_id, entry.mangadex_id, entry.status) == ("The Licensed Title", 55, UUID,
+                                                                                 E.FOUND)
+    A.record_english(db, A.SeriesInfo(title="Made Up Unlooked", mu_id=2000, mu_title="Made Up Unlooked"))
+    assert "mu:2000" not in E.EnglishTitles(db).load()              # MangaDex not read: nothing known, nothing kept
+
+
+def test_the_short_name_comes_from_mangaupdates_titles_only():
+    # answer 78: the romaji part is MangaUpdates' - a MangaDex English title never becomes the short name in Add series
+    long = "Made Up Romaji wa Hontou ni Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"
+    md = A.MangaDexSeries(id=UUID, title="x", english_alts=["Made Up Romaji Kai"])
+    info = A.info_from_mu(mu_record(title=long, associated=[{"title": "The Made Up Long Story"}]), md)
+    assert "Made Up Romaji Kai" in info.associated and info.scheme_alts == ["The Made Up Long Story"]
+    assert info.scheme_name().startswith("Made Up Romaji wa Hontou ni")

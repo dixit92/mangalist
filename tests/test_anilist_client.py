@@ -107,3 +107,26 @@ def test_a_network_error_is_logged_and_ends_the_lookup(answers, caplog):
 
 def test_the_delay_keeps_under_thirty_requests_a_minute():
     assert 60.0 / anilist_client.REQUEST_DELAY < 30
+
+
+def test_english_titles_of_many_records_in_one_request(answers):
+    queue, sent, _ = answers
+    queue.append(response(200, {"data": {"Page": {"media": [
+        {"id": 11, "title": {"romaji": "Made Up Romaji", "english": " The Made Up English "}},
+        {"id": 12, "title": {"romaji": "Made Up Other", "english": None}},
+        "not a record"]}}}))
+    assert anilist_client.english_titles([11, 12, 11, 13]) == {11: "The Made Up English", 12: None}
+    assert sent[0]["variables"] == {"ids": [11, 12, 13]} and "id_in" in sent[0]["query"]
+    assert anilist_client.english_titles([]) == {} and len(sent) == 1
+
+
+def test_english_titles_raise_when_anilist_cannot_be_asked(answers):
+    queue, _, _ = answers
+    queue.append(requests.ConnectionError("offline"))
+    with pytest.raises(anilist_client.AniListUnavailable):
+        anilist_client.english_titles([11])
+    queue += [response(500, {}), response(503, {})]                  # a server error, retried once, then given up
+    with pytest.raises(anilist_client.AniListUnavailable):
+        anilist_client.english_titles([11])
+    queue.append(response(404, {"data": {"Page": None}}))            # "no match" is an answer, not a failure
+    assert anilist_client.english_titles([11]) == {}

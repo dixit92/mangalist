@@ -4,7 +4,9 @@ Only the manga search and direct-ID lookup are implemented, returning the
 fields needed for chapter/volume cross-unit estimation in the Behind column
 and the series' external links (official sources: publisher pages, official
 readers - ``externalLinks { url site type language }``, read in the same
-request, so no extra calls).
+request, so no extra calls). :func:`english_titles` reads the official English
+title (``title.english``) of up to :data:`PAGE_SIZE` records in ONE request
+(the folder scheme's English part, :mod:`mangalist.english_titles`).
 """
 
 from __future__ import annotations
@@ -36,6 +38,20 @@ query ($search: String) {
     chapters
     volumes
     externalLinks { url site type language }
+  }
+}
+"""
+
+# Up to PAGE_SIZE records by id in one request (AniList's page limit): the official English titles of a whole library
+# in a handful of requests instead of one per series.
+PAGE_SIZE = 50
+_QUERY_ENGLISH = """
+query ($ids: [Int]) {
+  Page(page: 1, perPage: 50) {
+    media(id_in: $ids, type: MANGA) {
+      id
+      title { romaji english }
+    }
   }
 }
 """
@@ -73,18 +89,33 @@ def _title_similar(query: str, result_title: str) -> bool:
     return overlap >= max(1, int(len(q) * 0.3))
 
 
+class AniListUnavailable(Exception):
+    """AniList could not be asked or did not answer (network, rate limit after the retry, server error)."""
+
+
 def _execute(query: str, variables: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Run a GraphQL query; one retry on a rate limit (429, after its Retry-After) or a server error.
 
     Returns the ``data.Media`` dict, or None on no match (AniList answers 404) or on error. Failures are
     logged with their real HTTP status and AniList's (or Cloudflare's) short reason.
     """
+    try:
+        data = _execute_data(query, variables)
+    except AniListUnavailable:
+        return None
+    return data.get("Media") if isinstance(data, dict) else None
+
+
+def _execute_data(query: str, variables: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """:func:`_execute`'s request: the answer's ``data`` dict (None: no match - AniList answers 404); raises
+    :class:`AniListUnavailable` when AniList could not be asked or failed, so a caller can tell "nothing there" from
+    "ask again later"."""
     for attempt in range(2):
         try:
             resp = _SESSION.post(_URL, json={"query": query, "variables": variables}, timeout=15)
         except requests.RequestException as exc:
             _log.warning("AniList request failed: %s", type(exc).__name__)
-            return None
+            raise AniListUnavailable(type(exc).__name__) from None
         status = resp.status_code
         if status == 404:
             _log.debug("AniList: no match")
@@ -96,17 +127,17 @@ def _execute(query: str, variables: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             continue
         if not resp.ok:
             _log.warning("AniList request failed (HTTP %s): %s", status, _reason(resp))
-            return None
+            raise AniListUnavailable(f"HTTP {status}")
         try:
             data = resp.json()
         except ValueError:
             _log.warning("AniList returned no JSON (HTTP %s)", status)
-            return None
-        media = (data.get("data") or {}).get("Media") if isinstance(data, dict) else None
-        if media is None and isinstance(data, dict) and data.get("errors"):
+            raise AniListUnavailable("no JSON") from None
+        body = data.get("data") if isinstance(data, dict) else None
+        if isinstance(data, dict) and data.get("errors") and not any((body or {}).values()):
             _log.warning("AniList query error: %s", _reason(resp))
-        return media
-    return None
+        return body if isinstance(body, dict) else None
+    raise AniListUnavailable("no answer after the retry")
 
 
 def _retry_after(resp: requests.Response, default: float) -> float:
@@ -194,3 +225,21 @@ def get_manga(anilist_id: int) -> Optional[Dict[str, Any]]:
     result = _normalise(media)
     _log.debug("anilist get_manga result: %r", result)
     return result
+
+
+def english_titles(anilist_ids: List[int]) -> Dict[int, Optional[str]]:
+    """The official English title (``title.english``: AniList keeps the licensed title apart from fan titles) of each
+    AniList manga record in *anilist_ids* (at most :data:`PAGE_SIZE`, one request): ``{id: title or None}`` - None
+    when the record has no English title; an id AniList does not know is left out. Raises
+    :class:`AniListUnavailable` when AniList could not be asked (the caller tries again later)."""
+    ids = [int(i) for i in dict.fromkeys(anilist_ids)][:PAGE_SIZE]
+    if not ids:
+        return {}
+    data = _execute_data(_QUERY_ENGLISH, {"ids": ids})
+    out: Dict[int, Optional[str]] = {}
+    for media in ((data or {}).get("Page") or {}).get("media") or ():
+        if not isinstance(media, dict) or not isinstance(media.get("id"), int):
+            continue
+        english = (media.get("title") or {}).get("english")
+        out[media["id"]] = english.strip() if isinstance(english, str) and english.strip() else None
+    return out
