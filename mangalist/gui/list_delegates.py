@@ -6,16 +6,20 @@ and then paints its text on top, so the model's roles keep working unchanged."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from typing import List, Tuple
+
+from PySide6.QtCore import QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
-from . import theme
-from .table_model import MODE_CHIP_ROLE, REVIEW_ROLE, STATE_ROLE, SUBTITLE_ROLE, state_text
+from . import busy, theme
+from .table_model import MODE_CHIP_ROLE, PENDING_ROLE, REVIEW_ROLE, STATE_ROLE, SUBTITLE_ROLE, state_text
 
 ROW_HEIGHT = 50                 # two lines of the Title cell with the mockup's 9 px padding
 TITLE_PAD = 20                  # the first column's left padding
 CELL_PAD = 12
+SPINNER_PX = 14                 # the busy indicator of a State cell that waits for its state
+PENDING_TEXT = "Checking…"
 CHIP_AUTO = "Auto"              # the accent chip; Notify / Off are muted (owner decisions 2026-10-10, 2026-10-11)
 
 
@@ -90,12 +94,24 @@ def _paint_mode_chip(painter: QPainter, rect: QRectF, text: str) -> float:
 
 
 class StateBadgeDelegate(QStyledItemDelegate):
-    """The state as a rounded badge in its colours, its flags (``Upcoming``, ``Needs attention``) after it."""
+    """The state as a rounded badge in its colours, its flags (``Upcoming``, ``Needs attention``) after it.
+
+    A series whose state is still being worked out in the background and has none to show (a series seen for the first
+    time, 0.1-1 s after a scan: UI performance stage 2) paints a small spinner and "Checking…" instead of an empty cell
+    (owner, 2026-10-16, answer 80: "keep a spinner if measured time for any UI element can go over 0.5s"). The spinners
+    turn on the shared clock (:mod:`.busy`): each frame repaints only the pending cells painted since the last frame,
+    and the clock stops by itself when none was painted (all states in, or scrolled out of sight)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._painted: List[Tuple[object, QRect]] = []         # (viewport, cell rect) of the busy cells just painted
 
     def paint(self, painter: QPainter, option, index) -> None:
         opt = _draw_cell(option, painter, index, self)
         st = index.data(STATE_ROLE)
         if st is None:
+            if index.data(PENDING_ROLE):
+                self._paint_pending(painter, opt)
             return
         label = st.reasons[0] if st.state.value == "Not a series" and st.reasons else st.state.value
         flags = "  ·  ".join(st.flags)
@@ -126,6 +142,36 @@ class StateBadgeDelegate(QStyledItemDelegate):
                 painter.drawText(rest, Qt.AlignmentFlag.AlignVCenter,
                                  QFontMetrics(small).elidedText(flags, Qt.TextElideMode.ElideRight, int(rest.width())))
         painter.restore()
+
+    def _paint_pending(self, painter: QPainter, opt: QStyleOptionViewItem) -> None:
+        pal = theme.current()
+        rect = QRectF(opt.rect).adjusted(CELL_PAD, 0, -CELL_PAD, 0)
+        ring = QRectF(rect.left(), rect.top() + (rect.height() - SPINNER_PX) / 2, SPINNER_PX, SPINNER_PX)
+        busy.paint_spinner(painter, ring, pal.muted, track=pal.border)
+        small = theme.font(12, 400)
+        painter.save()
+        painter.setFont(small)
+        painter.setPen(QColor(pal.muted_2))
+        rest = QRectF(ring.right() + 8, rect.top(), max(rect.right() - ring.right() - 8, 0), rect.height())
+        if rest.width() > 20:
+            painter.drawText(rest, Qt.AlignmentFlag.AlignVCenter,
+                             QFontMetrics(small).elidedText(PENDING_TEXT, Qt.TextElideMode.ElideRight, int(rest.width())))
+        painter.restore()
+        viewport = opt.widget.viewport() if opt.widget is not None and hasattr(opt.widget, "viewport") else opt.widget
+        if viewport is not None:
+            self._painted.append((viewport, QRect(opt.rect)))
+            busy.clock().watch(self._tick)
+
+    def _tick(self) -> bool:
+        """One frame of the clock: repaint the busy cells painted since the last one (each paint registers itself again).
+        False (the clock lets this go) when there were none."""
+        painted, self._painted = self._painted, []
+        for viewport, rect in painted:
+            try:
+                viewport.update(rect)
+            except RuntimeError:                            # the table was deleted
+                return False
+        return bool(painted)
 
     def sizeHint(self, option, index) -> QSize:
         st = index.data(STATE_ROLE)

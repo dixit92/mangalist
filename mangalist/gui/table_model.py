@@ -81,10 +81,12 @@ NOT_STATE_INPUTS = frozenset({COL_DUPE, COL_LIBRARY, COL_RENAME})
 SUBTITLE_ROLE = Qt.UserRole + 1     # Title: the matched series' title, shown under the folder's
 REVIEW_ROLE = Qt.UserRole + 2       # Title: the match needs review (the subtitle turns orange)
 STATE_ROLE = Qt.UserRole + 3        # State: the SeriesState (the badge's colour)
+PENDING_ROLE = Qt.UserRole + 21    # State: True while the row has no state to show and its state is being worked out
+                                    # (the cell paints a busy indicator, :mod:`.busy`)
 MODE_CHIP_ROLE = Qt.UserRole + 20   # Title: the series' own automatic-downloads mode where it differs from the default
                                     # (a small chip after the title; "" for none)
 # Roles a series' state does not read: a dataChanged for these alone keeps the cached state.
-NOT_STATE_ROLES = frozenset({int(Qt.BackgroundRole), int(MODE_CHIP_ROLE)})
+NOT_STATE_ROLES = frozenset({int(Qt.BackgroundRole), int(MODE_CHIP_ROLE), int(PENDING_ROLE)})
 # The columns a pushed state changes (the Title's subtitle is MangaPixer's title; MU Title to English read the state or
 # its knowledge): one dataChanged over them per push (UI performance stage 2).
 STATE_PUSH_COLUMNS = (COL_TITLE, COL_ENGLISH)
@@ -101,6 +103,7 @@ _SUBTITLE = int(SUBTITLE_ROLE)
 _REVIEW = int(REVIEW_ROLE)
 _STATE = int(STATE_ROLE)
 _MODE_CHIP = int(MODE_CHIP_ROLE)
+_PENDING = int(PENDING_ROLE)
 _ALIGN_RIGHT = int(Qt.AlignRight | Qt.AlignVCenter)
 _ALIGN_CENTER = int(Qt.AlignCenter)
 _RIGHT_COLUMNS = frozenset({COL_FILES, COL_SUBS, COL_VOL, COL_CH, COL_BOTH, COL_MTIME, COL_RENAME})
@@ -484,6 +487,22 @@ class MangaTableModel(QAbstractTableModel):
         entries = self._entries
         it = entries if rows is None else (entries[r] for r in rows if 0 <= r < len(entries))
         return any(id(e) not in cache and id(e) not in failed for e in it)
+
+    def state_pending_at(self, row: int) -> bool:
+        """Deferred: is *row* a series whose state is being worked out and which has none to show meanwhile (never seen
+        before - the State cell would be empty)? The cell paints a busy indicator for it. A row that shows its old state
+        while the new one is computed is not pending in this sense, and nothing here computes a state."""
+        if not self.deferred or not 0 <= row < len(self._entries):
+            return False
+        e = self._entries[row]
+        k = id(e)
+        cached = self._state_cache.get(k)
+        if (cached is not None and cached[0] is e) or k in self._failed:
+            return False
+        stale = self._stale.get(k)
+        if stale is not None and stale[0] is e:
+            return False
+        return str(e.folder) not in self._stale_folders
 
     def _want_states(self) -> None:
         if not self._asked:
@@ -971,6 +990,8 @@ class MangaTableModel(QAbstractTableModel):
                 return None
             got = self._shown(row)
             return got[0] if got else None
+        if role == _PENDING:
+            return self.state_pending_at(row) if col == COL_STATE else None
 
         if role == _ALIGNMENT:
             if col in _RIGHT_COLUMNS:

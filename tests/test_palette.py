@@ -31,8 +31,12 @@ TODAY = {
 ADDED = {"untracked_bg": "#e3f2ef", "untracked_text": "#00655a"}
 
 
-def test_light_is_todays_look_exactly():
-    assert LIGHT.tokens() == {**TODAY, **ADDED}
+#: Tokens recoloured since (2026-10-16, owner answer 81 "another hue"): the Wanted badge, violet before.
+RECOLOURED = {"wanted_bg": "#fbe8f6", "wanted_text": "#86206b"}
+
+
+def test_light_is_todays_look_except_what_was_recoloured():
+    assert LIGHT.tokens() == {**TODAY, **ADDED, **RECOLOURED}
 
 
 def test_every_token_is_in_both_palettes_as_a_colour():
@@ -137,3 +141,29 @@ def test_not_tracked_has_its_own_badge_in_both_palettes():
         assert pal.badge("untracked") not in others, pal.name
         assert contrast(pal.untracked_text, pal.untracked_bg) >= 4.5, pal.name
         assert contrast(pal.untracked_text, pal.surface) >= 4.5, pal.name
+
+
+def _hue(color: str) -> float:
+    import colorsys
+
+    r, g, b = (v / 255 for v in palette._rgb(color))
+    return colorsys.rgb_to_hsv(r, g, b)[0] * 360
+
+
+def _apart(a: str, b: str) -> float:
+    d = abs(_hue(a) - _hue(b)) % 360
+    return min(d, 360 - d)
+
+
+@pytest.mark.parametrize("pal", [LIGHT, DARK], ids=["light", "dark"])
+def test_the_wanted_badge_has_a_hue_of_its_own(pal):
+    """Owner, 2026-10-16: the Wanted badge was the violet of Dark's accent ("another hue"). Its text is at least 40
+    degrees of hue from the accent and from every other coloured badge (the greys and the blue-grey Up to date aside),
+    and it reads at AA on its own badge in both palettes."""
+    wanted = pal.wanted_text
+    assert contrast(wanted, pal.wanted_bg) >= 4.5
+    assert _apart(wanted, pal.accent) >= 40
+    for kind in ("ok", "warn", "bad", "info", "untracked"):
+        assert _apart(wanted, pal.badge(kind)[1]) >= 40, kind
+        assert _apart(pal.wanted_bg, pal.badge(kind)[0]) >= 40, kind
+    assert pal.wanted_text != pal.accent and pal.wanted_bg != pal.accent_tint

@@ -117,15 +117,18 @@ def test_a_bad_container_value_is_shown_flagged_not_hidden(qapp, db):
     assert db.get_setting("schedule_rescan") == "daily@03:30" and page.schedule_reading["rescan"].property("tone") == ""
 
 
-def test_the_clean_up_is_off_until_daily_weekly_or_monthly_is_chosen(qapp, db):
+def test_the_clean_up_is_weekly_until_another_period_or_off_is_chosen(qapp, db):
     page = make(db)
     job = "clean-records"
     assert choices(page, job) == ["Off", "Daily", "Weekly", "Monthly"]
-    assert page.schedule_modes[job].currentText() == "Off" and page.schedule_times[job].isHidden()
-    assert page.schedule_reading[job].text() == "off"
+    # A fresh install clears records older than a week, weekly (owner, 2026-10-16: "Weekly"); nothing is stored for it.
+    assert page.schedule_modes[job].currentText() == "Weekly" and not page.schedule_times[job].isHidden()
+    assert db.get_setting("schedule_clean_records") is None
+    assert page.schedule_reading[job].text() == "every Sunday 05:30 (records older than a week)"
+    pick(page, job, "Off")
+    assert db.get_setting("schedule_clean_records") == "off" and page.schedule_reading[job].text() == "off"
     pick(page, job, "Weekly")                                   # starts after the rescan and the find pass
     assert db.get_setting("schedule_clean_records") == "weekly@sun 05:30"
-    assert page.schedule_reading[job].text() == "every Sunday 05:30 (records older than a week)"
     pick(page, job, "Monthly")
     assert db.get_setting("schedule_clean_records") == "monthly@1 05:30"
     assert not page.schedule_monthdays[job].isHidden() and page.schedule_days[job].isHidden()
@@ -197,6 +200,8 @@ def test_run_now_leaves_a_request_for_the_runner_and_waits_for_it(qapp, db):
 
 def test_run_now_of_an_off_clean_up_is_not_offered(qapp, db):
     page = make(db)
+    assert page.run_buttons["clean-records"].isEnabled()        # Weekly until chosen
+    pick(page, "clean-records", "Off")
     assert not page.run_buttons["clean-records"].isEnabled()
     assert "Clear finished now" in page.run_buttons["clean-records"].toolTip()
     pick(page, "clean-records", "Daily")

@@ -152,6 +152,8 @@ def test_the_job_is_skipped_while_off_and_clears_by_the_chosen_period(db, tmp_pa
     for n, (status, age) in enumerate([(S.REMOVED, 20), (S.CANCELLED, 3), (S.REMOVED, 0.2), (S.FILED, 90), (S.SENT, 0)], 1):
         _record(db, status, age, n, sid, now)
     job = make_clean_records(open_db=lambda: db)
+    assert current_retention(db) == 7                           # Weekly until chosen (owner, 2026-10-16)
+    save_schedule(db, SCHEDULE_BY_JOB["clean-records"], "off")
     off = job(JobContext())
     assert off.status == "skipped" and "Scheduled tasks" in off.message and current_retention(db) is None
     save_schedule(db, SCHEDULE_BY_JOB["clean-records"], "weekly@sun 05:30")
@@ -180,5 +182,8 @@ def test_rows_for_every_task(db):
     rows = task_rules.build_rows(db, {}, {}, tz=UTC, now=now, runner=True, downloads_on=False)
     assert [r.job for r in rows] == [t.job for t in tasks.TASKS]
     by = {r.job: r for r in rows}
-    assert by["clean-records"].badge == "Off" and not by["clean-records"].can_run
+    assert by["clean-records"].badge == "Scheduled" and by["clean-records"].can_run      # Weekly until chosen
+    save_schedule(db, SCHEDULE_BY_JOB["clean-records"], "off")
+    off = {r.job: r for r in task_rules.build_rows(db, {}, {}, tz=UTC, now=now, runner=True, downloads_on=False)}
+    assert off["clean-records"].badge == "Off" and not off["clean-records"].can_run
     assert by["downloads"].badge == "Downloads off" and by["rescan"].badge == "Scheduled" and by["rescan"].can_run

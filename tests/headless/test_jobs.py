@@ -12,7 +12,7 @@ from mangalist.headless.jobs import (
     Cancelled, ConfigRootsProvider, Job, JobContext, JobRegistry, RootsProvider, StoreRootsProvider,
     build_registry, make_dispatch, make_rescan)
 from mangalist.store.roots import Root
-from mangalist.headless.schedule import DailyAt, EveryHours
+from mangalist.headless.schedule import DailyAt, EveryHours, WeeklyAt
 from mangalist.headless.settings import HeadlessSettings, parse_bool
 
 
@@ -58,8 +58,11 @@ def test_default_settings_rescan_on_downloads_off():
     assert not reg.get("dispatch-batch").enabled
     assert not reg.get("downloads").enabled and s.downloads_schedule == EveryHours(1)
     # The MangaPixer sync is scheduled by default and skips itself while no server is set up.
-    assert not reg.get("clean-records").active and s.clean_records_schedule is None      # off until chosen
-    assert [j.name for j in reg.active()] == ["mangapixer-sync", "rescan"]
+    # The clean-up of finished records is weekly on a fresh install (owner, 2026-10-16), and Off stays a choice.
+    assert reg.get("clean-records").active and s.clean_records_schedule == WeeklyAt(6, 5, 30)
+    assert [j.name for j in reg.active()] == ["mangapixer-sync", "rescan", "clean-records"]
+    off = HeadlessSettings.from_env({"MANGALIST_CLEAN_RECORDS_SCHEDULE": "off"})
+    assert off.clean_records_schedule is None and not build_registry(off, ListRoots()).get("clean-records").active
 
 
 def test_downloads_are_opt_in():
@@ -80,7 +83,8 @@ def test_downloads_schedule_is_configurable():
 
 def test_rescan_can_be_turned_off():
     reg = build_registry(HeadlessSettings.from_env({"MANGALIST_RESCAN_SCHEDULE": "off",
-                                                    "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "off"}),
+                                                    "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "off",
+                                                    "MANGALIST_CLEAN_RECORDS_SCHEDULE": "off"}),
                          ListRoots())
     assert reg.active() == []
 

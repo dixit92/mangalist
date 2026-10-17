@@ -15,8 +15,8 @@
   registered but DISABLED unless downloads are turned on. Nothing is ever dispatched on discovery - only in these
   scheduled passes (or the owner's Find now). Settings > Automation calls it "Find and send missing volumes and
   chapters".
-- ``clean-records``: the clean-up of finished download records (:mod:`mangalist.headless.records_job`) - off until
-  the owner picks Daily, Weekly or Monthly in Settings > Scheduled tasks.
+- ``clean-records``: the clean-up of finished download records (:mod:`mangalist.headless.records_job`) - weekly
+  by default (records older than a week); the owner picks Off, Daily, Weekly or Monthly in Settings > Scheduled tasks.
 - ``downloads``: the volumes MVP's arrivals pass (:mod:`mangalist.headless.downloads_job`) - file finished
   ``mangalist`` torrents into their series folders and remove completed ones. Enabled only with downloads on.
 

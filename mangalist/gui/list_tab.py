@@ -50,6 +50,7 @@ _CHIP_KEYS = {key for key, _ in CHIPS}
 #: The other state filters (Wanted, Upcoming, Needs attention, ...) sit behind "More".
 MORE_FILTERS: List[Tuple[str, str]] = [(k, label) for k, label in STATE_FILTERS if k not in _CHIP_KEYS]
 
+BUSY_COUNT = "…"                    # a More-menu entry whose count is being worked out
 PAGE_TABLE, PAGE_DUPLICATES, PAGE_EMPTY = 0, 1, 2
 DETAILS_WIDTH = 380
 
@@ -64,6 +65,7 @@ class ListTab(QWidget):
         super().__init__(parent)
         self._filter: Optional[str] = None
         self._counts: Dict[Optional[str], Optional[int]] = {}
+        self._busy_keys: frozenset = frozenset()        # the filters whose count is being worked out (a spinner)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -252,6 +254,7 @@ class ListTab(QWidget):
         self.chip_more.setChecked(in_more)
         self.chip_more.setText(f"{dict(MORE_FILTERS)[key]} ▾" if in_more else "More ▾")
         self.chip_more.set_count(self._counts.get(key) if in_more else None)
+        self.chip_more.set_busy(in_more and key in self._busy_keys)
         if emit:
             self.filter_changed.emit(key)
 
@@ -265,7 +268,20 @@ class ListTab(QWidget):
         for key, act in self._more_actions.items():
             n = counts.get(key)
             label = dict(MORE_FILTERS)[key]
-            act.setText(f"{label}   {n}" if n is not None else label)
+            if key in self._busy_keys:
+                act.setText(f"{label}   {BUSY_COUNT}")
+            else:
+                act.setText(f"{label}   {n}" if n is not None else label)
+
+    def set_busy_counts(self, keys) -> None:
+        """The filters (*keys*) whose count is still being worked out in the background (Rename pending, Duplicates:
+        the long counts of a subprocess, tens of seconds on a big library): their chips show a spinner in place of the
+        number, the "More" menu a "…" - never a count that is not final yet (owner, 2026-10-16, answer 80)."""
+        self._busy_keys = frozenset(keys)
+        for key, chip in self.chips.items():
+            chip.set_busy(key in self._busy_keys)
+        self.chip_more.set_busy(self._filter in self._more_actions and self._filter in self._busy_keys)
+        self.set_counts(self._counts)
 
     def show_page(self, page: int) -> None:
         self.stack.setCurrentIndex(page)

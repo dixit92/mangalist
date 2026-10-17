@@ -394,6 +394,7 @@ class MainWindow(QMainWindow):
         # _background for a synchronous call and _make_renamer for one with a fake namer.
         self._renamer_window = None
         self._rename_call = None
+        self._wanted_waiting = False                # the Download tab's counts show spinners (_set_wanted_waiting)
         self._rename_again = False
         self._rename_again_folders: Optional[set] = None   # the queued count's folders (None: every series)
         self._renamer_runner = None                 # the Renamer window's runner (None: its own threads)
@@ -838,7 +839,9 @@ class MainWindow(QMainWindow):
             del cache[key]
         rows = model.scope_rows()               # the library picked
         if model.states_pending(rows):
+            self._set_wanted_waiting(True)      # (spinners where the counts of the list before stand)
             return                              # some states are being computed: the list follows when they are in
+        self._set_wanted_waiting(False)
         for row in rows:
             entry = model.entry_at(row)
             st = model.state_at(row)
@@ -859,6 +862,27 @@ class MainWindow(QMainWindow):
             return
         self._wanted_series = out
         self._download_tab.set_wanted(out)
+
+    def _set_wanted_waiting(self, waiting: bool) -> None:
+        """The Download tab's counts (its chips and the tab's badge) show a spinner while its list waits for the picked
+        library's states (up to about a second after a scan, a library's first visit): owner, 2026-10-16, answer 80."""
+        if waiting == self._wanted_waiting:
+            return
+        self._wanted_waiting = waiting
+        tab = self._download_tab
+        if tab is not None and callable(getattr(tab, "set_waiting", None)):
+            tab.set_waiting(waiting)
+        self._top.set_download_busy(waiting)
+
+    def _update_busy_counts(self) -> None:
+        """Spinners on the chips whose count a background job is still working out: Rename pending (a subprocess count,
+        35-50 s on 700 series) and Duplicates (the duplicate-numbers finder)."""
+        keys = set()
+        if self._rename_call is not None or self._rename_again:
+            keys.add("rename")
+        if self._dupe_call is not None:
+            keys.add(DUPLICATES)
+        self._list.set_busy_counts(keys)
 
     def _wanted_groups(self, folder: str) -> List[str]:
         return [w.group for w in self._wanted_series if w.folder == folder]
@@ -1079,9 +1103,11 @@ class MainWindow(QMainWindow):
             self._dupe_call = self._process_runner(process_pool.duplicate_counts, (str(db.path),),
                                                    self._on_duplicate_files_counted, failed,
                                                    self._on_duplicate_count_finished)
+            self._update_busy_counts()
             return
         self._dupe_call = start_call(lambda: _count_by_folder(finder(db)), self._on_duplicate_files_counted,
                                      failed, self._on_duplicate_count_finished)
+        self._update_busy_counts()
 
     def _on_duplicate_files_counted(self, counted) -> None:
         total, per_folder = counted
@@ -1116,6 +1142,7 @@ class MainWindow(QMainWindow):
 
     def _on_duplicate_count_finished(self) -> None:
         self._dupe_call = None
+        self._update_busy_counts()
 
     # --- The renamer -------------------------------------------------------
 
@@ -1136,6 +1163,7 @@ class MainWindow(QMainWindow):
                 self._rename_again, self._rename_again_folders = True, want
             elif self._rename_again_folders is not None:
                 self._rename_again_folders = None if want is None else self._rename_again_folders | want
+            self._update_busy_counts()
             return
         self._rename_again, self._rename_again_folders = False, None
         counted = lambda counts: self._on_rename_counted(counts, want)                     # noqa: E731
@@ -1151,6 +1179,7 @@ class MainWindow(QMainWindow):
                                         counted, failed, self._on_rename_count_finished)
             if self._rename_call is token:
                 self._rename_call = call
+            self._update_busy_counts()
             return
         entries = self._model.entries()
         if want is not None:
@@ -1158,6 +1187,7 @@ class MainWindow(QMainWindow):
         renamer = self._make_renamer()
         self._rename_call = self._background(lambda: renamer.pending_counts(entries), counted, failed,
                                              self._on_rename_count_finished)
+        self._update_busy_counts()
 
     def _in_subprocess(self) -> bool:
         """Do the long counts run in a subprocess (the real background runner, subprocesses not switched off)?"""
@@ -1176,6 +1206,7 @@ class MainWindow(QMainWindow):
         self._rename_call = None
         if self._rename_again:
             self._count_rename_pending(self._rename_again_folders)
+        self._update_busy_counts()
 
     def open_renamer(self, scope):
         """The Renamer window on *scope* (:class:`.renamer_view.Scope`); one window, re-aimed when it is open."""

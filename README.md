@@ -53,8 +53,8 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 (default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1` (below).
 
 The schedules (`MANGALIST_RESCAN_SCHEDULE`, `MANGALIST_MANGAPIXER_SYNC_SCHEDULE`, `MANGALIST_DOWNLOADS_SCHEDULE`,
-`MANGALIST_DISPATCH_SCHEDULE`, and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records, off
-by default) and the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run
+`MANGALIST_DISPATCH_SCHEDULE`, and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records,
+default `weekly@sun 05:30`: records older than a week; `off` to stop) and the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run
 defaults**: you change them in **Settings > Scheduled tasks** (one list: each task with its time, last run, next run
 and **Run now**; the full re-read offers every 6 hours, every 12 hours or daily) and **Settings > Logging**, the
 container's background runner picks the change
