@@ -535,3 +535,25 @@ def test_an_empty_folder_of_a_known_library_is_offline_and_keeps_its_rows(make_w
     finally:
         mw.scan_and_record_library = real
     assert len(got) == 1 and isinstance(got[0], LibraryScan)
+
+
+class MergingDuplicatesView(FocusingDuplicatesView):
+    """The view with "Merge into..." (same series in two folders, 2026-10-17)."""
+
+    folders_merged = Signal(list, str)
+
+
+def test_a_merge_rescans_both_folders_and_opens_the_kept_folders_duplicate_files(make_window):
+    win = make_window(dupes=MergingDuplicatesView)
+    view = win._duplicates_view
+    scans = []
+    win._start_scan = lambda roots=None, scopes=None: scans.append((roots, scopes))
+    library = SimpleNamespace(id=1, name="Library", path="/lib")
+    win._roots = lambda: [library]
+    kept = str(LIB / TWIN_A)
+    view.folders_merged.emit([str(LIB / TWIN_B), kept], kept)
+    assert scans == [([library], {1: {TWIN_A, TWIN_B}})]                       # both folders, nothing else
+    assert win._list.current_filter() == "duplicates" and view.focus[-1] == kept
+    assert win._scan_note == "Folders merged"
+    view.folders_merged.emit([str(LIB / TWIN_B), kept], "")                   # its undo: a rescan, no review
+    assert len(scans) == 2 and view.focus == [kept]

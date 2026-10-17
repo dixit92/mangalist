@@ -1100,9 +1100,10 @@ class MainWindow(QMainWindow):
     def _on_folders_merged(self, paths, kept: str) -> None:
         """The duplicates view merged one series folder into another (or undid it): the identity moved in the database
         (examined mark, link), both folders are rescanned, and the kept folder's duplicate files are opened for review."""
-        self._status_label.setText("Folders merged - rescanning" if kept else "Merge undone - rescanning")
         self._apply_identity_changes([(p, kept) for p in paths if kept and p != kept])
-        self._scan_paths(paths)
+        self._scan_note = "Folders merged" if kept else "Merge undone"      # said with the scan's result
+        if not self._scan_paths(paths):
+            self._scan_note = None
         if kept:
             self.review_duplicates(kept)
 
