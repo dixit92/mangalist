@@ -145,7 +145,8 @@ class ScanWorker(QObject):
             return
         if self._stop:
             return
-        if not result.entries and result.errors and len(result.errors) == len(self._roots):
+        failed = [rs for rs in result.roots if rs.error and not rs.offline]    # an offline share is not a failure
+        if not result.entries and failed and len(failed) == len(self._roots):
             _log.error("Scan failed: no root could be read (%s)", "; ".join(result.errors))
             self.failed.emit("\n".join(result.errors))
             return
@@ -1511,7 +1512,9 @@ class MainWindow(QMainWindow):
     def _on_root_scanned(self, rs: RootScan, renamed) -> None:
         """A library folder was read and recorded: its series replace its old rows now, before the next folder is read."""
         self._apply_root_scan(rs, renamed)
-        if rs.error:
+        if rs.offline:                      # owner, 2026-10-16: an empty folder of a known library is not recorded
+            self._status_label.setText(f"{rs.root_name}: {rs.error}")
+        elif rs.error:
             self._status_label.setText(f"{rs.root_name}: not reachable")
         elif rs.empty:
             self._status_label.setText(f"{rs.root_name}: {LIBRARY_EMPTY}")
@@ -1590,14 +1593,14 @@ class MainWindow(QMainWindow):
         if isinstance(result, LibraryScan):
             shown, self._scan_applied = self._scan_applied, set()      # this scan's roots; the next one starts empty
             for rs in result.roots:         # normally all shown already, root by root
-                if rs.error:
+                if rs.error and not rs.offline:     # an offline share's rows stay as they were (nothing changed)
                     self._drop_root_rows(rs.root_id)
                 elif rs.root_id not in shown:
                     self._apply_root_scan(rs, result.renamed if len(result.roots) == 1 else ())
             self._scan_applied = set()
             entries: List[MangaEntry] = result.entries
             loose = result.loose
-            errors = result.errors
+            errors = [f"{rs.root_name}: {rs.error}" for rs in result.roots if rs.error and not rs.offline]
             renamed = result.renamed
             partial = len(result.roots) < len(self._roots())
         else:  # a plain list of entries
@@ -1609,8 +1612,13 @@ class MainWindow(QMainWindow):
         # The counts are in the footer (_update_counts); the message says what else the scan found.
         folders_only = isinstance(result, LibraryScan) and result.folders_only
         empty_roots = [rs.root_name for rs in result.roots if rs.empty] if isinstance(result, LibraryScan) else []
+        offline = [f"{rs.root_name}: {rs.error}" for rs in result.roots if rs.offline] \
+            if isinstance(result, LibraryScan) else []
         all_empty = bool(empty_roots) and len(empty_roots) == len(result.roots)
-        if all_empty:
+        all_offline = bool(offline) and len(offline) == len(result.roots)
+        if all_offline:
+            text, offline = "; ".join(offline), []     # owner, 2026-10-16: "is the share mounted? Nothing was changed"
+        elif all_empty:
             text = f"{', '.join(empty_roots)}: {LIBRARY_EMPTY}"      # owner, 2026-10-15: not "Scan failed"
         elif folders_only:
             n = sum(len(rs.scope) for rs in result.roots)
@@ -1619,7 +1627,9 @@ class MainWindow(QMainWindow):
             text = f"Scanned {len(entries)} folder(s)"
         if empty_roots and not all_empty:
             text += f"  —  {', '.join(empty_roots)}: {LIBRARY_EMPTY}"
-        if partial and isinstance(result, LibraryScan) and not folders_only and not all_empty:
+        if offline:
+            text += "  —  " + "; ".join(offline)
+        if partial and isinstance(result, LibraryScan) and not folders_only and not all_empty and not all_offline:
             text += " in " + ", ".join(rs.root_name for rs in result.roots)
         tips = []
         if loose:

@@ -472,3 +472,40 @@ def test_a_scan_of_a_library_that_is_now_empty_says_library_empty(make_window, t
     other = RootScan(root_id=2, root_name="Archive", folder=tmp_path, entries=[_entry(QUEST)])
     win._on_scan_finished(LibraryScan(roots=[other, empty]))
     assert "Reading: Library Empty" in win._status_label.text() and win._status_label.text().startswith("Scanned 1")
+
+
+def test_an_empty_folder_of_a_known_library_is_offline_and_keeps_its_rows(make_window, tmp_path):
+    """Owner, 2026-10-16 (question 71: "add a guard"): the scan records nothing for it and says why - not "Scan
+    failed", not "Library Empty"; its rows stay in the table as they were."""
+    from mangalist.gui.main_window import ScanWorker
+    from mangalist.scanner import OFFLINE_EMPTY, LibraryScan, RootScan
+
+    win = make_window()
+    kept = _entry(QUEST)
+    kept.root_id = 1
+    win._set_rows([kept])
+    offline = RootScan(root_id=1, root_name="Reading", folder=tmp_path, error=OFFLINE_EMPTY, offline=True)
+    win._on_root_scanned(offline, [])
+    assert win._status_label.text() == f"Reading: {OFFLINE_EMPTY}"
+    win._on_scan_finished(LibraryScan(roots=[offline]))
+    text = win._status_label.text()
+    assert text.startswith("Reading: the folder is empty - is the share mounted? Nothing was changed")
+    assert "Scan failed" not in text and "Library Empty" not in text and "not reachable" not in text
+    assert [e.folder for e in win._model.entries()] == [kept.folder]
+    other = RootScan(root_id=2, root_name="Archive", folder=tmp_path, entries=[_entry(PLAIN)])
+    win._on_scan_finished(LibraryScan(roots=[other, offline]))
+    assert win._status_label.text().startswith("Scanned 1") and f"Reading: {OFFLINE_EMPTY}" in win._status_label.text()
+    # the scan worker hands it over as a finished scan, never as a failure
+    worker = ScanWorker([], None)
+    got = []
+    worker.finished.connect(got.append)
+    worker.failed.connect(lambda msg: got.append(("failed", msg)))
+    import mangalist.gui.main_window as mw
+    real = mw.scan_and_record_library
+    mw.scan_and_record_library = lambda *a, **k: LibraryScan(roots=[offline])
+    try:
+        worker._roots = [object()]
+        worker.run()
+    finally:
+        mw.scan_and_record_library = real
+    assert len(got) == 1 and isinstance(got[0], LibraryScan)

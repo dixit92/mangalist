@@ -97,11 +97,16 @@ def test_one_root_rescans_of_the_source_then_the_destination_carry_the_series(db
     new_folder = library2.resolve() / "Old Title"
 
     only_source = scan_and_record_library([root], db)
-    assert only_source.renamed == []
-    assert [m.rel_path for m in carry_mod.missing_series(db)] == ["Old Title"]     # waiting for the other root
+    # the source is empty now and its series are nowhere else yet: it may be an unmounted share (owner, 2026-10-16,
+    # question 71) - nothing is recorded for it
+    assert only_source.renamed == [] and only_source.roots[0].offline
+    assert db.get_series(root.id, "Old Title").status == "present" and carry_mod.missing_series(db) == []
 
     only_destination = scan_and_record_library([root2], db)
-    assert only_destination.renamed == [(folder, new_folder)]
+    assert only_destination.renamed == []                   # a new row for now, as when the source is not read
+
+    again = scan_and_record_library([root], db)             # the series is in the other root now: a move, carried
+    assert again.renamed == [(folder, new_folder)] and again.roots[0].empty
     _assert_kept(db, root2, new_folder, old_id)
     assert carry_mod.missing_series(db) == []
 

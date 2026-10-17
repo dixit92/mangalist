@@ -5,7 +5,9 @@ allowed"). No Qt here: the List, the wanted list and the headless find pass read
 
 **What it does** is the states' business (:func:`mangalist.states.compute_state`, ``unbundled=``): the chapters after
 the newest held (or released) volume's last chapter up to the chapter target become Missing chapters (added to what
-the folder already wants: the setting never takes a gap away); the volume side is unchanged. The wanted list then
+the folder already wants: the setting never takes a gap away); the volume side is unchanged, except that a missing
+volume of the original edition not out in English, whose chapters it now gets, is kept as an upgrade (owner,
+2026-10-16, question 73: "Keep both, treat the volume as an upgrade"). The wanted list then
 lists the series under Missing chapters as well, and the find pass and the Download tab treat those chapters like any
 chapter series' (the saved Suwayomi source, the series' group, its automatic-downloads mode - Auto included).
 
