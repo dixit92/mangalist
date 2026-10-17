@@ -7,6 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.43] - 2026-10-17
+
+The forty-second MangaList release (testing build): the Rename window's file menu, faster rescans, MangaPixer kept in step after a rename, and Unbundled chapters after the newest volume out.
+
+- **Right-click a file in the Rename window:** Open folder (also on double-click), Delete this file… (for a stray file such as a hiatus notice - asked first, deleted for good, only inside a library and only if it has not changed), and Review duplicates of this series….
+- **One folder rescanned, not the library.** Answering Chapters or Volumes for a series in the Rename window (or deleting a file there) reads only that series' folder again - seconds instead of the whole library.
+- **MangaPixer follows a rename.** A scan MangaPixer holds back (its five-minute cooldown) is asked again as soon as it may be, not at the next hourly pass; and once MangaPixer has scanned, MangaList re-reads it, so renamed series stop showing "needs review" a few minutes after a rename instead of after the 12-hourly sync.
+- **No freeze after a large rename.** The window no longer stops for a few seconds after renaming thousands of files.
+- **Unbundled chapters start after the newest volume out.** The chapters after the volumes start after the newest volume you hold or lack while it is out in English (a volume you lack brings its chapters; a volume you hold the chapters of stays an upgrade). An empty folder with Unbundled on wants them too. Where the volume list does not say where that volume ends, "First chapter to get" asks about that volume.
+
 ## [2026.10.42] - 2026-10-17
 
 The forty-first MangaList release (testing build): a finished unlicensed series whose every volume you hold is Complete.
