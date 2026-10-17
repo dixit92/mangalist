@@ -68,6 +68,8 @@ from ..renamer import (
 )
 from . import palette, theme
 from .download_widgets import ROLE_CHIPS, ROLE_SUB, TwoLineDelegate
+from .links import OPEN_FOLDER_LABEL
+from .links import open_folder as _open_folder
 
 _log = logging.getLogger(__name__)
 
@@ -268,7 +270,8 @@ def _plural(n: int, word: str, many: Optional[str] = None) -> str:
 
 class RenamerWindow(QDialog):
     library_changed = Signal(list)          # root ids whose files were renamed (or put back): rescan them
-    series_changed = Signal(list, list)     # (root ids, series ids): only how the series read changed - rescan their folders
+    series_changed = Signal(list, list)     # (root ids, series ids): no rename journaled (a kind answer, a deleted
+                                            # stray file) - rescan those series' folders
     duplicates_requested = Signal(str)      # a series folder: the duplicates review on it
 
     def __init__(self, renamer, scope: Scope, parent: Optional[QWidget] = None, *,
@@ -362,6 +365,7 @@ class RenamerWindow(QDialog):
         self.preview.setColumnWidth(1, 360)
         self.preview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.preview.customContextMenuRequested.connect(self._on_preview_menu)
+        self.preview.itemDoubleClicked.connect(self._on_preview_double_click)
         split.addWidget(self.series_list)
         split.addWidget(self.preview)
         split.setStretchFactor(0, 1)
@@ -813,19 +817,90 @@ class RenamerWindow(QDialog):
     def _on_preview_menu(self, pos) -> None:
         item = self.preview.itemAt(pos)
         path = item.data(0, ROLE_PATH) if item is not None else None
-        if not path or self._busy or not callable(getattr(self._renamer, "set_file_units", None)):
+        if not path:
             return
         menu = QMenu(self.preview)
-        act_set = menu.addAction("Set chapter / volume…")
-        act_set.setToolTip("Say which chapter or volume this file holds; it is then named by the scheme")
-        act_forget = (menu.addAction("Forget the number I set") if self._renamer.file_units(path) is not None
-                      else None)
+        act_open = menu.addAction(OPEN_FOLDER_LABEL)
+        act_open.setToolTip("Show the folder this file is in")
+        act_set = act_forget = act_delete = act_dupes = None
+        if not self._busy:
+            if callable(getattr(self._renamer, "set_file_units", None)):
+                menu.addSeparator()
+                act_set = menu.addAction("Set chapter / volume…")
+                act_set.setToolTip("Say which chapter or volume this file holds; it is then named by the scheme")
+                act_forget = (menu.addAction("Forget the number I set") if self._renamer.file_units(path) is not None
+                              else None)
+            if getattr(self._renamer, "db", None) is not None:
+                menu.addSeparator()
+                act_delete = menu.addAction("Delete this file…")
+                act_delete.setToolTip("A stray file - a hiatus notice, an announcement page: delete it for good")
+            if self._current_series() is not None:
+                act_dupes = menu.addAction("Review duplicates of this series…")
         chosen = self._exec_menu(menu, self.preview.viewport().mapToGlobal(pos))
-        if chosen is act_set:
+        if chosen is None:
+            return
+        if chosen is act_open:
+            self.open_folder_of(path)
+        elif chosen is act_set:
             self.set_units_for(path)
         elif act_forget is not None and chosen is act_forget:
             self._renamer.set_file_units(path, None)
             self.refresh()
+        elif chosen is act_delete:
+            self.delete_file(path)
+        elif chosen is act_dupes:
+            self.duplicates_requested.emit(self._current_series().folder)
+
+    def _on_preview_double_click(self, item, _column: int) -> None:
+        path = item.data(0, ROLE_PATH) if item is not None else None
+        if path:
+            self.open_folder_of(path)
+
+    def open_folder_of(self, path: str) -> bool:
+        """The file manager on the folder *path* is in (owner, 2026-10-17: "open the file explorer by clicking on
+        files in the rename window")."""
+        return _open_folder(os.path.dirname(path) or path)
+
+    def _confirm_delete(self, name: str, size: int) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Warning, "Delete this file?",
+                          f"Delete {name} ({size / 1048576:.1f} MB) for good?\n\nIt is not moved anywhere - it cannot "
+                          "be put back. Only this one file is deleted.")
+        yes = box.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def delete_file(self, path: str) -> bool:
+        """Delete one stray file after the owner's yes (owner, 2026-10-17: "Hiatus notices can just be deleted"):
+        the guarded delete (:func:`mangalist.duplicates.discard_file`), then its series' folder is read again."""
+        from ..duplicates import discard_file, file_as_listed
+
+        db = getattr(self._renamer, "db", None)
+        listed = file_as_listed(path)
+        if self._busy or db is None:
+            return False
+        name = os.path.basename(path)
+        if listed is None:
+            self._say("bad", f"{name} cannot be read - is it already gone?")
+            return False
+        if not self._confirm_delete(name, listed[0]):
+            return False
+        outcome = discard_file(db, path, *listed)
+        if not outcome.deleted:
+            self._say("bad", f"{name} was not deleted: {outcome.reason}.")
+            return False
+        self._say("ok", f"{name} deleted.")
+        s = self._current_series()
+        if s is not None and s.root_id is not None and s.series_id is not None:
+            self._after_change([s.root_id], series_ids=[s.series_id])
+        else:
+            self.refresh()
+        return True
+
+    def _say(self, tone: str, text: str) -> None:
+        self.result_label.setProperty("tone", tone)
+        self.result_label.setText(text)
 
     def set_units_for(self, path: str) -> bool:
         """Ask what *path* holds, then look again: the file shows the scheme's name for it, to rename with the rest."""
@@ -975,8 +1050,8 @@ class RenamerWindow(QDialog):
     def _after_change(self, root_ids: Sequence[int], series_ids: Optional[Sequence[int]] = None) -> None:
         """Files were renamed or put back. The preview reads the files as the last scan recorded them, so with a host
         that rescans (``rescan_follows``) it waits for that rescan - looking at once listed every renamed file under its
-        old name as "gone since the last scan" (owner, 2026-10-10). *series_ids*: nothing moved, only how these series
-        read changed (a "volumes or chapters?" answer) - the host rescans their folders, not the whole library (owner,
+        old name as "gone since the last scan" (owner, 2026-10-10). *series_ids*: no rename was journaled (a "volumes or
+        chapters?" answer, a deleted stray file) - the host rescans these series' folders, not the whole library (owner,
         2026-10-17)."""
         if root_ids and series_ids:
             self.series_changed.emit(list(root_ids), list(series_ids))

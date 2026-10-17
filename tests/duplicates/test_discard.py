@@ -230,3 +230,23 @@ def test_nothing_is_deleted_for_an_empty_selection(db, two):
     assert discard_duplicates(db, []) == []
     assert discard_duplicates(db, [(group, [])]) == []
     assert older.exists() and newer.exists()
+
+
+def test_discard_file_deletes_one_stray_file_with_every_guard(db, lib, tmp_path):
+    # owner, 2026-10-17: a hiatus notice deleted from the Rename window
+    from mangalist.duplicates import discard_file, file_as_listed
+
+    notice = lib.add(S, "0050 [Ch. 0017.1.5 - Short hiatus notice].cbz", size=7, mtime_ns=T0)
+    keep = lib.add(S, "Series c001.cbz", size=9, mtime_ns=T0)
+    size, modified = file_as_listed(str(notice))
+    assert discard_file(db, str(notice), size + 1, modified).deleted is False and notice.exists()   # changed since
+    with RootLock(lib.dir, host="another-host", pid=1) as _held:
+        out = discard_file(db, str(notice), size, modified)
+        assert not out.deleted and "busy" in out.reason and notice.exists()
+    elsewhere = tmp_path / "elsewhere.cbz"
+    elsewhere.write_bytes(b"x")
+    out = discard_file(db, str(elsewhere), *file_as_listed(str(elsewhere)))
+    assert not out.deleted and "outside every configured root" in out.reason and elsewhere.exists()
+    assert discard_file(db, str(notice), size, modified).deleted
+    assert not notice.exists() and keep.exists() and not (lib.dir / LOCK_NAME).exists()   # the lock is released
+    assert file_as_listed(str(notice)) is None

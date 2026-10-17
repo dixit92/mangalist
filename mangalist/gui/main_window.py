@@ -1289,8 +1289,8 @@ class MainWindow(QMainWindow):
         self._scan_retry.check()
 
     def _on_series_reread(self, root_ids, series_ids) -> None:
-        """A "volumes or chapters?" answer in the Renamer window: nothing moved, so rescan only those series' folders
-        (the journal names nothing, which read the whole library - 11 s for one answer; owner, 2026-10-17). A library
+        """A "volumes or chapters?" answer (or a deleted stray file) in the Renamer window: rescan only those series'
+        folders (the journal names nothing, which read the whole library - 11 s for one answer; owner, 2026-10-17). A library
         whose series the database no longer knows is read whole, so the window's wait for it always ends."""
         roots = [r for r in self._roots() if r.id in set(root_ids)]
         if not roots:

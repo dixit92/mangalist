@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 
 from mangalist import renamer as rn  # noqa: E402
 from mangalist.gui.download_widgets import ROLE_CHIPS, ROLE_SUB  # noqa: E402
+from mangalist.gui.links import OPEN_FOLDER_LABEL  # noqa: E402
 from mangalist.gui.renamer_view import (  # noqa: E402
     NOT_AVAILABLE, PILOT_LIBRARY, PILOT_SERIES, SCOPE_ALL, SCOPE_ROOT, STATUS_COLORS, RenamerWindow, Scope)
 from mangalist.gui.table_model import COL_RENAME, COL_STATE  # noqa: E402
@@ -412,10 +413,11 @@ def test_a_left_alone_file_can_be_given_its_chapter_from_the_row_menu(qapp, db, 
                 range(win.preview.topLevelItemCount())}
         assert "right-click to set its chapter or volume" in rows[cut].text(2)
         menus = []
-        win._exec_menu = lambda menu, pos: menus.append([a.text() for a in menu.actions()]) or menu.actions()[0]
+        win._exec_menu = lambda menu, pos: menus.append(_texts(menu)) or _action(menu, "Set chapter / volume…")
         win._ask_units = lambda name, current: ("chapter", "1", "")
         win._on_preview_menu(win.preview.visualItemRect(rows[cut]).center())
-        assert menus == [["Set chapter / volume…"]]
+        assert menus == [[OPEN_FOLDER_LABEL, "Set chapter / volume…", "Delete this file…",
+                          "Review duplicates of this series…"]]
         after = {os.path.basename(f.path): f for f in win.dry_run.series[0].files}
         assert after[cut].status == RENAME and after[cut].target == "Ch. 0001.00 Vol. 001.cbz"
         assert "chapter 1" in win.result_label.text()
@@ -423,7 +425,71 @@ def test_a_left_alone_file_can_be_given_its_chapter_from_the_row_menu(qapp, db, 
                 range(win.preview.topLevelItemCount())}
         assert "number set by you" in rows[cut].text(2)
         win._on_preview_menu(win.preview.visualItemRect(rows[cut]).center())         # set again: Forget is offered
-        assert menus[-1] == ["Set chapter / volume…", "Forget the number I set"]
+        assert menus[-1][1:3] == ["Set chapter / volume…", "Forget the number I set"]
+    finally:
+        win.deleteLater()
+
+
+def _texts(menu):
+    return [a.text() for a in menu.actions() if not a.isSeparator()]
+
+
+def _action(menu, text):
+    return next(a for a in menu.actions() if a.text() == text)
+
+
+def _row(win, name):
+    win.show_done.setChecked(True)
+    return next(win.preview.topLevelItem(i) for i in range(win.preview.topLevelItemCount())
+                if win.preview.topLevelItem(i).text(0) == name)
+
+
+def test_a_stray_file_can_be_deleted_from_the_row_menu(qapp, db, tmp_path):
+    # owner, 2026-10-17: "Hiatus notices can just be deleted"
+    folder = tmp_path / "library5" / "Manga"
+    folder.mkdir(parents=True)
+    notice = "0050 [Ch. 0017.1.5 - Short hiatus notice [Group]].cbz"
+    root = make_library(db, folder, {"Notice Series": {notice: payload("n1"), fmd2(1, "0001", "One", "G"): payload("n2")}})
+    path = folder / "Notice Series" / notice
+    win = _window(qapp, _renamer(db, namer=None), Scope.root(root.id, "Manga"))
+    reread = []
+    win.series_changed.connect(lambda roots, ids: reread.append((roots, ids)))
+    try:
+        row = _row(win, notice)
+        win._exec_menu = lambda menu, pos: _action(menu, "Delete this file…")
+        win._confirm_delete = lambda name, size: False                          # Cancel: nothing happens
+        win._on_preview_menu(win.preview.visualItemRect(row).center())
+        assert path.exists() and reread == []
+        asked = []
+        win._confirm_delete = lambda name, size: asked.append(name) or True
+        win._on_preview_menu(win.preview.visualItemRect(row).center())
+        assert asked == [notice] and not path.exists()
+        assert (folder / "Notice Series").is_dir() and len(list((folder / "Notice Series").iterdir())) == 1
+        assert reread == [([root.id], [db.get_series(root.id, "Notice Series").id])]     # its folder is read again
+        assert "deleted" in win.result_label.text()
+        assert not win.delete_file(str(path))                                   # already gone: refused, said so
+        assert "cannot be read" in win.result_label.text()
+    finally:
+        win.deleteLater()
+
+
+def test_a_file_row_opens_its_folder_from_the_menu_or_a_double_click(qapp, db, tmp_path, monkeypatch):
+    # owner, 2026-10-17: "I should be able to open the file explorer by clicking on files in the rename window"
+    from mangalist.gui import renamer_view
+
+    folder = tmp_path / "library6" / "Manga"
+    folder.mkdir(parents=True)
+    name = fmd2(1, "0001", "One", "G")
+    root = make_library(db, folder, {"Open Series": {name: payload("o1")}})
+    opened = []
+    monkeypatch.setattr(renamer_view, "_open_folder", lambda f: opened.append(str(f)) or True)
+    win = _window(qapp, _renamer(db, namer=None), Scope.root(root.id, "Manga"))
+    try:
+        row = _row(win, name)
+        win._exec_menu = lambda menu, pos: _action(menu, OPEN_FOLDER_LABEL)
+        win._on_preview_menu(win.preview.visualItemRect(row).center())
+        win._on_preview_double_click(row, 0)
+        assert opened == [str(folder / "Open Series")] * 2
     finally:
         win.deleteLater()
 
