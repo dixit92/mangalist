@@ -167,3 +167,17 @@ def test_to_get_shows_the_open_gap_under_volumes_never_searched():
                          held=("1", "2", "3"), series_id=7, volumes=volumes)
     assert w.group == GROUP_VOLUMES and w.gaps == "Vol. 4+" and not w.findable
     assert w.group != GROUP_CHAPTERS and not s.gaps_of(GAP_CHAPTER)
+
+
+def test_a_finished_series_with_every_volume_held_is_complete_whatever_the_list_maps():
+    # owner, 2026-10-17: 8 volumes, all held, MangaUpdates "8 Volumes | 40 Chapters (Complete)"; MangaDex's list maps
+    # volume 8 to 36-38 only (its translation stopped) - the chapters it does not map are in the final volume
+    k = unlicensed(latest_chapter="32", origin_status="Complete", origin_volumes=3)
+    s = state(k)
+    assert s.state == State.COMPLETE and not s.gaps
+    # still ongoing in the original: the chapters past volume 3 may be a volume 4 to come
+    s = state(unlicensed(latest_chapter="32", origin_volumes=3))
+    assert s.state == State.MISSING_VOLUMES and s.gaps_text == "Vol. 4+"
+    # finished, but a volume of the original edition is not held: not Complete, and no gap past the final volume
+    s = state(k, volumes=("1", "2"))
+    assert s.state == State.MISSING_VOLUMES and s.gaps_text == "Vol. 3"

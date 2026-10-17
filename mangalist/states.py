@@ -1055,7 +1055,13 @@ def _unlicensed_volume_gaps(k: SeriesKnowledge, held: _Held, gaps: Sequence[Gap]
     top = max(held.volumes)
     last = max([top] + [to_decimal(g.start) for g in out] + [d for d in have if d is not None])
     end = last_volume_chapter(k.volumes, last)
-    if end is not None and target > end and any(v.has_chapters and to_decimal(v.volume) == last for v in k.volumes):
+    # a finished series whose last volume known is its final one (the original edition's volume count): chapters the
+    # volume list does not map belong to that volume - no "Vol. 9+" (owner, 2026-10-17: a complete series of 8 volumes,
+    # all held; MangaDex's list maps volume 8 to 36-38 only, MangaUpdates says 40 chapters)
+    final = (k.finished_in_origin and k.origin_volumes is not None
+             and last >= to_decimal(k.origin_volumes))
+    if (end is not None and target > end and not final
+            and any(v.has_chapters and to_decimal(v.volume) == last for v in k.volumes)):
         out.append(Gap(GAP_VOLUME, fmt_num(last.to_integral_value(rounding="ROUND_FLOOR") + 1), open_end=True,
                        note=f"{_chapters_text(_first_after(end), target)} out past volume {fmt_num(last)}; not "
                             "licensed in English"))
@@ -1285,6 +1291,9 @@ def _is_complete(k: SeriesKnowledge, held: _Held, missing: bool) -> bool:
         return False
     if k.translation_complete is True:
         return True
+    if (not k.licensed and held.has_volumes and not held.has_chapters and k.origin_volumes is not None
+            and all(Decimal(n) in held.volumes for n in range(1, int(k.origin_volumes) + 1))):
+        return True                             # every volume of the finished original edition (owner, 2026-10-17)
     if k.total_chapters is not None and held.highest_chapter is not None:
         return held.highest_chapter >= k.total_chapters
     return k.licensed and k.english_finished
