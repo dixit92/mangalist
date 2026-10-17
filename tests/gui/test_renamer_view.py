@@ -382,9 +382,14 @@ def test_answering_shows_the_wait_until_the_rescan(qapp, db, tmp_path):
     root = make_library(db, folder, {"Bare Series": {"Bare Series 001 Read Online.cbz": payload("w1")}})
     win = _window(qapp, _renamer(db, namer=None), Scope.root(root.id, "Manga"))
     win.rescan_follows = True
+    renamed, reread = [], []
+    win.library_changed.connect(renamed.append)
+    win.series_changed.connect(lambda roots, ids: reread.append((roots, ids)))
     try:
         assert not win.kind_bar.isHidden()
         win.btn_kind_chapters.click()
+        # owner, 2026-10-17: nothing moved - the host rescans the series' folder, not the whole library
+        assert reread == [([root.id], [db.get_series(root.id, "Bare Series").id])] and renamed == []
         assert win.busy and not win.busy_bar.isHidden() and "Rescanning the library" in win.busy_label.text()
         assert win.kind_bar.isHidden() and not win.btn_apply.isEnabled()
         rescan(db)

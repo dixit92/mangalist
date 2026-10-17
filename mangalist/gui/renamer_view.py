@@ -268,6 +268,7 @@ def _plural(n: int, word: str, many: Optional[str] = None) -> str:
 
 class RenamerWindow(QDialog):
     library_changed = Signal(list)          # root ids whose files were renamed (or put back): rescan them
+    series_changed = Signal(list, list)     # (root ids, series ids): only how the series read changed - rescan their folders
     duplicates_requested = Signal(str)      # a series folder: the duplicates review on it
 
     def __init__(self, renamer, scope: Scope, parent: Optional[QWidget] = None, *,
@@ -684,7 +685,7 @@ class RenamerWindow(QDialog):
             return False
         self.result_label.setProperty("tone", "ok")
         self.result_label.setText(f"{s.title}: its bare numbers are {kind} (saved for the series).")
-        self._after_change([s.root_id] if s.root_id is not None else [])
+        self._after_change([s.root_id] if s.root_id is not None else [], series_ids=[s.series_id])
         return True
 
     def _recolor_preview(self) -> None:
@@ -971,11 +972,15 @@ class RenamerWindow(QDialog):
         self._after_change(sorted(result.root_ids) if result.root_ids and (result.renamed or getattr(result, "folders", 0))
                            else [])
 
-    def _after_change(self, root_ids: Sequence[int]) -> None:
+    def _after_change(self, root_ids: Sequence[int], series_ids: Optional[Sequence[int]] = None) -> None:
         """Files were renamed or put back. The preview reads the files as the last scan recorded them, so with a host
         that rescans (``rescan_follows``) it waits for that rescan - looking at once listed every renamed file under its
-        old name as "gone since the last scan" (owner, 2026-10-10)."""
-        if root_ids:
+        old name as "gone since the last scan" (owner, 2026-10-10). *series_ids*: nothing moved, only how these series
+        read changed (a "volumes or chapters?" answer) - the host rescans their folders, not the whole library (owner,
+        2026-10-17)."""
+        if root_ids and series_ids:
+            self.series_changed.emit(list(root_ids), list(series_ids))
+        elif root_ids:
             self.library_changed.emit(list(root_ids))
         if root_ids and self.rescan_follows:
             self._awaiting = set(root_ids)

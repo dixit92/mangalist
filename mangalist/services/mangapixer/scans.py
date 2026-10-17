@@ -54,6 +54,19 @@ def _parse(value: str) -> Optional[datetime]:
         return None
 
 
+def next_due(cache: MangaPixerCache) -> Optional[datetime]:
+    """When the earliest pending scan request may be tried again, or None (nothing pending, or nothing would be asked:
+    no connection, a refused token, a token without the scope)."""
+    pending = cache.pending_scans()
+    if not pending:
+        return None
+    conn = cache.connection()
+    if not conn.base_url or not conn.has_token or conn.token_rejected_at or cache.scan_forbidden_at():
+        return None
+    times = [_parse(when) for when in pending.values()]
+    return min((t for t in times if t is not None), default=datetime.now(timezone.utc))
+
+
 def libraries_for_series(cache: MangaPixerCache, series_ids: Iterable[int]) -> Set[str]:
     """The MangaPixer libraries the given library-database series belong to (through their roots' mappings)."""
     db = cache.store

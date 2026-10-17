@@ -473,6 +473,20 @@ def test_folder_scopes_name_each_paths_top_folder_and_never_every_root(tmp_path)
     assert folder_scopes(roots, [lib.p("Manga"), lib.p("Manga", "Alpha")]) == {lib.manga.id: None}
 
 
+def test_folder_scopes_resolve_each_root_once_however_many_paths(tmp_path, monkeypatch):
+    # 2026-10-17: a rename of 2,813 files resolved every root per file (a stat on the share each) - the window froze 3 s
+    import pathlib
+
+    lib = Lib(tmp_path, "lib")
+    roots = lib.db.list_roots()
+    calls = []
+    real = pathlib.Path.resolve
+    monkeypatch.setattr(pathlib.Path, "resolve", lambda self, *a, **k: calls.append(self) or real(self, *a, **k))
+    paths = [lib.p("Manga", "Alpha", f"a{i}.cbz") for i in range(200)] + [lib.p("Completed", "Omega", "o.cbz")]
+    assert folder_scopes(roots, paths) == {lib.manga.id: {"Alpha"}, lib.done.id: {"Omega"}}
+    assert len(calls) == len(roots)
+
+
 def test_series_scopes_merge_and_widen(tmp_path):
     lib = Lib(tmp_path, "lib")
     spin = lib.db.get_series(lib.manga.id, "Gamma/Gamma Spinoff").id

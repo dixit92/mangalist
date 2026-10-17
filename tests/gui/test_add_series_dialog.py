@@ -505,3 +505,17 @@ def test_the_new_empty_folder_shows_up_as_a_series_with_its_match(qapp, window, 
     assert len(rows) == 1 and rows[0].files == [] and rows[0].mu_id == 1000 and rows[0].mu_confirmed
     series = db.series_for_folder(out.folder)
     assert series.id == out.series_id and series.status == "present"
+
+
+def test_a_kind_answer_in_the_renamer_rescans_only_that_series_folder(qapp, window, libs):
+    # owner, 2026-10-17: answering "chapters" for one series read its whole library (304 series, 11 s)
+    db, roots, base = libs
+    (base / "Manga" / "Bare Series").mkdir()
+    series = db.ensure_series(roots[0].id, "Bare Series")
+    scans = []
+    window._start_scan = lambda roots=None, scopes=None: scans.append(([r.name for r in roots], scopes))
+    window._on_series_reread([roots[0].id], [series.id])
+    assert scans == [(["Manga"], {roots[0].id: {"Bare Series"}})]
+    # a series the database no longer knows: its library is read whole (the window's wait for it still ends)
+    window._on_series_reread([roots[1].id], [99999])
+    assert scans[-1] == (["Comics"], {roots[1].id: None})

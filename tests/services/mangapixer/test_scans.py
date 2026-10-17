@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from mangalist.services.mangapixer import client as mpc
-from mangalist.services.mangapixer.scans import libraries_for_series, request_scans
+from mangalist.services.mangapixer.scans import libraries_for_series, next_due, request_scans
 from mangalist.store.mangapixer import Mapping
 
 from .conftest import TOKEN, add_root_with_series
@@ -90,3 +90,33 @@ def test_libraries_come_from_the_roots_mappings(cache, db, tmp_path):
     assert libraries_for_series(cache, [ids["Series A"], ids["Series B"]]) == {"lib0manga"}
     assert libraries_for_series(cache, [ids["Series C"], 999]) == set()
     assert other.id != root.id
+
+
+def test_next_due_is_the_earliest_pending_request_while_one_would_be_asked(connected, fake, client_factory):
+    assert next_due(connected) is None                                              # nothing pending
+    c = _client(connected, client_factory)
+    fake.queue.append(("scan", 429, {"error": "scan_cooldown"}, {"Retry-After": "240"}))
+    fake.queue.append(("scan", 409, {"error": "scan_in_progress"}, {"Retry-After": "60"}))
+    request_scans(connected, ["lib0manga", "lib1done"], client=c, now=NOW)
+    assert next_due(connected) == NOW + timedelta(seconds=60)
+    connected.mark_token_rejected()                                                 # nothing would be asked
+    assert next_due(connected) is None
+
+
+def test_next_due_needs_a_connection(cache):
+    cache.set_scan_pending("lib0manga", "2026-10-08T12:00:00Z")
+    assert next_due(cache) is None
+
+
+def test_retry_mangapixer_scans_asks_only_when_the_requests_are_on(cache):
+    from mangalist import renamer
+    from mangalist.downloads.options import KEY_SCAN_AFTER_FILING, set_flag
+
+    db = cache.store
+    assert renamer.retry_mangapixer_scans(db) == ("", None)            # nothing pending, no connection
+    cache.set_connection(base_url="http://127.0.0.1:9", token="mpx_test")
+    cache.set_scan_pending("lib0manga", "2999-01-01T00:00:00Z")        # not due: nothing asked, its time returned
+    summary, due = renamer.retry_mangapixer_scans(db)
+    assert due == datetime(2999, 1, 1, tzinfo=timezone.utc) and "pending" in summary
+    set_flag(db, KEY_SCAN_AFTER_FILING, False)
+    assert renamer.retry_mangapixer_scans(db) == ("", None)
