@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QPersistentModelIndex, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QKeySequence
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -201,6 +201,12 @@ def _sync_run(fn, on_done=None, on_error=None, on_finished=None):
     return None
 
 
+# A dialog-type window: the container's window manager draws a title bar with a close button only for dialogs (a
+# normal window is shown maximized without one, like the main window - owner, 2026-10-17: "how do I exit the log
+# viewer"); the hints keep the desktop's minimize / maximize buttons.
+WINDOW_FLAGS = (Qt.WindowType.Dialog | Qt.WindowType.WindowMinMaxButtonsHint | Qt.WindowType.WindowCloseButtonHint)
+
+
 class LogViewer(QWidget):
     """The log viewer window. Keyword hooks are for tests: *log_dir* (default ``paths.log_dir()``), *run* (how a read
     is run; default off the UI thread), *poll_ms* (0: no timer), *chunk_bytes*, *open_folder*, *copy_text*."""
@@ -210,7 +216,7 @@ class LogViewer(QWidget):
                  chunk_bytes: int = log_tail.CHUNK_BYTES,
                  open_folder: Optional[Callable[[str], object]] = None,
                  copy_text: Optional[Callable[[str], object]] = None):
-        super().__init__(parent, Qt.WindowType.Window)
+        super().__init__(parent, WINDOW_FLAGS)
         self.setObjectName("logViewer")
         self.setWindowTitle("MangaList - logs")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -279,10 +285,13 @@ class LogViewer(QWidget):
                                               "keep to the newest line.")
         self.btn_copy = button("Copy selected lines")
         self.btn_folder = button("Open the log folder", tip="On the desktop: opens the folder in the file manager.")
+        self.btn_close = button("Close", tip="Close the log viewer (Esc).")
+        self.btn_close.clicked.connect(self.close)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.close)
         self.info_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)   # never widens
         row2 = hbox(self.info_label, spacing=10)
         row2.setStretch(0, 1)
-        for widget in (self.btn_older, self.btn_follow, self.btn_copy, self.btn_folder):
+        for widget in (self.btn_older, self.btn_follow, self.btn_copy, self.btn_folder, self.btn_close):
             row2.addWidget(widget)
         bv.addLayout(row2)
         outer.addWidget(bar)
@@ -653,7 +662,7 @@ class LogViewer(QWidget):
         if parent is self.parentWidget():
             return
         geometry, shown = self.geometry(), self.isVisible()
-        self.setParent(parent, Qt.WindowType.Window)
+        self.setParent(parent, WINDOW_FLAGS)
         self.setGeometry(geometry)
         if shown:
             self.show()

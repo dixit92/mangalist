@@ -362,3 +362,30 @@ def test_one_viewer_at_a_time_and_it_moves_to_a_new_owner(qapp, logs):
         viewer = None
     finally:
         dispose(qapp, viewer, first_owner, second_owner)
+
+
+def test_close_button_and_esc_close_it_and_it_is_a_dialog_type_window(qapp, logs):
+    # owner, 2026-10-17: "how do I exit the log viewer" - in the container a normal window is maximized without a title
+    # bar; a dialog-type window gets one with a close button, and the viewer has its own Close and Esc too
+    owner = QWidget()
+    viewer = None
+    try:
+        viewer = open_log_viewer(owner, log_dir=logs, run=_sync_run, poll_ms=0)
+        assert viewer.windowType() == Qt.WindowType.Dialog and viewer.isWindow()
+        assert viewer.windowFlags() & Qt.WindowType.WindowCloseButtonHint
+        assert viewer.btn_close.isVisible() and viewer.btn_close.text() == "Close"
+        viewer.btn_close.click()
+        assert viewer._closed and not viewer.isVisible()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        assert log_viewer.current_viewer() is None
+        viewer = open_log_viewer(owner, log_dir=logs, run=_sync_run, poll_ms=0)
+        viewer.activateWindow()
+        viewer.search.setFocus()
+        wait_until(qapp, lambda: viewer.isActiveWindow())
+        QTest.keyClick(viewer.search, Qt.Key.Key_Escape)
+        assert viewer._closed and not viewer.isVisible(), "Esc closes it, also from the search box"
+        viewer.move_to(None)
+        assert viewer.windowType() == Qt.WindowType.Dialog, "a new owner keeps the dialog type"
+        viewer = None
+    finally:
+        dispose(qapp, viewer, owner)
