@@ -66,10 +66,11 @@ def state(**kw):
 
 def test_one_card_per_task_in_order_with_what_it_does(qapp, db):
     page = make(db)
-    assert list(page.cards) == ["mangapixer-sync", "rescan", "downloads", "dispatch-batch", "clean-records"]
+    assert list(page.cards) == ["mangapixer-sync", "rescan", "downloads", "dispatch-batch", "chapter-check",
+                                "clean-records"]
     text = text_of(page)
     for title in ("Sync with MangaPixer", "Full re-read of the library", "Check downloads",
-                  "Find missing volumes and chapters", "Clear finished download records"):
+                  "Find missing volumes and chapters", "Check for new chapters", "Clear finished download records"):
         assert title in text
     assert "Times are in the container's time zone: UTC (UTC+00:00), now 14:05." in text
     assert "The background runner is running." in text
@@ -141,6 +142,19 @@ def test_the_clean_up_is_weekly_until_another_period_or_off_is_chosen(qapp, db):
     assert db.get_setting("schedule_clean_records") == "off"
 
 
+def test_the_new_chapters_check_is_every_6_hours_until_changed_or_turned_off(qapp, db):
+    # owner, 2026-10-18: "Scheduled newer-chapter check - every 6-12 h"
+    page = make(db)
+    job = "chapter-check"
+    assert choices(page, job) == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]
+    assert page.schedule_modes[job].currentText() == "Every 6 hours" and db.get_setting("schedule_chapter_check") is None
+    assert page.schedule_reading[job].text() == "every 6 hours"
+    pick(page, job, "Every 12 hours")
+    assert db.get_setting("schedule_chapter_check") == "every 12h"
+    pick(page, job, "Off")
+    assert db.get_setting("schedule_chapter_check") == "off" and page.badges[job].text() == "Off"
+
+
 # --- last run, next run, status ----------------------------------------------------------------------------------------
 
 def test_last_and_next_run_come_from_the_runners_records(qapp, db):
@@ -171,7 +185,7 @@ def test_a_failed_run_is_red_and_a_running_one_says_so(qapp, db):
 
 def test_without_downloads_their_tasks_are_not_available(qapp, db):
     page = make(db, downloads=False)
-    for job in ("downloads", "dispatch-batch"):
+    for job in ("downloads", "dispatch-batch", "chapter-check"):
         assert page.badges[job].text() == "Downloads off" and not page.run_buttons[job].isEnabled()
         assert page.next_labels[job].text().startswith("Next run: not available")
     assert page.run_buttons["rescan"].isEnabled()

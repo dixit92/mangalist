@@ -7,6 +7,8 @@ Variable                       Default             Meaning
 ``MANGALIST_RESCAN_SCHEDULE``  ``daily@03:30``     When to rescan the library roots (``off`` to stop).
 ``MANGALIST_DOWNLOADS``        ``0``               Opt-in: downloads (the volumes MVP; the Unraid container).
 ``MANGALIST_DISPATCH_SCHEDULE`` ``daily@04:30``    When the find pass runs (only with downloads on).
+``MANGALIST_CHAPTER_CHECK_SCHEDULE`` ``every 6h``  When the saved sources are asked for chapters newer than the
+                                                   newest held (the ``chapter-check`` job; only with downloads on).
 ``MANGALIST_DOWNLOADS_SCHEDULE`` ``every 1h``      When to file finished downloads and remove completed
                                                    torrents (the ``downloads`` job; only with downloads on).
 ``MANGALIST_CLEAN_RECORDS_SCHEDULE`` ``weekly@sun 05:30`` When to clear finished download records
@@ -21,9 +23,9 @@ Variable                       Default             Meaning
 
 Schedules in the settings database (owner, 2026-10-09: "This should be configurable by the user")
 --------------------------------------------------------------------------------------------------
-The five schedules are editable in Settings > Scheduled tasks and stored in the library database's settings table
+The schedules are editable in Settings > Scheduled tasks and stored in the library database's settings table
 (``schedule_rescan``, ``schedule_mangapixer_sync``, ``schedule_dispatch``, ``schedule_downloads``,
-``schedule_clean_records``; the text forms of
+``schedule_clean_records``, ``schedule_chapter_check``; the text forms of
 :mod:`.schedule`, ``off`` included). Order of precedence, per schedule:
 
 1. the stored value, once the owner has set one;
@@ -58,6 +60,7 @@ ENV_CATCH_UP = "MANGALIST_CATCH_UP"
 ENV_MANGAPIXER = "MANGALIST_MANGAPIXER_SYNC_SCHEDULE"
 ENV_DOWNLOADS_SCHEDULE = "MANGALIST_DOWNLOADS_SCHEDULE"
 ENV_CLEAN_RECORDS = "MANGALIST_CLEAN_RECORDS_SCHEDULE"
+ENV_CHAPTER_CHECK = "MANGALIST_CHAPTER_CHECK_SCHEDULE"
 
 DEFAULT_RESCAN = "daily@03:30"
 DEFAULT_DISPATCH = "daily@04:30"
@@ -66,6 +69,8 @@ DEFAULT_DOWNLOADS_SCHEDULE = "every 1h"
 # owner, 2026-10-15: a setting, user clearable; 2026-10-16 (answer 70, "Weekly"): a fresh install clears records older
 # than a week, weekly (Sunday 05:30, after the rescan and the find pass). A stored choice - Off included - is kept.
 DEFAULT_CLEAN_RECORDS = "weekly@sun 05:30"
+# owner, 2026-10-18: "Scheduled newer-chapter check - every 6-12 h"; every 6 hours until the owner changes it.
+DEFAULT_CHAPTER_CHECK = "every 6h"
 
 
 class ScheduleSpec(NamedTuple):
@@ -88,6 +93,8 @@ SCHEDULES = (
                  DEFAULT_DOWNLOADS_SCHEDULE),
     ScheduleSpec("clean-records", "Clear finished download records", "schedule_clean_records", ENV_CLEAN_RECORDS,
                  DEFAULT_CLEAN_RECORDS),
+    ScheduleSpec("chapter-check", "Check for new chapters", "schedule_chapter_check", ENV_CHAPTER_CHECK,
+                 DEFAULT_CHAPTER_CHECK),
 )
 SCHEDULE_BY_JOB = {spec.job: spec for spec in SCHEDULES}
 
@@ -212,6 +219,7 @@ class HeadlessSettings:
     mangapixer_schedule: Optional[Schedule] = None
     downloads_schedule: Optional[Schedule] = None
     clean_records_schedule: Optional[Schedule] = None
+    chapter_check_schedule: Optional[Schedule] = None
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None, db: Any = None) -> "HeadlessSettings":
@@ -228,4 +236,5 @@ class HeadlessSettings:
             mangapixer_schedule=schedules["mangapixer-sync"],
             downloads_schedule=schedules["downloads"],
             clean_records_schedule=schedules["clean-records"],
+            chapter_check_schedule=schedules["chapter-check"],
         )

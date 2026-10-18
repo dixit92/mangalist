@@ -53,7 +53,8 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 (default `daily@03:30`, `off` to disable). Downloads stay off unless `MANGALIST_DOWNLOADS=1` (below).
 
 The schedules (`MANGALIST_RESCAN_SCHEDULE`, `MANGALIST_MANGAPIXER_SYNC_SCHEDULE`, `MANGALIST_DOWNLOADS_SCHEDULE`,
-`MANGALIST_DISPATCH_SCHEDULE`, and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records,
+`MANGALIST_DISPATCH_SCHEDULE`, `MANGALIST_CHAPTER_CHECK_SCHEDULE` for the check for new chapters, default `every 6h`,
+and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records,
 default `weekly@sun 05:30`: records older than a week; `off` to stop) and the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run
 defaults**: you change them in **Settings > Scheduled tasks** (one list: each task with its time, last run, next run
 and **Run now**; the full re-read offers every 6 hours, every 12 hours or daily) and **Settings > Logging**, the
@@ -109,6 +110,14 @@ a release goes out by itself only when it certainly fills a missing volume and i
 the missing volumes, and chapters only from the series' saved Suwayomi source; everything else waits in the Download
 tab's **Found** list with the reason, for you to **Send** or **Skip**. **Bulk find** (select series in the List) fills
 the same list without sending anything.
+
+**New chapters before MangaUpdates lists them.** The find pass only looks for the chapters a series is missing up to
+MangaUpdates' latest chapter, which can lag the sites by days or weeks. A scheduled **check for new chapters**
+(`MANGALIST_CHAPTER_CHECK_SCHEDULE`, default every 6 hours; Settings > Scheduled tasks changes it or turns it off) asks
+the saved Suwayomi source of each ongoing chapter series that is not Off for the chapters numbered after the newest one
+you have - the same as **Check for new chapters** in the List's row menu. Series on Auto get them sent; for series on
+Notify they wait in **Found**. A series without a saved source (or a MangaDex id MangaPixer links), or with a download
+on its way, is not asked.
 
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 

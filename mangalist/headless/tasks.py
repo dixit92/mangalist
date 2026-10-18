@@ -50,6 +50,10 @@ TASKS = (
     TaskInfo("dispatch-batch", "Find missing volumes and chapters",
              "Searches for series with gaps; series on Auto get what is found sent, the rest waits under Found.",
              needs_downloads=True),
+    TaskInfo("chapter-check", "Check for new chapters",
+             "Asks the saved source of each ongoing chapter series for chapters newer than the newest one you have, "
+             "before MangaUpdates lists them; series on Auto get them sent, the rest waits under Found.",
+             needs_downloads=True),
     TaskInfo("clean-records", "Clear finished download records",
              "Removes finished entries from the Download tab's Show finished list once they are older than the "
              "period. Nothing in progress, filed or failed is touched."),

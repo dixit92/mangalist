@@ -47,6 +47,7 @@ from .contracts import (
     DownloadStatus,
     MangaChapters,
     Placement,
+    QueuedChapter,
     SuwayomiChapter,
     SuwayomiManga,
     SuwayomiSource,
@@ -553,9 +554,11 @@ class ChapterLookup:
 def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str], match: MangaMatch,
                  held: Mapping[Decimal, Sequence[str]], stored_group: Optional[str],
                  in_hand: Optional[Mapping[str, DownloadRecord]] = None,
-                 fetched: Optional[MangaChapters] = None, with_extras: bool = True) -> ChapterLookup:
+                 fetched: Optional[MangaChapters] = None, with_extras: bool = True,
+                 queue: Optional[Sequence[QueuedChapter]] = None) -> ChapterLookup:
     """The chapters of a confirmed *match* against the series' *missing* chapters (*fetched*: the source's list when
-    the caller has it already; *with_extras*: also offer the side chapters around them, e.g. 71.5)."""
+    the caller has it already; *with_extras*: also offer the side chapters around them, e.g. 71.5; *queue*: Suwayomi's
+    download queue when the caller read it already - the scheduled chapter check reads it once per run)."""
     if fetched is None:
         fetched = client.chapters(match.manga.id)
     numbers = [d for d in (to_decimal(n) for n in missing) if d is not None]
@@ -567,7 +570,7 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
     try:
         ids = {c.id: c for c in fetched.chapters}
         wanted = set(numbers) | set(extras)
-        queued = tuple(sorted({ids[q.chapter_id].number for q in client.queue()
+        queued = tuple(sorted({ids[q.chapter_id].number for q in (client.queue() if queue is None else queue)
                                if q.chapter_id in ids and to_decimal(ids[q.chapter_id].number) in wanted},
                               key=lambda n: to_decimal(n) or Decimal(0)))
     except Exception:  # noqa: BLE001 - the queue is a courtesy note
@@ -576,6 +579,54 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
                          manga_title=fetched.manga.title or match.manga.title,
                          source_name=fetched.source_name or match.source.display_name, rows=rows, group=choice,
                          groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters)
+
+
+def newer_lookup(client: ChapterClient, db, *, series_id: int, match: MangaMatch,
+                 held: Mapping[Decimal, Sequence[str]], stored_group: Optional[str],
+                 in_hand: Optional[Mapping[str, DownloadRecord]] = None,
+                 queue: Optional[Sequence[QueuedChapter]] = None) -> ChapterLookup:
+    """"Check for new chapters" (owner, 2026-10-11) for a confirmed *match*: the source's chapters fetched now, and the
+    ones numbered after the newest chapter held (:func:`newest_held_chapter`, :func:`newer_numbers`) as the lookup's
+    *missing* - with the series' group by the usual default rule, extras never (every number after the newest held is
+    new, a part ``N.2`` after a held ``N.1`` too: MAL-Sync parity, owner 2026-10-18). When the newest held chapter
+    cannot be told, nothing is listed and the note says why. The manual check (the chapters panel) and the scheduled
+    chapter check (:mod:`mangalist.downloads.chapter_check`) both use it."""
+    fetched = client.chapters(match.manga.id)
+    notes: List[str] = []
+    try:
+        newest, why = newest_held_chapter(db, series_id)
+    except LookupError:
+        newest, why = None, ""
+    if newest is None and why and why != "no file of this series states a chapter number":
+        missing: Tuple[str, ...] = ()
+        notes.append(why)
+    else:
+        missing = tuple(newer_numbers(fetched.chapters, newest))
+    built = build_lookup(client, series_id=series_id, missing=missing, match=match, held=held,
+                         stored_group=stored_group, in_hand=in_hand, fetched=fetched, with_extras=False, queue=queue)
+    built.notes = notes
+    built.newer, built.newer_than = True, (_plain(str(newest)) if newest is not None else None)
+    return built
+
+
+def newer_text(lookup: ChapterLookup) -> str:
+    """One line on what a "Check for new chapters" lookup found, for the log: ``ch 38, 38.2 after ch 37.2 on MangaFire
+    (EN) (Alpha Scans)``, ``nothing after ch 37.2 on ...``, or why nothing could be listed."""
+    from ..gui.volumes_target import numbers_text
+
+    where = f"on {lookup.source_name or (lookup.match.source.display_name if lookup.match else '?')}"
+    after = f"after ch {lookup.newer_than}" if lookup.newer_than is not None else "(no chapter held)"
+    group = f" ({lookup.group.group})" if lookup.group.group else ""
+    if not lookup.missing:
+        why = f" - {'; '.join(lookup.notes)}" if lookup.notes else ""
+        return f"nothing {after} {where}{why}"
+    text = f"ch {numbers_text(list(lookup.missing))} {after} {where}{group}"
+    held = [r.number for r in lookup.rows if r.in_hand is not None]
+    if held:
+        text += f"; already sent: ch {numbers_text(held)}"
+    if lookup.queued_in_suwayomi:
+        text += f"; in Suwayomi's queue: ch {numbers_text(list(lookup.queued_in_suwayomi))}"
+    return text
 
 
 # --- sending ---------------------------------------------------------------------------------------------------

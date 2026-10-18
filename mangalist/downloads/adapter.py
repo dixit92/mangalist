@@ -39,13 +39,11 @@ import logging
 import os
 import threading
 from dataclasses import replace
-from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .. import paths
 from ..gui.downloads_backend import BackendError, QbtSettings, SuwayomiCheck, SuwayomiSettingsView
-from ..knowledge import fmt_num
 from ..services.suwayomi import SuwayomiError
 from ..services.nyaa import NyaaError, NyaaSearch
 from ..services.nyaa.client import NyaaClient
@@ -79,8 +77,8 @@ from .chapters import (
     find_manga,
     held_chapter_groups,
     mangadex_id_for,
-    newer_numbers,
-    newest_held_chapter,
+    newer_lookup,
+    newer_text,
     send_chapters,
     title_candidates,
 )
@@ -545,26 +543,18 @@ class Backend:
             if found.match is None:
                 return lookup
             in_hand = self._chapters_in_hand(series_id)
-            fetched = None
-            newest: Optional[Decimal] = None
             if newer:
-                fetched = client.chapters(found.match.manga.id)
-                try:
-                    newest, why = newest_held_chapter(self.db, series_id)
-                except LookupError:
-                    newest, why = None, ""
-                if newest is None and why and why != "no file of this series states a chapter number":
-                    missing = ()
-                    lookup.notes.append(why)
-                else:
-                    missing = tuple(newer_numbers(fetched.chapters, newest))
-            built = build_lookup(client, series_id=series_id, missing=missing, match=found.match,
-                                 held=self._held_groups(series_id), stored_group=stored.get("group"), in_hand=in_hand,
-                                 fetched=fetched, with_extras=not newer)
+                built = newer_lookup(client, self.db, series_id=series_id, match=found.match,
+                                     held=self._held_groups(series_id), stored_group=stored.get("group"),
+                                     in_hand=in_hand)
+                # what the owner's check found, at INFO (owner, 2026-10-18: only the sends were in the log)
+                _log.info("Check for new chapters: series %s: %s", series_id, newer_text(built))
+            else:
+                built = build_lookup(client, series_id=series_id, missing=missing, match=found.match,
+                                     held=self._held_groups(series_id), stored_group=stored.get("group"),
+                                     in_hand=in_hand)
             built.placement, built.placement_error = lookup.placement, lookup.placement_error
-            built.notes = lookup.notes
-            if newer:
-                built.newer, built.newer_than = True, (fmt_num(newest) if newest is not None else None)
+            built.notes = lookup.notes + built.notes
             if found.match.how == HOW_MANGADEX and stored.get("manga_id") != found.match.manga.id:
                 self.suwayomi.set_series_choice(series_id, source_id=found.match.source.id,
                                                 manga_id=found.match.manga.id, manga_title=built.manga_title,

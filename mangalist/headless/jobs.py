@@ -15,6 +15,9 @@
   registered but DISABLED unless downloads are turned on. Nothing is ever dispatched on discovery - only in these
   scheduled passes (or the owner's Find now). Settings > Automation calls it "Find and send missing volumes and
   chapters".
+- ``chapter-check``: the scheduled newer-chapter check (:mod:`mangalist.headless.chapter_check_job`, every 6 hours
+  by default; owner, 2026-10-18): ongoing chapter series not on Off are asked, at their saved Suwayomi source, for
+  chapters newer than the newest held - Auto sends, Notify waits under Found. Only with downloads on.
 - ``clean-records``: the clean-up of finished download records (:mod:`mangalist.headless.records_job`) - weekly
   by default (records older than a week); the owner picks Off, Daily, Weekly or Monthly in Settings > Scheduled tasks.
 - ``downloads``: the volumes MVP's arrivals pass (:mod:`mangalist.headless.downloads_job`) - file finished
@@ -482,10 +485,12 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
     from .mangapixer_job import DESCRIPTION as MP_DESCRIPTION, JOB_NAME as MP_JOB, make_mangapixer_sync
 
     from .records_job import DESCRIPTION as CLEAN_DESCRIPTION, JOB_NAME as CLEAN_JOB, make_clean_records
+    from .chapter_check_job import DESCRIPTION as CC_DESCRIPTION, JOB_NAME as CC_JOB, make_chapter_check
 
     clean_schedule = getattr(settings, "clean_records_schedule", None)
     mp_schedule = getattr(settings, "mangapixer_schedule", None)
     dl_schedule = getattr(settings, "downloads_schedule", None)
+    cc_schedule = getattr(settings, "chapter_check_schedule", None)
     return JobRegistry([
         # First, so the rescan after it already sees MangaPixer's latest links; skipped while no
         # MangaPixer server is set up.
@@ -501,6 +506,9 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
         Job(DL_JOB, make_downloads_job(), dl_schedule,
             enabled=bool(settings.downloads_enabled) and dl_schedule is not None,
             description=DL_DESCRIPTION, catch_up=settings.catch_up, gate=bool(settings.downloads_enabled)),
+        Job(CC_JOB, make_chapter_check(settings.downloads_enabled), cc_schedule,
+            enabled=bool(settings.downloads_enabled) and cc_schedule is not None,
+            description=CC_DESCRIPTION, catch_up=settings.catch_up, gate=bool(settings.downloads_enabled)),
         # Last: after the arrivals pass has looked at what was filed (the replaced-chapters look comes with it).
         Job(CLEAN_JOB, make_clean_records(), clean_schedule, enabled=clean_schedule is not None,
             description=CLEAN_DESCRIPTION, catch_up=settings.catch_up),
