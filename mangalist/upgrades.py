@@ -356,12 +356,18 @@ def _volumes_problem(db, batch: Batch) -> Optional[str]:
 
 # --- examining a filed download ----------------------------------------------------------------------------------
 
+#: A series nested in another's folder whose own MangaUpdates link the owner confirmed: the item it would inherit is the
+#: other series' (owner, 2026-10-18 - a spin-off inside its parent's folder; ``resolve.own_link_wins``).
+OWN_LINK_REASON = ("the series has its own MangaUpdates link; MangaPixer's item is the series' whose folder holds it, "
+                   "not this one's")
+
 
 def _knowledge_volumes(db, series) -> Tuple[Optional[Sequence[VolumeInfo]], str]:
-    """MangaPixer's volume list of *series* (its own item or the nearest ancestor's), or (None, why not)."""
+    """MangaPixer's volume list of *series* (its own item or the nearest ancestor's - unless the series' own confirmed
+    MangaUpdates link names another record: :data:`OWN_LINK_REASON`), or (None, why not)."""
     from .knowledge import MANGAPIXER_SERIES_STATES, LINK_NEEDS_REVIEW, from_mangapixer_item
     from .services.mangapixer import open_cache
-    from .services.mangapixer.resolve import resolve
+    from .services.mangapixer.resolve import own_link_wins, resolve
 
     try:
         res = resolve(open_cache(db), series.root_id, series.rel_path)
@@ -369,6 +375,8 @@ def _knowledge_volumes(db, series) -> Tuple[Optional[Sequence[VolumeInfo]], str]
         return None, f"MangaPixer's data could not be read ({type(exc).__name__})"
     if res is None:
         return None, "MangaPixer does not know this series"
+    if own_link_wins(res, series):
+        return None, OWN_LINK_REASON
     if res.link_state not in MANGAPIXER_SERIES_STATES or res.link_state == LINK_NEEDS_REVIEW:
         return None, f"MangaPixer's link is {res.link_state or 'unknown'}, not matched"
     volumes = from_mangapixer_item(res.item).volumes
@@ -442,7 +450,7 @@ def examine(db, ledger, record) -> NewBatch:
 def _knowledge_estimates(db, series) -> Tuple[Sequence[VolumeInfo], str]:
     from .knowledge import MANGAPIXER_SERIES_STATES, LINK_NEEDS_REVIEW, from_mangapixer_item
     from .services.mangapixer import open_cache
-    from .services.mangapixer.resolve import resolve
+    from .services.mangapixer.resolve import own_link_wins, resolve
 
     try:
         res = resolve(open_cache(db), series.root_id, series.rel_path)
@@ -450,6 +458,8 @@ def _knowledge_estimates(db, series) -> Tuple[Sequence[VolumeInfo], str]:
         return (), f"MangaPixer's data could not be read ({type(exc).__name__})"
     if res is None:
         return (), "MangaPixer does not know this series"
+    if own_link_wins(res, series):
+        return (), OWN_LINK_REASON
     if res.link_state not in MANGAPIXER_SERIES_STATES or res.link_state == LINK_NEEDS_REVIEW:
         return (), f"MangaPixer's link is {res.link_state or 'unknown'}, not matched"
     estimates = tuple(v for v in from_mangapixer_item(res.item).estimated_volumes if v.has_chapters)

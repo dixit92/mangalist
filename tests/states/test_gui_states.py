@@ -30,6 +30,7 @@ from mangalist.gui.table_model import (  # noqa: E402
 )
 from mangalist.knowledge import from_mangapixer_item  # noqa: E402
 from mangalist.models import FileHit, MangaEntry  # noqa: E402
+from mangalist.services.mangapixer.resolve import Resolution  # noqa: E402
 from mangalist.states import State  # noqa: E402
 
 from ..gui.conftest import settle_states  # noqa: E402
@@ -249,13 +250,29 @@ def test_main_window_uses_mangapixer_for_known_folders_and_skips_their_mu_lookup
     # nothing for it (owner decision, MangaPixer Data Source 2026-10-02).
     win, _ = window
     entry = win._model.entry_at(0)
-    win._mp_items[str(entry.folder)] = item()
+    # the window caches the folder's resolution (the folder's own item here)
+    win._mp_items[str(entry.folder)] = Resolution(item=item(), link_state="Confirmed", inherited=False,
+                                                  library_id="lib", node_id="n01", source_trail=("Example Quest",))
     win._model.refresh_states()
     assert win._knowledge_for(entry).source == "mangapixer"
     win._mu_thread = None
     win._start_mu_lookup([entry])
     assert win._mu_thread is None  # no worker started: nothing to fetch
     assert "MangaPixer knows them" in win._status_label.text()
+
+
+def test_a_nested_series_own_confirmed_link_beats_the_inherited_item_at_once(window):
+    # Owner, 2026-10-18: a spin-off nested in its parent's folder read the parent's item. Confirming its own match takes
+    # it off the inherited item without a rescan (the cache holds the resolution; the own link is read at each call).
+    win, _ = window
+    entry = win._model.entry_at(0)
+    win._mp_items[str(entry.folder)] = Resolution(item=item(), link_state="Confirmed", inherited=True,
+                                                  library_id="lib", node_id="n01", source_trail=("Parent",))
+    entry.mu_id, entry.mu_confirmed = 9004, False
+    assert win._knowledge_for(entry).source == "mangapixer"          # an automatic own match does not beat it
+    entry.mu_confirmed = True
+    assert win._knowledge_for(entry) is None                          # the own matcher's knowledge applies
+    assert win._inventory_for(entry) is not None
 
 
 def test_old_columns_follow_mangapixer_and_stay_empty_when_not_a_series(model):

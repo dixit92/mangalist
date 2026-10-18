@@ -262,7 +262,7 @@ def _matches(db, only: Optional[set] = None) -> List[Tuple[Optional[str], Series
             item = None
             if resolver is not None:
                 try:
-                    item = mangapixer_item(resolver, root.id, stored, folder, resolved_root=base)
+                    item = mangapixer_item(resolver, root.id, stored, folder, resolved_root=base, own=entry)
                 except Exception:  # noqa: BLE001 - a folder MangaPixer cannot place: the own matcher's link
                     _log.debug("Same series: no MangaPixer item for %s", folder, exc_info=True)
             knowledge = from_mangapixer_item(item) if item is not None else from_own_matcher(entry)
