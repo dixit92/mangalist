@@ -25,17 +25,17 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
 
 from ..downloads.budget import BudgetState, gb_text
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .background import BackgroundCall, start_call
 from .download_rules import badge_kind, in_progress, merge_batches, next_check_text, when_text
 from .download_style import set_tone
-from .download_widgets import button, flat_table, hbox, label, pill
+from .download_widgets import ElidedLabel, button, flat_table, hbox, label, pill
 from .downloads_backend import DownloadsBackend
 from .tables import cell, resizable_columns
-from .volumes_target import status_text, status_tooltip
+from .volumes_target import status_parts, status_tooltip
 
 _log = logging.getLogger(__name__)
 
@@ -152,7 +152,9 @@ class DownloadsList(QWidget):
                              self.btn_finished, self.btn_refresh, self.btn_find_now, self.btn_check, spacing=12))
 
         self.table = flat_table("progressTable", COLUMNS, select_rows=False)
-        resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 240, COL_UPDATED: 110})
+        # the status column starts wide enough for a reason beside its chip (owner, 2026-10-18); every column stays
+        # the owner's to drag (no Stretch column - tests/gui/test_tables.py)
+        resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 420, COL_UPDATED: 110})
         self.table.horizontalHeaderItem(COL_UPDATED).setTextAlignment(Qt.AlignmentFlag.AlignRight
                                                                      | Qt.AlignmentFlag.AlignVCenter)
         self.table.verticalHeader().setDefaultSectionSize(34)
@@ -238,9 +240,7 @@ class DownloadsList(QWidget):
             self.table.setItem(row, COL_SERIES, cell(self.name_of(record)))
             self.table.setItem(row, COL_RELEASE, cell(record.title))
             self.table.setItem(row, COL_STATUS, cell(""))
-            badge = pill(status_text(record), badge_kind(record))
-            badge.setToolTip(tip)
-            self.table.setCellWidget(row, COL_STATUS, hbox_widget(badge))
+            self.table.setCellWidget(row, COL_STATUS, status_cell(record, tip))
             updated = cell(when_text(record.updated_at))
             updated.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, COL_UPDATED, updated)
@@ -495,6 +495,29 @@ class DownloadsList(QWidget):
     def stop(self) -> None:
         if self._call is not None:
             self._call.abandon()
+
+
+def status_cell(record: DownloadRecord, tip: str) -> QWidget:
+    """The status column of a row: the chip (the state, never squeezed - owner, 2026-10-18: "the chip should not be
+    cut off") and the reason beside it, ended with "..." when the column is narrow; both carry the full tooltip."""
+    chip_text, reason = status_parts(record)
+    chip = pill(chip_text, badge_kind(record))
+    chip.setObjectName("statusChip")
+    chip.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    chip.setToolTip(tip)
+    holder = QWidget()
+    lay = hbox(chip, spacing=8, margins=(0, 0, 8, 0))
+    lay.setAlignment(chip, Qt.AlignmentFlag.AlignVCenter)
+    if reason:
+        detail = ElidedLabel(reason)
+        detail.setObjectName("statusDetail")
+        detail.setProperty("role", "muted")
+        detail.setToolTip(tip)
+        lay.addWidget(detail, 1)
+    else:
+        lay.addStretch(1)
+    holder.setLayout(lay)
+    return holder
 
 
 def hbox_widget(inner: QWidget) -> QWidget:

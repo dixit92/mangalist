@@ -308,3 +308,29 @@ def test_reset_forgets_the_owners_source_choice(tmp_path):
     assert settings.sources() == ["1", "2"]
     settings.reset_sources()
     assert settings.sources() is None
+
+
+def test_the_same_series_in_two_folders_never_sends_a_suwayomi_chapter_twice(db, cledger, tmp_path):
+    # owner, 2026-10-18: one series in two libraries sent chapters 19-25 from each folder; Suwayomi keeps one copy, so
+    # once the first folder filed them and Suwayomi deleted it, the second folder's seven downloads failed
+    folders = []
+    for lib in ("Manga", "Other Manga"):
+        folder = tmp_path / "library" / lib / "Series C"
+        folder.mkdir(parents=True)
+        (folder / "0001 [Ch. 0001 - Title 1 [Alpha Scans]].cbz").write_bytes(data(f"c1-{lib}"))
+        root = db.add_root(str(folder.parent), lib)
+        folders.append((root, folder))
+    scan(db)
+    (first, first_dir), (second, second_dir) = [(db.get_series(r.id, "Series C").id, f) for r, f in folders]
+    fake = FakeSuwayomi(chapters=[chapter(19, "19"), chapter(20, "20")])
+    match = chm.MangaMatch(MANGADEX, MANGA, chm.HOW_MANGADEX)
+    sent = chm.send_chapters(fake, cledger, first, match, fake.chapter_list, str(first_dir))
+    assert len(sent.records) == 2
+    again = chm.send_chapters(fake, cledger, second, match, fake.chapter_list, str(second_dir))
+    assert again.records == [] and again.skipped == ["ch 19: already on its way for another folder",
+                                                     "ch 20: already on its way for another folder"]
+    for rec in sent.records:                                    # done in the first folder: the other may have them now
+        cledger.set_status(rec.id, S.FILED, expect=(S.SENT,))
+        cledger.set_status(rec.id, S.REMOVED, expect=(S.FILED,))
+    later = chm.send_chapters(fake, cledger, second, match, fake.chapter_list, str(second_dir))
+    assert [r.wanted_chapters for r in later.records] == [("19",), ("20",)] and later.skipped == []

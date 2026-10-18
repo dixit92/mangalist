@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.49] - 2026-10-18
+
+The forty-eighth MangaList release (testing build): status chips read whole, and one chapter is never downloaded for two folders at once.
+
+- **Status chips are never cut off.** In the Download tab's In progress list the chip shows only the state ("Failed", "Filed v03-v05", "Downloading") and is never squeezed; the reason sits beside it, ending with "..." when the column is narrow, and the row's tooltip holds it all. A long reason no longer showed only the middle of the chip. The status column starts wider.
+- **One chapter, one folder at a time.** The same series in two folders (two libraries) no longer sends the same Suwayomi chapter for both: Suwayomi keeps one copy, so the second download failed once the first folder had filed it ("the chapter's CBZ is not in Suwayomi's download folder"). A chapter on its way for one folder is skipped for the other ("already on its way for another folder") until that download is done.
+
 ## [2026.10.48] - 2026-10-18
 
 The forty-seventh MangaList release (testing build): spin-offs kept inside their parent's folder, bare-numbered packs, packs stuck stopped in qBittorrent, settings that went back by themselves, and one folder name.

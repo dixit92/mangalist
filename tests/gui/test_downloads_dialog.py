@@ -17,6 +17,15 @@ from mangalist.gui.downloads_list import DownloadsList  # noqa: E402
 from .conftest import FakeBackend, qapp, record, wait_until  # noqa: E402,F401
 
 
+def chip(dlg, row):
+    return dlg.table.cellWidget(row, 2).findChild(QLabel, "statusChip")
+
+
+def reason(dlg, row):
+    detail = dlg.table.cellWidget(row, 2).findChild(QLabel, "statusDetail")
+    return detail.full_text() if detail is not None else ""
+
+
 @pytest.fixture(autouse=True)
 def _close_lists():
     made = []
@@ -41,9 +50,10 @@ def test_lists_records_newest_first_with_status_wording(qapp):
     dlg = DownloadsList(backend, series_name=lambda i: {7: "Example Series"}.get(i, f"Series #{i}"))
     wait_until(qapp, lambda: dlg.records)
     dlg.toggle_finished()                                                       # the finished one too
-    rows = [[dlg.table.item(r, 0).text(), dlg.table.item(r, 1).text(), dlg.table.cellWidget(r, 2).findChild(QLabel).text(),
-             dlg.table.cellWidget(r, 2).findChild(QLabel).property("badge")] for r in range(dlg.table.rowCount())]
-    assert [r[2] for r in rows] == ["Filed v03-v05 - done", "Failed: no space left", "Filed v03-v05 - seeding"]
+    rows = [[dlg.table.item(r, 0).text(), dlg.table.item(r, 1).text(), chip(dlg, r).text(), chip(dlg, r).property("badge")]
+            for r in range(dlg.table.rowCount())]
+    assert [r[2] for r in rows] == ["Filed v03-v05 - done", "Failed", "Filed v03-v05 - seeding"]
+    assert [reason(dlg, r) for r in range(3)] == ["", "no space left", ""]
     assert [r[3] for r in rows] == ["done", "bad", "ok"]                      # the badge colour of each status
     assert rows[2][:2] == ["Example Series", "Example Series v03-05"] and rows[0][0] == "Series #9"
     assert threading.get_ident() not in backend.threads
@@ -59,7 +69,7 @@ def test_empty_list_is_explicit_and_refresh_picks_up_new_records(qapp):
     backend.record_list.append(record(1))
     assert dlg.refresh()
     wait_until(qapp, lambda: dlg.table.rowCount() == 1)
-    assert dlg.table.cellWidget(0, 2).findChild(QLabel).text() == "Downloading" and dlg.status_label.text() == ""
+    assert dlg.table.cellWidget(0, 2).findChild(QLabel, "statusChip").text() == "Downloading" and dlg.status_label.text() == ""
 
 
 def test_finished_downloads_are_hidden_until_asked(qapp):
@@ -114,7 +124,7 @@ def test_check_now_runs_the_check_off_the_ui_thread_then_reloads(qapp):
     dlg.check_finished.connect(finished.append)
     assert dlg.check_now() and not dlg.btn_check.isEnabled() and not dlg.btn_refresh.isEnabled()
     wait_until(qapp, lambda: dlg.btn_check.isEnabled() and dlg.table.rowCount() == 1 and finished
-               and dlg.table.cellWidget(0, 2).findChild(QLabel).text() == "Filed v03-v05 - seeding")
+               and dlg.table.cellWidget(0, 2).findChild(QLabel, "statusChip").text() == "Filed v03-v05 - seeding")
     assert finished == [True]
     assert backend.checks == 1 and threading.get_ident() not in backend.threads
     assert dlg.status_label.text() == "Checked now: torrents: 1 checked: 1 filed, 0 removed, 0 failed, 0 waiting."
@@ -158,7 +168,7 @@ def test_remove_now_from_the_row_menu_after_a_yes(qapp):
     asked = []
     dlg = DownloadsList(backend, confirm_remove=lambda rec: asked.append(rec.id) or True)
     wait_until(qapp, lambda: dlg.table.rowCount() == 2)
-    assert "stopped before its seed goal" in dlg.table.cellWidget(1, 2).findChild(QLabel).text()
+    assert chip(dlg, 1).text() == "Filed v03-v05" and "stopped before its seed goal" in reason(dlg, 1)
     menus = []
 
     def answer(menu, pos):
@@ -223,7 +233,7 @@ def test_a_failed_torrent_row_can_be_dismissed(qapp):
     assert backend.dismissed == [(1,)] and threading.get_ident() not in backend.threads
     assert dlg.status_label.text().startswith("Dismissed: Example Series v03-05 (Series #7). It is under Show finished.")
     dlg.toggle_finished()
-    assert dlg.table.cellWidget(1, 2).findChild(QLabel).text() == "Cancelled"
+    assert dlg.table.cellWidget(1, 2).findChild(QLabel, "statusChip").text() == "Cancelled"
 
 
 def test_a_failed_chapter_row_dismisses_every_chapter_record_it_shows(qapp):
@@ -262,3 +272,22 @@ def test_the_same_known_titles_again_rebuild_nothing(qapp, monkeypatch):
     assert built == [1]
     dlg.set_known_titles({7: "Renamed Series"})
     assert built == [1, 1] and dlg.table.item(0, 0).text() == "Renamed Series"
+
+
+def test_a_long_reason_never_squeezes_the_chip(qapp):
+    # owner, 2026-10-18: "the chip should not be cut off" - a long error in the chip showed only its middle
+    long = "the chapter's CBZ is not in Suwayomi's download folder (looked for Some Group_Vol.5 Ch.25.cbz)"
+    backend = FakeBackend(records=[record(1, status=S.FAILED, error=long)])
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 1)
+    dlg.resize(1300, 300)
+    dlg.show()
+    qapp.processEvents()
+    c, detail = chip(dlg, 0), dlg.table.cellWidget(0, 2).findChild(QLabel, "statusDetail")
+    assert c.text() == "Failed" and c.width() >= c.sizeHint().width()                     # the chip is whole
+    assert detail.full_text() == long and long in c.toolTip()
+    assert detail.text() == long or detail.text().endswith("\u2026")                     # cut at its end only
+    assert detail.text().startswith("the chapter") or detail.text() == "\u2026"
+    header = dlg.table.horizontalHeader()
+    assert header.sectionSize(2) == 420                                       # room for a reason beside the chip
+    dlg.close()
