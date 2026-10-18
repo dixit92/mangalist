@@ -379,6 +379,13 @@ _CUT_TAG = re.compile(r"^[^\[\]]*\]\s*")
 _TRAILING_PAREN = re.compile(r"^(?P<head>.+?)\s*\((?P<inner>[^()]+)\)\s*$")
 
 
+def _after_the_title(name: str, bracket: str, romaji: Optional[str]) -> bool:
+    """The folder is the whole romaji title and then this ``[bracket]``: the owner's English, even when it repeats a
+    piece of the romaji (owner's ``Long Title ~Subtitle~ [Long Title]``: read as part of the title, the whole folder
+    name was taken for the English and renamed to ``Long Title ~Subtitle~ [(Long Title)]``, 2026-10-18)."""
+    return bool(romaji) and same_title(name.replace(f"[{bracket}]", " "), romaji)
+
+
 def _in_title(part: str, romaji: Optional[str]) -> bool:
     """*part* is a piece of the romaji title itself (``Skill [Name] de ...``), not a translation of it."""
     key = title_key(part)
@@ -400,7 +407,7 @@ def english_from_folder(folder_name: str, romaji: Optional[str], alt_titles: Ite
     name = _CUT_TAG.sub("", (folder_name or "").strip())     # "Author] Title": the rest of a cut "[Author]"
     for bracket in reversed(_BRACKETS.findall(name)):
         text = bracket.strip()
-        if text and not _in_title(text, romaji):
+        if text and (not _in_title(text, romaji) or _after_the_title(name, bracket, romaji)):
             return text
     if not top_level or not name:
         return None
