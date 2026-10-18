@@ -197,6 +197,32 @@ def chapter_status_tooltip(record: DownloadRecord) -> str:
     return "\n".join(lines)
 
 
+def status_parts(record: DownloadRecord) -> Tuple[str, str]:
+    """(the chip, the reason beside it): :func:`status_text` split so the chip is always the short state, read whole -
+    "Failed", "Filed v03-v05", "Downloading" - and a reason (Suwayomi's, qBittorrent's, an error) goes beside it, cut
+    with "..." when the column is narrow; the tooltip holds it all (owner, 2026-10-18: "the chip should not be cut
+    off" - a long reason in the chip showed only its middle). "" when there is no reason."""
+    status, error = record.status, (record.error or "").strip()
+    if getattr(record, "is_chapters", False):
+        units = units_text(record)
+        filed = f"Filed {units}" if units else "Filed"
+        if status == DownloadStatus.SENT:
+            return "Downloading", error
+        if status == DownloadStatus.FILED:
+            return filed, error
+        if status == DownloadStatus.DOWNLOADED:
+            return "Downloaded", error
+    else:
+        if status == DownloadStatus.QUEUED and error:
+            return "Queued", error
+        if status == DownloadStatus.FILED and error:
+            vols = numbers_text(record.wanted_volumes, pad=True)
+            return (f"Filed {vols}" if vols else "Filed"), error
+    if status == DownloadStatus.FAILED:
+        return "Failed", error
+    return status_text(record), ""
+
+
 def status_tooltip(record: DownloadRecord) -> str:
     if getattr(record, "is_chapters", False):
         return chapter_status_tooltip(record)

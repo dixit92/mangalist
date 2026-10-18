@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionButton,
@@ -114,6 +115,36 @@ def label(text: str = "", role: Optional[str] = None, *, wrap: bool = False, sel
     if selectable:
         out.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     return out
+
+
+class ElidedLabel(QLabel):
+    """A one-line label that ends its text with "..." when it is narrower than the text - never cut at both ends, never
+    wider than it is given (the full text: :meth:`full_text`, and the tooltip the caller sets)."""
+
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.set_full_text(text)
+
+    def set_full_text(self, text: str) -> None:
+        self._full = text or ""
+        self._elide()
+
+    def full_text(self) -> str:
+        return self._full
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        shown = self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, max(0, self.contentsRect().width()))
+        if shown != self.text():
+            self.setText(shown)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
 
 
 def pill(text: str, kind: str = "muted") -> QLabel:

@@ -210,7 +210,7 @@ def test_queued_rows_show_their_place_and_the_budget_line(qapp):
     backend = queued_backend()
     lst = DownloadsList(backend)
     wait_until(qapp, lambda: lst.table.rowCount() == 3)
-    pills = [lst.table.cellWidget(r, 2).findChild(QLabel) for r in range(3)]          # newest first
+    pills = [lst.table.cellWidget(r, 2).findChild(QLabel, "statusChip") for r in range(3)]          # newest first
     assert [p.text() for p in pills] == ["Filed v03-v05 - seeding", "Queued - 2nd in line", "Queued - 1st in line"]
     assert pills[1].property("badge") == "muted"
     assert "Queued, 2nd in line" in pills[1].toolTip() and "5 GB (the release's size" in pills[1].toolTip()
