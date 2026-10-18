@@ -134,8 +134,8 @@ def test_english_or_romaji_by_their_words(text, english, romaji):
     ("Side 1 - The Made Up Story", "Made Up Gaiden", (), False, None),   # a subseries: only its bracket counts
     ("Made Up [Clench] (Some Author)", "Made Up (SOME Author)", (), True, "Clench"),   # a bracket inside the name
     ("Made Up Skill [Waza] de Katsu", "Made Up Skill Waza de Katsu", (), True, None),  # ... that is the title itself
-    ("Made Up Island Story ~Some Subtitle~ [Made Up Island Story]", "Made Up Island Story ~Some Subtitle~", (), True,
-     "Made Up Island Story"),                                            # the whole title, then a bracket repeating a piece
+    ("The Girl on the Made Up Island ~Some Subtitle~ [The Girl on the Made Up Island]",
+     "The Girl on the Made Up Island ~Some Subtitle~", (), True, "The Girl on the Made Up Island"),   # repeats a piece
     ("Made Up no Hanashi - Gaiden [Made Up no Hanashi]", "Made Up no Hanashi - Gaiden", (), True, None),  # ... in romaji
     ("Shinsetsu na Kame - Gaiden [Shinsetsu na Kame]", "Shinsetsu na Kame - Gaiden", (), True, None),  # ... not English
     ("Made Up no Nakama (Banished from the Made Up Party)", "Made Up no Nakama ja Nai", (), True,
@@ -307,7 +307,7 @@ def test_a_subtitle_colon_becomes_a_dash(raw, clean):
 
 def test_a_bracket_repeating_the_start_of_the_title_is_not_wrapped_in_parentheses():
     # owner, 2026-10-18: "Long Title ~Subtitle~ [Long Title]" was to be renamed "Long Title ~Subtitle~ [(Long Title)]"
-    folder = "Made Up Island Story ~Some Subtitle~ [Made Up Island Story]"
-    romaji = "Made Up Island Story ~Some Subtitle~"
-    titles = fs.titles_for(folder, romaji, (), official="Made Up Island Story: Some Subtitle")
+    folder = "The Girl on the Made Up Island ~Some Subtitle~ [The Girl on the Made Up Island]"
+    romaji = "The Girl on the Made Up Island ~Some Subtitle~"
+    titles = fs.titles_for(folder, romaji, (), official="The Girl on the Made Up Island: Some Subtitle")
     assert titles.name() == folder
