@@ -71,6 +71,7 @@ from .finding import (
     TRIGGER_SCHEDULE,
     FindReport,
 )
+from .spinoffs import search_titles
 
 _log = logging.getLogger(__name__)
 
@@ -486,8 +487,10 @@ def _volumes(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> bo
     upgrades = _numbers(v for e in entries if e.group == GROUP_UPGRADES for v in e.missing)
     wanted = _numbers([*missing, *upgrades])
     first = entries[0]
+    # not by the names of a series whose folder holds this one's (owner, 2026-10-18: a spin-off took its parent's pack)
+    titles = search_titles(ctx.db, sid, list(first.titles) or [first.title], label=f"Find pass {ctx.run_id}: {name}")
     try:
-        candidates = list(ctx.backend.search(list(first.titles) or [first.title], wanted, list(first.held)))
+        candidates = list(ctx.backend.search(list(titles), wanted, list(first.held)))
     except BackendError as exc:
         ctx.report.errors += 1
         _line(ctx, name, f"the nyaa search failed: {exc}")

@@ -41,7 +41,7 @@ import threading
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .. import paths
 from ..gui.downloads_backend import BackendError, QbtSettings, SuwayomiCheck, SuwayomiSettingsView
@@ -102,6 +102,26 @@ from .service import PackSetupError, SendRefused
 _log = logging.getLogger(__name__)
 
 
+class _UploadsKnownTorrents:
+    """A TorrentClient whose ``add`` of a ``.torrent`` link uploads the file instead when the backend has read and
+    checked it already (:meth:`Backend.inspect_pack`): qBittorrent then knows the torrent at once, where by link it
+    fetches the file itself after answering - once 87 s, past the 60 s a partial send waits (owner, 2026-10-18).
+    Everything else goes to the client as it is."""
+
+    def __init__(self, client: Any, files: Dict[str, bytes]):
+        self._client, self._files = client, files
+
+    def add(self, url: str, *, category: str, stopped: bool = False) -> None:
+        data = self._files.get(url)
+        if data is not None and hasattr(self._client, "add_file"):
+            self._client.add_file(data, category=category, stopped=stopped)
+            return
+        self._client.add(url, category=category, stopped=stopped)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
 class Backend:
     def __init__(self, db, *, search: Optional[NyaaSearch] = None, nyaa_client: Optional[NyaaClient] = None,
                  client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection,
@@ -121,6 +141,7 @@ class Backend:
         self._client_factory = client_factory
         self._packs: Dict[tuple, PackSelection] = {}      # readable file lists already looked at, newest last
         self._outcomes: Dict[str, PackOutcome] = {}       # what the last send of a torrent did with its pack
+        self._torrent_files: Dict[str, bytes] = {}        # .torrent link -> its bytes, read and checked against the hash
 
     # --- library ---------------------------------------------------------------------------------------
 
@@ -214,6 +235,9 @@ class Backend:
         if listing is None:
             _log.info("Partial: %s: file list not read: %s", candidate.title, problem)
             return PackSelection(wanted=wanted, problem=problem or "the file list is not available")
+        self._torrent_files[candidate.torrent_url] = data         # a send then uploads it: no fetch by qBittorrent
+        while len(self._torrent_files) > 32:
+            del self._torrent_files[next(iter(self._torrent_files))]
         selection = choose_files([(f.name, f.size) for f in listing.files], wanted, hint_for(candidate))
         log_selection(candidate.title, selection, "the .torrent on nyaa")
         self._packs[key] = selection
@@ -256,7 +280,7 @@ class Backend:
         placement = replace(self.placement(series_id), target_dir=target_dir, options=())
         key = candidate.info_hash.lower()
         self._outcomes.pop(key, None)
-        client = self._client_factory(conn)
+        client = _UploadsKnownTorrents(self._client_factory(conn), self._torrent_files)
         try:
             refresh(client, self.ledger)            # the budget with qBittorrent's own sizes, when it answers
         except Exception as exc:  # noqa: BLE001 - the send itself reports an unreachable qBittorrent

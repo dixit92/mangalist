@@ -138,7 +138,9 @@ class FakeQbt:
         if path == "torrents/add":
             self.add_forms.append(dict(form))
             if self.add_answer == "Ok.":
-                for link in form.get("urls", "").split("\n"):
+                if isinstance(form.get("torrents"), tuple):
+                    self.added.append((form["torrents"], form.get("category")))
+                for link in (form.get("urls") or "").split("\n") if form.get("urls") else ():
                     self.added.append((link, form.get("category")))
             if self.v5 and self.add_answer == "Ok.":
                 return 202, b"", {}                  # 5.x: Accepted (the add is queued)
@@ -182,6 +184,21 @@ class FakeQbt:
         return 404, b"", {}
 
 
+def _multipart(content_type: str, body: bytes) -> Dict[str, Any]:
+    """A multipart form: text fields as str, a file field as ``(filename, bytes)``."""
+    from email.parser import BytesParser
+    from email.policy import HTTP
+
+    msg = BytesParser(policy=HTTP).parsebytes(b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + body)
+    form: Dict[str, Any] = {}
+    for part in msg.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        data = part.get_payload(decode=True) or b""
+        filename = part.get_filename()
+        form[name] = (filename, data) if filename else data.decode("utf-8")
+    return form
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     fake: FakeQbt
@@ -192,8 +209,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _serve(self, method: str) -> None:
         parts = urlsplit(self.path)
         length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length).decode("utf-8") if length else ""
-        form = {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+        body = self.rfile.read(length) if length else b""
+        if self.headers.get("Content-Type", "").startswith("multipart/form-data"):
+            form = _multipart(self.headers.get("Content-Type", ""), body)
+        else:
+            form = {k: v[0] for k, v in parse_qs(body.decode("utf-8"), keep_blank_values=True).items()}
         query = {k: v[0] for k, v in parse_qs(parts.query, keep_blank_values=True).items()}
         headers = {k.lower(): v for k, v in self.headers.items()}
         cookie = headers.get("cookie", "")

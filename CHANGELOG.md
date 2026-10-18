@@ -7,6 +7,16 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.48] - 2026-10-18
+
+The forty-seventh MangaList release (testing build): spin-offs kept inside their parent's folder, bare-numbered packs, packs stuck stopped in qBittorrent, settings that went back by themselves, and one folder name.
+
+- **A spin-off inside its parent's folder is its own series.** A series folder nested in another series' folder (a spin-off or side story kept inside the main series') whose MangaUpdates match you confirmed now uses that match, not the MangaPixer record of the folder it is in: it no longer wants the parent's volumes, and the find pass never searches it by the parent's names - so the parent's pack is never sent into it.
+- **Bare-numbered packs are chapters.** A release named with bare numbers ("001-010") is read from its title every time: its files are chapters, never volumes - also for a release found by an older version and for a queued send, which could pick chapter files as the volumes you were missing.
+- **No more packs stuck stopped in qBittorrent.** When only the missing volumes of a pack are downloaded, MangaList now hands qBittorrent the .torrent file it has already read instead of its link: qBittorrent knows it at once. Fetched by link, a slow nyaa could take longer than MangaList waited, and the pack stayed stopped in qBittorrent with nothing selected and no record in MangaList.
+- **Settings stay as they were set.** The window no longer writes back, with what it read at its start, settings other parts of MangaList changed meanwhile - for example which libraries you converted to the naming scheme, which went back by themselves after a rename (new downloads there were then filed under their release names).
+- **A folder named "Title ~Subtitle~ [Title]"** (its English part repeating the start of its title) is no longer offered a rename to "[(Title)]".
+
 ## [2026.10.47] - 2026-10-17
 
 The forty-sixth MangaList release (testing build): the window no longer closes and restarts every hour and a half in the Docker image.

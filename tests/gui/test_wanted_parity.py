@@ -73,7 +73,7 @@ def test_every_series_reads_the_same(setup):
     lib, win = setup
     gui = _gui_views(win)
     mine = {str(v.entry.folder): v for v in wanted.library_states(lib.db, today=TODAY)}
-    assert set(mine) == set(gui) and len(gui) == 18
+    assert set(mine) == set(gui) and len(gui) == 20
     for folder, (entry, state, knowledge, held) in gui.items():
         v = mine[folder]
         assert _files(v.entry) == _files(entry), folder

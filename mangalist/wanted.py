@@ -47,6 +47,7 @@ _log = logging.getLogger(__name__)
 
 __all__ = [
     "wanted_list", "library_states", "SeriesView", "entries_from_db", "apply_links_cache", "load_links_cache", "open_resolver", "mangapixer_item",
+    "mangapixer_resolution", "item_of",
     "knowledge_of_item", "inventory_of", "evaluate", "held_volumes", "series_wanted",
 ]
 
@@ -112,18 +113,37 @@ def open_resolver(db):
     return Resolver(open_cache(db))
 
 
-def mangapixer_item(resolver, root_id: Optional[int], root_path: Optional[str], folder, *,
-                    resolved_root: Optional[Path] = None) -> Optional[dict]:
-    """The MangaPixer export item that applies to *folder* (its own or an ancestor's - a subfolder inherits), or
-    None. *root_path* is the root's stored path; the folder is made relative to it resolved, as the scanner keys it
-    (*resolved_root*: the caller resolved it already - :func:`resolved_roots` - so a table of 700 series does not
-    resolve the same library path 700 times on a network share)."""
+def mangapixer_resolution(resolver, root_id: Optional[int], root_path: Optional[str], folder, *,
+                          resolved_root: Optional[Path] = None):
+    """MangaPixer's :class:`~mangalist.services.mangapixer.resolve.Resolution` of *folder* (its own item or an
+    ancestor's - a subfolder inherits), or None. *root_path* is the root's stored path; the folder is made relative to
+    it resolved, as the scanner keys it (*resolved_root*: the caller resolved it already - :func:`resolved_roots` - so a
+    table of 700 series does not resolve the same library path 700 times on a network share)."""
     if root_id is None or root_path is None or resolver is None:
         return None
     base = resolved_root if resolved_root is not None else Path(root_path).resolve()
     rel = Path(folder).resolve().relative_to(base).as_posix()
-    res = resolver.resolve(root_id, rel)
-    return res.item if res is not None else None
+    return resolver.resolve(root_id, rel)
+
+
+def item_of(res, own: Any = None) -> Optional[dict]:
+    """The item of a resolution as it applies to the series *own* (its entry with the links applied, or its series row):
+    None when there is none, or when it is inherited and the folder's own confirmed MangaUpdates link names another
+    record (:func:`~mangalist.services.mangapixer.resolve.own_link_wins`; owner, 2026-10-18: a spin-off nested in its
+    parent's folder read the parent's volumes and names)."""
+    from .services.mangapixer.resolve import own_link_wins
+
+    if res is None or own_link_wins(res, own):
+        return None
+    return res.item
+
+
+def mangapixer_item(resolver, root_id: Optional[int], root_path: Optional[str], folder, *,
+                    resolved_root: Optional[Path] = None, own: Any = None) -> Optional[dict]:
+    """The MangaPixer export item that applies to *folder* (its own or an ancestor's - a subfolder inherits), or
+    None (:func:`mangapixer_resolution`). *own*: the series' entry (or row) - an inherited item does not apply to a
+    folder whose own confirmed MangaUpdates link names another record (:func:`item_of`)."""
+    return item_of(mangapixer_resolution(resolver, root_id, root_path, folder, resolved_root=resolved_root), own)
 
 
 def resolved_roots(db) -> Dict[int, Tuple[str, Path]]:
@@ -137,10 +157,11 @@ def resolved_roots(db) -> Dict[int, Tuple[str, Path]]:
     return out
 
 
-def mangapixer_known(db, folders: Iterable[Tuple[Optional[int], str]]) -> set:
+def mangapixer_known(db, folders: Iterable[Tuple[Optional[int], str]], own: Optional[Mapping[str, Any]] = None) -> set:
     """The *folders* (``(root id, folder)``) MangaPixer's export knows - each folder that has an item of its own or an
-    ancestor's. One resolver and one roots read for all; runs off the UI thread (the MangaUpdates lookup asks it for
-    the folders it would otherwise fetch)."""
+    ancestor's (*own*: folder -> its entry; an inherited item a folder's own confirmed link beats does not count,
+    :func:`item_of`). One resolver and one roots read for all; runs off the UI thread (the MangaUpdates lookup asks it
+    for the folders it would otherwise fetch)."""
     resolver = open_resolver(db)
     roots = resolved_roots(db)
     known = set()
@@ -149,7 +170,8 @@ def mangapixer_known(db, folders: Iterable[Tuple[Optional[int], str]]) -> set:
         if root is None:
             continue
         try:
-            if mangapixer_item(resolver, root_id, root[0], folder, resolved_root=root[1]) is not None:
+            if mangapixer_item(resolver, root_id, root[0], folder, resolved_root=root[1],
+                               own=(own or {}).get(str(folder))) is not None:
                 known.add(str(folder))
         except Exception:  # noqa: BLE001 - a folder outside its root or a broken cache: not known
             _log.debug("MangaPixer item for %s unavailable", folder, exc_info=True)
@@ -381,7 +403,7 @@ def _list_order(rel: str):
 
 def _safe_item(resolver, root, entry: MangaEntry) -> Optional[dict]:
     try:
-        return mangapixer_item(resolver, root.id, root.path, entry.folder)
+        return mangapixer_item(resolver, root.id, root.path, entry.folder, own=entry)
     except Exception:  # noqa: BLE001 - as the window: a broken MangaPixer cache must not break the list
         _log.warning("MangaPixer data for %s unavailable", os.path.basename(str(entry.folder)), exc_info=True)
         return None
