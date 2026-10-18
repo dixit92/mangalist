@@ -41,7 +41,12 @@ def test_a_whole_chapter_next_to_its_first_part_may_be_redundant(db, lib):
 
 
 def test_an_extra_next_to_a_whole_chapter_is_no_overlap(db, lib):
-    build(lib, "Series c010", "Series c010.5", "Series c011", "Series c011.25")
+    # the split model: 10.5 (no 10.4), 11.25, a lone 12.1 next to 12 and a run from 13.3 are extras, and so is a file
+    # whose name says it is one
+    build(lib, "Series c010", "Series c010.5", "Series c011", "Series c011.25", "Series c012", "Series c012.1",
+          "Series c013", "Series c013.3", "Series c014", "Series c014.1 (Extra 1)", "Series c014.2 (Extra 2)",
+          "Series c015", "Series c015.1 (Special)", "Series c015.2 (Omake)",
+          "Series c016", "Series c016.1 (Extra)", "Series c016.2")    # 16.1 is held: 16 stands in for nothing
     assert find_duplicate_files(db) == []
 
 
@@ -57,7 +62,8 @@ def test_a_whole_chapter_held_twice_is_the_duplicate_first(db, lib):
 
 
 def test_overlaps_count_like_numbers_held_more_than_once(db, lib):
-    build(lib, "Series c001", "Series c001 [2]", "Series c038", "Series c038.2", "Series c040", "Series c040.1")
+    build(lib, "Series c001", "Series c001 [2]", "Series c038", "Series c038.2", "Series c040", "Series c040.1",
+          "Series c040.2")
     groups = find_duplicate_files(db)
     assert [(g.number, g.overlap) for g in groups] == [("1", ""), ("38", OVERLAP_STAND_IN), ("40", OVERLAP_REDUNDANT)]
     total, per_folder = count_by_folder(groups)

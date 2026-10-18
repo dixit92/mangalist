@@ -19,10 +19,14 @@ library database's units, so MangaList and MangaPixer agree on what a folder hol
   ``008 Vol 01`` (chapters the parser does not read), ``Season 1 v01`` next to ``Season 2 v01`` - they are different
   units and never listed. FMD2's download index (``0002 [Vol. 0001 Ch. 1]``) is not such a number.
 - **Whole and parts** (owner, 2026-10-18: "Duplicates: flag overlaps"; :func:`part_overlaps`): a whole chapter ``N``
-  held in one folder together with parts ``N.1``, ``N.2`` ... of it is listed too - one entry per chapter, counted like a
-  number held more than once - as an overlap to review, never a copy: two scanlation groups, one releasing whole
-  chapters, one in parts. When ``N.1`` is missing the whole ``N`` stands in for the missing part(s) and keeping both is
-  the expected answer; when ``N.1`` is held the whole may be redundant. Every file of an overlap defaults to Keep;
+  held in one folder together with parts of it is listed too - one entry per chapter, counted like a number held more
+  than once - as an overlap to review, never a copy: two scanlation groups, one releasing whole chapters, one in parts.
+  The parts follow the split model (:mod:`mangalist.split_chapters`): ``N.2`` onwards next to the whole ``N`` (the whole
+  stands in for the missing ``N.1``; keeping both is the expected answer), or ``N.1`` and ``N.2`` onwards (they count as
+  chapter ``N`` on their own, so the whole may be redundant). A lone ``N.1`` next to ``N`` is an extra, as MangaPixer
+  counts it, and so is a file whose name says so (``Extra``, ``Special``, ``Omake``, ``Bonus``, ``Side Story``,
+  ``Afterword``): measured on the owner's library (2026-10-18), the broader "any ``N.x`` next to ``N``" listed 206
+  chapters in 67 series, mostly extras. Every file of an overlap defaults to Keep;
   nothing is deleted unless the owner discards one and confirms. A chapter whose files are themselves duplicated is
   listed as that duplicate first (one file is listed once).
 - The usual group: when the copies come from different scanlation groups, the group of the neighbouring numbers (else
@@ -201,6 +205,18 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
     return out
 
 
+def _tenth(number: Decimal) -> int:
+    return int((number - Decimal(int(number))) * 10)
+
+
+def _says_extra(rel: str) -> bool:
+    """Whether a file's name calls it an extra (``(Extra 1 - ...)``, ``(Special)``, ``Omake``, ``Bonus``, ``Side
+    Story``, ``Afterword`` - the naming scheme's marker words): numbered like a part, it is not one."""
+    from .naming import _MARKER
+
+    return _MARKER.search(os.path.basename(rel)) is not None
+
+
 def part_overlaps(buckets: Dict[Tuple[int, str, str, Decimal], List[Tuple[str, Optional[str]]]],
                   folders: Dict[int, Path]) -> List[DuplicateGroup]:
     """A whole chapter held together with its parts in one folder (see the module docstring), one group per chapter.
@@ -215,6 +231,11 @@ def part_overlaps(buckets: Dict[Tuple[int, str, str, Decimal], List[Tuple[str, O
             whole = Decimal(n)
             if whole not in numbers or any(len(numbers[x]) > 1 for x in (whole, *parts)):
                 continue                # no whole file, or a number held twice: that duplicate is reviewed first
+            parts = [p for p in parts if not _says_extra(numbers[p][0][0])]
+            first_held = whole + Decimal("0.1") in numbers
+            if not parts or not ((_tenth(parts[0]) == 2 and not first_held)
+                                 or (_tenth(parts[0]) == 1 and len(parts) > 1)):
+                continue                # the split model: a lone N.1 next to N is an extra, a run from N.3 too
             series_folder = folders[sid]
             files, there = [], set()
             for x in (whole, *parts):

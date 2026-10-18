@@ -198,6 +198,8 @@ def test_the_series_form_follows_its_newest_and_recent_chapters():
     # a series that just switched to the parts group: its newest chapter is held in parts
     assert held_form(D("33", "34", "35", "36", "37.1", "37.2")).parts
     assert not held_form(()).parts
+    # a lone 37.1 next to a whole 37 is an extra (the split model), not a sign of parts
+    assert not held_form(D(*WHOLE_HELD, "37.1")).parts
 
 
 # --- the manual and the scheduled check agree; the find pass follows the same rule -------------------------------

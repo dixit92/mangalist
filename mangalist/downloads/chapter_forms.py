@@ -12,7 +12,9 @@ parts up to ``37.2``; the source listed ``38``, ``38.2``, ``39.1`` (its ``38.1``
 whether they are parts).
 
 **The series' form** (:func:`held_form`): the series holds parts when the newest chapter it holds is held in parts, or
-most of its last :data:`RECENT` chapters are; otherwise it holds whole chapters.
+most of its last :data:`RECENT` chapters are; otherwise it holds whole chapters. A chapter is held in parts when its
+parts are held without the whole, or next to it as the split model counts parts (from ``.2``, or ``.1`` and ``.2``); a
+lone ``N.1`` next to a whole ``N`` is an extra.
 
 **Choosing** (:func:`choose`), for a chapter ``N`` the source lists both whole and in parts:
 
@@ -73,6 +75,17 @@ class HeldForm:
     reason: str                         # e.g. "the series holds its chapters in parts (newest: ch 37.1, 37.2)"
 
 
+def _held_in_parts(n: int, held: Set[Decimal], parts: List[Decimal]) -> bool:
+    """Whether the series holds chapter *n* in parts: parts without the whole chapter, or next to it parts the split
+    model counts (from ``.2``, the whole being the first part; or ``.1`` and ``.2`` onwards) - a lone ``N.1`` next to a
+    whole ``N`` is an extra (MangaPixer's rule), not a sign of parts."""
+    if not parts:
+        return False
+    if Decimal(n) not in held:
+        return True
+    return _tenth(parts[0]) == 2 or (_tenth(parts[0]) == 1 and len(parts) > 1)
+
+
 def held_form(held: Iterable[Decimal]) -> HeldForm:
     """The form the series holds its chapters in (see the module docstring). *held*: the chapter numbers it holds."""
     held = {n for n in held if n is not None}
@@ -81,9 +94,9 @@ def held_form(held: Iterable[Decimal]) -> HeldForm:
     if not chapters:
         return HeldForm(False, "the series holds no chapter yet")
     recent = chapters[-RECENT:]
-    in_parts = [n for n in recent if n in parts]
+    in_parts = [n for n in recent if _held_in_parts(n, held, parts.get(n, []))]
     newest = recent[-1]
-    if newest in parts or 2 * len(in_parts) > len(recent):
+    if newest in in_parts or 2 * len(in_parts) > len(recent):
         shown = ", ".join(_plain(p) for p in parts[in_parts[-1]])
         return HeldForm(True, f"the series holds its chapters in parts (ch {shown})")
     return HeldForm(False, "the series holds whole chapters")
@@ -101,13 +114,6 @@ class FormChoice:
     notes: Dict[Decimal, str] = field(default_factory=dict)    # why, for a taken number that needs a word
     others: Dict[Decimal, str] = field(default_factory=dict)   # the other form, not taken, and why
     form: Optional[HeldForm] = None
-
-    def lines(self) -> List[str]:
-        """The choice in words, for the log: ``ch 38 stands in for ...``, ``not taken: ch 38.1 (...)``."""
-        out = [f"ch {_plain(n)} {why}" for n, why in sorted(self.notes.items())]
-        if self.others:
-            out.append("not taken: " + ", ".join(f"ch {_plain(n)} ({why})" for n, why in sorted(self.others.items())))
-        return out
 
 
 def choose(listed: Iterable[Decimal], held: Iterable[Decimal], wanted: Iterable[Decimal]) -> FormChoice:
@@ -151,7 +157,9 @@ def choose(listed: Iterable[Decimal], held: Iterable[Decimal], wanted: Iterable[
             take.add(c)                     # an extra (38.5) or a number like 12.25: not a part, taken as before
             continue
         whole = Decimal(n)
-        if not form.parts and (whole in held or (whole in candidates and whole in listed)):
+        # a whole-chapter series takes no part of a whole it holds or takes - unless it holds a part of it already (a
+        # part N.2 after a held N.1 counts: MAL-Sync parity, owner 2026-10-18)
+        if not form.parts and not held_parts.get(n) and (whole in held or (whole in candidates and whole in listed)):
             out.others[c] = (f"a part of ch {n}; the whole ch {n} is "
                              f"{'held' if whole in held else 'taken'} - {form.reason}")
             continue
