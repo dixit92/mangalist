@@ -137,6 +137,7 @@ def test_english_or_romaji_by_their_words(text, english, romaji):
     ("Made Up Island Story ~Some Subtitle~ [Made Up Island Story]", "Made Up Island Story ~Some Subtitle~", (), True,
      "Made Up Island Story"),                                            # the whole title, then a bracket repeating a piece
     ("Made Up no Hanashi - Gaiden [Made Up no Hanashi]", "Made Up no Hanashi - Gaiden", (), True, None),  # ... in romaji
+    ("Shinsetsu na Kame - Gaiden [Shinsetsu na Kame]", "Shinsetsu na Kame - Gaiden", (), True, None),  # ... not English
     ("Made Up no Nakama (Banished from the Made Up Party)", "Made Up no Nakama ja Nai", (), True,
      "Banished from the Made Up Party"),                                 # an English "(...)" after the romaji
     ("The Made Up (Friend's) Story", "Made Up Monogatari", (), True, "The Made Up (Friend's) Story"),
