@@ -186,6 +186,27 @@ def test_add_a_torrent_url(client, qbt):
     assert form == {"urls": "https://nyaa.si/download/123.torrent", "category": "mangalist", "autoTMM": "true"}
 
 
+def test_add_a_torrent_file_uploads_it(client, qbt):
+    client.add_file(b"d4:infod4:name1:aee", category="mangalist", stopped=True)
+    assert qbt.added == [(("release.torrent", b"d4:infod4:name1:aee"), "mangalist")]
+    form = qbt.calls("torrents/add")[0]["form"]
+    assert form["category"] == "mangalist" and form["stopped"] == "true" and "urls" not in form
+
+
+def test_add_file_needs_bytes_and_a_category(client, qbt):
+    with pytest.raises(ValueError):
+        client.add_file(b"", category="mangalist")
+    with pytest.raises(ValueError):
+        client.add_file(b"d4:infod4:name1:aee", category=" ")
+    assert not qbt.calls("torrents/add")
+
+
+def test_add_file_refused_is_torrent_rejected(client, qbt):
+    qbt.add_answer = "Fails."
+    with pytest.raises(TorrentRejected):
+        client.add_file(b"d4:infod4:name1:aee", category="mangalist")
+
+
 def test_add_a_magnet_link(client, qbt):
     client.add(f"magnet:?xt=urn:btih:{HASH_A}", category="mangalist")
     assert qbt.added[0][0] == f"magnet:?xt=urn:btih:{HASH_A}"

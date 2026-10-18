@@ -213,11 +213,11 @@ class QbtClient:
         return f"{parts.scheme}://{parts.netloc}"
 
     def _send(self, method: str, path: str, params: Optional[Dict[str, Any]] = None,
-              data: Optional[Dict[str, Any]] = None) -> requests.Response:
+              data: Optional[Dict[str, Any]] = None, files: Optional[Dict[str, Any]] = None) -> requests.Response:
         url = f"{self.base_url}/api/v2/{path}"
         headers = {"Referer": self.base_url + "/", "Origin": self._origin()}
         try:
-            return self._session.request(method, url, params=params, data=data, headers=headers,
+            return self._session.request(method, url, params=params, data=data, files=files, headers=headers,
                                          timeout=self.timeout, verify=self.verify_tls, allow_redirects=False)
         except requests.exceptions.SSLError:
             raise Unreachable(f"the certificate of {self.base_url} was not accepted (self-signed? turn "
@@ -254,17 +254,17 @@ class QbtClient:
         raise UnexpectedResponse("the login answer is not qBittorrent's - is the address the Web UI's?", status)
 
     def _call(self, method: str, path: str, params: Optional[Dict[str, Any]] = None,
-              data: Optional[Dict[str, Any]] = None) -> requests.Response:
+              data: Optional[Dict[str, Any]] = None, files: Optional[Dict[str, Any]] = None) -> requests.Response:
         """One API call: log in first if needed, log in again once on 403. Returns a 2xx / 404 / 409 response (any 2xx:
         qBittorrent 5.x answers an add with 202 Accepted)."""
         if not self._logged_in:
             self._login()
-        resp = self._send(method, path, params, data)
+        resp = self._send(method, path, params, data, files)
         if resp.status_code == 403:
             _log.info("qBittorrent: session refused; logging in again")
             self._logged_in = False
             self._login()
-            resp = self._send(method, path, params, data)
+            resp = self._send(method, path, params, data, files)
             if resp.status_code == 403:
                 self._logged_in = False
                 raise AuthFailed("qBittorrent refuses this session even after a new login (403): check the "
@@ -332,6 +332,26 @@ class QbtClient:
         resp = self._call("POST", "torrents/add", data=form)
         if resp.status_code == 409 or (resp.text or "").strip() == "Fails.":
             raise TorrentRejected("qBittorrent did not add the torrent: the link is not a valid torrent, or it is "
+                                  "already in qBittorrent")
+        self._ok(resp, "adding the torrent")
+
+    def add_file(self, data: bytes, *, category: str, stopped: bool = False) -> None:
+        """Add a torrent from the ``.torrent`` file's bytes (an upload: qBittorrent knows it at once). MangaList uses it
+        when it has read the release's ``.torrent`` already (owner, 2026-10-18: added by link, qBittorrent took 87 s
+        to fetch the file from nyaa; the send gave up after 60 s and the torrent stayed stopped, unknown to MangaList).
+        ``stopped`` as in :meth:`add`."""
+        if not isinstance(data, (bytes, bytearray)) or not data:
+            raise ValueError("add_file takes the .torrent file's bytes")
+        category = str(category or "").strip()
+        if not category:
+            raise ValueError("add needs a category")
+        form = {"category": category, "autoTMM": "true"}
+        if stopped:
+            form.update({"stopped": "true", "paused": "true"})
+        resp = self._call("POST", "torrents/add", data=form,
+                          files={"torrents": ("release.torrent", bytes(data), "application/x-bittorrent")})
+        if resp.status_code == 409 or (resp.text or "").strip() == "Fails.":
+            raise TorrentRejected("qBittorrent did not add the torrent: the file is not a valid torrent, or it is "
                                   "already in qBittorrent")
         self._ok(resp, "adding the torrent")
 

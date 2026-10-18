@@ -92,6 +92,19 @@ class PartialQbt(FakeQbt):
                                     str(self.save_root), str(self.save_root / name), 0.0, 0, max_ratio=2.0,
                                     max_seeding_time=87600)
 
+    def add_file(self, data: bytes, *, category: str, stopped: bool = False) -> None:
+        """An upload: qBittorrent knows the torrent at once (no fetch after the answer, so no ``appear_after``)."""
+        from mangalist.torrent_files import read_torrent
+
+        h = read_torrent(data).info_hash
+        url = next(u for u, (ph, _n, _f) in self.packs.items() if ph == h)
+        wait, self.appear_after = self.appear_after, 0
+        try:
+            self.add(url, category=category, stopped=stopped)
+        finally:
+            self.appear_after = wait
+        self.calls[-1] = ("add_file", h, category, stopped)
+
     def torrents(self, category: str):
         if self.unreachable:
             raise ConnectionError("connection refused")

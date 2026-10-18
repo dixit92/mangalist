@@ -171,8 +171,9 @@ def test_send_without_the_flag_is_the_whole_pack_as_before(wired):
 
 def test_send_only_missing_does_the_partial_flow_and_keeps_the_outcome_once(wired):
     b, q, sid, sdir = wired
+    b.inspect_pack(cand(), ["2", "3"])                                             # the panel reads the files first
     rec = b.send(sid, cand(), ["2", "3"], sdir, only_missing=True)
-    assert [c[0] for c in q.calls] == ["ensure_category", "add", "set_file_priority", "start"]
+    assert [c[0] for c in q.calls] == ["ensure_category", "add_file", "set_file_priority", "start"]
     outcome = b.take_pack_outcome(rec.info_hash.upper())
     assert outcome.partial and outcome.selection.kept_files == 2
     assert b.take_pack_outcome(rec.info_hash) is None                              # handed over once
@@ -185,3 +186,21 @@ def test_a_partial_setup_failure_is_a_readable_backend_error(wired):
         b.send(sid, cand(), ["2", "3"], sdir, only_missing=True)
     assert q.calls_named("start") == [] and b.ledger.active() == []
     assert b.take_pack_outcome(cand().info_hash) is None
+
+
+def test_a_torrent_read_already_is_uploaded_so_a_slow_fetch_cannot_outlast_the_wait(wired):
+    # owner, 2026-10-18: added by link, qBittorrent took 87 s to fetch the .torrent; the send gave up after 60 s and
+    # the torrent stayed stopped in qBittorrent, unknown to MangaList
+    b, q, sid, sdir = wired
+    q.appear_after = 10 ** 6                                # by link it would never show up within the wait
+    b.inspect_pack(cand(), ["2", "3"])
+    rec = b.send(sid, cand(), ["2", "3"], sdir, only_missing=True)
+    assert rec.status == "sent" and q.calls_named("add") == []
+    assert q.calls_named("add_file") == [("add_file", cand().info_hash, "mangalist", True)]
+    assert q.calls_named("start") and b.take_pack_outcome(rec.info_hash).selection.kept_files == 2
+
+
+def test_a_torrent_not_read_yet_is_still_added_by_its_link(wired):
+    b, q, sid, sdir = wired
+    rec = b.send(sid, cand(), ["2", "3"], sdir)
+    assert rec.status == "sent" and q.calls_named("add_file") == [] and q.calls_named("add")[0][1] == URL
