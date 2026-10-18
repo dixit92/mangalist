@@ -26,9 +26,9 @@ library database's units, so MangaList and MangaPixer agree on what a folder hol
   chapter ``N`` on their own, so the whole may be redundant). A lone ``N.1`` next to ``N`` is an extra, as MangaPixer
   counts it, and so is a file whose name says so (``Extra``, ``Special``, ``Omake``, ``Bonus``, ``Side Story``,
   ``Afterword``): measured on the owner's library (2026-10-18), the broader "any ``N.x`` next to ``N``" listed 206
-  chapters in 67 series, mostly extras. Every file of an overlap defaults to Keep;
-  nothing is deleted unless the owner discards one and confirms. A chapter whose files are themselves duplicated is
-  listed as that duplicate first (one file is listed once).
+  chapters in 67 series, mostly extras. Every file of an overlap defaults to Keep; nothing is deleted unless the owner
+  discards one and confirms. A chapter whose files are themselves duplicated is listed as that duplicate first (one
+  file is listed once).
 - The usual group: when the copies come from different scanlation groups, the group of the neighbouring numbers (else
   the folder's most used group) - a series keeps its translation style. The default Keep prefers it.
 
