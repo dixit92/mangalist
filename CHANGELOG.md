@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.50] - 2026-10-18
+
+The forty-ninth MangaList release (testing build): a scheduled check for new chapters.
+
+- **Check for new chapters, on a schedule.** Every 6 hours (Settings > Scheduled tasks: weekly, daily, every 12 or 6 hours, or off; "Run now" too) MangaList asks the saved chapter source of each ongoing chapter series that is not Off for the chapters after the newest one you have - what **Check for new chapters** in the row menu does by hand. A part after the part you have counts (18.2 after 18.1). Series on Auto get them sent to Suwayomi; for series on Notify they wait under Found. MangaUpdates or MangaDex no longer have to show the new chapter first, which could take weeks. Only the series' saved source and group are used, never nyaa; a series without a saved source or MangaDex link is not checked.
+- **Check for new chapters by hand** now writes what it found to the log.
+
 ## [2026.10.49] - 2026-10-18
 
 The forty-eighth MangaList release (testing build): status chips read whole, and one chapter is never downloaded for two folders at once.
