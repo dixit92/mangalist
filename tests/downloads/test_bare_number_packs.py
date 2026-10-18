@@ -12,15 +12,19 @@ import pytest
 
 from mangalist.downloads.arrivals import run_arrivals
 from mangalist.downloads.contracts import DownloadStatus as S
-from mangalist.downloads.finder import KIND_UPGRADES, PAYLOAD_NYAA, candidate_from, candidate_payload
+from mangalist.downloads.finder import KIND_UPGRADES, PAYLOAD_NYAA, candidate_from, candidate_payload, run_find
+from mangalist.downloads.finding import TRIGGER_NOW
 from mangalist.downloads.partial import CHAPTERS_ONLY, choose_files, hint_for
 from mangalist.downloads.queueing import candidate_of
 from mangalist.downloads.service import PackWait
+from mangalist.services.nyaa.ranking import build_candidate
+from mangalist.services.nyaa.rss import RssItem
+from mangalist.services.nyaa.titles import parse_title
 from mangalist.store.findings import FindingStore, NewFinding
 
 from .fakes import candidate, data
 from .finder_fakes import wanted, wire
-from .torrents import MB
+from .torrents import MB, info_hash_of, make_torrent
 
 BARE = "Quiet Harbor - Side Days 001-010 (2018-2019) (Digital) (Group)"
 NUMBERS = ["001", "002", "003", "004", "005", "006", "006.5", "007", "008", "009", "009.5", "010"]
@@ -29,12 +33,23 @@ URL = "https://nyaa.example/download/7.torrent"
 BARE_HASH = "7" * 40
 
 
-def stale(**kw):
+def stale(info_hash: str = BARE_HASH):
     """The release as a payload recorded before ``numbers_only`` existed rebuilds it: the flag at its default."""
-    payload = candidate_payload(candidate(BARE_HASH, title=BARE, vol_from="1", vol_to="10", torrent_url=URL,
-                                          covers_missing=("1", "2"), **kw))
+    payload = candidate_payload(candidate(info_hash, title=BARE, vol_from="1", vol_to="10", torrent_url=URL,
+                                          covers_missing=("1", "2")))
     payload.pop("numbers_only")
     return payload
+
+
+def old_finding(store: FindingStore, series_id: int, info_hash: str = BARE_HASH):
+    """The waiting "Upgrade vol. 1-2" finding an earlier pass recorded with that payload."""
+    run_id = store.start_run("now")
+    f, _ = store.offer(NewFinding(series_id=series_id, kind=KIND_UPGRADES, pick_key=f"nyaa:{info_hash}", title=BARE,
+                                  fills=("1", "2"), size_bytes=20 * MB, reason="the series is on Notify",
+                                  payload={"type": PAYLOAD_NYAA, "candidate": stale(info_hash), "wanted": ["1", "2"],
+                                           "only_missing": True}), run_id=run_id)
+    store.finish_run(run_id, series_searched=1, found=1, sent=0, errors=0, summary="")
+    return f
 
 
 @pytest.fixture(autouse=True)
@@ -58,15 +73,34 @@ def test_a_finding_recorded_before_the_flag_is_not_sent_for_volumes(db, series, 
     w.entries = wanted(w.series_id, w.folder, upgrades=["1", "2"])
     w.qbt.offer(URL, BARE_HASH, "Quiet Harbor - Side Days (Digital) (Group)", [(n, 10 * MB) for n in FILES])
     store = FindingStore(db)
-    run_id = store.start_run("now")
-    f, _ = store.offer(NewFinding(series_id=w.series_id, kind=KIND_UPGRADES, pick_key=f"nyaa:{BARE_HASH}", title=BARE,
-                                  fills=("1", "2"), size_bytes=20 * MB, reason="the series is on Notify",
-                                  payload={"type": PAYLOAD_NYAA, "candidate": stale(), "wanted": ["1", "2"],
-                                           "only_missing": True}), run_id=run_id)
+    f = old_finding(store, w.series_id)
     text = w.backend.send_finding(f.id)
     assert text.startswith("Not sent") and "chapters, not volumes" in text
     assert w.backend.ledger.all_records() == [] and "start" not in [c[0] for c in w.qbt.calls]
     assert store.get(f.id).status == "waiting"
+
+
+def test_a_find_pass_offers_no_bare_number_chapter_pack_and_retires_the_stale_finding(db, series, tmp_path):
+    """The series' "Upgrade vol. 1-2" (volumes held only as chapters): the bare-numbered release, ranked live, is
+    uncertain; its files read as chapters, so it is not offered - and the finding of the old reading goes."""
+    w = wire(db, series, tmp_path)
+    w.entries = wanted(w.series_id, w.folder, upgrades=["1", "2"], held=())
+    root = "Quiet Harbor - Side Days (Digital) (Group)"
+    files = [(n, 10 * MB) for n in FILES]
+    torrent = make_torrent(root, files)
+    h = info_hash_of(torrent)
+    w.nyaa.files[URL] = torrent
+    w.qbt.offer(URL, h, root, files)
+    item = RssItem(title=BARE, torrent_url=URL, view_url="https://nyaa.example/view/7", info_hash=h,
+                   published="2026-10-01T00:00:00Z", seeders=2, category="3_1")
+    live = build_candidate(item, parse_title(BARE), ["1", "2"], [])
+    assert live.numbers_only and live.covers_missing == ("1", "2")
+    w.search.results = [live]
+    store = FindingStore(db)
+    old = old_finding(store, w.series_id, h)
+    run_find(db, trigger=TRIGGER_NOW, wanted=w.wanted, backend=w.backend)
+    assert store.list("waiting") == [] and store.get(old.id).status == "gone"
+    assert w.nyaa.calls == [URL] and w.backend.ledger.all_records() == []
 
 
 def test_a_queued_bare_number_pack_is_rebuilt_without_volume_reading(ledger, series):
