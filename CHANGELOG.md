@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.47] - 2026-10-17
+
+The forty-sixth MangaList release (testing build): the window no longer closes and restarts every hour and a half in the Docker image.
+
+- **No more restarts every ~82 minutes.** Since 2026.10.38 the window in the Docker image quit with "Fatal Python error: bool_dealloc" about every 82 minutes and was restarted, losing whatever was open in it (the scheduled jobs carried on). The cause was a fault in PySide6 6.12.0 (the Qt library), which the builds had taken up as soon as it came out; MangaList now uses PySide6 below 6.12, and a test fails on any version with that fault. The desktop downloads use a Python where it could not happen, but take the same PySide6.
+
 ## [2026.10.46] - 2026-10-17
 
 The forty-fifth MangaList release (testing build): the log viewer can be closed in the container's web GUI.
