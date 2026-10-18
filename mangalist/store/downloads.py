@@ -272,6 +272,7 @@ class DownloadLedger:
         with self.connect(durable=True) as con:
             con.execute("BEGIN IMMEDIATE")          # the in-hand check and the inserts as one step
             held, refs = self._chapters_in_hand(con, series_id)
+            elsewhere = self._chapters_elsewhere(con, series_id)
             for ch in chapters:
                 number = exact_number(ch.number) if ch.number and not ch.number.startswith("-") else None
                 if number is None:
@@ -279,6 +280,9 @@ class DownloadLedger:
                     continue
                 if str(ch.id) in refs or number in held:
                     skipped.append(f"ch {number}: already sent")
+                    continue
+                if str(ch.id) in elsewhere:
+                    skipped.append(f"ch {number}: already on its way for another folder")
                     continue
                 request = {"title": ch.name, "wanted_chapters": [number], "chapter_id": int(ch.id),
                            "chapter_name": ch.name, "scanlator": ch.scanlator or "", "chapter_url": ch.real_url or ch.url,
@@ -329,6 +333,17 @@ class DownloadLedger:
             numbers.update(str(c) for c in _loads(r["request"], {}).get("wanted_chapters") or ())
             refs.add(r["external_ref"])
         return numbers, refs
+
+    @staticmethod
+    def _chapters_elsewhere(con, series_id: int) -> Set[str]:
+        """The Suwayomi chapter ids another series has in hand (queued, sent, downloaded, or filed while Suwayomi still
+        has its copy). Suwayomi keeps ONE copy of a chapter: the same series in two folders (owner, 2026-10-18,
+        "Kanojo Shoukan Shimashita!" in two libraries) sent chapters 19-25 twice; the first send filed them and
+        Suwayomi deleted its copy, so the second failed ("the chapter's CBZ is not in Suwayomi's download folder").
+        The other folder can have the chapter once this download is done."""
+        return {r[0] for r in con.execute(
+            f"SELECT external_ref FROM ledger WHERE tool = ? AND series_id != ? AND status IN ({','.join('?' * len(TRACKED))})",
+            (TOOL_SUWAYOMI, int(series_id), *TRACKED)) if r[0]}
 
     def get(self, record_id: int) -> Optional[DownloadRecord]:
         with self.connect() as con:
