@@ -120,6 +120,23 @@ def test_the_last_copy_of_a_number_cannot_be_discarded(views, pair):
     assert view.discarded_paths() == [str(newer)]
 
 
+def test_a_whole_chapter_with_its_parts_is_listed_with_its_reason_and_everything_kept(views, lib):
+    # owner, 2026-10-18: "Duplicates: flag overlaps" - nothing of it is discarded unless the owner says so
+    paths = [lib.add(S, f"Series c{n}.cbz", mtime_ns=T0 + i) for i, n in enumerate(("037.1", "037.2", "038", "038.2"))]
+    lib.scan()
+    seen = []
+    view = views.make()
+    view.groups_found.connect(seen.append)
+    view.refresh()
+    wait_until(views.qapp, lambda: seen)
+    assert seen == [1] and view.discarded_paths() == [] and not view.apply_button.isEnabled()
+    shown = " ".join(texts(view))
+    assert "Chapter 38  ·  whole and parts" in shown and "whole chapter" in shown
+    assert "the whole chapter 38 stands in for the missing part 38.1 - keep both" in shown
+    assert view.set_discard(str(paths[2]), True) is True                 # the owner may still discard one
+    assert view.discarded_paths() == [str(paths[2])]
+
+
 def test_three_copies_can_all_but_one_be_discarded(views, lib):
     paths = [lib.add(S, n, size=s, mtime_ns=T0 + i) for i, (n, s) in
              enumerate((("Series c001.cbz", 5), ("Series c001 [2].cbz", 6), ("Series c001 [3].cbz", 7)))]

@@ -317,6 +317,30 @@ def test_extras_are_offered_unticked(qapp):
     assert "42.5" in [c.number for c in panel.picks()]
 
 
+def test_one_form_per_chapter_ticks_the_series_form_and_says_why(qapp):
+    # owner, 2026-10-18 ("Check: one form per chapter"): the series holds parts, the source lists 38 whole and in parts
+    from decimal import Decimal
+    from ..downloads.suwayomi_fakes import chapter
+
+    panel, _, _ = make(qapp)
+    open_series(qapp, panel)
+    look = panel.lookup
+    source = (chapter(3800, "38", "unofficial"), chapter(3810, "38.1", "unofficial"),
+              chapter(3820, "38.2", "unofficial"), chapter(3910, "39.1", "unofficial"))
+    held = [Decimal(n) for n in ("36.1", "36.2", "37.1", "37.2")]
+    look.rows = chm.chapter_rows(source, ["38", "38.1", "38.2", "39.1"], None, {}, held=held)
+    panel.show_lookup(look)
+    rows = table(panel)
+    assert rows[0][:2] == (False, "38") and rows[0][3].startswith("not taken: the whole chapter; its parts 38.1, 38.2")
+    assert [r[:2] for r in rows[1:]] == [(True, "38.1"), (True, "38.2"), (True, "39.1")]
+    assert [c.number for c in panel.picks()] == ["38.1", "38.2", "39.1"]
+    # without 38.1 on the source, the whole 38 stands in for it and says so
+    look.rows = chm.chapter_rows(source[:1] + source[2:], ["38", "38.2", "39.1"], None, {}, held=held)
+    panel.show_lookup(look)
+    assert table(panel)[0] == (True, "38", "unofficial",
+                               "stands in for the missing part 38.1 (the source lists ch 38 from 38.2)")
+
+
 def test_select_all_ticks_every_sendable_chapter_or_none(qapp):
     # owner, 2026-10-10: "there's no 'check all' box"
     panel, _, _ = make(qapp)
