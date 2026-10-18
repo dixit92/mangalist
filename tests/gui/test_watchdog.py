@@ -4,6 +4,7 @@ threshold; nothing while the window reacts; on in the container, off on the desk
 from __future__ import annotations
 
 import logging
+import sys
 import time
 
 import pytest
@@ -48,3 +49,28 @@ def test_on_or_off(env, level, on):
 def test_the_threshold_can_be_set():
     assert watchdog.threshold_ms({}) == 250 and watchdog.threshold_ms({"MANGALIST_UI_WATCHDOG_MS": "400"}) == 400
     assert watchdog.threshold_ms({"MANGALIST_UI_WATCHDOG_MS": "x"}) == 250
+
+
+@pytest.mark.skipif(sys.version_info >= (3, 12), reason="True and False are immortal from Python 3.12: a lost "
+                                                         "reference cannot be seen (nor do harm) there")
+def test_a_signal_emit_keeps_the_reference_counts_of_true_and_false(qapp):
+    # owner's container (Debian 12's Python 3.11), 2026-10-15 to 2026-10-17: the window aborted every ~82 min ("Fatal
+    # Python error: bool_dealloc: deallocating True or False"). PySide6 6.12.0's emit() returns a bool without its
+    # reference, and the watchdog emits ten times a second - requirements.txt keeps PySide6 below 6.12; this fails on
+    # a version with that bug (CI's Python 3.10 / 3.11 jobs run it).
+    from PySide6.QtCore import QObject, Qt, Signal
+
+    class Pinger(QObject):
+        ping = Signal(float)
+
+        def pong(self, _value: float) -> None:
+            pass
+
+    pinger = Pinger()
+    pinger.ping.connect(pinger.pong, Qt.ConnectionType.QueuedConnection)
+    before = sys.getrefcount(True), sys.getrefcount(False)
+    for _ in range(500):
+        pinger.ping.emit(1.0)
+    qapp.processEvents()
+    after = sys.getrefcount(True), sys.getrefcount(False)
+    assert after[0] >= before[0] - 50 and after[1] >= before[1] - 50, f"True / False lost references: {before} -> {after}"

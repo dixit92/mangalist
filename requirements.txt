@@ -1,4 +1,6 @@
-PySide6>=6.6
+# PySide6 6.12.0: every Signal.emit() drops a reference to True / False; on Python 3.11 (the Docker image's) the app
+# aborts (bool_dealloc) after enough emits - every ~82 min with the UI watchdog on. tests/gui/test_watchdog.py guards it.
+PySide6>=6.6,<6.12
 requests>=2.31
 regex>=2023.0
 platformdirs>=3.0
