@@ -117,7 +117,10 @@ MangaUpdates' latest chapter, which can lag the sites by days or weeks. A schedu
 the saved Suwayomi source of each ongoing chapter series that is not Off for the chapters numbered after the newest one
 you have - the same as **Check for new chapters** in the List's row menu. Series on Auto get them sent; for series on
 Notify they wait in **Found**. A series without a saved source (or a MangaDex id MangaPixer links), or with a download
-on its way, is not asked.
+on its way, is not asked. To keep the requests down, the check asks a source for the chapter list only, first syncs
+with MangaPixer when it is connected, and skips a MangaDex series whose latest upload on MangaDex (from MangaPixer, or
+one request to MangaDex for every 100 series) has not changed since its last check - at least once a day it is asked
+anyway. The row menu's Check for new chapters always asks.
 
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 

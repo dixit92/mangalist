@@ -419,7 +419,11 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
                                    manga_title=match.manga.title, how=HOW_MANGADEX)
     report.series_checked += 1
     if sid in gate.planned and match.source.is_mangadex:
-        same = gate.unchanged(sid, match, local_state(ctx.db, ctx.backend, ctx.store, sid))
+        try:
+            same = gate.unchanged(sid, match, local_state(ctx.db, ctx.backend, ctx.store, sid))
+        except Exception:  # noqa: BLE001 - cannot tell: fetched
+            _log.debug("%s: %s: the MangaDex gate could not tell; fetched", LABEL, name, exc_info=True)
+            same = None
         if same is not None:
             report.unchanged += 1
             _log.debug("%s: %s: not fetched: unchanged on MangaDex since its last check (latest upload %s, from %s)",
