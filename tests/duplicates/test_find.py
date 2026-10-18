@@ -46,7 +46,9 @@ def test_split_chapters_ranges_and_names_without_a_number_are_not_duplicates(db,
     rels = names("Series c002", "Series c002.1", "Series c002.2", "Series c005-c007", "Series c005-c007 [2]",
                  "Series c006", "Cover", "Notes")
     build(lib, rels)
-    assert find_duplicate_files(db) == []
+    # no number is held twice; the whole chapter 2 next to its parts is an overlap to review, not a copy (owner,
+    # 2026-10-18: "Duplicates: flag overlaps" - tests/duplicates/test_whole_and_parts.py)
+    assert [(g.number, g.overlap) for g in find_duplicate_files(db)] == [("2", "redundant")]
     # the parts are different numbers, MangaPixer's splits_of agrees they are parts of chapter 2
     from decimal import Decimal
     assert splits_of([Decimal(2), Decimal("2.1"), Decimal("2.2")]).chapters == frozenset({2})

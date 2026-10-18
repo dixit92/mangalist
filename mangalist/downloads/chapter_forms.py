@@ -6,7 +6,7 @@ MangaFire lists both under one label ("unofficial"), so the group cannot tell th
 parts up to ``37.2``; the source listed ``38``, ``38.2``, ``39.1`` (its ``38.1`` was on no source the owner enabled).
 "[the parts are] the better release" - and the whole ``38`` stands in for the missing ``38.1``.
 
-**What is a part** (:func:`part_numbers`): the split rule's tenths (:mod:`mangalist.split_chapters`) - one decimal,
+**What is a part** (:func:`mangalist.split_chapters.part_numbers`): the split rule's tenths (:mod:`mangalist.split_chapters`) - one decimal,
 ``.1`` ... ``.4``, and ``.5`` or above only next to a ``.4`` (else it is an extra, ``10.5``) - wherever the run starts
 (``38.2`` alone is a part of 38 here: the split rule's "starts at .1" decides whether parts *count as* chapter N, not
 whether they are parts).
@@ -35,7 +35,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set
+
+from ..split_chapters import part_numbers
 
 #: How many of the series' newest chapters decide its form, and how far back a late part is looked for.
 RECENT = 5
@@ -57,23 +59,6 @@ def _tenth(number: Decimal) -> Optional[int]:
 
 def is_whole(number: Decimal) -> bool:
     return number == number.to_integral_value()
-
-
-def part_numbers(numbers: Iterable[Decimal]) -> Dict[int, List[Decimal]]:
-    """chapter ``N`` -> the numbers among *numbers* that are parts of ``N`` (see the module docstring), ascending."""
-    tenths: Dict[int, Set[int]] = {}
-    for n in numbers:
-        if n is None:
-            continue
-        t = _tenth(n)
-        if t is not None:
-            tenths.setdefault(int(n), set()).add(t)
-    out: Dict[int, List[Decimal]] = {}
-    for n, ts in tenths.items():
-        own = sorted(t for t in ts if t < 5 or 4 in ts)
-        if own:
-            out[n] = [Decimal(n) + Decimal(t) / 10 for t in own]
-    return out
 
 
 def is_part(number: Decimal, among: Iterable[Decimal]) -> bool:

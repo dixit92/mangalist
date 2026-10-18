@@ -107,6 +107,15 @@ class DuplicateGroup:
     number: str                         # exact, e.g. "12", "12.5"
     files: Tuple[DuplicateFile, ...]
     usual_group: Optional[str] = None   # the group the neighbouring numbers come from, when the copies differ by group
+    # a whole chapter held next to its parts (owner, 2026-10-18: "Duplicates: flag overlaps") - not copies of one number:
+    # OVERLAP_STAND_IN (the whole stands in for a missing part; keep both) or OVERLAP_REDUNDANT (its parts from .1 are
+    # held; the whole may be redundant), "" for a number held more than once; *note* says it in words
+    overlap: str = ""
+    note: str = ""
+
+
+OVERLAP_STAND_IN = "stand-in"
+OVERLAP_REDUNDANT = "redundant"
 
 
 @dataclass(frozen=True)

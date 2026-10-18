@@ -14,6 +14,9 @@ Two sections, styled after the approved mockup (UI cycle, 2026-10-08):
   (:func:`mangalist.duplicates.find_duplicate_files`, MangaPixer's rule). Every file has Keep / Discard; the default keeps the
   newest (the largest of equally new ones) of each number and never discards them all. "Apply" lists every file to be
   deleted and asks; only then are they deleted (no holding folder), unless a scan or a filing holds the root's lock.
+  A whole chapter held with its parts (owner, 2026-10-18: "Duplicates: flag overlaps") is listed the same way, with a
+  line saying whether the whole stands in for a missing part (keep both) or may be redundant; its files all default to
+  Keep, so nothing of it is deleted unless the owner discards a file.
 
 The scan of the duplicates, the deletion and a merge run off the UI thread. Deleting goes through
 :func:`mangalist.duplicates.discard_duplicates` only; a merge deletes nothing (moves only).
@@ -740,18 +743,30 @@ class DuplicatesView(QWidget):
         word = "Volume" if group.kind == "volume" else "Chapter"
         container = os.path.relpath(os.path.dirname(group.files[0].path), group.folder)
         where = "" if container == "." else f"  ·  in {container}"
-        title = _label(f"{word} {group.number}  ·  {len(group.files)} files{where}", "heading")
+        overlap = getattr(group, "overlap", "")
+        what = "whole and parts" if overlap else f"{len(group.files)} files"
+        title = _label(f"{word} {group.number}  ·  {what}{where}", "heading")
         title.setContentsMargins(0, 10, 0, 4)
         block.addWidget(title)
+        if overlap:
+            note = _label(group.note, "muted")
+            note.setWordWrap(True)
+            note.setContentsMargins(0, 0, 0, 4)
+            block.addWidget(note)
         keep = default_keep(group)
         known = all(f.path in self._choice for f in group.files)
         remembered = known and not all(self._choice[f.path] for f in group.files)
         rows: List[_FileRow] = []
-        for f in sorted(group.files, key=lambda f: (f.modified, f.size, f.path), reverse=True):
-            tags = [t for t, best in (("newest", newest(group)), ("largest", largest(group))) if best is f]
+        files = group.files if overlap else sorted(group.files, key=lambda f: (f.modified, f.size, f.path), reverse=True)
+        for f in files:
+            if overlap:                                     # whole first, then the parts in order
+                tags = ["whole chapter" if f is group.files[0] else "part"]
+            else:
+                tags = [t for t, best in (("newest", newest(group)), ("largest", largest(group))) if best is f]
             if group.usual_group and (f.group or "").strip().casefold() == group.usual_group.strip().casefold():
                 tags.insert(0, "series' group")
-            discard = self._choice[f.path] if remembered else f.path != keep.path
+            # an overlap keeps every file by default: nothing of it is discarded unless the owner says so
+            discard = self._choice[f.path] if remembered else (False if overlap else f.path != keep.path)
             row = _FileRow(f, os.path.relpath(f.path, group.folder), tags, discard)
             row.chosen.connect(lambda path, discard, g=group: self._chose(g, path, discard))
             block.addWidget(row)
