@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtWidgets import QHeaderView, QMenu, QMessageBox, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
 
 from ..downloads.budget import BudgetState, gb_text
 from ..downloads.contracts import DownloadRecord, DownloadStatus
@@ -152,11 +152,9 @@ class DownloadsList(QWidget):
                              self.btn_finished, self.btn_refresh, self.btn_find_now, self.btn_check, spacing=12))
 
         self.table = flat_table("progressTable", COLUMNS, select_rows=False)
-        resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 240, COL_UPDATED: 110})
-        # the status column takes the room left (its reasons beside the chips), not the dates (owner, 2026-10-18)
-        header = self.table.horizontalHeader()
-        header.setStretchLastSection(False)
-        header.setSectionResizeMode(COL_STATUS, QHeaderView.ResizeMode.Stretch)
+        # the status column starts wide enough for a reason beside its chip (owner, 2026-10-18); every column stays
+        # the owner's to drag (no Stretch column - tests/gui/test_tables.py)
+        resizable_columns(self.table, {COL_SERIES: 200, COL_RELEASE: 360, COL_STATUS: 420, COL_UPDATED: 110})
         self.table.horizontalHeaderItem(COL_UPDATED).setTextAlignment(Qt.AlignmentFlag.AlignRight
                                                                      | Qt.AlignmentFlag.AlignVCenter)
         self.table.verticalHeader().setDefaultSectionSize(34)

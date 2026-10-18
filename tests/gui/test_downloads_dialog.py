@@ -289,5 +289,5 @@ def test_a_long_reason_never_squeezes_the_chip(qapp):
     assert detail.text() == long or detail.text().endswith("\u2026")                     # cut at its end only
     assert detail.text().startswith("the chapter") or detail.text() == "\u2026"
     header = dlg.table.horizontalHeader()
-    assert header.sectionSize(2) > 400 and header.sectionSize(3) == 110       # the reason gets the room, not the date
+    assert header.sectionSize(2) == 420                                       # room for a reason beside the chip
     dlg.close()
