@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.46] - 2026-10-17
+
+The forty-fifth MangaList release (testing build): the log viewer can be closed in the container's web GUI.
+
+- **Closing the log viewer.** In the Docker image's web GUI the log viewer (Settings > Logging > View logs) filled the screen without a title bar, and nothing closed it. It now opens as a normal-sized window with a title bar and its close button, and it has a **Close** button and closes with **Esc** everywhere.
+
 ## [2026.10.45] - 2026-10-17
 
 The forty-fourth MangaList release (testing build): completed torrents are removed again after a rename to the folder scheme.
