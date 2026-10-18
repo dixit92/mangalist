@@ -382,8 +382,9 @@ _TRAILING_PAREN = re.compile(r"^(?P<head>.+?)\s*\((?P<inner>[^()]+)\)\s*$")
 def _after_the_title(name: str, bracket: str, romaji: Optional[str]) -> bool:
     """The folder is the whole romaji title and then this ``[bracket]``: the owner's English, even when it repeats a
     piece of the romaji (owner's ``Long Title ~Subtitle~ [Long Title]``: read as part of the title, the whole folder
-    name was taken for the English and renamed to ``Long Title ~Subtitle~ [(Long Title)]``, 2026-10-18)."""
-    return bool(romaji) and same_title(name.replace(f"[{bracket}]", " "), romaji)
+    name was taken for the English and renamed to ``Long Title ~Subtitle~ [(Long Title)]``, 2026-10-18). A bracket
+    that reads as romaji (``Shishunki na Adam - Evil Eyes [Shishunki na Adam]``) is still a piece of the title."""
+    return (bool(romaji) and not romaji_like(bracket) and same_title(name.replace(f"[{bracket}]", " "), romaji))
 
 
 def _in_title(part: str, romaji: Optional[str]) -> bool:
