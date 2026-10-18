@@ -493,6 +493,12 @@ def _offer_or_send(ctx, report: CheckReport, cand: Candidate, match, lookup, fou
         else:
             _offer(ctx, sid, pick, reason)
             text = f"{pick.title} new {after}: waits ({reason})"
+        # one form per chapter: why a whole chapter stands in, a late part, the other form not taken (owner, 2026-10-18)
+        picked = {r.number for r in rows if r.default in picks}
+        forms = [f"ch {r.number} {r.note}" for r in rows if r.note and r.number in picked]
+        forms += [f"not taken: ch {r.number} ({r.note})" for r in lookup.rows if r.extra and r.note]
+        if forms:
+            text += "; " + "; ".join(forms)
         report.lines.append(f"{name}: {text}")
         _log.info("%s: %s: %s", LABEL, name, text)
     _retire_newer(ctx, sid, keep)

@@ -102,6 +102,16 @@ def test_the_38_case_takes_the_whole_38_as_a_stand_in_with_38_2_and_39_1(parts, 
     assert "ch 38 stands in for the missing part 38.1" in caplog.text
 
 
+def test_the_scheduled_check_says_why_in_its_log_line(parts, db, caplog):
+    caplog.set_level(logging.INFO)
+    parts.suwayomi.chapter_list = listing(*OWNER_SOURCE)
+    check(db, parts, "auto")
+    (line,) = [r.getMessage() for r in caplog.records if "Series W:" in r.getMessage()]
+    assert line == ("Chapter check: Series W: ch. 38, 38.2, 39.1 from MangaDex (EN) (unofficial) new after ch 37.2: "
+                    "Sent ch 38, 38.2, 39.1 to Suwayomi; ch 38 stands in for the missing part 38.1 (the source lists "
+                    "ch 38 from 38.2)")
+
+
 def test_a_source_with_every_part_gives_the_parts_and_not_the_whole(parts):
     parts.suwayomi.chapter_list = listing("37", "37.1", "37.2", "38", "38.1", "38.2")
     lookup = newer(parts)

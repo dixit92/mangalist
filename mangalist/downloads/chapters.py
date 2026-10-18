@@ -387,7 +387,7 @@ def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], gr
         chosen = set(choice.take)
         others = {n: why for n, why in choice.others.items() if n in missing_numbers}
         notes = dict(choice.notes)
-        for n, why in late_parts(per, held_numbers, None).items():
+        for n, why in late_parts(per, held_numbers, max(held_numbers, default=None)).items():
             if n in chosen and n in missing_numbers:
                 notes.setdefault(n, why)
     # a missing chapter the source has only in parts: its parts stand in for it (source_splits)
