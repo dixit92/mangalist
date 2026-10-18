@@ -101,9 +101,9 @@ def test_from_env_uses_the_stored_schedules_and_ignores_a_bad_variable_that_is_o
 
 
 def test_every_schedule_has_its_own_setting_key():
-    assert len({spec.key for spec in SCHEDULES}) == len(SCHEDULES) == 5
+    assert len({spec.key for spec in SCHEDULES}) == len(SCHEDULES) == 6
     assert {spec.job for spec in SCHEDULES} == {"rescan", "mangapixer-sync", "dispatch-batch", "downloads",
-                                                "clean-records"}
+                                                "clean-records", "chapter-check"}
 
 
 # --- the scheduler picks a change up ----------------------------------------------------------------------------
@@ -212,7 +212,7 @@ def test_a_failing_reload_keeps_the_schedules_and_is_reported_once(tmp_path, clo
 def test_build_registry_marks_the_downloads_jobs_as_gated():
     settings = HeadlessSettings.from_env({"MANGALIST_DOWNLOADS": "0"})
     registry = build_registry(settings, provider=type("P", (), {"roots": lambda self: []})())
-    assert [j.gate for j in registry.all()] == [True, True, False, False, True]
+    assert [j.gate for j in registry.all()] == [True, True, False, False, False, True]
 
 
 # --- the Automation section's helpers (no Qt) -------------------------------------------------------------------
@@ -223,7 +223,9 @@ def test_schedule_entries_say_where_each_value_comes_from(db):
     env = {"MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00", "MANGALIST_DOWNLOADS_SCHEDULE": "banana"}
     rules.save_schedule_text(db, "rescan", "12h")
     entries = {e.job: e for e in rules.schedule_entries(db, env)}
-    assert list(entries) == ["rescan", "mangapixer-sync", "downloads", "dispatch-batch", "clean-records"]
+    assert list(entries) == ["rescan", "mangapixer-sync", "downloads", "dispatch-batch", "chapter-check",
+                             "clean-records"]
+    assert entries["chapter-check"].when == "every 6 hours" and entries["chapter-check"].source == "default"
     assert entries["dispatch-batch"].when == "daily 04:30 (and Find now)"
     assert (entries["rescan"].edit_text, entries["rescan"].when, entries["rescan"].source) == \
         ("every 12h", "every 12 hours", "stored")
@@ -241,4 +243,5 @@ def test_schedule_rows_without_a_database_are_the_containers_values():
 
     assert [(w, e) for w, _when, e in rules.schedule_rows({"MANGALIST_RESCAN_SCHEDULE": "off"})] == [
         ("Rescan the library", True), ("Sync with MangaPixer", False), ("File finished downloads", False),
-        (SCHEDULE_BY_JOB["dispatch-batch"].label, False), (SCHEDULE_BY_JOB["clean-records"].label, False)]
+        (SCHEDULE_BY_JOB["dispatch-batch"].label, False), (SCHEDULE_BY_JOB["chapter-check"].label, False),
+        (SCHEDULE_BY_JOB["clean-records"].label, False)]

@@ -33,7 +33,9 @@ find of explicitly selected series - one the owner marked up to date (the List's
 **Findings.** Every pick is recorded (:meth:`FindingStore.offer`); one the owner skipped - or one sent before - is
 never offered or sent again. What a searched series no longer offers is retired (``gone``), and so are the waiting
 findings of a series that left the wanted list (its gap was filled). A sent pick is a finding with status ``sent`` and
-the ledger row, so the owner sees what Auto did.
+the ledger row, so the owner sees what Auto did. The scheduled chapter check's findings (chapters after the newest held,
+:mod:`mangalist.downloads.chapter_check`; ``newer`` in the payload, :func:`is_newer`) name no gap of the wanted list:
+a pass keeps them unless it picks their chapters itself, and they leave once their chapters are held or sent.
 
 **One pass at a time** (nyaa's politeness): a process-wide lock, plus the last run in the database - a run started
 less than :data:`STALE_RUN_HOURS` ago that has not finished means another process is searching. A second pass is
@@ -210,10 +212,16 @@ def retire_filled(db, wanted: "Wanted" = None) -> int:
             missing.setdefault((e.series_id, kind), set()).update(k for k in (_key(v) for v in e.missing) if k is not None)
     retired = 0
     for f in waiting:
-        still = missing.get((f.series_id, f.kind), set())
-        keys = [k for k in (_key(v) for v in f.fills) if k is not None]
-        if not keys or any(k in still or Decimal(int(k)) in still for k in keys):
-            continue
+        if is_newer(f):
+            from .chapter_check import still_new
+
+            if still_new(db, f.series_id, f.fills) != ():
+                continue                # (None: cannot tell - it stays)
+        else:
+            still = missing.get((f.series_id, f.kind), set())
+            keys = [k for k in (_key(v) for v in f.fills) if k is not None]
+            if not keys or any(k in still or Decimal(int(k)) in still for k in keys):
+                continue
         try:
             store.set_status(f.id, GONE, expect=(WAITING,))
         except FindingConflict:
@@ -287,6 +295,11 @@ class _Context:
     qbt_ready: Optional[bool] = None
     partial_on: Optional[bool] = None
     record_hashes: Dict[int, Set[str]] = field(default_factory=dict)
+    label: Optional[str] = None         # the log lines' head (None: "Find pass <run id>"; the chapter check's own)
+
+    @property
+    def who(self) -> str:
+        return self.label or f"Find pass {self.run_id}"
 
 
 def _busy_elsewhere(store: FindingStore) -> bool:
@@ -421,15 +434,17 @@ def _retire_left(ctx: _Context, by_series: Dict[int, list]) -> None:
                 GROUP_CHAPTERS: (KIND_CHAPTERS,)}
     still = {(sid, kind) for sid, group in by_series.items() for e in group for kind in kinds_of.get(e.group, ())}
     for f in ctx.store.list(WAITING):
+        if is_newer(f):
+            continue                    # the chapter check's: not a gap of the wanted list (retire_filled retires it)
         if (f.series_id, f.kind) not in still:
-            ctx.store.retire(f.series_id, f.kind)
+            ctx.store.retire(f.series_id, f.kind, _newer_keys(ctx.store, f.series_id))
             _log.info("Find pass %d: series %s: %s finding %r retired: no longer wanted", ctx.run_id, f.series_id,
                       f.kind, f.title)
 
 
 def _line(ctx: _Context, name: str, text: str) -> None:
     ctx.report.lines.append(f"{name}: {text}")
-    _log.info("Find pass %d: %s: %s", ctx.run_id, name, text)
+    _log.info("%s: %s: %s", ctx.who, name, text)
 
 
 def _waits(ctx: _Context, mode: str, blocker: Optional[str]) -> Optional[str]:
@@ -459,7 +474,7 @@ def _mark_sent(ctx: _Context, sid: int, pick: _Pick, record_id: Optional[int]) -
     try:
         ctx.store.set_status(found.id, SENT, expect=(WAITING,), record_id=record_id)
     except FindingConflict as exc:      # the owner acted on it meanwhile; the download stands
-        _log.info("Find pass %d: finding %s not marked sent: %s", ctx.run_id, found.id, exc)
+        _log.info("%s: finding %s not marked sent: %s", ctx.who, found.id, exc)
     ctx.report.sent += 1
 
 
@@ -640,7 +655,7 @@ def _chapter_client(ctx: _Context):
     ready = getattr(ctx.backend, "suwayomi_ready", None)
     if not callable(ready) or not ready():
         ctx.chapters_off = "Suwayomi is not set up"
-        _log.info("Find pass %d: chapters not searched: Suwayomi is not set up", ctx.run_id)
+        _log.info("%s: chapters not searched: Suwayomi is not set up", ctx.who)
         return None
     try:
         client = ctx.backend._chapter_client()
@@ -650,7 +665,7 @@ def _chapter_client(ctx: _Context):
         ctx.chapters_off = f"Suwayomi did not answer ({type(exc).__name__})"
         ctx.report.errors += 1
         ctx.report.lines.append(f"chapters not searched: {ctx.chapters_off}")
-        _log.warning("Find pass %d: chapters not searched: Suwayomi did not answer: %s: %s", ctx.run_id,
+        _log.warning("%s: chapters not searched: Suwayomi did not answer: %s: %s", ctx.who,
                      type(exc).__name__, exc)
         return None
     ctx.chapter_client = client
@@ -700,7 +715,7 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
         if not _settled(existing, pick.kind, pick.pick_key):
             _offer(ctx, sid, pick, REASON_NO_SOURCE)
             _line(ctx, name, f"{_text(missing, volumes=False)} wait: {REASON_NO_SOURCE}")
-        ctx.store.retire(sid, KIND_CHAPTERS, keep)
+        _retire_chapters(ctx, sid, keep)
         return True
     if match.how == HOW_MANGADEX and stored.get("manga_id") != match.manga.id:
         suwayomi.set_series_choice(sid, source_id=match.source.id, manga_id=match.manga.id,
@@ -717,14 +732,14 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
                   match.manga.id, type(exc).__name__, exc)
         _dropped(ctx, sid, name, match, missing, existing, keep,
                  reason=REASON_SOURCE_GONE.format(source=match.source.display_name))
-        ctx.store.retire(sid, KIND_CHAPTERS, keep)
+        _retire_chapters(ctx, sid, keep)
         return True
     source_name = fetched.source_name or source_name
     if not fetched.chapters:
         # the saved manga lists no chapters at all now (Suwayomi's "No chapters found"): taken down there, or never had any
         _dropped(ctx, sid, name, match, missing, existing, keep, source_name,
                  reason=_empty_reason(ctx, sid, match.source, source_name))
-        ctx.store.retire(sid, KIND_CHAPTERS, keep)
+        _retire_chapters(ctx, sid, keep)
         return True
     numbers = [d for d in (to_decimal(n) for n in missing) if d is not None]
     try:
@@ -756,17 +771,10 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
                      reason=REASON_SOURCE_BEHIND.format(source=source_name, newest=f"ch. {plain(newest)}",
                                                         missing=_text(behind, volumes=False),
                                                         verb="is" if len(behind) == 1 else "are"))
-        ctx.store.retire(sid, KIND_CHAPTERS, keep)
+        _retire_chapters(ctx, sid, keep)
         return True
-    chosen = tuple(_numbers(p.number for p in picks))
-    ids = sorted(int(p.id) for p in picks)
-    group = choice.group or "no group"
     manga_title = fetched.manga.title or match.manga.title
-    pick = _Pick(KIND_CHAPTERS, f"chapters:{match.source.id}:{','.join(str(i) for i in ids)}",
-                 f"{_text(chosen, volumes=False)} from {source_name} ({group})", chosen, None,
-                 {"type": PAYLOAD_SUWAYOMI, "source_id": match.source.id, "source_name": source_name,
-                  "manga_id": int(match.manga.id), "manga_title": manga_title, "manga_url": match.manga.url,
-                  "how": match.how, "chapter_ids": ids, "group": choice.group})
+    pick = chapter_pick(match, picks, choice.group, source_name, manga_title)
     keep.add(pick.pick_key)
     if not _settled(existing, pick.kind, pick.pick_key):
         reason = _waits(ctx, mode, None)
@@ -775,8 +783,42 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
         if reason is not None:
             _offer(ctx, sid, pick, reason)
             _line(ctx, name, f"{pick.title} waits: {reason}")
-    ctx.store.retire(sid, KIND_CHAPTERS, keep)
+    _retire_chapters(ctx, sid, keep, pick.fills)
     return True
+
+
+def chapter_pick(match, picks: Sequence[SuwayomiChapter], group: Optional[str], source_name: str, manga_title: str,
+                 **payload: Any) -> _Pick:
+    """The pick of chapters *picks* from *match*'s source: ``chapters:<source id>:<chapter ids>`` (the same chapters from
+    the same source are the same pick, whoever finds them), with what sending it later needs (*payload*: more of it)."""
+    chosen = tuple(_numbers(p.number for p in picks))
+    ids = sorted(int(p.id) for p in picks)
+    return _Pick(KIND_CHAPTERS, f"chapters:{match.source.id}:{','.join(str(i) for i in ids)}",
+                 f"{_text(chosen, volumes=False)} from {source_name} ({group or 'no group'})", chosen, None,
+                 {"type": PAYLOAD_SUWAYOMI, "source_id": match.source.id, "source_name": source_name,
+                  "manga_id": int(match.manga.id), "manga_title": manga_title, "manga_url": match.manga.url,
+                  "how": match.how, "chapter_ids": ids, "group": group, **payload})
+
+
+def is_newer(finding) -> bool:
+    """A finding of the scheduled chapter check (:mod:`mangalist.downloads.chapter_check`): chapters numbered after the
+    newest one held, which no wanted-list gap names (the metadata has not caught up). Its life is not the wanted
+    list's: it waits until its chapters are held or sent (:func:`retire_filled`), or the next check finds more."""
+    return finding.kind == KIND_CHAPTERS and bool((finding.payload or {}).get("newer"))
+
+
+def _newer_keys(store: FindingStore, sid: int) -> Set[str]:
+    return {f.pick_key for f in store.list(WAITING, sid) if is_newer(f)}
+
+
+def _retire_chapters(ctx: _Context, sid: int, keep: Set[str], chosen: Sequence[str] = ()) -> None:
+    """The series' waiting chapter findings this pass did not find again are gone - except the chapter check's
+    (:func:`is_newer`), which no gap names, unless this pass picked one of its chapters (*chosen*): the gap's pick
+    stands for them now (the same chapters from the same source are the same pick key anyway)."""
+    taken = {_key(v) for v in chosen}
+    newer = {f.pick_key for f in ctx.store.list(WAITING, sid)
+             if is_newer(f) and not any(_key(v) in taken for v in f.fills)}
+    ctx.store.retire(sid, KIND_CHAPTERS, set(keep) | newer)
 
 
 def _queued_numbers(ctx: _Context, client, chapters: Sequence[SuwayomiChapter], numbers: Sequence[Decimal]) -> Set[str]:
@@ -789,7 +831,7 @@ def _queued_numbers(ctx: _Context, client, chapters: Sequence[SuwayomiChapter], 
         return {str(by_id[q.chapter_id].number) for q in client.queue()
                 if q.chapter_id in by_id and to_decimal(by_id[q.chapter_id].number) in wanted}
     except Exception:  # noqa: BLE001 - a courtesy check, as in the chapters panel
-        _log.info("Find pass %d: Suwayomi's download queue could not be read", ctx.run_id)
+        _log.info("%s: Suwayomi's download queue could not be read", ctx.who)
         return set()
 
 
@@ -823,7 +865,9 @@ def _dropped(ctx: _Context, sid: int, name: str, match, missing: Tuple[str, ...]
 
 
 def _send_chapters(ctx: _Context, sid: int, name: str, pick: _Pick, match, picks: Sequence[SuwayomiChapter],
-                   manga_title: str, source_name: str) -> Optional[str]:
+                   manga_title: str, source_name: str, said: Optional[List[str]] = None) -> Optional[str]:
+    """Send an Auto pick of chapters. Returns None when it went out, else why it waits. What was sent is logged as the
+    series' line - or added to *said* for the caller's own line (the chapter check's)."""
     from .chapters import ChapterSendRefused, chapter_placement_for, send_chapters
 
     try:
@@ -847,7 +891,10 @@ def _send_chapters(ctx: _Context, sid: int, name: str, pick: _Pick, match, picks
             return f"Suwayomi did not take the download: {outcome.error}"
         return outcome.text()
     _mark_sent(ctx, sid, pick, sent[0].id)
-    _line(ctx, name, outcome.text())
+    if said is None:
+        _line(ctx, name, outcome.text())
+    else:
+        said.append(outcome.text())
     return None
 
 
@@ -857,6 +904,11 @@ def _still_missing(db, finding, wanted: Wanted) -> Optional[Set[Decimal]]:
     """What of the series' gap of this kind is still missing, per the wanted list now (None: cannot tell)."""
     from .placement import locate_series
 
+    if is_newer(finding):
+        from .chapter_check import still_new
+
+        new = still_new(db, finding.series_id, finding.fills)
+        return None if new is None else {_key(v) for v in new}
     try:
         _series, root, _dir = locate_series(db, finding.series_id)
         entries = load_wanted(db, wanted, root_ids=[root.id])

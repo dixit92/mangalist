@@ -409,7 +409,8 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 # the container's variables only seed them (see mangalist/headless/settings.py). ``dispatch-batch`` is the find pass of
 # automatic downloads (2026-10-10, :mod:`mangalist.downloads.finding`; default daily 04:30) - the headless runner names
 # its label. ``clean-records`` clears finished download records (2026-10-15; Weekly until chosen, 2026-10-16).
-SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads", "dispatch-batch", "clean-records")
+# ``chapter-check`` asks the saved sources for chapters newer than the newest held (2026-10-18; every 6 hours).
+SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads", "dispatch-batch", "chapter-check", "clean-records")
 
 #: The choices each schedule offers (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6
 #: hours"), plus Off. Filing finished downloads also keeps Every hour - its default; without it filing could not run
