@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
         # MangaPixer source: a folder MangaPixer knows takes its knowledge from the export; the others
         # fall back to the own matcher (knowledge_for returns None).
         self._mp_resolver = None
-        self._mp_items: dict = {}   # folder -> the resolved MangaPixer item (or None), per scan
+        self._mp_items: dict = {}   # folder -> its MangaPixer resolution (or None), per scan
         self._mp_roots: dict = {}   # root id -> (stored path, resolved path), read once per resolver
         self._mp_roots_of = None    # ... the resolver they were read for
         self._unbundled = UnbundledFolders(self._db)     # the per-series Unbundled Chapters setting
@@ -1462,15 +1462,17 @@ class MainWindow(QMainWindow):
 
     def _mp_item_for(self, entry: MangaEntry):
         """The MangaPixer export item that applies to *entry*'s folder (its own or an ancestor's), or
-        None; resolved once per scan / sync (:func:`mangalist.wanted.mangapixer_item`)."""
+        None; resolved once per scan / sync (:func:`mangalist.wanted.mangapixer_item`). The resolution is cached, the
+        entry's own confirmed link is read at each call (:func:`mangalist.wanted.item_of`: confirming a spin-off's
+        own match takes it off its parent's inherited item at once - owner, 2026-10-18)."""
         key = str(entry.folder)
         # Also called from the states' worker thread: the cache and the resolver are taken once, in this order (a
         # reset - a scan, a MangaPixer sync - replaces the resolver first, then the cache), so an item read with an old
         # resolver only ever lands in the old cache.
         items = self._mp_items
         if key in items:
-            return items[key]
-        item = None
+            return wanted.item_of(items[key], entry)
+        res = None
         if entry.root_id is not None:
             try:
                 resolver = self._mp_resolver
@@ -1482,12 +1484,12 @@ class MainWindow(QMainWindow):
                     self._mp_roots_of = resolver
                 root = roots.get(entry.root_id)
                 if root is not None:
-                    item = wanted.mangapixer_item(resolver, entry.root_id, root[0], entry.folder,
-                                                  resolved_root=root[1])
+                    res = wanted.mangapixer_resolution(resolver, entry.root_id, root[0], entry.folder,
+                                                       resolved_root=root[1])
             except Exception:  # noqa: BLE001 - a broken MangaPixer cache must not break the table
                 _log.warning("MangaPixer data for %s unavailable", entry.folder, exc_info=True)
-        items[key] = item
-        return item
+        items[key] = res
+        return wanted.item_of(res, entry)
 
     def _knowledge_for(self, entry: MangaEntry):
         """MangaPixer's knowledge for *entry* when its folder (or an ancestor) has an exported link,
@@ -2019,7 +2021,8 @@ class MainWindow(QMainWindow):
             _log.warning("Reading which folders MangaPixer knows failed: %s", message)
             known_now(set())
 
-        self._background(lambda: wanted.mangapixer_known(db, unresolved), known_now, failed, None)
+        own = {str(e.folder): e for e in entries}
+        self._background(lambda: wanted.mangapixer_known(db, unresolved, own), known_now, failed, None)
 
     def _run_mu_lookup(self, entries: List[MangaEntry], known_folders: set) -> None:
         """The MangaUpdates worker for *entries*, but the folders MangaPixer knows (*known_folders*, plus those the
@@ -2028,7 +2031,9 @@ class MainWindow(QMainWindow):
         # fetches nothing itself - their knowledge comes from the MangaPixer export.
         def known(e: MangaEntry) -> bool:
             key = str(e.folder)
-            return self._mp_items[key] is not None if key in self._mp_items else key in known_folders
+            if key in self._mp_items:
+                return wanted.item_of(self._mp_items[key], e) is not None
+            return key in known_folders
 
         skipped = [e for e in entries if known(e)]
         if skipped:

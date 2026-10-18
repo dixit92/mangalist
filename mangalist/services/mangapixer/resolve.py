@@ -40,6 +40,12 @@ MangaList's own matcher. CollectionAbout (a folder of works about a series) and 
 know are "not a series" like DontMatch (MangaPixer's docs, Versioning): the nearest item wins, so a folder
 below such a row resolves to it and never inherits a series link from further up.
 
+**A folder's own confirmed link beats an inherited item** (:func:`own_link_wins`; owner, 2026-10-18): a series folder
+nested in another series' folder (a spin-off kept inside its parent's) whose own MangaUpdates link the owner confirmed in
+MangaList, to another record, is that record - not the parent's item it would inherit. The callers that read an item for
+a series (:func:`mangalist.wanted.mangapixer_item`, the upgrades' volume lists) apply it; the resolution itself is
+MangaPixer's, unchanged.
+
 Archive items are never in the cache (series only), so they never take part. No Qt here.
 """
 
@@ -146,9 +152,31 @@ class Resolver:
         return {rel: self.resolve(root_id, rel) for rel in rel_paths}
 
 
+def own_link_wins(res: Optional[Resolution], own: Any) -> bool:
+    """True when *res* - an INHERITED item - does not apply to the folder because the folder has its own MangaUpdates
+    link the owner confirmed in MangaList to another record (*own*: anything with ``mu_id`` and ``mu_confirmed``, a
+    :class:`~mangalist.models.MangaEntry` with its links applied or a ``series`` row).
+
+    Owner, 2026-10-18: the spin-off ``Railgun/Railgun Gaiden - Astral Buddy`` (its own link confirmed: 4 volumes)
+    inherited the parent folder's MangaPixer item, so it read the parent's 20 volumes and names; the find pass wanted
+    its volumes 5-20, searched the parent's names and sent the parent's pack into the spin-off's folder. The folder's
+    own item (not inherited) always wins, as before; an automatic own match never beats MangaPixer's item; a link to
+    the inherited record itself keeps the item (its volume list)."""
+    if res is None or not res.inherited or own is None:
+        return False
+    mu_id = getattr(own, "mu_id", None)
+    if mu_id is None or str(mu_id).strip() == "" or not getattr(own, "mu_confirmed", False):
+        return False
+    record = res.record
+    if isinstance(record, dict) and record.get("provider") == "mangaupdates" \
+            and str(record.get("externalId") or "").strip() == str(mu_id).strip():
+        return False
+    return True
+
+
 def resolve(cache: MangaPixerCache, root_id: int, rel_path: str) -> Optional[Resolution]:
     """The effective MangaPixer item of one MangaList series folder (see the module docstring)."""
     return Resolver(cache).resolve(root_id, rel_path)
 
 
-__all__: List[str] = ["Resolution", "Resolver", "LibraryIndex", "resolve", "LINK_STATES"]
+__all__: List[str] = ["Resolution", "Resolver", "LibraryIndex", "resolve", "own_link_wins", "LINK_STATES"]

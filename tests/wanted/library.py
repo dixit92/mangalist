@@ -33,6 +33,10 @@ MANGA: Dict[str, List[str]] = {
     "Empty Unknown": [],                                                               # empty, nothing known
     "Parent Series": ["Parent Series v01.cbz", "Spin-off Story/Spin-off Story v01.cbz"],
     "Not A Series": ["Not A Series v01.cbz"],                                          # MangaPixer: Don't match
+    # A spin-off nested in its parent's folder whose OWN MangaUpdates link the owner confirmed (owner, 2026-10-18):
+    # it must not take the parent's MangaPixer item (the parent's volumes, its names).
+    "Main Saga": ["Main Saga v01.cbz", "Main Saga v02.cbz", "Main Saga v03.cbz",
+                  "Main Saga Gaiden - Side Buddy/Main Saga Gaiden - Side Buddy v01.cbz"],
 }
 MANHWA: Dict[str, List[str]] = {
     "Own Manhwa": [f"Own Manhwa c{n:03d}.cbz" for n in range(1, 11)],                  # own matcher, chapters
@@ -60,6 +64,8 @@ def _items() -> List[dict]:
         item(nodeId="n12", trail=["Not A Series"], link={"state": "DontMatch", "method": None, "score": None,
                                                           "updatedAt": "2026-09-28T12:00:00.000Z"},
              record=None, volumes=None, completion=None),
+        item(nodeId="n13", trail=["Main Saga"], record__externalId="90000000013", record__title="Main Saga",
+             record__altTitles=["Main Saga: English Name"]),
     ]
     return out
 
@@ -121,6 +127,9 @@ def build_library(base: Path, db: Optional[store.Store] = None) -> Library:
                         publisher_status="Ongoing")
     mu_cache.save_entry(Path(folders["Manga/Behind Done"]), 9002, "Behind Done", "https://mu.example/s/9002",
                         licensed=True, mu_confirmed=True, behind_override="done")
+    mu_cache.save_entry(Path(folders["Manga/Main Saga/Main Saga Gaiden - Side Buddy"]), 9004,
+                        "Main Saga Gaiden: Side Body", "https://mu.example/s/9004", licensed=True, mu_confirmed=True,
+                        publisher_name="Example Books", publisher_volumes=1.0, publisher_status="Completed")
     mu_cache.save_entry(Path(folders["Manhwa/Own Manhwa"]), 9003, "Own Manhwa", "https://mu.example/s/9003",
                         licensed=False, mu_confirmed=True, scan_latest_chapter=14.0)
     result = scan(db, db.list_roots())
