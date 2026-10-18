@@ -9,7 +9,10 @@ table, footer and status line; the same chips and In progress rows once sent.
   the series. "Refresh from source" asks Suwayomi again.
 - **The table**: one row per missing chapter - ticked by default when the source has it; the group it comes from (a
   choice when more than one group has it); the chapter's title as the source names it. A chapter already sent shows
-  how it stands and cannot be sent again; a chapter the source does not have says so.
+  how it stands and cannot be sent again; a chapter the source does not have says so. One form per chapter (owner,
+  2026-10-18; :mod:`mangalist.downloads.chapter_forms`): a chapter the source lists whole and in parts is ticked in the
+  series' form, the status saying why when it needs a word (a whole standing in for a missing part, a late part); the
+  other form is an unticked row saying why it is not taken.
 - **The group** above the table: the series' group (the owner's choice for the series, else the folder's usual group,
   else the group with the most chapters) and why; changing it re-picks every row and is remembered for the series.
 - A line says when chapters of the series are already in Suwayomi's download queue.
@@ -478,8 +481,12 @@ class ChaptersPanel(QWidget):
             return download_chip(row.in_hand)[0]
         if not row.available:
             return f"not on {self.lookup.source_name}" if self.lookup else "not available"
+        note = getattr(row, "note", "")
         if row.extra:
-            return "extra - not counted as missing"
+            # the other form of a chapter (owner, 2026-10-18: "one form per chapter") says why it is not taken
+            return f"not taken: {note}" if note else "extra - not counted as missing"
+        if note:
+            return note
         part_of = getattr(row, "part_of", None)
         return f"part of ch {part_of} (the source splits it)" if part_of else ""
 

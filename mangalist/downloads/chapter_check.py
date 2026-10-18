@@ -24,7 +24,10 @@ chapters panel, by hand) got ahead of the metadata. This is that check on a sche
 (one fetch per series, serially, :data:`DEFAULT_PAUSE` apart), every chapter numbered after the newest chapter held -
 a part ``N.2`` after a held ``N.1`` counts (MAL-Sync parity) - extras never, from the saved source only (sources number
 differently: one site's "38" is another's "38.1") and from the group the usual default picks; chapters already sent or
-filed, or in Suwayomi's queue, are left out.
+filed, or in Suwayomi's queue, are left out. One form per chapter (:mod:`~.chapter_forms`; owner, 2026-10-18): a chapter
+the source lists whole and in parts comes in the form the series holds (the whole as a stand-in when the source's parts
+do not start at ``.1``), and a late part (``38.1`` listed after ``38.2`` was filed) is new although it is numbered below
+the newest held chapter.
 
 **The outcome is the find pass's**: Auto sends through the same chapter send (its guards apply: a chapter already sent,
 or already on its way for another folder, is skipped); Notify leaves a finding waiting in Found - the find pass's
@@ -229,15 +232,18 @@ def _key(number: Any) -> Optional[Decimal]:
 
 
 def still_new(db, series_id: int, fills: Sequence[str]) -> Optional[Tuple[str, ...]]:
-    """The chapters of *fills* (a newer-chapter finding's) still wanted: numbered after the newest chapter held and not
-    sent, on their way or filed by a chapter download. None when it cannot be told (the series is gone, its newest
-    chapter is unknown) - the finding is then left as it is."""
+    """The chapters of *fills* (a newer-chapter finding's) still wanted: numbered after the newest chapter held (or a
+    late part, :func:`~.chapter_forms.is_late_part`), not held and not sent, on their way or filed by a chapter
+    download. None when it cannot be told (the series is gone, its newest chapter is unknown) - the finding is then
+    left as it is."""
     from ..store.downloads import DownloadLedger
-    from .chapters import newest_held_chapter
+    from .chapter_forms import is_late_part
+    from .chapters import held_chapter_groups, newest_held_chapter
     from .contracts import TOOL_SUWAYOMI
 
     try:
         newest, why = newest_held_chapter(db, series_id)
+        held = set(held_chapter_groups(db, series_id))
     except LookupError:
         return None
     if newest is None and why and why != "no file of this series states a chapter number":
@@ -250,7 +256,9 @@ def still_new(db, series_id: int, fills: Sequence[str]) -> Optional[Tuple[str, .
     out = []
     for v in fills:
         k = _key(v)
-        if k is not None and (newest is None or k > newest) and k not in in_hand:
+        if k is None or k in in_hand or k in held:
+            continue
+        if newest is None or k > newest or is_late_part(k, held):      # a late part (38.1 after 38.2) stays new
             out.append(v)
     return tuple(out)
 
