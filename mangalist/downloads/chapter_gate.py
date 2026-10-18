@@ -24,7 +24,8 @@ c) else (no MangaDex id, the request failed, the id missing from the answer) it 
 **Skipped only when nothing changed** (:meth:`Gate.unchanged`): the latest upload is known and the same as the one kept
 at the series' last successful check, for the same Suwayomi manga and MangaDex manga, AND MangaList's own side of the
 series is the same too (:func:`local_state`: the newest chapter held, the chapters on their way or filed, the waiting
-chapter findings - a send that failed, a file deleted or a finding the owner skipped makes the next check fetch), AND
+chapter findings - a download that failed, a file deleted or a finding the owner skipped makes the next check fetch the
+series, as it would without the gate), AND
 that check is younger than :data:`REFETCH_AFTER` (about a day: a chapter MangaDex lists later than it counts it as
 uploaded - a group's publish delay - is still found within a day). Everything else is fetched: changed, unknown, first
 time. **The value is kept only after the series' check succeeded** (:meth:`Gate.record`; the source was read and every
@@ -158,7 +159,7 @@ def forget(db, series_id: int) -> None:
 def local_state(db, backend: Any, store: Any, series_id: int) -> str:
     """MangaList's own side of a series, as a short fingerprint: the newest chapter held, the chapters on their way or
     filed (the chapter ledger), the waiting chapter findings. A change makes the next check fetch the series even when
-    MangaDex shows nothing new (a send that failed is offered again, a skipped finding is not)."""
+    MangaDex shows nothing new, so what the check would do without the gate it still does."""
     from ..store.findings import WAITING
     from .chapters import newest_held_chapter
 
