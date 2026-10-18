@@ -109,10 +109,11 @@ def test_the_job_runs_a_check_and_reports_its_summary(w, caplog):
     FindingStore(w.backend.db).set_mode([w.series_id], "auto")
     result = job(w)(JobContext())
     assert result.status == "ok"
-    assert result.message == "1 series checked, 1 with new chapters: 1 sent, 0 waiting"
+    assert result.message == ("1 series checked (1 fetched, 0 unchanged on MangaDex), 1 with new chapters: 1 sent, "
+                              "0 waiting; MangaDex latest uploads: from MangaPixer 0, own requests 0")
     assert result.extra["sent"] == 1 and result.extra["series_checked"] == 1
     assert "Chapter check: Series C: ch. 5 from MangaDex (EN) (Alpha Scans) new after ch 4: Sent ch 5" in caplog.text
-    assert "Chapter check: 1 series checked, 1 with new chapters: 1 sent, 0 waiting" in caplog.text
+    assert "Chapter check: 1 series checked (1 fetched, 0 unchanged on MangaDex), 1 with new chapters" in caplog.text
 
 
 def test_the_job_does_not_hold_the_nyaa_lock(w):

@@ -39,9 +39,23 @@ find pass. A check runs alone (its own lock, :class:`CheckBusy` otherwise) and n
 another MangaList on the same database (:class:`CheckBusy`: it runs again at its next time); sends are made safe against
 a find pass in another process by the ledger (the in-hand check and the record are one transaction).
 
+**Fewer requests** (owner-approved 2026-10-18, "Shared Chapter Signal"; lane GT):
+
+- every fetch asks the source for the chapter list only (:meth:`mangalist.services.suwayomi.SuwayomiClient.chapters`,
+  ``fetchManga: false``): one request to the source per series instead of two;
+- **the MangaDex gate** (:mod:`mangalist.downloads.chapter_gate`): a MangaDex-sourced series whose latest upload on
+  MangaDex (MangaPixer's ``companions.mangadexLatestUpload`` when fresh, else MangaList's own request for 100 series at
+  a time) is the one its last successful check saw, and whose own side did not change, is not fetched. Changed,
+  unknown or first time: fetched; the value is kept only after the series' check succeeded. Other sources are fetched
+  every run, and the manual "Check for new chapters" is never gated;
+- **a sync first**: the job (:mod:`mangalist.headless.chapter_check_job`) passes *sync* - an incremental MangaPixer
+  sync when MangaPixer is connected (:func:`sync_mangapixer`; local network only), so MangaPixer's value is fresh. A
+  sync that fails is logged and the check goes on with what is stored.
+
 **Logging**: one INFO line per series with something new (what, from which source, sent or waiting and why), the
-nothing-new series at DEBUG, and a summary (:attr:`CheckReport.summary`) - the runner's line reads ``chapter-check: ok in
-N s - N series checked, N with new chapters: N sent, N waiting``.
+nothing-new series and the ones skipped as unchanged on MangaDex at DEBUG, and a summary (:attr:`CheckReport.summary`)
+- the runner's line reads ``chapter-check: ok in N s - N series checked (N fetched, N unchanged on MangaDex), N with new
+chapters: N sent, N waiting; MangaDex latest uploads: from MangaPixer N, own requests N``.
 """
 
 from __future__ import annotations
@@ -52,6 +66,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..store.findings import GONE, MODE_OFF, WAITING, FindingConflict, FindingStore
@@ -101,7 +116,12 @@ class CheckReport:
     """What one check did."""
 
     selected: int = 0                   # series selected (before the source was asked)
-    series_checked: int = 0             # series whose source was asked
+    series_checked: int = 0             # series checked: fetched + unchanged on MangaDex
+    fetched: int = 0                    # ... whose source was asked
+    unchanged: int = 0                  # ... not fetched: nothing changed on MangaDex since their last check (the gate)
+    from_mangapixer: int = 0            # series whose MangaDex latest upload came from MangaPixer
+    own_requests: int = 0               # requests MangaList sent to MangaDex itself (100 series each)
+    synced: Optional[str] = None        # how the MangaPixer sync before the check went (None: none ran)
     with_new: int = 0                   # ... that have chapters newer than the newest held (not skipped before)
     sent: int = 0                       # picks sent (Auto)
     waiting: int = 0                    # findings waiting for the owner
@@ -116,15 +136,16 @@ class CheckReport:
     def summary(self) -> str:
         if self.not_checked:
             return f"nothing checked: {self.not_checked}"
-        text = (f"{self.series_checked} series checked, {self.with_new} with new chapters: {self.sent} sent, "
-                f"{self.waiting} waiting")
+        text = (f"{self.series_checked} series checked ({self.fetched} fetched, {self.unchanged} unchanged on "
+                f"MangaDex), {self.with_new} with new chapters: {self.sent} sent, {self.waiting} waiting")
         if self.unreadable:
             text += f", {self.unreadable} could not be read"
         if self.errors:
             text += f", {self.errors} failed"
         if self.stopped:
             text += f" (stopped after {self.series_checked} of {self.selected})"
-        return text
+        return (f"{text}; MangaDex latest uploads: from MangaPixer {self.from_mangapixer}, "
+                f"own requests {self.own_requests}")
 
 
 # --- which series ------------------------------------------------------------------------------------------------
@@ -249,12 +270,35 @@ def _wait(seconds: float, should_stop: Callable[[], bool], sleep: Callable[[floa
         sleep(min(left, 0.25))
 
 
+def sync_mangapixer(db, should_stop: Optional[Callable[[], bool]] = None) -> str:
+    """An incremental MangaPixer sync before the check, when MangaPixer is connected (an address and a token, not
+    refused): the scheduled sync's own :func:`~mangalist.services.mangapixer.sync.sync_all` (``manual=False``), which
+    takes no lock of its own - the runner runs its jobs one at a time. How it went, for the log."""
+    from ..services.mangapixer import open_cache
+    from ..services.mangapixer.sync import sync_all
+
+    cache = open_cache(db)
+    conn = cache.connection()
+    if not conn.base_url or not conn.has_token:
+        return "MangaPixer is not connected"
+    if conn.token_rejected_at:
+        return "MangaPixer refused the token (no automatic retry)"
+    result = sync_all(cache, manual=False, should_stop=should_stop)
+    return f"{result.status}: {result.message}"
+
+
 def run_chapter_check(db, *, backend: Any = None, views: Optional[Callable[[Any], Sequence[Any]]] = None,
                       should_stop: Optional[Callable[[], bool]] = None, pause: float = DEFAULT_PAUSE,
-                      sleep: Callable[[float], None] = time.sleep) -> CheckReport:
+                      sleep: Callable[[float], None] = time.sleep, sync: Optional[Callable[[], str]] = None,
+                      mangadex: Any = None, interval: Optional[timedelta] = None,
+                      now: Optional[datetime] = None) -> CheckReport:
     """One check (see the module docstring). *backend*: the :class:`~mangalist.downloads.adapter.Backend` whose Suwayomi
     and chapter ledger it uses (default: a new one over *db*). *should_stop*: asked between series and during the
-    pause between them. Raises :class:`CheckBusy` while another check or a find pass runs."""
+    pause between them. *sync*: run first (the job's MangaPixer sync, :func:`sync_mangapixer`); its failure is logged
+    and the check goes on. *mangadex*: the MangaDex client of the gate's own request (default
+    :func:`~mangalist.downloads.chapter_gate.default_client`); *interval*: the check's interval (MangaPixer's latest
+    upload must be younger; default 6 h); *now*: for tests. Raises :class:`CheckBusy` while another check or a find
+    pass runs."""
     from . import finder
 
     if not _CHECK.acquire(blocking=False):
@@ -269,20 +313,45 @@ def run_chapter_check(db, *, backend: Any = None, views: Optional[Callable[[Any]
             backend = Backend(db)
         report = CheckReport()
         started = time.monotonic()
+        if sync is not None:
+            try:
+                report.synced = sync()
+            except Exception as exc:  # noqa: BLE001 - the check goes on with what is stored
+                report.synced = f"failed ({type(exc).__name__})"
+                _log.warning("%s: the MangaPixer sync before the check failed (%s: %s); checking with what is stored",
+                             LABEL, type(exc).__name__, exc)
+            else:
+                _log.info("%s: MangaPixer sync before the check: %s", LABEL, report.synced)
         selection = select_series(db, views=views)
         report.selected, report.skipped = len(selection.series), selection.skipped
         _log.info("%s started: %d series to ask%s", LABEL, len(selection.series),
                   f" (not asked: {selection.skipped_text()})" if selection.skipped else "")
         if selection.series:
-            _check(db, backend, report, selection.series, should_stop, pause, sleep)
+            _check(db, backend, report, selection.series, should_stop, pause, sleep,
+                   gate_args={"client": mangadex, "interval": interval, "now": now})
         _log.info("%s: %s (%.0f s)", LABEL, report.summary, time.monotonic() - started)
         return report
     finally:
         _CHECK.release()
 
 
+def _gate(db, ctx, series: Sequence[Candidate], should_stop: Callable[[], bool], report: CheckReport, **kw):
+    """The MangaDex gate of this check, or one that skips nothing when it cannot be prepared (the gate only ever
+    saves requests: a failure here costs fetches, never a chapter)."""
+    from .chapter_gate import Gate
+
+    try:
+        gate = Gate.prepare(db, series, ctx.sources or [], should_stop=should_stop, **kw)
+    except Exception as exc:  # noqa: BLE001 - every series is fetched, as before the gate
+        _log.warning("%s: the MangaDex gate could not be prepared (%s: %s); every series is fetched", LABEL,
+                     type(exc).__name__, exc)
+        return Gate.off(db)
+    report.from_mangapixer, report.own_requests = gate.from_mangapixer, gate.own_requests
+    return gate
+
+
 def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should_stop: Callable[[], bool],
-           pause: float, sleep: Callable[[float], None]) -> None:
+           pause: float, sleep: Callable[[float], None], gate_args: Optional[Dict[str, Any]] = None) -> None:
     from .finder import _chapter_client, _close, _Context
     from .finding import FindReport, TRIGGER_SCHEDULE
 
@@ -300,6 +369,7 @@ def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should
         except Exception:  # noqa: BLE001 - a courtesy check, as in the chapters panel; the ledger guards the sends
             _log.info("%s: Suwayomi's download queue could not be read", LABEL)
             queue = []
+        gate = _gate(db, ctx, series, should_stop, report, **(gate_args or {}))
         for i, cand in enumerate(series):
             if i and pause > 0:
                 _wait(pause, should_stop, sleep)
@@ -308,7 +378,7 @@ def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should
                 _log.info("%s: asked to stop; %d series wait for the next check", LABEL, len(series) - i)
                 break
             try:
-                _check_one(ctx, report, cand, queue)
+                _check_one(ctx, report, cand, queue, gate)
             except _Stop:
                 report.lines.append("Suwayomi stopped answering; the rest waits for the next check")
                 break
@@ -318,9 +388,12 @@ def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should
         _close(ctx.chapter_client)
 
 
-def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any]) -> None:
+def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], gate: Any = None) -> None:
+    from .chapter_gate import Gate, local_state
     from .chapters import HOW_MANGADEX, find_manga, newer_lookup, newer_text
     from .finder import _line, _suwayomi_up
+
+    gate = gate if gate is not None else Gate.off(ctx.db)
 
     sid, name = cand.series_id, cand.name
     suwayomi = ctx.backend.suwayomi
@@ -345,6 +418,14 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any]) 
         suwayomi.set_series_choice(sid, source_id=match.source.id, manga_id=match.manga.id,
                                    manga_title=match.manga.title, how=HOW_MANGADEX)
     report.series_checked += 1
+    if sid in gate.planned and match.source.is_mangadex:
+        same = gate.unchanged(sid, match, local_state(ctx.db, ctx.backend, ctx.store, sid))
+        if same is not None:
+            report.unchanged += 1
+            _log.debug("%s: %s: not fetched: unchanged on MangaDex since its last check (latest upload %s, from %s)",
+                       LABEL, name, same.chapter or "none", same.origin)
+            return
+    report.fetched += 1
     try:
         lookup = newer_lookup(ctx.chapter_client, ctx.db, series_id=sid, match=match,
                               held=ctx.backend._held_groups(sid), stored_group=stored.get("group"),
@@ -358,7 +439,13 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any]) 
         _log.info("%s: %s: %s manga %s could not be read (%s: %s); next time", LABEL, name,
                   match.source.display_name, match.manga.id, type(exc).__name__, exc)
         return
+    errors = ctx.report.errors
     _offer_or_send(ctx, report, cand, match, lookup, newer_text(lookup))
+    if ctx.report.errors == errors:     # the series' check succeeded: what MangaDex said before it is kept
+        try:
+            gate.record(sid, match, lookup.manga_url, local_state(ctx.db, ctx.backend, ctx.store, sid))
+        except Exception:  # noqa: BLE001 - not kept: the next check fetches the series
+            _log.debug("%s: %s: the MangaDex gate's value could not be kept", LABEL, name, exc_info=True)
 
 
 def _offer_or_send(ctx, report: CheckReport, cand: Candidate, match, lookup, found_text: str) -> None:
@@ -415,4 +502,4 @@ def _retire_newer(ctx, sid: int, keep: Set[str]) -> None:
 
 
 __all__ = ["CheckBusy", "CheckReport", "Candidate", "DEFAULT_PAUSE", "Selection", "run_chapter_check",
-           "select_series", "still_new"]
+           "select_series", "still_new", "sync_mangapixer"]

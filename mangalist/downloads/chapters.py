@@ -39,7 +39,7 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .contracts import (
     ChapterClient,
@@ -451,8 +451,8 @@ def mangadex_released_for(db, series_id: int) -> Optional[Tuple[str, int]]:
     return (released.language, released.chapters) if released is not None else None
 
 
-def mangadex_id_for(db, series_id: int) -> Optional[str]:
-    """The MangaDex id MangaPixer links to the series' own folder (its Confirmed / Auto item), else None."""
+def linked_item(db, series_id: int) -> Optional[Mapping[str, Any]]:
+    """The MangaPixer export item linked to the series' own folder (Confirmed / Auto, not inherited), else None."""
     from ..services.mangapixer import open_cache
     from ..services.mangapixer.resolve import resolve
     from .placement import locate_series
@@ -465,9 +465,25 @@ def mangadex_id_for(db, series_id: int) -> Optional[str]:
         return None
     if res is None or res.inherited or res.link_state not in ("Confirmed", "Auto"):
         return None
-    companions = res.item.get("companions") if isinstance(res.item.get("companions"), Mapping) else {}
-    value = companions.get("mangadex")
+    return res.item if isinstance(res.item, Mapping) else None
+
+
+def mangadex_id_of(item: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """``companions.mangadex`` of a MangaPixer export item (a MangaDex manga uuid, lower case), else None."""
+    companions = item.get("companions") if isinstance(item, Mapping) else None
+    value = companions.get("mangadex") if isinstance(companions, Mapping) else None
     return value.strip().lower() if isinstance(value, str) and _UUID.fullmatch(value.strip()) else None
+
+
+def mangadex_id_for(db, series_id: int) -> Optional[str]:
+    """The MangaDex id MangaPixer links to the series' own folder (its Confirmed / Auto item), else None."""
+    return mangadex_id_of(linked_item(db, series_id))
+
+
+def mangadex_id_in_url(url: Optional[str]) -> Optional[str]:
+    """The MangaDex manga uuid in a MangaDex source's manga url (Suwayomi's MangaDex extension: ``/manga/<uuid>``)."""
+    found = _UUID.search(str(url or ""))
+    return found.group(0).lower() if found else None
 
 
 def find_manga(client: ChapterClient, sources: Sequence[SuwayomiSource], *, mangadex_id: Optional[str],
@@ -530,6 +546,7 @@ class ChapterLookup:
     candidates: List[MangaMatch] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     manga_title: str = ""                           # as Suwayomi fetched it (its download folder's name)
+    manga_url: str = ""                             # the manga's url on its source (MangaDex: ``/manga/<uuid>``)
     source_name: str = ""                           # the source's display name (its download folder's name)
     rows: List[ChapterRow] = field(default_factory=list)
     group: GroupChoice = GroupChoice(None, "")
@@ -577,6 +594,7 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
         _log.info("Chapters: Suwayomi's download queue could not be read", exc_info=True)
     return ChapterLookup(series_id=series_id, missing=tuple(missing), match=match,
                          manga_title=fetched.manga.title or match.manga.title,
+                         manga_url=fetched.manga.url or match.manga.url,
                          source_name=fetched.source_name or match.source.display_name, rows=rows, group=choice,
                          groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters)
 
