@@ -30,7 +30,7 @@ from ..classifier import _human
 from ..parsing import Kind, ParseContext, parse_name
 from ..parsing.model import plain
 from ..scanner import ARCHIVE_EXTS
-from .arrivals import volumes_of
+from .arrivals import release_hint, volumes_of
 from .contracts import NyaaCandidate, TorrentFile
 
 _log = logging.getLogger(__name__)
@@ -144,8 +144,12 @@ CHAPTERS_ONLY = "its files are chapters, not volumes"
 def hint_for(candidate: NyaaCandidate) -> Optional[str]:
     """The kind hint arrivals reads the torrent's names with: a release whose title states volumes holds volumes. Bare
     numbers ("001-051") state nothing: read with that hint, chapter 3 of a chapter pack passed for volume 3 (owner,
-    2026-10-13)."""
-    return "volumes" if candidate.vol_from and not getattr(candidate, "numbers_only", False) else None
+    2026-10-13). The title decides (:func:`~mangalist.downloads.arrivals.release_hint`), not only the candidate's
+    ``numbers_only``: a candidate rebuilt from a stored finding or a queued record may lack it (owner's report,
+    2026-10-17)."""
+    if getattr(candidate, "numbers_only", False):
+        return None
+    return release_hint(candidate.title, candidate.vol_from)
 
 
 def _fmt(values: Sequence[Decimal]) -> str:

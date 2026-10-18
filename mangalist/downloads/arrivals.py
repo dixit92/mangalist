@@ -89,6 +89,22 @@ def volumes_of(name: str, kind_hint: Optional[str] = None, series_title: Optiona
     return _expand(parsed.volume.start, parsed.volume.end)
 
 
+def release_hint(title: Optional[str], vol_from: Optional[str]) -> Optional[str]:
+    """The kind hint a release's file names are read with: ``"volumes"`` when its title states volumes with a volume
+    mark (``v01-03``, ``Vol. 3``), else None (the names alone decide). Bare numbers (``001-051``) state nothing: read
+    with that hint, chapter 3 of a chapter pack passed for volume 3 (owner, 2026-10-13).
+
+    The title is read again here instead of trusting a stored flag: a finding recorded before ``numbers_only`` existed,
+    a queued record and the ledger's request all come back without it (owner's report, 2026-10-17: a finding of
+    2026-10-13 for "<Series> 001-010 (2018-2019) (Digital)" was sent for "volumes" 1 and 2 of a side story the owner
+    had answered holds chapters; its files "... 001 ...cbz" and "... 002 ...cbz" were kept as those volumes)."""
+    if not vol_from:
+        return None
+    from ..services.nyaa.titles import parse_title
+
+    return None if parse_title(title or "").numbers_only else "volumes"
+
+
 def held_volumes(db, series, series_dir: str) -> Set[Decimal]:
     """The volumes the series holds right now: its stored ``volume`` units (nested rows included) plus every
     archive in its folder, read again now."""
@@ -270,7 +286,7 @@ class _Pass:
 
     def _pick(self, rec: DownloadRecord, t: TorrentInfo, series, series_dir: str, root=None):
         request = self.ledger.request(rec.id)
-        hint = "volumes" if request.get("vol_from") else None   # the release says it holds volumes
+        hint = release_hint(request.get("title") or rec.title, request.get("vol_from"))   # the title states volumes
         wanted = {Decimal(v) for v in rec.wanted_volumes}
         held = held_volumes(self.db, series, series_dir)
         save_path = os.path.normpath(t.save_path)
