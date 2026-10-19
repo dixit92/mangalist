@@ -193,9 +193,10 @@ soon as it has been read. Settings > Library shows which MangaPixer library each
 ## Duplicates
 
 The List tab's **Duplicates** chip shows series held in more than one folder (to look at; nothing changes) and
-duplicate files: the same chapter or volume number in two files of one folder, by MangaPixer's rule - and a whole
-chapter held next to its parts (`38` with `38.2`: the whole stands in for the missing `38.1`, keep both; `38` with
-`38.1`, `38.2`: the whole may be redundant), whose files are all kept unless you discard one. Mark each
+duplicate files: the same chapter or volume number in two files of one folder, by MangaPixer's rule. A section of
+its own, **Whole chapters with parts**, with its own count (not in the Duplicates chip), lists a whole chapter held next
+to its parts (`38` with `38.2`: the whole stands in for the missing `38.1`, keep both; `38` with `38.1`, `38.2`: the
+whole may be redundant); its files are all kept unless you discard one. Mark each
 file **Keep** or **Discard** (by default the newest is kept), then **Apply**: MangaList lists every file it is
 about to delete and deletes them only after you confirm. There is no holding folder - the files are gone - and at
 least one copy of each number always stays. Each series also has its own **Apply for this series**, and right-clicking

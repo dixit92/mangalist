@@ -14,9 +14,11 @@ Two sections, styled after the approved mockup (UI cycle, 2026-10-08):
   (:func:`mangalist.duplicates.find_duplicate_files`, MangaPixer's rule). Every file has Keep / Discard; the default keeps the
   newest (the largest of equally new ones) of each number and never discards them all. "Apply" lists every file to be
   deleted and asks; only then are they deleted (no holding folder), unless a scan or a filing holds the root's lock.
-  A whole chapter held with its parts (owner, 2026-10-18: "Duplicates: flag overlaps") is listed the same way, with a
-  line saying whether the whole stands in for a missing part (keep both) or may be redundant; its files all default to
-  Keep, so nothing of it is deleted unless the owner discards a file.
+- **Whole chapters with parts** (owner, 2026-10-18: "Duplicates: flag overlaps", then "Own section, own count";
+  :func:`mangalist.duplicates.find_whole_and_parts`) - a whole chapter held next to its parts in one folder, in a section
+  of its own with its own count (never in the duplicate numbers above nor in the Duplicates chip, :attr:`groups_found`):
+  per chapter a line saying whether the whole stands in for a missing part (keep both) or may be redundant; its files
+  all default to Keep, so nothing of it is deleted unless the owner discards a file and applies.
 
 The scan of the duplicates, the deletion and a merge run off the UI thread. Deleting goes through
 :func:`mangalist.duplicates.discard_duplicates` only; a merge deletes nothing (moves only).
@@ -55,6 +57,7 @@ from ..duplicates import (
     default_keep,
     discard_duplicates,
     find_duplicate_files,
+    find_whole_and_parts,
     format_time,
     human_size,
     iso_from_ns,
@@ -330,10 +333,12 @@ class DuplicatesView(QWidget):
         self._series_link: Optional[Callable[[str], Optional[str]]] = None
         self._focus: Optional[str] = None                   # a series folder: show only its duplicate files
         self._root_ids: Optional[List[int]] = None          # the List's Library picker (None: every library)
-        self._card_apply: Dict[Tuple[Optional[int], str], QPushButton] = {}
+        self._overlaps: List[DuplicateGroup] = []           # whole chapters with parts: their own section and count
+        self._overlaps_error = ""
+        self._card_apply: Dict[Tuple[Optional[int], str], List[QPushButton]] = {}   # a series' card in each section
         # series cards ticked for "Apply to selected" (owner, 2026-10-09: "select some series cards and do it on a subset")
         self._picked: set = set()
-        self._card_pick: Dict[Tuple[Optional[int], str], QCheckBox] = {}
+        self._card_pick: Dict[Tuple[Optional[int], str], List[QCheckBox]] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -369,6 +374,12 @@ class DuplicatesView(QWidget):
         self.show_all_button.hide()
         self.files_box = QVBoxLayout()
         self.files_box.setSpacing(10)
+        self.parts_heading = _label("", "heading")
+        self.parts_note = _label("A whole chapter held next to its parts - two groups, one releasing whole chapters, one "
+                                 "in parts. Not copies: every file is kept unless you discard one.", "muted")
+        self.parts_note.setWordWrap(True)
+        self.parts_box = QVBoxLayout()
+        self.parts_box.setSpacing(10)
         series_head = QHBoxLayout()
         series_head.addWidget(self.series_heading, 1)
         series_head.addWidget(self.undo_merge_button)
@@ -384,6 +395,10 @@ class DuplicatesView(QWidget):
         files_head.addWidget(self.show_all_button)
         self._body_layout.addLayout(files_head)
         self._body_layout.addLayout(self.files_box)
+        self._body_layout.addSpacing(14)
+        self._body_layout.addWidget(self.parts_heading)
+        self._body_layout.addWidget(self.parts_note)
+        self._body_layout.addLayout(self.parts_box)
         self._body_layout.addStretch(1)
 
         bar = _frame("bar")
@@ -636,6 +651,11 @@ class DuplicatesView(QWidget):
         """The duplicate numbers the last scan found."""
         return list(self._groups)
 
+    @property
+    def whole_and_parts(self) -> List[DuplicateGroup]:
+        """The whole chapters held with their parts the last scan found (their own section and count)."""
+        return list(self._overlaps)
+
     def refresh(self) -> None:
         """Re-read the duplicate files (off the UI thread)."""
         if self._applying or self._merging:
@@ -646,18 +666,21 @@ class DuplicatesView(QWidget):
         self._scan_error = ""
         self._update_summary()
         db, root_ids = self._db, self._root_ids
-        self._start(lambda: (find_duplicate_files(db, root_ids=root_ids), *_same_series_of(db)),
+        self._start(lambda: (find_duplicate_files(db, root_ids=root_ids), *_same_series_of(db),
+                             *_whole_and_parts_of(db, root_ids)),
                     lambda found: self._scanned(generation, *found),
                     lambda message: self._scan_failed(generation, message))
 
     def _scanned(self, generation: int, groups: List[DuplicateGroup], same: Optional[SameSeriesReport] = None,
-                 last_merge=None, same_error: str = "") -> None:
+                 last_merge=None, same_error: str = "", overlaps: Optional[List[DuplicateGroup]] = None,
+                 overlaps_error: str = "") -> None:
         if generation != self._generation:
             return                                          # a newer scan is on its way
         self._scanning = False
         if not self._blocked:
             self._after_apply = False
         self._groups = list(groups)
+        self._overlaps, self._overlaps_error = list(overlaps or ()), overlaps_error
         if same is not None or same_error:
             self._same, self._last_merge, self._same_error = same or SameSeriesReport(), last_merge, same_error
         self._render_series()
@@ -674,13 +697,15 @@ class DuplicatesView(QWidget):
         self._scan_error = message
         self._update_summary()
 
-    def _shown_groups(self) -> List[DuplicateGroup]:
+    def _shown_groups(self, groups: Optional[List[DuplicateGroup]] = None) -> List[DuplicateGroup]:
+        groups = self._groups if groups is None else groups
         if self._focus is None:
-            return self._groups
-        return [g for g in self._groups if os.path.normpath(g.folder) == os.path.normpath(self._focus)]
+            return groups
+        return [g for g in groups if os.path.normpath(g.folder) == os.path.normpath(self._focus)]
 
     def _render_files(self) -> None:
         _clear(self.files_box)
+        _clear(self.parts_box)
         self._rows.clear()
         self._by_group.clear()
         self._card_apply.clear()
@@ -697,7 +722,24 @@ class DuplicatesView(QWidget):
                      else "No number is held by more than one file of a folder." if self._focus is None
                      else "This series has no duplicate files.")
             self.files_box.addWidget(_label(empty, "muted"))
-            return
+        self._render_cards(groups, self.files_box)
+        # whole chapters with parts: their own section and count (owner, 2026-10-18: "Own section, own count")
+        overlaps = self._shown_groups(self._overlaps)
+        n_over = len(overlaps)
+        n_over_series = len({(g.series_id, g.folder) for g in overlaps})
+        self.parts_heading.setText("WHOLE CHAPTERS WITH PARTS" + (
+            f"  ·  {n_over} chapter{'s' if n_over != 1 else ''} in {n_over_series} series" if n_over else ""))
+        self.parts_note.setVisible(bool(n_over))
+        if not n_over:
+            empty = ("Looking for whole chapters held with their parts..." if self._scanning
+                     else f"Could not look for whole chapters with parts: {self._overlaps_error}" if self._overlaps_error
+                     else "No whole chapter is held next to its parts." if self._focus is None
+                     else "This series holds no whole chapter next to its parts.")
+            self.parts_box.addWidget(_label(empty, "muted"))
+        self._render_cards(overlaps, self.parts_box)
+
+    def _render_cards(self, groups: Sequence[DuplicateGroup], box: QVBoxLayout) -> None:
+        """One card per series of *groups* in *box* (a series can have a card in each section)."""
         card: Optional[QFrame] = None
         card_box: Optional[QVBoxLayout] = None
         current = None
@@ -715,7 +757,7 @@ class DuplicatesView(QWidget):
                 pick.setChecked(key in self._picked)
                 pick.toggled.connect(lambda on, k=key: self._pick(k, on))
                 head.addWidget(pick)
-                self._card_pick[key] = pick
+                self._card_pick.setdefault(key, []).append(pick)
                 head.addWidget(_label(group.title, "title"))
                 head.addSpacing(8)
                 head.addWidget(_Elided(group.folder, tone="muted"), 1)
@@ -732,9 +774,9 @@ class DuplicatesView(QWidget):
                 only.setToolTip("Delete the files marked Discard in this series only (after you confirm)")
                 only.clicked.connect(lambda _=False, k=key: self.apply(series=k))
                 head.addWidget(only)
-                self._card_apply[key] = only
+                self._card_apply.setdefault(key, []).append(only)
                 card_box.addLayout(head)
-                self.files_box.addWidget(card)
+                box.addWidget(card)
             card_box.addLayout(self._group_block(group))
 
     def _group_block(self, group: DuplicateGroup) -> QVBoxLayout:
@@ -830,10 +872,11 @@ class DuplicatesView(QWidget):
         self._body.setEnabled(not working)                  # no Keep / Discard while the list is about to change
         self.apply_button.setText(f"Apply ({len(discards)})" if discards else "Apply")
         self.apply_button.setEnabled(bool(discards) and not busy and not self._blocked)
-        for key, button in self._card_apply.items():
+        for key, buttons in self._card_apply.items():
             n = sum(1 for g, rows in self._by_group if (g.series_id, g.folder) == key for r in rows if r.discard)
-            button.setText(f"Apply for this series ({n})" if n else "Apply for this series")
-            button.setEnabled(bool(n) and not busy and not self._blocked)
+            for button in buttons:
+                button.setText(f"Apply for this series ({n})" if n else "Apply for this series")
+                button.setEnabled(bool(n) and not busy and not self._blocked)
         shown = {(g.series_id, g.folder) for g, _rows in self._by_group}
         self._picked &= shown                                   # a series that left the list is no longer ticked
         picked_files = sum(1 for g, rows in self._by_group if (g.series_id, g.folder) in self._picked
@@ -863,13 +906,19 @@ class DuplicatesView(QWidget):
 
     def _pick(self, key, on: bool) -> None:
         (self._picked.add if on else self._picked.discard)(key)
+        for box in self._card_pick.get(key, ()):             # the series' card in the other section follows
+            if box.isChecked() != on:
+                box.blockSignals(True)
+                box.setChecked(on)
+                box.blockSignals(False)
         self._update_summary()
 
     def pick_series(self, folders: Sequence[str]) -> None:
         """Tick the cards of these series folders (and only those)."""
         want = {os.path.normpath(f) for f in folders}
-        for key, box in self._card_pick.items():
-            box.setChecked(os.path.normpath(key[1]) in want)
+        for key, boxes in self._card_pick.items():
+            for box in boxes:
+                box.setChecked(os.path.normpath(key[1]) in want)
 
     def focus_series(self, folder: Optional[str]) -> None:
         """Show only *folder*'s duplicate files (the List's "Review duplicate files"), or every series (None). The
@@ -986,6 +1035,16 @@ class DuplicatesView(QWidget):
     def closeEvent(self, event) -> None:
         self.stop()
         super().closeEvent(event)
+
+
+def _whole_and_parts_of(db, root_ids) -> Tuple[List[DuplicateGroup], str]:
+    """The whole chapters held with their parts, and why they could not be read ("" when they could): their section
+    says so, the duplicate numbers above it are shown either way."""
+    try:
+        return find_whole_and_parts(db, root_ids=root_ids), ""
+    except Exception as exc:  # noqa: BLE001 - shown in the section
+        _log.warning("Looking for whole chapters with parts failed: %s: %s", type(exc).__name__, exc)
+        return [], str(exc) or type(exc).__name__
 
 
 def _same_series_of(db) -> Tuple[Optional[SameSeriesReport], Optional[series_merge.MergeRecord], str]:
