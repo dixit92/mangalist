@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import FrozenSet, Iterable, Optional, Set, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
 #: Numbers above this are not expanded (MangaPixer's ``MissingUnits.MaxNumber``).
 MAX_NUMBER = 3000
@@ -77,3 +77,25 @@ def splits_of(singles: Iterable[Optional[Decimal]],
         parts.update(Decimal(n) + Decimal(t) / 10 for t in own)
         missing.extend(Decimal(n) + Decimal(t) / 10 for t in range(1, own[-1]) if t not in present)
     return SplitChapters(frozenset(parts), frozenset(chapters), tuple(missing))
+
+
+def part_numbers(numbers: Iterable[Optional[Decimal]]) -> Dict[int, List[Decimal]]:
+    """Chapter ``N`` -> the numbers among *numbers* that are parts of ``N`` by this rule's tenths - one decimal, ``.1``
+    ... ``.4``, and ``.5`` or above only next to a ``.4`` - WHEREVER the run starts, ascending. :func:`splits_of`
+    decides whether parts count as chapter ``N`` held (they must start at the beginning); this only tells the parts of a
+    whole chapter apart from its extras, for the whole-or-parts rules (owner, 2026-10-18: a whole ``38`` next to
+    ``38.2`` - :mod:`mangalist.downloads.chapter_forms`, :func:`mangalist.duplicates.find_part_overlaps`)."""
+    tenths: Dict[int, Set[int]] = {}
+    for c in numbers:
+        if c is None or c <= 0 or c > MAX_NUMBER:
+            continue
+        t = (c - Decimal(int(c))) * 10
+        if t == 0 or t != t.to_integral_value():
+            continue
+        tenths.setdefault(int(c), set()).add(int(t))
+    out: Dict[int, List[Decimal]] = {}
+    for n, ts in tenths.items():
+        own = sorted(t for t in ts if t < 5 or 4 in ts)
+        if own:
+            out[n] = [Decimal(n) + Decimal(t) / 10 for t in own]
+    return out

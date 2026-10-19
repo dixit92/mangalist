@@ -338,7 +338,8 @@ class ChapterClient(Protocol):
     def search(self, source_id: str, query: str) -> Sequence[SuwayomiManga]: ...
 
     def chapters(self, manga_id: int) -> MangaChapters:
-        """The manga and its chapters, fetched from the source now (Suwayomi refreshes its own list)."""
+        """The manga's chapters, fetched from the source now (Suwayomi refreshes its own list), and the manga as Suwayomi
+        holds it (its details are fetched only when Suwayomi never fetched them; lane GT, 2026-10-18)."""
         ...
 
     def add_to_library(self, manga_id: int) -> None: ...

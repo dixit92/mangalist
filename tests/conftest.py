@@ -20,6 +20,27 @@ def _isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("MANGALIST_SUBPROCESS", "0")
 
 
+class _NoMangaDex:
+    """MangaDex never answers in a test: the chapter check's own bulk request learns nothing (a test that needs answers
+    passes its own client)."""
+
+    def latest_uploads(self, ids, should_stop=None):
+        from mangalist.services.mangadex import LatestUploads
+
+        return LatestUploads()
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _no_mangadex(monkeypatch):
+    """No test asks MangaDex itself (the scheduled chapter check's gate, lane GT 2026-10-18)."""
+    from mangalist.downloads import chapter_gate
+
+    monkeypatch.setattr(chapter_gate, "default_client", lambda: _NoMangaDex())
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _qt_teardown():
     """Close and delete every leftover top-level widget while the QApplication still exists. Dialogs a test

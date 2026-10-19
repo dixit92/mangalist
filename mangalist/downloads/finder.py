@@ -747,9 +747,10 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
     except LookupError:
         held = {}
     choice = default_group(group_counts(fetched.chapters, numbers), held, numbers, stored.get("group"))
-    rows = chapter_rows(fetched.chapters, missing, choice.group, ctx.backend._chapters_in_hand(sid))
+    # one form per chapter (owner, 2026-10-18): a gap the source lists whole and in parts is filled in the series' form
+    rows = chapter_rows(fetched.chapters, missing, choice.group, ctx.backend._chapters_in_hand(sid), held=held)
     pending = [r for r in rows if r.in_hand is None and not r.extra]
-    queued = _queued_numbers(ctx, client, fetched.chapters, numbers)
+    queued = _queued_numbers(ctx, client, fetched.chapters, numbers + [to_decimal(r.number) for r in pending])
     picks = [r.default for r in pending if r.available and r.default is not None and r.number not in queued]
     if not picks:
         listed = [d for d in (to_decimal(c.number) for c in fetched.chapters) if d is not None]

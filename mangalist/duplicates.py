@@ -18,6 +18,19 @@ library database's units, so MangaList and MangaPixer agree on what a folder hol
   (``[group]``, ``(Digital)``, a year, a copy marker). When anything else differs by a number - ``009 Vol 01`` next to
   ``008 Vol 01`` (chapters the parser does not read), ``Season 1 v01`` next to ``Season 2 v01`` - they are different
   units and never listed. FMD2's download index (``0002 [Vol. 0001 Ch. 1]``) is not such a number.
+- **Whole and parts** (owner, 2026-10-18: "Duplicates: flag overlaps", then "Own section, own count";
+  :func:`find_whole_and_parts`, :func:`part_overlaps`): a whole chapter ``N`` held in one folder together with parts of
+  it is listed in a section of its own with its own count - one entry per chapter, never among the numbers held more
+  than once nor in the Duplicates chip - as an overlap to review, never a copy: two scanlation groups, one releasing
+  whole chapters, one in parts.
+  The parts follow the split model (:mod:`mangalist.split_chapters`): ``N.2`` onwards next to the whole ``N`` (the whole
+  stands in for the missing ``N.1``; keeping both is the expected answer), or ``N.1`` and ``N.2`` onwards (they count as
+  chapter ``N`` on their own, so the whole may be redundant). A lone ``N.1`` next to ``N`` is an extra, as MangaPixer
+  counts it, and so is a file whose name says so (``Extra``, ``Special``, ``Omake``, ``Bonus``, ``Side Story``,
+  ``Afterword``): measured on the owner's library (2026-10-18), the broader "any ``N.x`` next to ``N``" listed 206
+  chapters in 67 series, mostly extras. Every file of an overlap defaults to Keep; nothing is deleted unless the owner
+  discards one and confirms. A chapter whose files are themselves duplicated is listed as that duplicate first (one
+  file is listed once).
 - The usual group: when the copies come from different scanlation groups, the group of the neighbouring numbers (else
   the folder's most used group) - a series keeps its translation style. The default Keep prefers it.
 
@@ -47,10 +60,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Collection, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .gui.shell import DuplicateFile, DuplicateGroup
+from .gui.shell import OVERLAP_REDUNDANT, OVERLAP_STAND_IN, DuplicateFile, DuplicateGroup
 from .inventory import to_number
 from .parsing.model import Layer
 from .parsing.parser import ParseContext, parse_name
+from .split_chapters import part_numbers
 from .store.lock import LOCK_NAME, LockError, RootLock
 
 _log = logging.getLogger(__name__)
@@ -127,25 +141,22 @@ def _slash_parts(rel: str) -> List[str]:
     return [p for p in str(rel).replace("\\", "/").split("/") if p and p != "."]
 
 
-def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List[DuplicateGroup]:
-    """Every number held by more than one file of one folder, in the roots *root_ids* (None: all roots).
-
-    Groups come sorted by series title, folder, volumes before chapters, number ascending; the files of a group by path.
-    """
+def _buckets(db, root_ids: Optional[Collection[int]]):
+    """``(roots, series folders, buckets)`` of the roots *root_ids* (None: all): every archive stating ONE number, as
+    (series id, container folder rel to the series, kind, number) -> [(archive rel, group)]; None when no root is
+    asked."""
     roots = {r.id: r for r in db.list_roots() if root_ids is None or r.id in set(root_ids)}
     if not roots:
-        return []
+        return None
     ids = sorted(roots)
     where = f" AND s.root_id IN ({','.join('?' * len(ids))})"
-    # (series id, container folder rel to the series, archive rel path) -> its unit rows
+    # (series id, archive rel path) -> its unit rows
     series_info: Dict[int, Tuple[int, str]] = {}
     per_archive: Dict[Tuple[int, str], List] = {}
     with db.connect() as con:
         for row in con.execute(_QUERY.format(where=where), ids):
             series_info[row["series_id"]] = (row["root_id"], row["series_rel"])
             per_archive.setdefault((row["series_id"], row["rel_path"]), []).append(SimpleNamespace(**dict(row)))
-
-    # (series id, container, kind, number) -> [(archive rel, group)]
     buckets: Dict[Tuple[int, str, str, Decimal], List[Tuple[str, Optional[str]]]] = {}
     for (sid, rel), rows in per_archive.items():
         stated = stated_unit(rows)
@@ -153,6 +164,26 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
             continue
         container = "/".join(_slash_parts(rel)[:-1])
         buckets.setdefault((sid, container, stated.kind, stated.number), []).append((rel, stated.group))
+    folders = {sid: Path(roots[root_id].path, *_slash_parts(rel)) for sid, (root_id, rel) in series_info.items()}
+    return roots, folders, buckets
+
+
+def _order(groups: List[DuplicateGroup]) -> List[DuplicateGroup]:
+    groups.sort(key=lambda g: (g.title.casefold(), g.folder, _directory(g), 0 if g.kind == KIND_VOLUME else 1,
+                               Decimal(g.number)))
+    return groups
+
+
+def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List[DuplicateGroup]:
+    """Every number held by more than one file of one folder, in the roots *root_ids* (None: all roots) - what the
+    Duplicates chip counts. A whole chapter held with its parts is not one (:func:`find_whole_and_parts`).
+
+    Groups come sorted by series title, folder, volumes before chapters, number ascending; the files of a group by path.
+    """
+    read = _buckets(db, root_ids)
+    if read is None:
+        return []
+    roots, folders, buckets = read
 
     # (series id, container, kind) -> {number: [groups]} - for the usual group of a duplicate number
     groups_by_number: Dict[Tuple[int, str, str], Dict[Decimal, List[str]]] = {}
@@ -163,8 +194,7 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
     for (sid, container, kind, number), members in buckets.items():
         if len(members) < 2:
             continue
-        root_id, series_rel = series_info[sid]
-        series_folder = Path(roots[root_id].path, *_slash_parts(series_rel))
+        series_folder = folders[sid]
         for same in _alike(members, number, series_folder.name).values():
             if len(same) < 2:
                 continue
@@ -180,10 +210,83 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
             out.append(DuplicateGroup(series_id=sid, folder=str(series_folder),
                                       title=series_folder.name or str(series_folder), kind=kind,
                                       number=canonical_number(number), files=tuple(files), usual_group=usual))
-    out.sort(key=lambda g: (g.title.casefold(), g.folder, _directory(g), 0 if g.kind == KIND_VOLUME else 1,
-                            Decimal(g.number)))
+    _order(out)
     _log.info("Duplicates: %d number%s held more than once (%d files) in %d root%s", len(out),
               "" if len(out) == 1 else "s", sum(len(g.files) for g in out), len(roots), "" if len(roots) == 1 else "s")
+    return out
+
+
+def find_whole_and_parts(db, root_ids: Optional[Collection[int]] = None) -> List[DuplicateGroup]:
+    """Every whole chapter held with its parts in one folder (:func:`part_overlaps`; ``overlap`` set), in the roots
+    *root_ids* (None: all roots) - the Duplicates view's own section and count (owner, 2026-10-18: "Own section, own
+    count"); never part of the duplicate numbers or the Duplicates chip. Sorted as :func:`find_duplicate_files`."""
+    read = _buckets(db, root_ids)
+    if read is None:
+        return []
+    roots, folders, buckets = read
+    out = _order(part_overlaps(buckets, folders))
+    _log.info("Duplicates: %d whole chapter%s held with parts in %d root%s", len(out), "" if len(out) == 1 else "s",
+              len(roots), "" if len(roots) == 1 else "s")
+    return out
+
+
+def _tenth(number: Decimal) -> int:
+    return int((number - Decimal(int(number))) * 10)
+
+
+def _says_extra(rel: str) -> bool:
+    """Whether a file's name calls it an extra (``(Extra 1 - ...)``, ``(Special)``, ``Omake``, ``Bonus``, ``Side
+    Story``, ``Afterword`` - the naming scheme's marker words): numbered like a part, it is not one."""
+    from .naming import _MARKER
+
+    return _MARKER.search(os.path.basename(rel)) is not None
+
+
+def part_overlaps(buckets: Dict[Tuple[int, str, str, Decimal], List[Tuple[str, Optional[str]]]],
+                  folders: Dict[int, Path]) -> List[DuplicateGroup]:
+    """A whole chapter held together with its parts in one folder (see the module docstring), one group per chapter.
+    *buckets*: (series id, container, kind, number) -> [(archive rel, group)]; *folders*: series id -> its folder."""
+    by_folder: Dict[Tuple[int, str], Dict[Decimal, List[Tuple[str, Optional[str]]]]] = {}
+    for (sid, container, kind, number), members in buckets.items():
+        if kind == KIND_CHAPTER:
+            by_folder.setdefault((sid, container), {})[number] = members
+    out: List[DuplicateGroup] = []
+    for (sid, container), numbers in by_folder.items():
+        for n, parts in sorted(part_numbers(numbers).items()):
+            whole = Decimal(n)
+            if whole not in numbers or any(len(numbers[x]) > 1 for x in (whole, *parts)):
+                continue                # no whole file, or a number held twice: that duplicate is reviewed first
+            parts = [p for p in parts if not _says_extra(numbers[p][0][0])]
+            first_held = whole + Decimal("0.1") in numbers
+            if not parts or not ((_tenth(parts[0]) == 2 and not first_held)
+                                 or (_tenth(parts[0]) == 1 and len(parts) > 1)):
+                continue                # the split model: a lone N.1 next to N is an extra, a run from N.3 too
+            series_folder = folders[sid]
+            files, there = [], set()
+            for x in (whole, *parts):
+                for rel, group in numbers[x]:
+                    seen = _stat_plain_file(Path(series_folder, *_slash_parts(rel)))
+                    if seen is not None:
+                        there.add(x)
+                        files.append(DuplicateFile(path=str(seen[0]), size=seen[1], modified=iso_from_ns(seen[2]),
+                                                   group=group))
+            parts = [p for p in parts if p in there]
+            if whole not in there or not parts:
+                continue                # the whole file, or every part, is gone from the disk
+            held = ", ".join(canonical_number(p) for p in parts)
+            if parts[0] - whole == Decimal("0.1"):
+                kind, note = OVERLAP_REDUNDANT, (f"Whole chapter {n} and its parts {held}: part {n}.1 is held too, so "
+                                                 f"the whole chapter {n} may be redundant - compare them before you "
+                                                 "discard one.")
+            else:
+                first = int((parts[0] - whole) * 10)
+                lacking = ", ".join(f"{n}.{t}" for t in range(1, first))
+                kind, note = OVERLAP_STAND_IN, (f"Whole chapter {n} and the part{'s' if len(parts) > 1 else ''} "
+                                                f"{held}: the whole chapter {n} stands in for the missing part "
+                                                f"{lacking} - keep both.")
+            out.append(DuplicateGroup(series_id=sid, folder=str(series_folder),
+                                      title=series_folder.name or str(series_folder), kind=KIND_CHAPTER,
+                                      number=canonical_number(whole), files=tuple(files), overlap=kind, note=note))
     return out
 
 

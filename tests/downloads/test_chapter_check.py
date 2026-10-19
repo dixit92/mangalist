@@ -79,7 +79,8 @@ def test_auto_sends_the_chapters_newer_than_the_newest_held_and_nothing_older(db
     report = check(db, lib)
     assert enqueued(lib) == [[103, 104]]                                 # 5 and 6; never 3 or 4 (held)
     assert (report.series_checked, report.with_new, report.sent, report.waiting) == (1, 1, 1, 0)
-    assert report.summary == "1 series checked, 1 with new chapters: 1 sent, 0 waiting"
+    assert report.summary == ("1 series checked (1 fetched, 0 unchanged on MangaDex), 1 with new chapters: 1 sent, "
+                              "0 waiting; MangaDex latest uploads: from MangaPixer 0, own requests 0")
     (f,) = findings(db, "sent")
     assert f.payload["newer"] is True and f.pick_key == f"chapters:{MANGADEX.id}:103,104"
     assert {r.wanted_chapters for r in lib.backend.chapter_ledger.all_records()} == {("5",), ("6",)}
@@ -171,7 +172,8 @@ def test_nothing_newer_on_the_source_sends_and_offers_nothing(db, lib):
     lib.suwayomi.chapter_list = [chapter(101, "3"), chapter(102, "4"), chapter(99, "2.5")]
     report = check(db, lib)
     assert enqueued(lib) == [] and findings(db, None) == [] and report.series_checked == 1 and report.with_new == 0
-    assert report.summary == "1 series checked, 0 with new chapters: 0 sent, 0 waiting"
+    assert report.summary == ("1 series checked (1 fetched, 0 unchanged on MangaDex), 0 with new chapters: 0 sent, "
+                              "0 waiting; MangaDex latest uploads: from MangaPixer 0, own requests 0")
 
 
 def test_only_the_series_group_and_never_what_is_queued_or_sent(db, lib):

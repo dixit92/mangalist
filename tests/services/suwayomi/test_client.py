@@ -158,3 +158,42 @@ def test_a_manga_without_chapters_answers_an_empty_list(session):
     session.answers["MangaListChapters"] = "error_unknown.json"          # any other error still fails
     with pytest.raises(GraphQLError):
         make(session).chapters(1)
+
+
+# --- the chapter list only (owner-approved 2026-10-18, lane GT: "Shared Chapter Signal") ---------------------------
+
+def test_chapters_ask_the_source_for_the_chapter_list_only(session):
+    # fetchManga: false - one request to the source instead of two; the recorded answer's manga is Suwayomi's own
+    fetched = make(session).chapters(1)
+    (req,) = session.requests
+    assert req["name"] == "MangaListChapters"
+    assert req["variables"] == {"id": 1, "fetchManga": False, "fetchChapters": True}
+    assert "fetchManga: $fetchManga" in req["query"] and "fetchChapters: $fetchChapters" in req["query"]
+    assert fetched.manga.title == "Example Manga" and len(fetched.chapters) > 4
+
+
+def test_a_manga_whose_details_suwayomi_never_fetched_gets_them_once(session):
+    # a manga a search just found (initialized false): its details once, so the title is its download folder's name
+    base = json.loads(recorded("fetch_manga_and_chapters.json"))
+    stale = json.loads(json.dumps(base))
+    stale["data"]["fetchMangaAndChapters"]["manga"].update(initialized=False, title="Example Manga (search title)")
+    fresh = json.loads(json.dumps(base))
+    fresh["data"]["fetchMangaAndChapters"]["chapters"] = []
+
+    def answer(variables):
+        return fresh if variables["fetchManga"] else stale
+
+    session.answers["MangaListChapters"] = answer
+    fetched = make(session).chapters(1)
+    assert [r["variables"] for r in session.requests] == [{"id": 1, "fetchManga": False, "fetchChapters": True},
+                                                          {"id": 1, "fetchManga": True, "fetchChapters": False}]
+    assert fetched.manga.title == "Example Manga" and len(fetched.chapters) > 4     # the chapters of the first answer
+
+
+def test_details_that_cannot_be_fetched_leave_the_stored_title(session):
+    stale = json.loads(recorded("fetch_manga_and_chapters.json"))
+    stale["data"]["fetchMangaAndChapters"]["manga"]["initialized"] = False
+    error = json.loads(recorded("error_unknown.json"))
+    session.answers["MangaListChapters"] = lambda variables: error if variables["fetchManga"] else stale
+    fetched = make(session).chapters(1)
+    assert len(session.requests) == 2 and fetched.manga.title == "Example Manga" and fetched.chapters

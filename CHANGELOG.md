@@ -7,6 +7,14 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.51] - 2026-10-18
+
+The fiftieth MangaList release (testing build): the check for new chapters asks the internet far less, a whole chapter and its parts are told apart, and the Duplicates view shows whole chapters held with their parts.
+
+- **Fewer requests for the check for new chapters.** It asks a chapter source for the chapter list only (half the requests). For series from MangaDex it first asks MangaDex, in one request per 100 series, whose newest upload changed since the last check, and reads only those - a run went from about 350 requests to a few dozen. When MangaPixer is connected, its data is brought up to date first, and once MangaPixer reports the newest MangaDex upload itself, MangaList uses that instead of asking. Each series is still read in full at least once a day, and Check for new chapters by hand always reads the source.
+- **A whole chapter and its parts.** Some series come from two groups, one releasing whole chapters ("38") and one releasing parts ("38.1", "38.2"). MangaList now takes one form per chapter: parts when your series is kept in parts, whole chapters otherwise - never both. A whole chapter only stands in when the source has no part 1, and a part that turns up later (38.1 after 38.2) is fetched then. The form not taken is listed unticked with the reason.
+- **Whole chapters with parts in Duplicates.** A whole chapter held next to parts of the same chapter is listed in its own section of the Duplicates view, with its own count - as a stand-in for a missing part 1, or as possibly redundant. Nothing is removed unless you choose to; the Duplicates count still counts numbers held twice only.
+
 ## [2026.10.50] - 2026-10-18
 
 The forty-ninth MangaList release (testing build): a scheduled check for new chapters.

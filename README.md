@@ -117,7 +117,17 @@ MangaUpdates' latest chapter, which can lag the sites by days or weeks. A schedu
 the saved Suwayomi source of each ongoing chapter series that is not Off for the chapters numbered after the newest one
 you have - the same as **Check for new chapters** in the List's row menu. Series on Auto get them sent; for series on
 Notify they wait in **Found**. A series without a saved source (or a MangaDex id MangaPixer links), or with a download
-on its way, is not asked.
+on its way, is not asked. To keep the requests down, the check asks a source for the chapter list only, first syncs
+with MangaPixer when it is connected, and skips a MangaDex series whose latest upload on MangaDex (from MangaPixer, or
+one request to MangaDex for every 100 series) has not changed since its last check - at least once a day it is asked
+anyway. The row menu's Check for new chapters always asks.
+
+**Whole chapters or parts - one form per chapter.** When two groups release a series, one in whole chapters and one in
+parts (`38` and `38.1`, `38.2`), and the source lists both, the checks and the find pass take each chapter in the form
+the series holds: a series held in parts gets the parts, and the whole chapter only as a stand-in when the source's
+parts do not start at `.1` (`38` with `38.2`: the whole stands in for the missing `38.1`); a series held in whole
+chapters gets the whole chapter, never its parts. A part that turns up later (`38.1` after `38.2` was filed) is fetched
+too. The chapters panel shows the other form unticked, with the reason.
 
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 
@@ -183,7 +193,10 @@ soon as it has been read. Settings > Library shows which MangaPixer library each
 ## Duplicates
 
 The List tab's **Duplicates** chip shows series held in more than one folder (to look at; nothing changes) and
-duplicate files: the same chapter or volume number in two files of one folder, by MangaPixer's rule. Mark each
+duplicate files: the same chapter or volume number in two files of one folder, by MangaPixer's rule. A section of
+its own, **Whole chapters with parts**, with its own count (not in the Duplicates chip), lists a whole chapter held next
+to its parts (`38` with `38.2`: the whole stands in for the missing `38.1`, keep both; `38` with `38.1`, `38.2`: the
+whole may be redundant); its files are all kept unless you discard one. Mark each
 file **Keep** or **Discard** (by default the newest is kept), then **Apply**: MangaList lists every file it is
 about to delete and deletes them only after you confirm. There is no holding folder - the files are gone - and at
 least one copy of each number always stays. Each series also has its own **Apply for this series**, and right-clicking

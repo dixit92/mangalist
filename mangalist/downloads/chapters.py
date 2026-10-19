@@ -39,7 +39,7 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .contracts import (
     ChapterClient,
@@ -295,6 +295,8 @@ class ChapterRow:
     in_hand: Optional[DownloadRecord] = None        # a chapter download already has it (not sent again)
     extra: bool = False                             # an extra (``71.5``) the source has: offered, not counted missing
     part_of: Optional[str] = None                   # a part (``62.1``) of the missing chapter ``62`` the source splits
+    note: str = ""                                  # why this form of the chapter (:mod:`.chapter_forms`): a stand-in,
+                                                    # a late part; on an ``extra`` row, why the other form is not taken
 
     @property
     def available(self) -> bool:
@@ -366,11 +368,28 @@ def extra_numbers(chapters: Iterable[SuwayomiChapter], missing: Sequence[str],
 
 def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], group: Optional[str],
                  in_hand: Optional[Mapping[str, DownloadRecord]] = None,
-                 extras: Sequence[Decimal] = ()) -> List[ChapterRow]:
+                 extras: Sequence[Decimal] = (), held: Optional[Iterable[Decimal]] = None) -> List[ChapterRow]:
     """One row per missing chapter number and per *extra* (:func:`extra_numbers`), ascending (see the module
-    docstring)."""
+    docstring). *held*: the chapter numbers the series holds - with them, one form per chapter
+    (:func:`.chapter_forms.choose`; owner, 2026-10-18): a chapter the source lists whole and in parts is taken in the
+    series' form, the whole as a stand-in when the source's parts do not start at ``.1``; the other form, when it was
+    asked about, is a row of its own - an unticked ``extra`` saying why it is not taken."""
+    from .chapter_forms import choose, late_parts
+
     per = _per_group(chapters)
     missing_numbers = {d for d in (to_decimal(n) for n in missing) if d is not None}
+    notes: Dict[Decimal, str] = {}
+    others: Dict[Decimal, str] = {}
+    chosen = set(missing_numbers)
+    if held is not None:
+        held_numbers = {n for n in held if n is not None}
+        choice = choose(per, held_numbers, missing_numbers)
+        chosen = set(choice.take)
+        others = {n: why for n, why in choice.others.items() if n in missing_numbers}
+        notes = dict(choice.notes)
+        for n, why in late_parts(per, held_numbers, max(held_numbers, default=None)).items():
+            if n in chosen and n in missing_numbers:
+                notes.setdefault(n, why)
     # a missing chapter the source has only in parts: its parts stand in for it (source_splits)
     splits = source_splits(chapters)
     part_of: Dict[Decimal, Decimal] = {}
@@ -378,9 +397,13 @@ def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], gr
         whole = Decimal(int(p))
         if whole in missing_numbers and not per.get(whole):
             part_of[p] = whole
+    for p in chosen:                    # ... or in parts the series' form takes (the whole is the other form)
+        whole = Decimal(int(p))
+        if p != whole and whole in missing_numbers and whole not in chosen:
+            part_of[p] = whole
     stand_ins = set(part_of.values())
-    numbers = sorted((missing_numbers - stand_ins) | set(part_of) | set(extras))
-    extra = set(extras)
+    numbers = sorted((chosen - stand_ins) | set(part_of) | set(others) | set(extras))
+    extra = set(extras) | set(others)
     counts = Counter(key for n in numbers for key in per.get(n, {}))
     want = group_key(group)
     in_hand = in_hand or {}
@@ -392,7 +415,8 @@ def chapter_rows(chapters: Sequence[SuwayomiChapter], missing: Sequence[str], gr
         options = tuple(ch for _k, ch in ordered)
         whole = part_of.get(number)
         rows.append(ChapterRow(text, options, options[0] if options else None, in_hand.get(text), number in extra,
-                               _plain(str(whole)) if whole is not None else None))
+                               _plain(str(whole)) if whole is not None else None,
+                               others.get(number) or notes.get(number, "")))
     return rows
 
 
@@ -451,8 +475,8 @@ def mangadex_released_for(db, series_id: int) -> Optional[Tuple[str, int]]:
     return (released.language, released.chapters) if released is not None else None
 
 
-def mangadex_id_for(db, series_id: int) -> Optional[str]:
-    """The MangaDex id MangaPixer links to the series' own folder (its Confirmed / Auto item), else None."""
+def linked_item(db, series_id: int) -> Optional[Mapping[str, Any]]:
+    """The MangaPixer export item linked to the series' own folder (Confirmed / Auto, not inherited), else None."""
     from ..services.mangapixer import open_cache
     from ..services.mangapixer.resolve import resolve
     from .placement import locate_series
@@ -465,9 +489,25 @@ def mangadex_id_for(db, series_id: int) -> Optional[str]:
         return None
     if res is None or res.inherited or res.link_state not in ("Confirmed", "Auto"):
         return None
-    companions = res.item.get("companions") if isinstance(res.item.get("companions"), Mapping) else {}
-    value = companions.get("mangadex")
+    return res.item if isinstance(res.item, Mapping) else None
+
+
+def mangadex_id_of(item: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """``companions.mangadex`` of a MangaPixer export item (a MangaDex manga uuid, lower case), else None."""
+    companions = item.get("companions") if isinstance(item, Mapping) else None
+    value = companions.get("mangadex") if isinstance(companions, Mapping) else None
     return value.strip().lower() if isinstance(value, str) and _UUID.fullmatch(value.strip()) else None
+
+
+def mangadex_id_for(db, series_id: int) -> Optional[str]:
+    """The MangaDex id MangaPixer links to the series' own folder (its Confirmed / Auto item), else None."""
+    return mangadex_id_of(linked_item(db, series_id))
+
+
+def mangadex_id_in_url(url: Optional[str]) -> Optional[str]:
+    """The MangaDex manga uuid in a MangaDex source's manga url (Suwayomi's MangaDex extension: ``/manga/<uuid>``)."""
+    found = _UUID.search(str(url or ""))
+    return found.group(0).lower() if found else None
 
 
 def find_manga(client: ChapterClient, sources: Sequence[SuwayomiSource], *, mangadex_id: Optional[str],
@@ -530,6 +570,7 @@ class ChapterLookup:
     candidates: List[MangaMatch] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     manga_title: str = ""                           # as Suwayomi fetched it (its download folder's name)
+    manga_url: str = ""                             # the manga's url on its source (MangaDex: ``/manga/<uuid>``)
     source_name: str = ""                           # the source's display name (its download folder's name)
     rows: List[ChapterRow] = field(default_factory=list)
     group: GroupChoice = GroupChoice(None, "")
@@ -565,11 +606,11 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
     counts = group_counts(fetched.chapters, numbers)
     choice = default_group(counts, held, numbers, stored_group)
     extras = extra_numbers(fetched.chapters, missing, held) if with_extras else ()
-    rows = chapter_rows(fetched.chapters, missing, choice.group, in_hand, extras)
+    rows = chapter_rows(fetched.chapters, missing, choice.group, in_hand, extras, held=held)
     queued: Tuple[str, ...] = ()
     try:
         ids = {c.id: c for c in fetched.chapters}
-        wanted = set(numbers) | set(extras)
+        wanted = set(numbers) | set(extras) | {to_decimal(r.number) for r in rows}
         queued = tuple(sorted({ids[q.chapter_id].number for q in (client.queue() if queue is None else queue)
                                if q.chapter_id in ids and to_decimal(ids[q.chapter_id].number) in wanted},
                               key=lambda n: to_decimal(n) or Decimal(0)))
@@ -577,6 +618,7 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
         _log.info("Chapters: Suwayomi's download queue could not be read", exc_info=True)
     return ChapterLookup(series_id=series_id, missing=tuple(missing), match=match,
                          manga_title=fetched.manga.title or match.manga.title,
+                         manga_url=fetched.manga.url or match.manga.url,
                          source_name=fetched.source_name or match.source.display_name, rows=rows, group=choice,
                          groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters)
 
@@ -590,7 +632,12 @@ def newer_lookup(client: ChapterClient, db, *, series_id: int, match: MangaMatch
     *missing* - with the series' group by the usual default rule, extras never (every number after the newest held is
     new, a part ``N.2`` after a held ``N.1`` too: MAL-Sync parity, owner 2026-10-18). When the newest held chapter
     cannot be told, nothing is listed and the note says why. The manual check (the chapters panel) and the scheduled
-    chapter check (:mod:`mangalist.downloads.chapter_check`) both use it."""
+    chapter check (:mod:`mangalist.downloads.chapter_check`) both use it.
+
+    One form per chapter (:mod:`.chapter_forms`; owner, 2026-10-18, "Check: one form per chapter"): a chapter the source
+    lists whole and in parts is taken in the form the series holds (the whole as a stand-in when the source's parts do
+    not start at ``.1``); the other form is a row that says why it is not taken, and not in *missing*. A **late part**
+    (``38.1`` listed after ``38.2`` was filed) is new too, although it is numbered below the newest held chapter."""
     fetched = client.chapters(match.manga.id)
     notes: List[str] = []
     try:
@@ -601,9 +648,16 @@ def newer_lookup(client: ChapterClient, db, *, series_id: int, match: MangaMatch
         missing: Tuple[str, ...] = ()
         notes.append(why)
     else:
-        missing = tuple(newer_numbers(fetched.chapters, newest))
+        from .chapter_forms import late_parts
+
+        spelled = {to_decimal(c.number): c.number for c in fetched.chapters if to_decimal(c.number) is not None}
+        late = late_parts(spelled, held, newest)
+        found = list(newer_numbers(fetched.chapters, newest)) + [spelled[n] for n in late]
+        missing = tuple(sorted(dict.fromkeys(found), key=lambda n: to_decimal(n) or Decimal(0)))
     built = build_lookup(client, series_id=series_id, missing=missing, match=match, held=held,
                          stored_group=stored_group, in_hand=in_hand, fetched=fetched, with_extras=False, queue=queue)
+    other_form = {to_decimal(r.number) for r in built.rows if r.extra}
+    built.missing = tuple(n for n in missing if to_decimal(n) not in other_form)
     built.notes = notes
     built.newer, built.newer_than = True, (_plain(str(newest)) if newest is not None else None)
     return built
@@ -624,6 +678,12 @@ def newer_text(lookup: ChapterLookup) -> str:
     held = [r.number for r in lookup.rows if r.in_hand is not None]
     if held:
         text += f"; already sent: ch {numbers_text(held)}"
+    said = [f"ch {r.number} {r.note}" for r in lookup.rows if r.note and not r.extra]
+    others = [f"ch {r.number} ({r.note})" for r in lookup.rows if r.note and r.extra]
+    if said:
+        text += "; " + "; ".join(said)
+    if others:
+        text += "; not taken: " + ", ".join(others)
     if lookup.queued_in_suwayomi:
         text += f"; in Suwayomi's queue: ch {numbers_text(list(lookup.queued_in_suwayomi))}"
     return text

@@ -347,6 +347,8 @@ def test_check_for_new_chapters_lists_the_sources_chapters_after_the_newest_held
     assert {r.number for r in lookup.available} == set(lookup.missing) and not lookup.candidates
     assert not any(r.extra for r in lookup.rows)                     # older side chapters are not "new"
     assert session.names().count("MangaListChapters") == 1                              # one fetch
+    (fetch,) = [r for r in session.requests if r["name"] == "MangaListChapters"]
+    assert fetch["variables"] == {"id": 1, "fetchManga": False, "fetchChapters": True}   # the chapter list only
     # nothing newer: no "MangaDex has none" detour to the other sources
     session.answers["MangaListSources"] = with_other_source()
     backend.set_suwayomi_sources([MANGADEX_EN, OTHER])

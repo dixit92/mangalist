@@ -9,7 +9,8 @@ recorded answers and the code cannot drift apart unnoticed:
   downloads path, FlareSolverr - shown, never changed);
 - :data:`Q_SOURCES` ``sources`` (the installed sources: id, name, display name, language, extension);
 - :data:`M_SEARCH` ``fetchSourceManga(type: SEARCH)`` - on MangaDex ``id:<uuid>`` finds the one manga with that id;
-- :data:`M_CHAPTERS` ``fetchMangaAndChapters`` (the manga's details and its chapters, fetched from the source now);
+- :data:`M_CHAPTERS` ``fetchMangaAndChapters`` (the manga's chapters fetched from the source now - the chapter list
+  only, ``fetchManga: false``, unless Suwayomi never fetched the manga's details: :meth:`SuwayomiClient.chapters`);
 - :data:`M_LIBRARY` ``updateManga(patch: {inLibrary: true})``;
 - :data:`M_ENQUEUE` ``enqueueChapterDownloads(ids)``; :data:`Q_QUEUE` ``downloadStatus`` (a finished chapter LEAVES the
   queue); :data:`Q_CHAPTERS_BY_ID` ``chapters(filter: {id: {in}})`` (``isDownloaded``);
@@ -66,10 +67,18 @@ Q_SOURCES = ("query MangaListSources { sources { nodes { id name lang displayNam
 M_SEARCH = ("mutation MangaListSearch($source: LongString!, $query: String) { fetchSourceManga(input: {source: $source, "
             "type: SEARCH, page: 1, query: $query}) { hasNextPage mangas { id title url sourceId inLibrary initialized "
             "} } }")
-M_CHAPTERS = ("mutation MangaListChapters($id: Int!) { fetchMangaAndChapters(input: {id: $id, fetchManga: true, "
-              "fetchChapters: true}) { manga { id title url status inLibrary initialized source { id displayName } } "
+#: ``fetchManga`` / ``fetchChapters`` are variables (``FetchMangaAndChaptersInput`` has both as booleans - read from the
+#: v2.4.2366 server jar, 2026-10-18): :meth:`SuwayomiClient.chapters` asks for the chapter list only, one source request
+#: instead of two (lane GT, 2026-10-18). The answer's ``manga`` is Suwayomi's stored record either way.
+M_CHAPTERS = ("mutation MangaListChapters($id: Int!, $fetchManga: Boolean!, $fetchChapters: Boolean!) { "
+              "fetchMangaAndChapters(input: {id: $id, fetchManga: $fetchManga, fetchChapters: $fetchChapters}) { "
+              "manga { id title url status inLibrary initialized source { id displayName } } "
               "chapters { id name chapterNumber scanlator url realUrl uploadDate sourceOrder isDownloaded pageCount "
               "mangaId } } }")
+#: The variables of the two ways MangaList asks: the chapter list only (every chapter lookup), and once per manga the
+#: details Suwayomi never fetched (a manga a search just found).
+CHAPTERS_ONLY = {"fetchManga": False, "fetchChapters": True}
+DETAILS_ONLY = {"fetchManga": True, "fetchChapters": False}
 M_LIBRARY = ("mutation MangaListAddToLibrary($id: Int!) { updateManga(input: {id: $id, patch: {inLibrary: true}}) "
              "{ manga { id inLibrary } } }")
 M_ENQUEUE = ("mutation MangaListEnqueue($ids: [Int!]!) { enqueueChapterDownloads(input: {ids: $ids}) { downloadStatus "
@@ -336,22 +345,41 @@ class SuwayomiClient:
         return [manga_of(m) for m in mangas if isinstance(m, Mapping)]
 
     def chapters(self, manga_id: int) -> MangaChapters:
-        """The manga (details fetched now) and its chapters, fetched from the source now. A source that lists no
-        chapters answers with none (Suwayomi reports it as an error)."""
-        try:
-            answer = self.call(M_CHAPTERS, {"id": int(manga_id)}, timeout=FETCH_TIMEOUT)
-        except NoChapters as exc:
-            got = exc.data.get("fetchMangaAndChapters")
-            manga = got.get("manga") if isinstance(got, Mapping) else None
-            answer = {"fetchMangaAndChapters": {"manga": manga if isinstance(manga, Mapping) else {"id": int(manga_id)},
-                                                "chapters": []}}
-        data = self._field(answer, "fetchMangaAndChapters")
+        """The manga's chapters, fetched from the source now, and the manga as Suwayomi holds it. A source that lists no
+        chapters answers with none (Suwayomi reports it as an error).
+
+        **The chapter list only** (owner-approved 2026-10-18, lane GT, "Shared Chapter Signal"): ``fetchManga: false``
+        - one request to the source instead of two (its details page and its chapter list). Every caller reads only the
+        manga's title (the name of Suwayomi's download folder for it) and the source's name, and Suwayomi's stored title
+        is the one its downloader uses. One exception: a manga whose details Suwayomi never fetched (``initialized``
+        false - a manga a search just found) gets them fetched once here (``fetchChapters: false``: its chapter list is
+        not asked for twice), so the title MangaList keeps is the one Suwayomi's download will use."""
+        data = self._chapters_answer(manga_id, CHAPTERS_ONLY)
         manga_node = data.get("manga") if isinstance(data.get("manga"), Mapping) else {}
+        if manga_node.get("initialized") is False:
+            try:
+                details = self._chapters_answer(manga_id, DETAILS_ONLY)
+            except SuwayomiError as exc:
+                _log.info("Suwayomi: the details of manga %s could not be fetched (%s); its stored title is used",
+                          manga_id, type(exc).__name__)
+            else:
+                if isinstance(details.get("manga"), Mapping):
+                    manga_node = details["manga"]
         source = manga_node.get("source") if isinstance(manga_node.get("source"), Mapping) else {}
         manga = manga_of({**manga_node, "sourceId": manga_node.get("sourceId") or source.get("id")})
         chapters = tuple(chapter_of({"mangaId": manga_id, **c}) for c in data.get("chapters") or ()
                          if isinstance(c, Mapping))
         return MangaChapters(manga=manga, source_name=_text(source.get("displayName")), chapters=chapters)
+
+    def _chapters_answer(self, manga_id: int, how: Mapping[str, bool]) -> Mapping[str, Any]:
+        try:
+            answer = self.call(M_CHAPTERS, {"id": int(manga_id), **how}, timeout=FETCH_TIMEOUT)
+        except NoChapters as exc:
+            got = exc.data.get("fetchMangaAndChapters")
+            manga = got.get("manga") if isinstance(got, Mapping) else None
+            answer = {"fetchMangaAndChapters": {"manga": manga if isinstance(manga, Mapping) else {"id": int(manga_id)},
+                                                "chapters": []}}
+        return self._field(answer, "fetchMangaAndChapters")
 
     def add_to_library(self, manga_id: int) -> None:
         self.call(M_LIBRARY, {"id": int(manga_id)})

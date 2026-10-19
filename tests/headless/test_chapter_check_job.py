@@ -109,10 +109,11 @@ def test_the_job_runs_a_check_and_reports_its_summary(w, caplog):
     FindingStore(w.backend.db).set_mode([w.series_id], "auto")
     result = job(w)(JobContext())
     assert result.status == "ok"
-    assert result.message == "1 series checked, 1 with new chapters: 1 sent, 0 waiting"
+    assert result.message == ("1 series checked (1 fetched, 0 unchanged on MangaDex), 1 with new chapters: 1 sent, "
+                              "0 waiting; MangaDex latest uploads: from MangaPixer 0, own requests 0")
     assert result.extra["sent"] == 1 and result.extra["series_checked"] == 1
     assert "Chapter check: Series C: ch. 5 from MangaDex (EN) (Alpha Scans) new after ch 4: Sent ch 5" in caplog.text
-    assert "Chapter check: 1 series checked, 1 with new chapters: 1 sent, 0 waiting" in caplog.text
+    assert "Chapter check: 1 series checked (1 fetched, 0 unchanged on MangaDex), 1 with new chapters" in caplog.text
 
 
 def test_the_job_does_not_hold_the_nyaa_lock(w):
@@ -154,3 +155,59 @@ def test_a_shutdown_during_the_check_cancels_the_job(w):
     with pytest.raises(Cancelled):
         job(w, views=views)(JobContext(lambda: bool(stop)))
     assert not [c for c in w.suwayomi.calls if c[0] == "chapters"]
+
+
+# --- fewer requests (owner-approved 2026-10-18, "Shared Chapter Signal", lane GT) --------------------------------
+
+def test_the_job_syncs_mangapixer_first_and_a_failed_sync_does_not_stop_the_check(w, caplog):
+    order = []
+
+    def sync(db, stop):
+        order.append("sync")
+        assert stop() is False
+        return "ok: 1 libraries synced"
+
+    def views(db):
+        order.append("check")
+        return library_states(db)
+
+    result = job(w, views=views, sync=sync)(JobContext())
+    assert order == ["sync", "check"] and result.status == "ok"
+    assert result.extra["mangapixer_sync"] == "ok: 1 libraries synced"
+
+    def failing(db, stop):
+        raise TimeoutError("MangaPixer did not answer")
+
+    caplog.set_level(logging.INFO)
+    result = job(w, sync=failing)(JobContext())
+    assert result.status == "ok" and result.extra["series_checked"] == 1
+    assert result.extra["mangapixer_sync"] == "failed (TimeoutError)"
+    assert "the MangaPixer sync before the check failed" in caplog.text
+
+
+def test_without_mangapixer_the_job_syncs_nothing(w):
+    result = job(w)(JobContext())                       # the default sync: MangaPixer is not connected here
+    assert result.extra["mangapixer_sync"] == "MangaPixer is not connected"
+
+
+def test_the_gates_interval_is_the_checks_own_schedule(w):
+    from datetime import timedelta
+
+    from mangalist.headless.chapter_check_job import check_interval
+
+    db = w.backend.db
+    assert check_interval(db) == timedelta(hours=6)                         # the default, every 6 h
+    save_schedule(db, SCHEDULE_BY_JOB[JOB_NAME], "every 12h")
+    assert check_interval(db) == timedelta(hours=12)
+    save_schedule(db, SCHEDULE_BY_JOB[JOB_NAME], "daily@04:00")
+    assert check_interval(db) == timedelta(days=1)
+    save_schedule(db, SCHEDULE_BY_JOB[JOB_NAME], "off")
+    assert check_interval(db) is None
+
+
+def test_the_job_reports_the_request_counts(w):
+    result = job(w)(JobContext())
+    assert {k: result.extra[k] for k in ("fetched", "unchanged_on_mangadex", "mangadex_from_mangapixer",
+                                         "mangadex_own_requests")} == {"fetched": 1, "unchanged_on_mangadex": 0,
+                                                                       "mangadex_from_mangapixer": 0,
+                                                                       "mangadex_own_requests": 0}
