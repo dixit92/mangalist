@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.53] - 2026-10-20
+
+The fifty-second MangaList release (testing build): chapter downloads Suwayomi gave up on can be retried.
+
+- **Chapter downloads Suwayomi gave up on can be retried.** Suwayomi tries a chapter 3 times within about a minute and then gives up for good, so a site that was down for a while left chapters stuck in In progress with no way to retry them from MangaList. MangaList now puts such a chapter back in Suwayomi's queue by itself every 6 hours, up to 3 times. In In progress, a line under the list names every stuck download with **Retry** and **Cancel…** buttons, which also work by tap; the row's menu has the same two actions. Retry tries again now; Cancel takes the chapters out of Suwayomi's queue and out of In progress.
+
 ## [2026.10.52] - 2026-10-19
 
 The fifty-first MangaList release (testing build): the check for new chapters relies on MangaPixer's own check.

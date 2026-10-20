@@ -122,6 +122,14 @@ class FakeSuwayomi:
             self.queued[cid] = QueuedChapter(cid, "QUEUED")
         return list(self.queued.values())
 
+    def dequeue(self, chapter_ids):
+        self.calls.append(("dequeue", list(chapter_ids)))
+        if self.unreachable:
+            raise ConnectionError("Suwayomi is down")
+        for cid in chapter_ids:
+            self.queued.pop(cid, None)
+        return list(self.queued.values())
+
     def queue(self):
         self._check("queue")
         return list(self.queued.values())

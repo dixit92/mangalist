@@ -5,8 +5,9 @@ download queue, then for the chapters of every active chapter record (in that or
 seen as downloaded, never as lost), and for each record:
 
 - **SENT** + Suwayomi has the chapter downloaded -> DOWNLOADED (and on to filing in the same pass). Still queued or
-  downloading -> waits; Suwayomi's ``ERROR`` state -> waits with the reason on the record (Suwayomi retries; the owner can
-  retry it there). Neither downloaded nor in the queue (removed in Suwayomi) -> FAILED. A chapter Suwayomi no longer
+  downloading -> waits; Suwayomi's ``ERROR`` state (it gave up after its own tries) -> waits with the reason on the
+  record, and MangaList puts it back in Suwayomi's queue every 6 h, up to 3 times (:mod:`.chapter_retry`; the owner can
+  Retry or Cancel it from In progress). Neither downloaded nor in the queue (removed in Suwayomi) -> FAILED. A chapter Suwayomi no longer
   knows -> FAILED.
 - **DOWNLOADED** -> filing: the CBZ is found in the download folder MangaList reads (Settings > Connected services >
   Suwayomi) by Suwayomi's own path rule - ``<downloads>/mangas/<source>/<manga title>/<scanlator>_<chapter name>.cbz``,
@@ -45,6 +46,7 @@ from xml.etree import ElementTree
 
 from ..scanner import ARCHIVE_EXTS
 from ..store.downloads import DownloadLedger, StatusConflict
+from . import chapter_retry
 from .arrivals import ArrivalsReport
 from .chapters import split_chapter_name, to_decimal
 from .contracts import ChapterClient, DownloadRecord, DownloadStatus, QueuedChapter, SuwayomiChapter
@@ -242,14 +244,22 @@ class _ChapterPass:
             if not ch.downloaded:
                 if queued is None:
                     self._fail(rec, "no longer in Suwayomi's download queue and not downloaded (removed there?)")
-                elif queued.state == "ERROR":
-                    note = f"Suwayomi could not download it ({queued.tries} tries); retry it in Suwayomi, or cancel"
+                elif queued.state == chapter_retry.ERROR_STATE:
+                    try:
+                        note = chapter_retry.auto_retry(self.db, self.client, rec, queued.tries)
+                    except Exception as exc:  # noqa: BLE001 - Suwayomi not answering: the next pass tries again
+                        _log.info("Chapter arrivals: download %d (%s) not retried: %s: %s", rec.id, rec.title,
+                                  type(exc).__name__, exc)
+                        note = chapter_retry.stuck_note(queued.tries, getattr(chapter_retry.load(self.db, rec.id),
+                                                                             "auto", 0))
                     self._wait(rec, note)
                     self._note(rec, note)
                 else:
+                    chapter_retry.forget(self.db, rec.id)
                     self._wait(rec, f"{queued.state.lower() or 'queued'} in Suwayomi ({queued.progress:.0%})")
                     self._note(rec, None)
                 return
+            chapter_retry.forget(self.db, rec.id)
             rec = self.ledger.set_status(rec.id, DownloadStatus.DOWNLOADED, expect=(DownloadStatus.SENT,), error=None)
             self.report.downloaded.append(rec.id)
             _log.info("Chapter arrivals: download %d (%s) finished in Suwayomi", rec.id, rec.title)

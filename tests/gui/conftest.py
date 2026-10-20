@@ -162,6 +162,32 @@ class FakeBackend:
                 n += 1
         return n
 
+    def retry_chapter_downloads(self, record_ids):
+        """Retry (2026-10-20): stuck chapter records go back to waiting for Suwayomi."""
+        from dataclasses import replace as _replace
+
+        self.threads.append(threading.get_ident())
+        self.retried = getattr(self, "retried", []) + [tuple(record_ids)]
+        n = 0
+        for i, r in enumerate(self.record_list):
+            if r.id in record_ids and r.status == DownloadStatus.SENT:
+                self.record_list[i] = _replace(r, error="retried by you; waiting for Suwayomi")
+                n += 1
+        return n
+
+    def cancel_chapter_downloads(self, record_ids):
+        """Cancel (2026-10-20): stuck chapter records become CANCELLED."""
+        from dataclasses import replace as _replace
+
+        self.threads.append(threading.get_ident())
+        self.cancelled = getattr(self, "cancelled", []) + [tuple(record_ids)]
+        n = 0
+        for i, r in enumerate(self.record_list):
+            if r.id in record_ids and r.status == DownloadStatus.SENT:
+                self.record_list[i] = _replace(r, status=DownloadStatus.CANCELLED, error="cancelled by you")
+                n += 1
+        return n
+
     def check_now(self):
         self.threads.append(threading.get_ident())
         self.checks += 1

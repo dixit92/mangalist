@@ -291,3 +291,64 @@ def test_a_long_reason_never_squeezes_the_chip(qapp):
     header = dlg.table.horizontalHeader()
     assert header.sectionSize(2) == 420                                       # room for a reason beside the chip
     dlg.close()
+
+
+# --- chapter downloads Suwayomi gave up on: Retry / Cancel (owner, 2026-10-20: "I can't manually retry this") ---------
+
+STUCK = "Suwayomi could not download it (3 tries); MangaList retries it within 6 h - or Retry / Cancel now"
+
+
+def _stuck_backend():
+    from .chapter_fakes import chapter_record
+
+    stuck = [chapter_record(i, 7, str(49 + i), error=STUCK) for i in (1, 2)]            # one Send: ch 50, 51
+    running = chapter_record(3, 7, "60", batch="b2")
+    return FakeBackend(records=stuck + [running])
+
+
+def test_a_stuck_chapter_row_offers_retry_and_cancel_in_its_menu(qapp):
+    backend = _stuck_backend()
+    dlg = DownloadsList(backend, confirm_cancel=lambda rows: True)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 2)
+    stuck_row = next(r for r in range(2) if "50" in dlg.table.item(r, 1).text())
+    assert _menu_on(dlg, 1 - stuck_row) is None                       # downloading normally: no menu, as before
+    assert _menu_on(dlg, stuck_row, pick="Retry in Suwayomi") == {"Retry in Suwayomi": True, "Cancel download…": True}
+    wait_until(qapp, lambda: dlg._call is None and not dlg.stuck_bar.isVisibleTo(dlg))
+    assert sorted(backend.retried[0]) == [1, 2] and threading.get_ident() not in backend.threads
+    assert dlg.status_label.text().startswith("Retried: Series #7")
+
+
+def test_the_line_under_the_list_retries_every_stuck_row_by_tap(qapp):
+    """A tap works where the row menu needs a right-click (the iPad)."""
+    backend = _stuck_backend()
+    dlg = DownloadsList(backend)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 2)
+    assert dlg.stuck_bar.isVisibleTo(dlg)
+    assert dlg.stuck_label.text().startswith("Suwayomi gave up on a chapter download: Series #7 (")
+    assert STUCK in dlg.stuck_label.toolTip()
+    dlg.btn_retry.click()
+    wait_until(qapp, lambda: dlg._call is None and not dlg.stuck_bar.isVisibleTo(dlg))
+    assert sorted(backend.retried[0]) == [1, 2]
+
+
+def test_cancel_asks_first_and_a_no_cancels_nothing(qapp):
+    backend = _stuck_backend()
+    asked = []
+    dlg = DownloadsList(backend, confirm_cancel=lambda rows: asked.append([r.id for r in rows]) or False)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 2)
+    dlg.btn_cancel_stuck.click()
+    assert asked and dlg._call is None and not hasattr(backend, "cancelled")
+    dlg._confirm_cancel = lambda rows: True
+    dlg.btn_cancel_stuck.click()
+    wait_until(qapp, lambda: dlg._call is None and dlg.table.rowCount() == 1)
+    assert sorted(backend.cancelled[0]) == [1, 2] and not dlg.stuck_bar.isVisibleTo(dlg)
+    assert dlg.status_label.text().startswith("Cancelled: Series #7")
+
+
+def test_no_stuck_rows_no_line(qapp):
+    from .chapter_fakes import chapter_record
+
+    dlg = DownloadsList(FakeBackend(records=[chapter_record(1, 7, "50", error="queued in Suwayomi (0%)")]))
+    wait_until(qapp, lambda: dlg.table.rowCount() == 1)
+    assert not dlg.stuck_bar.isVisibleTo(dlg) and not dlg.retry_stuck() and not dlg.cancel_stuck()
+

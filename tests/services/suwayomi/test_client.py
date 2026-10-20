@@ -139,6 +139,21 @@ def test_enqueue_queue_downloaded_delete(session):
     assert c.enqueue([]) == [] and c.chapters_by_id([]) == []
 
 
+def test_dequeue_takes_chapters_out_of_the_queue(session):
+    # 2026-10-20: Cancel of a chapter download Suwayomi gave up on (dequeueChapterDownloads, Suwayomi v2.4.2366)
+    session.answers["MangaListDequeue"] = {"data": {"dequeueChapterDownloads": {"downloadStatus": {
+        "state": "STARTED", "queue": [{"position": 0, "progress": 0.0, "state": "ERROR", "tries": 3,
+                                       "chapter": {"id": 2}}]}}}}
+    c = make(session)
+    left = c.dequeue([1])
+    req = session.requests[-1]
+    assert req["name"] == "MangaListDequeue" and req["variables"] == {"ids": [1]}
+    assert "dequeueChapterDownloads(input: {ids: $ids})" in req["query"]
+    assert [(q.chapter_id, q.state, q.tries) for q in left] == [(2, "ERROR", 3)]
+    n = len(session.requests)
+    assert c.dequeue([]) == [] and len(session.requests) == n
+
+
 def test_every_operation_is_valid_against_the_recorded_schema_names():
     # the operations name only fields Suwayomi v2.4.2366's schema has (introspected at pinning time)
     for key, query in sc.OPERATIONS.items():
