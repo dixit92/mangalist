@@ -376,6 +376,28 @@ class Backend:
         _log.info("Dismissed %d failed download record(s) of %d", done, len(record_ids))
         return done
 
+    def retry_chapter_downloads(self, record_ids: Sequence[int]) -> int:
+        """The owner's Retry of chapter downloads Suwayomi gave up on: back in Suwayomi's queue now
+        (:func:`~.chapter_retry.retry`). Returns how many were retried."""
+        return self._stuck_call("retry", record_ids)
+
+    def cancel_chapter_downloads(self, record_ids: Sequence[int]) -> int:
+        """The owner's Cancel of chapter downloads Suwayomi gave up on: out of Suwayomi's queue, the records cancelled
+        (:func:`~.chapter_retry.cancel`). Returns how many were cancelled."""
+        return self._stuck_call("cancel", record_ids)
+
+    def _stuck_call(self, what: str, record_ids: Sequence[int]) -> int:
+        from . import chapter_retry
+
+        if not self.suwayomi_ready():
+            raise BackendError("Suwayomi is not set up")
+        try:
+            return getattr(chapter_retry, what)(self.db, self._chapter_client(), [int(i) for i in record_ids])
+        except chapter_retry.RetryRefused as exc:
+            raise BackendError(str(exc)) from None
+        except SuwayomiError as exc:
+            raise BackendError(f"Suwayomi: {exc}") from None
+
     def set_remove_completed(self, on: bool) -> None:
         self.ledger.set_remove_completed(on)
 

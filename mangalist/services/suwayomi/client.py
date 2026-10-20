@@ -12,7 +12,8 @@ recorded answers and the code cannot drift apart unnoticed:
 - :data:`M_CHAPTERS` ``fetchMangaAndChapters`` (the manga's chapters fetched from the source now - the chapter list
   only, ``fetchManga: false``, unless Suwayomi never fetched the manga's details: :meth:`SuwayomiClient.chapters`);
 - :data:`M_LIBRARY` ``updateManga(patch: {inLibrary: true})``;
-- :data:`M_ENQUEUE` ``enqueueChapterDownloads(ids)``; :data:`Q_QUEUE` ``downloadStatus`` (a finished chapter LEAVES the
+- :data:`M_ENQUEUE` ``enqueueChapterDownloads(ids)`` (also restarts a chapter in the ``ERROR`` state: one more
+  try, Suwayomi 2.4); :data:`M_DEQUEUE` ``dequeueChapterDownloads(ids)``; :data:`Q_QUEUE` ``downloadStatus`` (a finished chapter LEAVES the
   queue); :data:`Q_CHAPTERS_BY_ID` ``chapters(filter: {id: {in}})`` (``isDownloaded``);
 - :data:`M_DELETE` ``deleteDownloadedChapters(ids)`` - Suwayomi deletes its downloaded copy (and empty folders) and
   marks the chapters not downloaded; it answers the same when the file is already gone.
@@ -84,6 +85,8 @@ M_LIBRARY = ("mutation MangaListAddToLibrary($id: Int!) { updateManga(input: {id
 M_ENQUEUE = ("mutation MangaListEnqueue($ids: [Int!]!) { enqueueChapterDownloads(input: {ids: $ids}) { downloadStatus "
              "{ state queue { position progress state tries chapter { id name chapterNumber scanlator isDownloaded "
              "mangaId } manga { id title } } } } }")
+M_DEQUEUE = ("mutation MangaListDequeue($ids: [Int!]!) { dequeueChapterDownloads(input: {ids: $ids}) { downloadStatus "
+             "{ state queue { position progress state tries chapter { id } } } } }")
 Q_QUEUE = "query MangaListQueue { downloadStatus { state queue { position progress state tries chapter { id } } } }"
 Q_CHAPTERS_BY_ID = ("query MangaListChaptersById($ids: [Int!]!) { chapters(filter: {id: {in: $ids}}) { nodes { id name "
                     "chapterNumber scanlator isDownloaded url realUrl uploadDate sourceOrder mangaId } } }")
@@ -92,6 +95,7 @@ M_DELETE = ("mutation MangaListDeleteDownloaded($ids: [Int!]!) { deleteDownloade
 
 OPERATIONS = {"aboutServer": Q_ABOUT, "settings": Q_SETTINGS, "sources": Q_SOURCES, "fetchSourceManga": M_SEARCH,
               "fetchMangaAndChapters": M_CHAPTERS, "updateManga": M_LIBRARY, "enqueueChapterDownloads": M_ENQUEUE,
+              "dequeueChapterDownloads": M_DEQUEUE,
               "downloadStatus": Q_QUEUE, "chapters": Q_CHAPTERS_BY_ID, "deleteDownloadedChapters": M_DELETE}
 
 
@@ -389,6 +393,14 @@ class SuwayomiClient:
         if not ids:
             return []
         data = self._field(self.call(M_ENQUEUE, {"ids": ids}), "enqueueChapterDownloads")
+        return queue_of(self._field(data, "downloadStatus"))
+
+    def dequeue(self, chapter_ids: Sequence[int]) -> List[QueuedChapter]:
+        """Take chapters out of Suwayomi's download queue (a download it gave up on, cancelled by the owner)."""
+        ids = [int(i) for i in chapter_ids]
+        if not ids:
+            return []
+        data = self._field(self.call(M_DEQUEUE, {"ids": ids}), "dequeueChapterDownloads")
         return queue_of(self._field(data, "downloadStatus"))
 
     def queue(self) -> List[QueuedChapter]:

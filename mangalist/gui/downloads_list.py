@@ -16,6 +16,12 @@ the cap and removing ask first, as Remove now does; moving to the front does not
 the tooltip). Nothing else changes: no file is touched, a torrent still in qBittorrent is left there and stops counting
 against the download budget. A merged chapter row dismisses every chapter record it shows. It does not ask first (it
 changes no download); the status line says what was dismissed.
+
+**Stuck chapter downloads** (owner, 2026-10-20: "I can't manually retry this"): a chapter download Suwayomi gave up on
+(:mod:`mangalist.downloads.chapter_retry`; MangaList also retries it by itself every 6 h, up to 3 times) offers "Retry in
+Suwayomi" and "Cancel download..." in its row menu, and a line under the list names every such row with Retry and
+Cancel... buttons - reachable by tap too (the iPad, touch UX backlog). Retry puts the chapters back in Suwayomi's queue;
+Cancel (asked first) takes them out of it and marks the records cancelled.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
 
 from ..downloads.budget import BudgetState, gb_text
+from ..downloads.chapter_retry import is_stuck
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .background import BackgroundCall, start_call
 from .download_rules import badge_kind, in_progress, merge_batches, next_check_text, when_text
@@ -69,6 +76,12 @@ ACT_TO_FRONT = "Move to the front of the queue"
 ACT_DEQUEUE = "Remove from the queue…"
 QUEUE_ACTIONS = {ACT_SEND_NOW: "send_queued_now", ACT_TO_FRONT: "move_to_front", ACT_DEQUEUE: "remove_from_queue"}
 ACT_DISMISS = "Dismiss"
+ACT_RETRY = "Retry in Suwayomi"
+ACT_CANCEL = "Cancel download…"
+RETRY_TIP = ("Put the chapters back in Suwayomi's download queue now (Suwayomi gave up after its own tries; MangaList "
+             "also retries them by itself every 6 hours, up to 3 times)")
+CANCEL_TIP = ("Take the chapters out of Suwayomi's download queue and out of In progress (marked cancelled, under Show "
+              "finished). A later check may find them missing again.")
 DISMISS_TIP = ("Take this failed download out of In progress (it is marked cancelled and stays under Show finished). "
                "No file is touched; a torrent still in qBittorrent is left there and no longer counts against the "
                "download budget.")
@@ -92,8 +105,10 @@ class DownloadsList(QWidget):
     def __init__(self, backend: DownloadsBackend, parent: Optional[QWidget] = None, autostart: bool = True,
                  heading: str = "In progress", series_name: Optional[Callable[[int], str]] = None,
                  confirm_remove: Optional[Callable[[DownloadRecord], bool]] = None,
-                 confirm_queue: Optional[Callable[[str, DownloadRecord], bool]] = None):
+                 confirm_queue: Optional[Callable[[str, DownloadRecord], bool]] = None,
+                 confirm_cancel: Optional[Callable[[Sequence[DownloadRecord]], bool]] = None):
         super().__init__(parent)
+        self._confirm_cancel = confirm_cancel or self._ask_cancel
         self._confirm_remove = confirm_remove or self._ask_remove
         self._confirm_queue = confirm_queue or self._ask_queue
         self.setObjectName("downloadsList")
@@ -161,6 +176,19 @@ class DownloadsList(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         outer.addWidget(self.table, 1)
+
+        # Chapter downloads Suwayomi gave up on, with buttons (a tap works where the row menu needs a right-click)
+        self.stuck_label = label("", wrap=True)
+        set_tone(self.stuck_label, "warn")
+        self.btn_retry = button("Retry", tip=RETRY_TIP)
+        self.btn_retry.clicked.connect(lambda: self.retry_stuck())
+        self.btn_cancel_stuck = button("Cancel…", tip=CANCEL_TIP)
+        self.btn_cancel_stuck.clicked.connect(lambda: self.cancel_stuck())
+        self.stuck_bar = QWidget()
+        self.stuck_bar.setLayout(hbox(self.stuck_label, None, self.btn_retry, self.btn_cancel_stuck, spacing=10))
+        self.stuck_bar.setVisible(False)
+        self.stuck_rows: List[DownloadRecord] = []
+        outer.addWidget(self.stuck_bar)
 
         self.status_label = label("", wrap=True, selectable=True)
         outer.addWidget(self.status_label)
@@ -249,6 +277,17 @@ class DownloadsList(QWidget):
             font = self.table.item(row, COL_SERIES).font()
             font.setWeight(font.Weight.Medium)
             self.table.item(row, COL_SERIES).setFont(font)
+        self._show_stuck([r for r in shown if is_stuck(r)])
+
+    def _show_stuck(self, rows: List[DownloadRecord]) -> None:
+        self.stuck_rows = rows
+        self.stuck_bar.setVisible(bool(rows))
+        if not rows:
+            return
+        names = ", ".join(f"{self.name_of(r)} ({r.title})" for r in rows[:3]) + (", ..." if len(rows) > 3 else "")
+        what = "a chapter download" if len(rows) == 1 else f"{len(rows)} chapter downloads"
+        self.stuck_label.setText(f"Suwayomi gave up on {what}: {names}")
+        self.stuck_label.setToolTip("\n".join(r.error or "" for r in rows))
 
     def _on_error(self, message: str) -> None:
         set_tone(self.status_label, "bad")
@@ -264,6 +303,8 @@ class DownloadsList(QWidget):
     def _busy(self, busy: bool) -> None:
         self.btn_refresh.setEnabled(not busy)
         self.btn_check.setEnabled(not busy)
+        self.btn_retry.setEnabled(not busy)
+        self.btn_cancel_stuck.setEnabled(not busy)
         self.progress.setVisible(busy)
 
     # --- Find now (the host's find pass) ------------------------------------------------------------------------
@@ -329,6 +370,8 @@ class DownloadsList(QWidget):
             self._failed_menu(record, pos)
             return
         if record.is_chapters:              # a chapter download (Suwayomi): no torrent to remove, nothing queued
+            if is_stuck(record):
+                self._stuck_menu(record, pos)
             return
         if record.status == DownloadStatus.QUEUED:
             self._queue_menu(record, pos)
@@ -415,6 +458,73 @@ class DownloadsList(QWidget):
         set_tone(self.status_label, "bad")
         self.status_label.setText(f"Could not dismiss it: {message}")
         self._check_failed = True
+
+    # --- chapter downloads Suwayomi gave up on: Retry / Cancel ----------------------------------------------------
+
+    def _stuck_menu(self, record: DownloadRecord, pos: QPoint) -> None:
+        menu = QMenu(self.table)
+        retry = menu.addAction(ACT_RETRY)
+        retry.setToolTip(RETRY_TIP)
+        cancel = menu.addAction(ACT_CANCEL)
+        cancel.setToolTip(CANCEL_TIP)
+        for act, name in ((retry, "retry_chapter_downloads"), (cancel, "cancel_chapter_downloads")):
+            act.setEnabled(self._call is None and callable(getattr(self._backend, name, None)))
+        menu.setToolTipsVisible(True)
+        chosen = self._exec_menu(menu, self.table.viewport().mapToGlobal(pos))
+        if chosen is retry:
+            self.retry_stuck([record])
+        elif chosen is cancel:
+            self.cancel_stuck([record])
+
+    def retry_stuck(self, rows: Optional[Sequence[DownloadRecord]] = None) -> bool:
+        """Retry stuck chapter downloads in Suwayomi (*rows*: shown rows; default every stuck row), off the UI thread;
+        the list reloads after."""
+        return self._stuck_call("retry_chapter_downloads", list(rows if rows is not None else self.stuck_rows),
+                                "Retrying in Suwayomi...", "Retried", "Could not retry it")
+
+    def cancel_stuck(self, rows: Optional[Sequence[DownloadRecord]] = None) -> bool:
+        """Cancel stuck chapter downloads (asked first), off the UI thread; the list reloads after."""
+        rows = [r for r in (rows if rows is not None else self.stuck_rows) if is_stuck(r)]
+        if not rows or self._call is not None or not self._confirm_cancel(rows):
+            return False
+        return self._stuck_call("cancel_chapter_downloads", rows, "Cancelling...", "Cancelled",
+                                "Could not cancel it")
+
+    def _stuck_call(self, name: str, rows: List[DownloadRecord], busy: str, done: str, failed: str) -> bool:
+        fn = getattr(self._backend, name, None)
+        rows = [r for r in rows if is_stuck(r)]
+        if self._call is not None or not rows or not callable(fn):
+            return False
+        ids = [i for r in rows for i in members_of(r, self.records)]
+        what = ", ".join(f"{self.name_of(r)} {r.title}" for r in rows)
+        self._busy(True)
+        set_tone(self.status_label, "")
+        self.status_label.setText(busy)
+        self._check_failed = False
+        _log.info("In progress: %s for chapter download(s) %s", name, ids)
+
+        def on_done(n: int) -> None:
+            self._note = f"{done}: {what} ({n} chapter{'s' if n != 1 else ''})."
+
+        def on_error(message: str) -> None:
+            self._note = None
+            set_tone(self.status_label, "bad")
+            self.status_label.setText(f"{failed}: {message}")
+            self._check_failed = True
+
+        self._call = start_call(lambda: fn(ids), on_done, on_error, self._after_check)
+        return True
+
+    def _ask_cancel(self, rows: Sequence[DownloadRecord]) -> bool:
+        names = "\n".join(f"- {self.name_of(r)}: {r.title}" for r in rows)
+        box = QMessageBox(QMessageBox.Icon.Question, "Cancel these downloads?",
+                          f"Take these chapters out of Suwayomi's download queue and out of In progress?\n\n{names}"
+                          "\n\nNothing is deleted. A later check may find the chapters missing again.", parent=self)
+        yes = box.addButton("Cancel downloads", QMessageBox.ButtonRole.DestructiveRole)
+        no = box.addButton("Keep", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        return box.clickedButton() is yes
 
     # --- the queue (the download budget): the owner's overrides -------------------------------------------------
 
