@@ -15,8 +15,11 @@ run, as before.
 **The latest upload** comes from, in this order:
 
 a) MangaPixer's export item ``companions.mangadexLatestUpload`` = ``{"chapterId": "<uuid>" | null, "fetchedAt":
-   "<ISO-8601 UTC>"}``, when its ``companions.mangadex`` is the same manga and ``fetchedAt`` is newer than one check
-   interval ago (MangaPixer does not export it yet; an absent or malformed block reads as "not there");
+   "<ISO-8601 UTC>"}`` (MangaPixer 1.45.0), when its ``companions.mangadex`` is the same manga and the value was
+   confirmed less than one check interval ago: its ``fetchedAt`` (when MangaPixer first read that chapter id) or its
+   library's sweep time (the export page's ``sweeps.mangadexLatestUpload``: every value of the library confirmed at
+   least then; kept by the last complete sync, :meth:`MangaPixerCache.sweeps`), whichever is newer. An absent or
+   malformed block reads as "not there";
 b) else MangaList's own request (:class:`mangalist.services.mangadex.MangaDexClient`: 100 ids per request, every
    content rating);
 c) else (no MangaDex id, the request failed, the id missing from the answer) it is unknown, and the series is fetched.
@@ -52,6 +55,9 @@ DEFAULT_INTERVAL = timedelta(hours=6)
 #: A series unchanged on MangaDex is fetched anyway once its last successful check is this old (every 4th run at 6 h).
 REFETCH_AFTER = timedelta(hours=23)
 
+#: The export's ``sweeps`` key that confirms ``companions.mangadexLatestUpload`` (MangaPixer 1.45.0).
+SWEEP_KEY = "mangadexLatestUpload"
+
 ORIGIN_MANGAPIXER = "MangaPixer"
 ORIGIN_OWN = "MangaDex"
 
@@ -83,7 +89,8 @@ def parse_time(value: Any) -> Optional[datetime]:
 @dataclass(frozen=True)
 class Signal:
     """``companions.mangadexLatestUpload``: MangaDex's latest uploaded chapter (None: MangaDex lists none), and when
-    MangaPixer read it."""
+    MangaPixer first read that chapter id (it moves only with a new chapter; the library's sweep time says how
+    recently the value was confirmed)."""
 
     chapter: Optional[str]
     fetched_at: datetime
@@ -107,6 +114,25 @@ def mangapixer_signal_of(item: Any) -> Optional[Signal]:
     if not isinstance(chapter, str) or not _UUID.fullmatch(chapter.strip()):
         return None
     return Signal(chapter.strip().lower(), fetched_at)
+
+
+def mangapixer_sweeps(db) -> Dict[str, datetime]:
+    """Per MangaPixer library, when MangaPixer last confirmed every latest upload in it (the export's
+    ``sweeps.mangadexLatestUpload`` kept by the last complete sync), for the libraries that have one; empty without
+    MangaPixer data."""
+    try:
+        from ..services.mangapixer import open_cache
+
+        kept = open_cache(db).sweeps()
+    except Exception:  # noqa: BLE001 - no sweep times: each value's own fetchedAt decides
+        _log.debug("Chapter check: no MangaPixer sweep times", exc_info=True)
+        return {}
+    out: Dict[str, datetime] = {}
+    for library_id, sweeps in kept.items():
+        at = parse_time(sweeps.get(SWEEP_KEY))
+        if at is not None:
+            out[library_id] = at
+    return out
 
 
 # --- what is kept per series -------------------------------------------------------------------------------------
@@ -199,6 +225,7 @@ class Gate:
     planned: Dict[int, str] = field(default_factory=dict)          # series id -> MangaDex manga uuid
     latest: Dict[str, Latest] = field(default_factory=dict)        # MangaDex manga uuid -> its latest upload
     from_mangapixer: int = 0            # series whose latest upload came from MangaPixer
+    by_sweep: int = 0                   # ... of them fresh only through their library's sweep time
     own_requests: int = 0               # requests MangaList sent to MangaDex itself
     own_failed: int = 0
 
@@ -216,13 +243,16 @@ class Gate:
         *sources*: their MangaDex ids, MangaPixer's fresh values, and one own request per 100 of the rest (*client*:
         a :class:`~mangalist.services.mangadex.MangaDexClient`; default :func:`default_client`)."""
         from ..store.downloads import SuwayomiSettings
-        from .chapters import HOW_CONFIRMED, HOW_MANGADEX, linked_item, mangadex_id_of
+        from .chapters import HOW_CONFIRMED, HOW_MANGADEX, mangadex_id_of
+        from .chapters import linked as linked_to
 
         gate = cls(db=db, now=now or utcnow(), refetch_after=refetch_after)
         fresh_after = gate.now - (interval or DEFAULT_INTERVAL)
         by_id = {s.id: s for s in sources}
         suwayomi = SuwayomiSettings(db)
         signals: Dict[str, Signal] = {}
+        swept: set = set()                  # MangaDex ids fresh only through their library's sweep time
+        sweeps = mangapixer_sweeps(db)
         for cand in candidates:
             sid = int(cand.series_id)
             choice = suwayomi.series_choice(sid)
@@ -236,18 +266,26 @@ class Gate:
                     else None
             else:
                 mangadex_id = cand.mangadex_id      # found through MangaPixer's MangaDex id
-            item = linked_item(db, sid)
+            found = linked_to(db, sid)
+            item = found.item if found is not None else None
             linked = mangadex_id_of(item)
             mangadex_id = mangadex_id or linked     # checked against Suwayomi's answer before it is kept
             if not mangadex_id:
                 continue
             gate.planned[sid] = mangadex_id
             signal = mangapixer_signal_of(item) if linked == mangadex_id else None
-            if signal is not None and signal.fetched_at > fresh_after:
+            if signal is None:
+                continue
+            swept_at = sweeps.get(found.library_id) if found is not None else None
+            if signal.fetched_at > fresh_after:
                 signals[mangadex_id] = signal
+            elif swept_at is not None and swept_at > fresh_after:
+                signals[mangadex_id] = signal
+                swept.add(mangadex_id)
         for mangadex_id, signal in signals.items():
             gate.latest[mangadex_id] = Latest(mangadex_id, signal.chapter, ORIGIN_MANGAPIXER)
         gate.from_mangapixer = sum(1 for m in gate.planned.values() if m in signals)
+        gate.by_sweep = sum(1 for m in gate.planned.values() if m in swept)
         ask = list(dict.fromkeys(m for m in gate.planned.values() if m not in gate.latest))
         if ask:
             own = client if client is not None else default_client()
@@ -259,8 +297,8 @@ class Gate:
             gate.own_requests, gate.own_failed = got.requests, got.failed
             for mangadex_id, chapter in got.values.items():
                 gate.latest[mangadex_id] = Latest(mangadex_id, chapter, ORIGIN_OWN)
-        _log.info("Chapter check: MangaDex latest uploads of %d series: %d from MangaPixer, %d from %d own "
-                  "request(s)%s", len(gate.planned), gate.from_mangapixer,
+        _log.info("Chapter check: MangaDex latest uploads of %d series: %d from MangaPixer (%d confirmed by its "
+                  "library sweep), %d from %d own request(s)%s", len(gate.planned), gate.from_mangapixer, gate.by_sweep,
                   sum(1 for m in gate.planned.values() if gate.latest.get(m) and gate.latest[m].origin == ORIGIN_OWN),
                   gate.own_requests, f" ({gate.own_failed} failed)" if gate.own_failed else "")
         return gate
@@ -298,4 +336,4 @@ class Gate:
 
 
 __all__ = ["DEFAULT_INTERVAL", "Gate", "Kept", "Latest", "REFETCH_AFTER", "Signal", "load", "local_state",
-           "mangapixer_signal_of", "save"]
+           "mangapixer_signal_of", "mangapixer_sweeps", "save"]

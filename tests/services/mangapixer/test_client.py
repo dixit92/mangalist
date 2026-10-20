@@ -57,6 +57,19 @@ def test_export_pages_follow_next_cursor(fake, client_factory):
     assert pages[-1].next_cursor is None
 
 
+@pytest.mark.parametrize("sent, kept", [
+    ({"mangadexLatestUpload": "2026-10-04T08:00:00.000Z"}, {"mangadexLatestUpload": "2026-10-04T08:00:00.000Z"}),
+    ({"mangadexLatestUpload": None}, {"mangadexLatestUpload": None}),
+    (None, {}),                                         # MangaPixer before 1.45.0 leaves it out
+    ("2026-10-04T08:00:00.000Z", {}),                   # malformed
+])
+def test_export_pages_keep_the_sweeps(fake, client_factory, sent, kept):
+    fake.items["lib0manga"] = [folder("n0001", ["S", "Series 1"])]
+    fake.sweeps = sent
+    (page,) = client_factory(fake.url).export_pages("lib0manga")
+    assert page.sweeps == kept
+
+
 def test_include_parameter(fake, client_factory):
     fake.items["lib0manga"] = load_fixture()["items"]
     c = client_factory(fake.url)

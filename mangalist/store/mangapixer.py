@@ -212,6 +212,31 @@ class MangaPixerCache:
                   "on" if cur["verify_tls"] else "OFF")
         return self.connection()
 
+    # --- new-chapter sweeps (MangaPixer 1.45.0) -------------------------------------------------------
+
+    _SWEEPS = "mangapixer.sweeps"      # {library id: the export's sweeps from its last complete sync}
+
+    def sweeps(self) -> Dict[str, Dict[str, Optional[str]]]:
+        """Per library, when MangaPixer last confirmed its new-chapter signals ({signal: ISO time or None}) as of
+        the last complete sync - the export's ``sweeps``, which matches the items MangaList holds."""
+        value = self.store.get_setting(self._SWEEPS, {})
+        if not isinstance(value, dict):
+            return {}
+        return {str(k): {str(s): (str(t) if t else None) for s, t in v.items()}
+                for k, v in value.items() if isinstance(v, dict)}
+
+    def set_sweeps(self, library_id: str, sweeps: Dict[str, Any]) -> None:
+        """Keep a complete sync's ``sweeps`` (empty from an older MangaPixer: an earlier value is dropped)."""
+        kept = {str(s): (str(t) if isinstance(t, str) and t else None) for s, t in (sweeps or {}).items()}
+        all_sweeps = self.sweeps()
+        if all_sweeps.get(str(library_id), {}) == kept:
+            return
+        if kept:
+            all_sweeps[str(library_id)] = kept
+        else:
+            all_sweeps.pop(str(library_id), None)
+        self.store.set_setting(self._SWEEPS, all_sweeps)
+
     # --- library scans on request (MangaPixer 1.36.0) ----------------------------------------------------
 
     _SCAN_PENDING = "mangapixer.scan_pending"          # {library id: not before (ISO UTC)}

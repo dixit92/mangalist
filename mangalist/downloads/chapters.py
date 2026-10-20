@@ -475,8 +475,22 @@ def mangadex_released_for(db, series_id: int) -> Optional[Tuple[str, int]]:
     return (released.language, released.chapters) if released is not None else None
 
 
+@dataclass(frozen=True)
+class Linked:
+    """The MangaPixer export item linked to a series' own folder, and the MangaPixer library it is in."""
+
+    library_id: str
+    item: Mapping[str, Any]
+
+
 def linked_item(db, series_id: int) -> Optional[Mapping[str, Any]]:
     """The MangaPixer export item linked to the series' own folder (Confirmed / Auto, not inherited), else None."""
+    found = linked(db, series_id)
+    return found.item if found is not None else None
+
+
+def linked(db, series_id: int) -> Optional[Linked]:
+    """:func:`linked_item` with its MangaPixer library, else None."""
     from ..services.mangapixer import open_cache
     from ..services.mangapixer.resolve import resolve
     from .placement import locate_series
@@ -489,7 +503,7 @@ def linked_item(db, series_id: int) -> Optional[Mapping[str, Any]]:
         return None
     if res is None or res.inherited or res.link_state not in ("Confirmed", "Auto"):
         return None
-    return res.item if isinstance(res.item, Mapping) else None
+    return Linked(str(res.library_id), res.item) if isinstance(res.item, Mapping) else None
 
 
 def mangadex_id_of(item: Optional[Mapping[str, Any]]) -> Optional[str]:

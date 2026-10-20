@@ -118,9 +118,9 @@ the saved Suwayomi source of each ongoing chapter series that is not Off for the
 you have - the same as **Check for new chapters** in the List's row menu. Series on Auto get them sent; for series on
 Notify they wait in **Found**. A series without a saved source (or a MangaDex id MangaPixer links), or with a download
 on its way, is not asked. To keep the requests down, the check asks a source for the chapter list only, first syncs
-with MangaPixer when it is connected, and skips a MangaDex series whose latest upload on MangaDex (from MangaPixer, or
-one request to MangaDex for every 100 series) has not changed since its last check - at least once a day it is asked
-anyway. The row menu's Check for new chapters always asks.
+with MangaPixer when it is connected, and skips a MangaDex series whose latest upload on MangaDex (from MangaPixer 1.45.0
+or later when its own check for new chapters went through that library within the check's interval, or else one request
+to MangaDex for every 100 series) has not changed since its last check - at least once a day it is asked anyway. The row menu's Check for new chapters always asks.
 
 **Whole chapters or parts - one form per chapter.** When two groups release a series, one in whole chapters and one in
 parts (`38` and `38.1`, `38.2`), and the source lists both, the checks and the find pass take each chapter in the form
