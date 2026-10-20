@@ -54,6 +54,7 @@ class LibrarySync:
     rekeyed: List[Tuple[str, str]] = field(default_factory=list)
     pages: int = 0
     server_time: Optional[str] = None
+    sweeps: Dict[str, Any] = field(default_factory=dict)    # the first page's (MangaPixer 1.45.0)
     fell_back_to_full: bool = False
     error: Optional[str] = None
 
@@ -117,6 +118,8 @@ def sync_library(cache: MangaPixerCache, client: mpc.MangaPixerClient, library: 
     if out.mode == "full":
         state.last_full_at = now
     cache.save_sync_state(state)
+    # Kept only now, like serverTime: the sweep time vouches for the items of this complete sync.
+    cache.set_sweeps(library.id, out.sweeps)
     _log.info("MangaPixer: %s synced (%s): %d items, %d removed, %d re-keyed, %d archives skipped",
               library.display_name, out.mode, out.upserted, out.removed + out.pruned, len(out.rekeyed),
               out.archives_dropped)
@@ -133,6 +136,7 @@ def _run(cache, client, library, since, out: LibrarySync, include, limit, progre
             raise SyncStopped()
         if page.first:
             out.server_time = page.server_time
+            out.sweeps = dict(page.sweeps)
         folders = [i for i in page.items if is_folder(i)]
         out.archives_dropped += len(page.items) - len(folders)
         removed = [str(r["nodeId"]) for r in page.removed] if since else []

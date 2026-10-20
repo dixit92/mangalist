@@ -166,6 +166,9 @@ class ExportPage:
     removed: List[Dict[str, Any]]
     next_cursor: Optional[str]
     index: int = 0                # 0 = the first page (its serverTime is the one to keep)
+    #: MangaPixer 1.45.0: when it last confirmed the library's new-chapter signals ({signal: ISO time or None};
+    #: ``mangadexLatestUpload``), the same on every page of a call. Empty from an older MangaPixer.
+    sweeps: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def first(self) -> bool:
@@ -486,7 +489,8 @@ class MangaPixerClient:
                               items=[i for i in items if isinstance(i, dict) and i.get("nodeId")],
                               removed=[r for r in (removed if isinstance(removed, list) else [])
                                        if isinstance(r, dict) and r.get("nodeId")],
-                              next_cursor=body.get("nextCursor") or None, index=index)
+                              next_cursor=body.get("nextCursor") or None, index=index,
+                              sweeps=body.get("sweeps") if isinstance(body.get("sweeps"), dict) else {})
             yield page
             if not page.next_cursor:
                 return

@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.52] - 2026-10-19
+
+The fifty-first MangaList release (testing build): the check for new chapters relies on MangaPixer's own check.
+
+- **MangaPixer's check for new chapters counts.** MangaPixer 1.45.0 checks MangaDex for new chapters of the whole library every few hours and says when it last did. MangaList's scheduled check now takes MangaPixer's answer whenever that check is within its own interval, so it no longer asks MangaDex itself for series MangaPixer has already confirmed. With an older MangaPixer, or when its check is late, MangaList asks MangaDex itself as before.
+
 ## [2026.10.51] - 2026-10-18
 
 The fiftieth MangaList release (testing build): the check for new chapters asks the internet far less, a whole chapter and its parts are told apart, and the Duplicates view shows whole chapters held with their parts.

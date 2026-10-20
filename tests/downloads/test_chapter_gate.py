@@ -18,6 +18,7 @@ from mangalist.downloads import chapter_gate as gate
 from mangalist.downloads import chapters as chm
 from mangalist.downloads.contracts import DownloadStatus
 from mangalist.services.mangadex import LatestUploads, MangaDexClient
+from mangalist.services.mangapixer import open_cache
 from mangalist.store.findings import FindingStore
 
 from .fakes import data, scan
@@ -79,13 +80,19 @@ def enqueued(w):
     return [ids for name, *rest in w.suwayomi.calls if name == "enqueue" for ids in rest]
 
 
-def link(monkeypatch, mangadex_id=MD_ID, latest=None):
-    """MangaPixer's item for every series: its MangaDex id, and (*latest*) its ``mangadexLatestUpload`` block."""
+def link(monkeypatch, mangadex_id=MD_ID, latest=None, library="lib0manga"):
+    """MangaPixer's item for every series, in *library*: its MangaDex id, and (*latest*) its
+    ``mangadexLatestUpload`` block."""
     item = {"companions": {"mangadex": mangadex_id}}
     if latest is not None:
         item["companions"]["mangadexLatestUpload"] = latest
-    monkeypatch.setattr(chm, "linked_item", lambda db, sid: item)
+    monkeypatch.setattr(chm, "linked", lambda db, sid: chm.Linked(library, item))
     return item
+
+
+def swept(db, at, library="lib0manga"):
+    """MangaPixer's library sweep time as the last complete sync kept it (1.45.0: ``sweeps.mangadexLatestUpload``)."""
+    open_cache(db).set_sweeps(library, {"mangadexLatestUpload": at})
 
 
 # --- unchanged / changed / unknown -------------------------------------------------------------------------------
@@ -225,6 +232,48 @@ def test_a_stale_absent_or_malformed_mangapixer_value_falls_back_to_the_own_requ
     assert url == "https://api.mangadex.org/manga" and ("ids[]", MD_ID) in params
     assert [v for k, v in params if k == "contentRating[]"] == ["safe", "suggestive", "erotica", "pornographic"]
     assert gate.load(db, lib.series_id).latest == C2
+
+
+# --- MangaPixer 1.45.0: the library sweep time ---------------------------------------------------------------
+
+def test_an_old_value_confirmed_by_a_recent_library_sweep_is_used(db, lib, monkeypatch, caplog):
+    """1.45.0: ``fetchedAt`` is when MangaPixer first saw the chapter, so an unchanged series' value grows old;
+    the library's sweep time says it was confirmed since."""
+    link(monkeypatch, latest={"chapterId": C1, "fetchedAt": "2026-10-10T00:00:00Z"})     # first seen 8 days ago
+    swept(db, "2026-10-18T11:00:00.000Z")                                                  # confirmed 1 h ago
+    md = FakeMangaDex({MD_ID: C2})
+    check(db, lib, md)
+    assert gate.load(db, lib.series_id).latest == C1
+    with caplog.at_level(logging.INFO, logger="mangalist.downloads.chapter_gate"):
+        report = check(db, lib, md, now=NOW + timedelta(hours=1))
+    assert md.calls == [] and fetches(lib) == 1
+    assert (report.unchanged, report.from_mangapixer, report.own_requests) == (1, 1, 0)
+    assert "1 from MangaPixer (1 confirmed by its library sweep)" in caplog.text
+
+
+@pytest.mark.parametrize("library, at", [
+    ("lib0manga", "2026-10-18T05:00:00.000Z"),     # the sweep is 7 h old too: older than the 6 h interval
+    ("lib0manga", None),                           # no complete sweep yet
+    ("lib1other", "2026-10-18T11:00:00.000Z"),     # another library's sweep
+    ("lib0manga", "an hour ago"),                  # malformed
+])
+def test_an_old_value_without_a_recent_sweep_of_its_library_falls_back_to_the_own_request(db, lib, monkeypatch,
+                                                                                          library, at):
+    link(monkeypatch, latest={"chapterId": C1, "fetchedAt": "2026-10-10T00:00:00Z"})
+    swept(db, at, library=library)
+    md = FakeMangaDex({MD_ID: C2})
+    report = check(db, lib, md, interval=timedelta(hours=6))
+    assert (report.from_mangapixer, report.own_requests) == (0, 1)
+    assert gate.load(db, lib.series_id).latest == C2
+
+
+def test_a_recent_value_is_used_without_any_sweep(db, lib, monkeypatch):
+    """A chapter MangaPixer saw an hour ago is fresh on its own (the sweep that saw it may not have read the whole
+    library yet)."""
+    link(monkeypatch, latest={"chapterId": C1, "fetchedAt": "2026-10-18T11:00:00Z"})
+    md = FakeMangaDex({MD_ID: C2})
+    report = check(db, lib, md)
+    assert (report.from_mangapixer, report.own_requests) == (1, 0)
 
 
 def test_a_null_chapter_from_mangapixer_is_a_value_none(db, lib, monkeypatch):

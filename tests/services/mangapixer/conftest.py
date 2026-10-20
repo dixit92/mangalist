@@ -53,6 +53,7 @@ class FakeMangaPixer:
         self.window_start: Optional[str] = None      # updatedSince before this -> 409
         self.schema_version = 1
         self.extra_fields = False
+        self.sweeps: Optional[Dict[str, Any]] = None  # 1.45.0: the page envelope's "sweeps" (None: left out)
         self.queue: List[Tuple[str, int, Any, Dict[str, str]]] = []   # (endpoint, status, body, headers)
         self.requests: List[Dict[str, Any]] = []
         self.scan_scope = True                       # the token has library:scan (1.36.0)
@@ -127,6 +128,8 @@ class FakeMangaPixer:
         body = {"schemaVersion": self.schema_version, "serverTime": self.server_time,
                 "library": {"id": lib_id, "displayName": lib["displayName"], "kind": lib["kind"]},
                 "items": page, "removed": removed if start == 0 else [], "nextCursor": nxt}
+        if self.sweeps is not None:
+            body["sweeps"] = copy.deepcopy(self.sweeps)
         if self.extra_fields:
             body["futureTopLevel"] = True
         return 200, body, {}

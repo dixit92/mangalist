@@ -19,6 +19,7 @@ def test_full_sync_from_the_contract_sample(connected, fake, client_factory):
     sample = load_fixture()
     fake.items["lib0manga"] = sample["items"]
     fake.server_time = sample["serverTime"]
+    fake.sweeps = sample["sweeps"]
     res = _sync(connected, client_factory, fake)
     assert res.status == "ok", res.message
     lib = res.libraries[0]
@@ -33,6 +34,7 @@ def test_full_sync_from_the_contract_sample(connected, fake, client_factory):
     assert connected.sync_state("lib0manga").server_time == sample["serverTime"]
     assert connected.sync_state("lib0manga").last_mode == "full"
     assert connected.last_sync_at()
+    assert connected.sweeps() == {"lib0manga": {"mangadexLatestUpload": sample["sweeps"]["mangadexLatestUpload"]}}
 
 
 def test_incremental_uses_the_first_pages_server_time_and_applies_removals_first(connected, fake, client_factory):
@@ -81,6 +83,35 @@ def test_409_falls_back_to_one_full_sync(connected, fake, client_factory):
     assert queries[-2].get("updatedSince") == "2026-08-01T00:00:00.000Z" and "updatedSince" not in queries[-1]
     assert [r.node_id for r in connected.items("lib0manga")] == ["n0001"]
     assert connected.sync_state("lib0manga").server_time == "2026-10-04T00:00:00.000Z"
+
+
+def test_the_sweep_time_is_kept_only_after_a_complete_sync_and_dropped_by_an_older_mangapixer(
+        connected, fake, client_factory):
+    """MangaPixer 1.45.0's ``sweeps`` vouches for the items of the call it came with, so it is kept like serverTime:
+    only once the last page arrived. A MangaPixer without it (older, or rolled back) drops the earlier value."""
+    fake.items["lib0manga"] = [folder(f"n{i:04d}", [f"S{i}"]) for i in range(4)]
+    fake.sweeps = {"mangadexLatestUpload": "2026-10-04T08:00:00.000Z"}
+    _sync(connected, client_factory, fake)
+    assert connected.sweeps() == {"lib0manga": {"mangadexLatestUpload": "2026-10-04T08:00:00.000Z"}}
+
+    fake.sweeps = {"mangadexLatestUpload": "2026-10-04T14:00:00.000Z"}
+    calls = {"n": 0}
+
+    def stop():
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    res = sync_all(connected, client=client_factory(fake.url), list_series=lambda rid: [], force_full=True, limit=2,
+                   should_stop=stop)
+    assert res.status == "error"
+    assert connected.sweeps()["lib0manga"]["mangadexLatestUpload"] == "2026-10-04T08:00:00.000Z"
+
+    fake.sweeps = {"mangadexLatestUpload": None}           # 1.45.0 before its first complete sweep
+    _sync(connected, client_factory, fake)
+    assert connected.sweeps() == {"lib0manga": {"mangadexLatestUpload": None}}
+    fake.sweeps = None                                      # an older MangaPixer
+    _sync(connected, client_factory, fake)
+    assert connected.sweeps() == {}
 
 
 def test_interrupted_sync_keeps_the_previous_server_time(connected, fake, client_factory):
