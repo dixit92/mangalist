@@ -130,6 +130,7 @@ class ApiServer(
     private val requestedPort: Int,
     private val registry: ExtensionRegistry,
     private val repo: Repo,
+    private val compat: CompatApi? = null,
 ) {
     private val json =
         Json {
@@ -189,6 +190,8 @@ class ApiServer(
                 }
                 method == "GET" && path == "/sources" ->
                     reply(ex, json.encodeToJsonElement(registry.sources.values.sortedBy { it.name }.map { sourceDto(it) }))
+                parts.firstOrNull() == "compat" && compat != null ->
+                    reply(ex, compat.handle(method, parts.drop(1)) { body(ex) } ?: throw HttpError(404, "no such endpoint: $method $path"))
                 parts.size == 3 && parts[0] == "sources" -> sourceCall(ex, method, source(parts[1]), parts[2], query)
                 else -> throw HttpError(404, "no such endpoint: $method $path")
             }

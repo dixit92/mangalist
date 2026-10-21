@@ -48,8 +48,21 @@ data class Options(
     val flareSolverrTimeout: Int = 60,
     val flareSolverrSession: String = "mangalist",
     val flareSolverrSessionTtl: Int = 15,
+    /** Where chapters are downloaded (`<downloads>/mangas/...`); default `<data>/downloads`. */
+    val downloadsDir: Path = dataDir.resolve("downloads"),
+    /** The extension repository's index (`index.json`). */
+    val repo: String = DEFAULT_REPO,
+    /** A browser engine (Chromium through JCEF, downloaded at first use) for extensions that open a WebView. */
+    val webView: Boolean = true,
+    /** Chapters downloaded at once (from different sources; one at a time per source). */
+    val downloadParallel: Int = 2,
 ) {
     companion object {
+        const val USAGE =
+            "mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--downloads DIR] [--repo URL] " +
+                "[--webview on|off] [--download-parallel 2] [--flaresolverr URL] [--flaresolverr-timeout 60] " +
+                "[--flaresolverr-session mangalist] [--flaresolverr-session-ttl 15]"
+
         fun parse(args: Array<String>): Options {
             var data = System.getenv("MANGALIST_EXTENSIONS_DATA") ?: "extension-host-data"
             var bind = "127.0.0.1"
@@ -58,28 +71,46 @@ data class Options(
             var flareTimeout = 60
             var flareSession = "mangalist"
             var flareTtl = 15
+            var downloads: String? = null
+            var repo = DEFAULT_REPO
+            var webView = true
+            var parallel = 2
             var i = 0
             while (i < args.size) {
                 when (args[i]) {
                     "--data" -> data = args[++i]
                     "--bind" -> bind = args[++i]
                     "--port" -> port = args[++i].toInt()
+                    "--downloads" -> downloads = args[++i]
+                    "--repo" -> repo = args[++i]
+                    "--webview" ->
+                        webView =
+                            when (args[++i].lowercase()) {
+                                "on", "true", "yes" -> true
+                                "off", "false", "no" -> false
+                                else -> throw IllegalArgumentException("--webview takes on or off")
+                            }
+                    "--download-parallel" -> parallel = args[++i].toInt().coerceIn(1, 4)
                     "--flaresolverr" -> flare = args[++i].takeIf { it.isNotBlank() }
                     "--flaresolverr-timeout" -> flareTimeout = args[++i].toInt()
                     "--flaresolverr-session" -> flareSession = args[++i]
                     "--flaresolverr-session-ttl" -> flareTtl = args[++i].toInt()
                     "--help", "-h" -> {
-                        println(
-                            "mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--flaresolverr URL] " +
-                                "[--flaresolverr-timeout 60] [--flaresolverr-session mangalist] [--flaresolverr-session-ttl 15]",
-                        )
+                        println(USAGE)
                         kotlin.system.exitProcess(0)
                     }
                     else -> throw IllegalArgumentException("unknown argument ${args[i]}")
                 }
                 i++
             }
-            return Options(Path(data).absolute(), bind, port, flare, flareTimeout, flareSession, flareTtl)
+            val dataDir = Path(data).absolute()
+            return Options(
+                dataDir, bind, port, flare, flareTimeout, flareSession, flareTtl,
+                downloadsDir = downloads?.let { Path(it).absolute() } ?: dataDir.resolve("downloads"),
+                repo = repo,
+                webView = webView,
+                downloadParallel = parallel,
+            )
         }
     }
 }
@@ -134,7 +165,12 @@ fun main(args: Array<String>) {
             logger.info { "User-Agent changed (FlareSolverr): making the sources again" }
             registry.reloadSources()
         }.launchIn(GlobalScope)
-    val server = ApiServer(options.bind, options.port, registry, Repo(network.client))
+    val store = Store(options.dataDir.resolve("host.db"))
+    val library = Library(store, { registry.sources[it] }, DownloadsLayout(options.downloadsDir))
+    val downloader = Downloader(store, library, options.dataDir.resolve("cache").resolve("downloads"), options.downloadParallel)
+    downloader.restore()
+    val compat = CompatApi(library, downloader, registry)
+    val server = ApiServer(options.bind, options.port, registry, Repo(network.client), compat)
     server.start()
     logger.info { "Listening on http://${options.bind}:${server.port}" }
 }
