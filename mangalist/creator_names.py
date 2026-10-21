@@ -206,12 +206,12 @@ def fill(db, mu_ids: Iterable[Any], *, get_series: Callable[[int], Mapping[str, 
 
     A request is made after the pace's wait and never when *should_stop* says so; ``MAX_FAILURES`` failures in a row end
     the run. The cache is written every :data:`SAVE_EVERY` records and when the run ends however it ends. *progress*:
-    ``(requests made, requests planned)``."""
+    ``(requests made, requests planned so far)``: the authors of series not read yet are counted once they are."""
     ids = [str(i) for i in (_int(m) for m in mu_ids) if i is not None]
     series, authors = load_cache(db)
     result = FillResult()
     todo_series = wanted_series(series, ids, now())
-    total = len(todo_series) + len(wanted_authors(series, authors, ids, now()))
+    total = len(todo_series) + len(wanted_authors(series, authors, ids, now()))     # (the new authors: once read)
     streak = 0
     unsaved = 0
     first = True
@@ -268,7 +268,9 @@ def fill(db, mu_ids: Iterable[Any], *, get_series: Callable[[int], Mapping[str, 
                 save()
             step()
         if not result.stopped:
-            for aid in wanted_authors(series, authors, ids, now()):
+            todo_authors = wanted_authors(series, authors, ids, now())
+            total = result.requests + len(todo_authors)
+            for aid in todo_authors:
                 if blocked():
                     break
                 answer = ask(get_author, aid, author_delay)

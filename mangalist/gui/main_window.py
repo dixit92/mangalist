@@ -3045,7 +3045,8 @@ class MainWindow(QMainWindow):
         self._creator_stop = True                   # the lookup ends after its request; what it read is cached
         if self._creator_call is not None:
             self._creator_call.abandon()
-            self._creator_call.wait(3000)
+            if hasattr(self._creator_call, "wait"):
+                self._creator_call.wait(3000)          # (a thread; it ends after its request)
         if self._scan_retry is not None:
             self._scan_retry.stop()
         if self._rename_call is not None and hasattr(self._rename_call, "abandon"):
