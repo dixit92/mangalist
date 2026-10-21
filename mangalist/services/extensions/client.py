@@ -124,6 +124,55 @@ class Page:
     image_url: Optional[str]
 
 
+#: A source preference's kinds (Mihon's ``androidx.preference`` classes, as the host names them; the class names are
+#: read too): what the Extensions page can edit.
+PREF_LIST, PREF_CHECKBOX, PREF_SWITCH, PREF_EDITTEXT, PREF_MULTISELECT = (
+    "list", "checkbox", "switch", "edittext", "multiselect")
+_PREF_KINDS = {"listpreference": PREF_LIST, "list": PREF_LIST, "checkboxpreference": PREF_CHECKBOX,
+               "checkbox": PREF_CHECKBOX, "switchpreferencecompat": PREF_SWITCH, "switchpreference": PREF_SWITCH,
+               "switch": PREF_SWITCH, "edittextpreference": PREF_EDITTEXT, "edittext": PREF_EDITTEXT,
+               "multiselectlistpreference": PREF_MULTISELECT, "multiselect": PREF_MULTISELECT}
+
+
+@dataclass(frozen=True)
+class SourcePreference:
+    """One setting of a source (MangaDex's languages, image quality, ...), as the extension declares it."""
+
+    position: int                     # its place in the source's list (Suwayomi's way of naming one)
+    key: str
+    kind: str                         # PREF_* ('' for a kind MangaList cannot edit: shown, read-only)
+    title: str
+    summary: str = ""
+    value: Any = None                 # str (list, edittext), bool (checkbox, switch), tuple of str (multiselect)
+    default: Any = None
+    entries: Tuple[str, ...] = ()     # list / multiselect: what the owner sees ...
+    entry_values: Tuple[str, ...] = ()    # ... and what is stored
+    visible: bool = True
+    enabled: bool = True
+
+
+def _pref_value(kind: str, value: Any) -> Any:
+    if kind in (PREF_CHECKBOX, PREF_SWITCH):
+        return bool(value) if not isinstance(value, str) else value.strip().lower() == "true"
+    if kind == PREF_MULTISELECT:
+        return tuple(str(v) for v in value or ()) if not isinstance(value, str) else (value,) if value else ()
+    return None if value is None else str(value)
+
+
+def _preference(d: Mapping[str, Any], index: int) -> SourcePreference:
+    raw_kind = str(d.get("type") or d.get("kind") or "").replace("_", "").strip().lower()
+    kind = _PREF_KINDS.get(raw_kind.rsplit(".", 1)[-1], "")
+    value = d.get("value", d.get("currentValue"))
+    default = d.get("default", d.get("defaultValue"))
+    return SourcePreference(
+        position=int(d.get("position", index)), key=str(d.get("key") or ""), kind=kind,
+        title=str(d.get("title") or d.get("key") or ""), summary=str(d.get("summary") or ""),
+        value=_pref_value(kind, value if value is not None else default), default=_pref_value(kind, default),
+        entries=tuple(str(e) for e in d.get("entries") or ()),
+        entry_values=tuple(str(e) for e in d.get("entryValues") or d.get("entries") or ()),
+        visible=d.get("visible", True) is not False, enabled=d.get("enabled", True) is not False)
+
+
 def _source(d: Mapping[str, Any]) -> Source:
     return Source(str(d["id"]), d["name"], d.get("lang") or "", d.get("baseUrl"), bool(d.get("supportsLatest")),
                   d.get("extension"))
@@ -222,8 +271,41 @@ class ExtensionHostClient:
             body["repo"] = repo
         return _extension(self._call("POST", "/extensions/install", body))
 
+    def update(self, pkg: str, *, repo: Optional[str] = None) -> Extension:
+        """Install the repository's newer version of an installed extension (its sources are loaded again)."""
+        body: Dict[str, Any] = {"pkg": pkg}
+        if repo:
+            body["repo"] = repo
+        return _extension(self._call("POST", "/extensions/update", body))
+
+    def uninstall(self, pkg: str) -> None:
+        """Remove an installed extension and its sources."""
+        self._call("POST", "/extensions/uninstall", {"pkg": pkg})
+
     def sources(self) -> List[Source]:
         return [_source(d) for d in self._call("GET", "/sources")]
+
+    def preferences(self, source_id: str) -> List[SourcePreference]:
+        """The source's settings (its extension's ``setupPreferenceScreen``), with their current values."""
+        got = self._call("GET", f"/sources/{source_id}/preferences")
+        items = got.get("preferences") if isinstance(got, Mapping) else got
+        return [_preference(d, i) for i, d in enumerate(items or ()) if isinstance(d, Mapping)]
+
+    def set_preference(self, source_id: str, pref: SourcePreference, value: Any) -> List[SourcePreference]:
+        """Change one setting (by its key, and its position for a host that names settings Suwayomi's way); the
+        source's settings as they are now."""
+        if pref.kind == PREF_MULTISELECT:
+            value = [str(v) for v in value or ()]
+        elif pref.kind in (PREF_CHECKBOX, PREF_SWITCH):
+            value = bool(value)
+        else:
+            value = "" if value is None else str(value)
+        got = self._call("POST", f"/sources/{source_id}/preferences",
+                         {"key": pref.key, "position": pref.position, "value": value})
+        items = got.get("preferences") if isinstance(got, Mapping) else got
+        if not isinstance(items, list):
+            return self.preferences(source_id)
+        return [_preference(d, i) for i, d in enumerate(items) if isinstance(d, Mapping)]
 
     # --- one source -----------------------------------------------------------------------------------------------
 
@@ -260,4 +342,5 @@ class ExtensionHostClient:
 
 
 __all__ = ["DEFAULT_URL", "Chapter", "Extension", "ExtensionHostClient", "ExtensionHostError", "HostUnreachable",
-           "Manga", "MangasPage", "NotFound", "Page", "RepoExtension", "RepoSource", "Source", "SourceFailed"]
+           "Manga", "MangasPage", "NotFound", "Page", "RepoExtension", "RepoSource", "Source", "SourceFailed",
+           "SourcePreference", "PREF_CHECKBOX", "PREF_EDITTEXT", "PREF_LIST", "PREF_MULTISELECT", "PREF_SWITCH"]

@@ -92,6 +92,7 @@ from .options import (
     set_budget_gb,
     set_flag,
 )
+from .extensions_backend import ExtensionsBackendMixin
 from .partial import PackOutcome, PackSelection, choose_files, hint_for, log_selection
 from .placement import placement_for
 from .queueing import ClientDown, budget_state, move_to_front, refresh, remove_from_queue, send_now, submit
@@ -120,17 +121,18 @@ class _UploadsKnownTorrents:
         return getattr(self._client, name)
 
 
-class Backend:
+class Backend(ExtensionsBackendMixin):
     def __init__(self, db, *, search: Optional[NyaaSearch] = None, nyaa_client: Optional[NyaaClient] = None,
                  client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection,
                  chapter_client_factory: Optional[Callable[[SuwayomiConnection], ChapterClient]] = None,
-                 namer=None, wanted=None):
+                 namer=None, wanted=None, host_client_factory: Optional[Callable[[str], Any]] = None):
         self.db = db
         self._wanted = wanted                   # the find pass's wanted list (tests); None: mangalist.wanted
         self.ledger = DownloadLedger(db)
         self.chapter_ledger = DownloadLedger(db, tool=TOOL_SUWAYOMI)
         self.suwayomi = SuwayomiSettings(db)
         self._chapter_client_factory = chapter_client_factory
+        self._host_client_factory = host_client_factory   # the extension host's own API (tests); None: the real one
         self._namer = namer
         self._search = search                   # given: used as it is (tests); else one NyaaSearch per category
         self._searches: Dict[tuple, NyaaSearch] = {}
@@ -396,7 +398,7 @@ class Backend:
         except chapter_retry.RetryRefused as exc:
             raise BackendError(str(exc)) from None
         except SuwayomiError as exc:
-            raise BackendError(f"Suwayomi: {exc}") from None
+            raise BackendError(str(exc) if self.suwayomi.builtin else f"Suwayomi: {exc}") from None
 
     def set_remove_completed(self, on: bool) -> None:
         self.ledger.set_remove_completed(on)
@@ -457,7 +459,7 @@ class Backend:
         return conn is not None and bool(conn.base_url)
 
     def load_suwayomi(self) -> SuwayomiSettingsView:
-        conn = self.suwayomi.connection()
+        conn = self.suwayomi.suwayomi_connection()
         if conn is None:
             return SuwayomiSettingsView()
         return SuwayomiSettingsView(base_url=conn.base_url, username=conn.username, has_password=bool(conn.password),
@@ -494,20 +496,22 @@ class Backend:
         except ValueError as exc:
             raise BackendError(str(exc)) from None
         if not password:
-            stored = self.suwayomi.connection()
+            stored = self.suwayomi.suwayomi_connection()
             password = stored.password if stored is not None and view.username.strip() else ""
         return SuwayomiConnection(base_url=base_url, username=view.username.strip(), password=password or "",
                                   download_dir=(view.download_dir or "").strip())
 
     def _chapter_client(self, conn: Optional[SuwayomiConnection] = None) -> ChapterClient:
+        """The chosen program's chapter client (Suwayomi, or the built-in extension host: one factory,
+        :func:`mangalist.downloads.chapter_backend.client_from_connection`)."""
+        from . import chapter_backend
+
         conn = conn if conn is not None else self.suwayomi.connection()
         if conn is None or not conn.base_url:
-            raise BackendError("Suwayomi is not set up yet (Settings > Connected services > Suwayomi)")
+            raise BackendError(chapter_backend.not_set_up(self.suwayomi.builtin).capitalize())
         if self._chapter_client_factory is not None:
             return self._chapter_client_factory(conn)
-        from ..services.suwayomi import client_from_connection as suwayomi_client
-
-        return suwayomi_client(conn)
+        return chapter_backend.client_from_connection(conn)
 
     def suwayomi_sources(self) -> List[tuple]:
         """``[(SuwayomiSource, allowed)]``: the allowed sources first, in the owner's order, then the other installed
@@ -555,7 +559,10 @@ class Backend:
             sources = allowed_sources(list(client.sources()), self.suwayomi.sources(), self._source_languages())
             if not sources:
                 lookup.error = ("no Suwayomi source is allowed (Settings > Download sources > Suwayomi sources), or "
-                                "the MangaDex extension is not installed in Suwayomi")
+                                "the MangaDex extension is not installed in Suwayomi") if not self.suwayomi.builtin \
+                    else ("no source is allowed (Settings > Download sources > Suwayomi sources), or the MangaDex "
+                          "extension is not installed in the extension host (Settings > Connected services > "
+                          "Built-in extensions > Extensions)")
                 return lookup
             stored = self.suwayomi.series_choice(series_id)
             found = find_manga(client, sources, mangadex_id=mangadex_id_for(self.db, series_id), titles=titles,
@@ -599,7 +606,8 @@ class Backend:
             return built
         except SuwayomiError as exc:
             # the panel shows it; the log keeps why (owner, 2026-10-11: three "Lookup failed" rows, nothing logged)
-            _log.warning("Chapters: looking up series %s in Suwayomi failed: %s", series_id, exc)
+            _log.warning("Chapters: looking up series %s in %s failed: %s", series_id,
+                         "the extension host" if self.suwayomi.builtin else "Suwayomi", exc)
             raise BackendError(str(exc)) from None
         finally:
             _close(client)
