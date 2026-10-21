@@ -73,6 +73,15 @@ def get_series(series_id: int) -> Dict[str, Any]:
     return resp.json()
 
 
+def get_author(author_id: int) -> Dict[str, Any]:
+    """Return the AuthorModelV1 dict for *author_id* (``name``, ``associated`` other names, ``actualname``; raises
+    ``requests.HTTPError``, 404 when the author does not exist)."""
+    _log.debug("get_author: id=%s", author_id)
+    resp = _SESSION.get(f"{_BASE}/authors/{int(author_id)}", timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def is_licensed(series_id: int) -> Optional[bool]:
     """Return True/False for the licensed flag, or None on error."""
     try:
