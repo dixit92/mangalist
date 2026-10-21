@@ -21,8 +21,11 @@ listed below; MangaList's own code (`../../host/src/main/kotlin/mangalist`) is n
   JVM's fonts).
 - `AndroidCompat/.../webkit/{CefHelper,KcefHelper,KcefWebSettings,KcefWebViewProvider}.kt` removed and
   `AndroidCompatInitializer` registers no WebView provider: extensions that open a WebView fail ("No factory registered").
-- `network/interceptor/CloudflareInterceptor.kt` removed (FlareSolverr); the host has its own pass-through of the same name.
-- `network/NetworkHelper.kt`: no source-registry reset on a user-agent change; the pass-through CloudflareInterceptor.
+- `network/interceptor/CloudflareInterceptor.kt`: unchanged (2026-10-21; it first was left out). Its FlareSolverr settings come from
+  the host's own `suwayomi.tachidesk.server.serverConfig` (`host/src/main/kotlin/suwayomi/tachidesk/server/ServerConfig.kt`),
+  which has only those six keys.
+- `network/NetworkHelper.kt`: no source-registry reset on a user-agent change (the host makes its sources again itself,
+  `Main.kt`).
 - `AppInfo.kt`: a fixed version (v2.4.2366) and image MIME list instead of Suwayomi's BuildConfig / ImageUtil.
 - `PackageTools.kt`: the extensions folder from the `mangalist.extensions.dir` system property instead of Suwayomi's ApplicationDirs.
 - Not copied: `source/local/**`, `util/storage/**` (Suwayomi's local source and EPUB reader).

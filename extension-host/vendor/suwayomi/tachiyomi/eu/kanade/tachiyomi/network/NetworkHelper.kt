@@ -91,8 +91,6 @@ class NetworkHelper(
             builder.addNetworkInterceptor(httpLoggingInterceptor)
             // }
 
-            // MangaList extension host (prototype): a pass-through CloudflareInterceptor (no FlareSolverr); extensions
-            // check that the default client has one
             builder.addInterceptor(
                 CloudflareInterceptor(setUserAgent = { userAgent.value = it }),
             )

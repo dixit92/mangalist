@@ -17,12 +17,13 @@ from typing import List, Optional, Sequence, Tuple
 from .client import DEFAULT_URL, ExtensionHostClient, ExtensionHostError, Source
 
 #: (source name, language, a series of the owner's library on that source) - the sources MangaList's series use most
-#: (2026-10-21: MangaDex 184 series, MangaFire 13, Weeb Central 13, Comix 3).
+#: (2026-10-21: MangaDex 184 series, MangaFire 13, Weeb Central 13, Comix 3, ManhwaRead 1).
 DEMO = (
     ("MangaDex", "en", "Kaoru Hana wa Rin to Saku"),
     ("Weeb Central", "en", "Absolute Regression"),
     ("MangaFire", "en", "Dungeon Gakuen"),
     ("Comix", "en", "Shuden Sugitara Nani Shite Asobu"),
+    ("ManhwaRead", "en", "Moby Dick"),          # behind Cloudflare: needs the host's --flaresolverr
 )
 
 

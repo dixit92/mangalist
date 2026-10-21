@@ -15,6 +15,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import suwayomi.tachidesk.server.serverConfig
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.util.concurrent.Executors
@@ -158,7 +159,17 @@ class ApiServer(
             val parts = path.split('/').filter { it.isNotEmpty() }
             when {
                 method == "GET" && path == "/health" ->
-                    reply(ex, json.encodeToJsonElement(mapOf("ok" to "true", "version" to HOST_VERSION, "sources" to registry.sources.size.toString())))
+                    reply(
+                        ex,
+                        json.encodeToJsonElement(
+                            mapOf(
+                                "ok" to "true",
+                                "version" to HOST_VERSION,
+                                "sources" to registry.sources.size.toString(),
+                                "flareSolverr" to if (serverConfig.flareSolverrEnabled.value) serverConfig.flareSolverrUrl.value else "off",
+                            ),
+                        ),
+                    )
                 method == "GET" && path == "/repo" ->
                     reply(ex, json.encodeToJsonElement(repo.index(query["url"] ?: DEFAULT_REPO)))
                 method == "GET" && path == "/extensions" ->

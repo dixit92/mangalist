@@ -85,6 +85,18 @@ class ExtensionRegistry(
         logger.info { "Loaded ${installed.size} extension(s), ${sources.size} source(s)" }
     }
 
+    /** Make every installed extension's sources again (new instances; their headers pick up the current User-Agent). */
+    @Synchronized
+    fun reloadSources() {
+        for (ext in installed.values.toList()) {
+            try {
+                register(ext, instantiate(root.resolve(ext.jar), ext.className))
+            } catch (e: Throwable) {
+                logger.error(e) { "Could not make ${ext.pkg}'s sources again" }
+            }
+        }
+    }
+
     /**
      * Download the extension at [url] and install it (replacing an installed version of the same package): a `.jar`
      * (keiyoushi's ready JVM jar, as Suwayomi prefers) or an `.apk` (converted with dex2jar).
