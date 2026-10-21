@@ -48,3 +48,9 @@ package/
 # Upstream MangaUpdates API spec — fetch on demand, see README.
 mangaupdates_openapi.json
 openapi.yaml
+
+# Mihon extension host prototype: build output and local run data
+extension-host/.gradle/
+extension-host/**/build/
+extension-host/.data/
+extension-host/.kotlin/
