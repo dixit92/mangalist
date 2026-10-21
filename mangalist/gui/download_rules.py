@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from ..alias_search import CreatorIndex, TextFilter
 from ..downloads.contracts import DownloadRecord, DownloadStatus, NyaaCandidate
 from .shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, GROUPS, WantedSeries
 from .volumes_target import status_text
@@ -63,9 +64,20 @@ SEARCH_TEXT: Mapping[str, str] = {SEARCH_QUEUED: "Queued", SEARCH_RUNNING: "Sear
                                   SEARCH_NONE: "No releases", SEARCH_FAILED: "Search failed"}
 
 
-def matches_filter(series: WantedSeries, text: str) -> bool:
-    needle = text.strip().casefold()
-    return not needle or needle in series.title.casefold() or any(needle in t.casefold() for t in series.titles)
+def filter_why(series: WantedSeries, text: str, creators: Optional[CreatorIndex] = None) -> Optional[Tuple[str, ...]]:
+    """Does *series* pass the filter box's *text*? None when not; else why beyond its own names (``aka <title>`` when only
+    another title of its record holds the text, ``by <creator>`` for each ``creator:`` value) - empty when its own
+    names hold it (:class:`~mangalist.alias_search.TextFilter`)."""
+    flt = TextFilter.of(text)
+    if flt.empty:
+        return ()
+    own = "\n".join((series.title, *series.titles)).casefold()
+    index = creators if creators is not None else CreatorIndex()
+    return flt.match(own, series.alt_titles, creators=lambda: index.creators_of(series.mu_id))
+
+
+def matches_filter(series: WantedSeries, text: str, creators: Optional[CreatorIndex] = None) -> bool:
+    return filter_why(series, text, creators) is not None
 
 
 #: How the "To get" list is sorted (owner, 2026-10-11: "Can I sort this? For example by highest number of missing
@@ -75,14 +87,14 @@ SORTS: Tuple[Tuple[str, str], ...] = ((SORT_TITLE, "Title (A-Z)"), (SORT_MOST, "
                                       (SORT_FEWEST, "Fewest missing first"))
 
 
-def grouped(series: Iterable[WantedSeries], filter_text: str = "",
-            sort: str = SORT_TITLE) -> List[Tuple[str, List[WantedSeries]]]:
+def grouped(series: Iterable[WantedSeries], filter_text: str = "", sort: str = SORT_TITLE,
+            creators: Optional[CreatorIndex] = None) -> List[Tuple[str, List[WantedSeries]]]:
     """(group, its series) for every group, in the fixed order, series sorted by *sort* (title - case-insensitive -
     breaking ties); the filter keeps those matching it. A group with nothing stays in the list (the tab shows its
     header, count 0)."""
     buckets: Dict[str, List[WantedSeries]] = {g: [] for g in GROUPS}
     for item in series:
-        if item.group in buckets and matches_filter(item, filter_text):
+        if item.group in buckets and matches_filter(item, filter_text, creators):
             buckets[item.group].append(item)
     sign = {SORT_MOST: -1, SORT_FEWEST: 1}.get(sort, 0)
     for items in buckets.values():

@@ -41,6 +41,15 @@ def _no_mangadex(monkeypatch):
     monkeypatch.setattr(chapter_gate, "default_client", lambda: _NoMangaDex())
 
 
+@pytest.fixture(autouse=True)
+def _no_creator_lookup(monkeypatch):
+    """No test asks MangaUpdates for creator names (the window starts that lookup after a MangaUpdates lookup); a test
+    of the lookup passes its own clients."""
+    from mangalist.gui import lanes
+
+    monkeypatch.setattr(lanes, "creator_name_clients", lambda: None)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _qt_teardown():
     """Close and delete every leftover top-level widget while the QApplication still exists. Dialogs a test

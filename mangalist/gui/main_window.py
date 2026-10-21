@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, mu_cache, process_pool, store, wanted
+from .. import config, creator_names, mu_cache, process_pool, store, wanted
 from ..alias_search import TextFilter, hint_text
 from .._version import __version__
 from ..models import MangaEntry
@@ -389,6 +389,7 @@ class MainWindow(QMainWindow):
         self.resize(int(win.get("w", 1440)), int(win.get("h", 900)))
 
         self._model = MangaTableModel()
+        self._model.set_creator_index(creator_names.load_index(self._db))
         self._proxy = _SortProxy(self)
         self._proxy.setSourceModel(self._model)
         # MangaPixer source: a folder MangaPixer knows takes its knowledge from the export; the others
@@ -413,6 +414,8 @@ class MainWindow(QMainWindow):
         self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
         self._dupe_call = None
         self._same_call = None                      # the same series in two folders, being looked for
+        self._creator_call = None                   # the creators of the series, being read from MangaUpdates
+        self._creator_stop = False
         self._wanted_series: List[WantedSeries] = []
         self._wanted_cache: Dict[int, tuple] = {}    # id(entry) -> (entry, its state, series id, its To get entries)
         self._dupe_per_folder: Dict[str, Tuple[int, int]] = {}
@@ -561,6 +564,7 @@ class MainWindow(QMainWindow):
             if hasattr(tab, "set_series_host"):         # the series menus' List side (series_actions.py)
                 tab.set_series_host(self)
             self._download_tab = tab
+            tab.set_creator_index(self._model.creator_index())
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
         self._make_auto_modes()
@@ -2047,6 +2051,7 @@ class MainWindow(QMainWindow):
             self._mu_worker = None
 
         if not entries:
+            self._start_creator_names()
             return
         entries = list(entries)
         unresolved = [(e.root_id, str(e.folder)) for e in entries if str(e.folder) not in self._mp_items]
@@ -2083,6 +2088,7 @@ class MainWindow(QMainWindow):
             self._status_label.setText(
                 f"{len(skipped)} folder(s) skipped: MangaPixer knows them (sync MangaPixer to refresh)")
             if not entries:
+                self._start_creator_names()
                 return
 
         # Build (source_row, entry) pairs - the row of each entry still in the model (a scan may have replaced it
@@ -2095,6 +2101,7 @@ class MainWindow(QMainWindow):
         pairs = [(folder_to_row[str(e.folder)], e) for e in entries
                  if str(e.folder) in folder_to_row and self._model.entry_at(folder_to_row[str(e.folder)]) is e]
         if not pairs:
+            self._start_creator_names()
             return
 
         worker = MuWorker(pairs)
@@ -2134,10 +2141,54 @@ class MainWindow(QMainWindow):
             self._table.resizeColumnToContents(col)
 
     def _on_mu_thread_finished(self) -> None:
+        stopped = self._mu_worker is not None and self._mu_worker.aborted
         self._model.set_mu_processing_row(None)
         self._mu_thread = None
         self._mu_worker = None
         self._list.set_mu_running(False)
+        if not stopped:
+            self._start_creator_names()
+
+    def _start_creator_names(self) -> None:
+        """Read the creators of the series (and the other names of each author) from MangaUpdates for the List's
+        ``creator:`` filter, in the background, at the end of a MangaUpdates lookup (so it asks MangaUpdates only when the
+        owner lets MangaList: the automatic lookup is on, or Look up was pressed). One run at a time; what is cached is
+        not asked again for 180 days (:mod:`mangalist.creator_names`)."""
+        if self._creator_call is not None or self._model.rowCount() == 0:
+            return
+        clients = lanes.creator_name_clients()
+        if clients is None:
+            return
+        ids = self._model.mu_ids()
+        try:
+            if not ids or not creator_names.pending(self._db, ids):
+                return
+        except Exception:  # noqa: BLE001 - a broken cache is read again by the run itself
+            _log.warning("Counting the creator names to read failed", exc_info=True)
+            return
+        from .background import start_call
+
+        get_series, get_author, not_found = clients
+        db = self._db
+        self._creator_stop = False
+
+        def work():
+            return creator_names.fill(db, ids, get_series=get_series, get_author=get_author, not_found=not_found,
+                                      should_stop=lambda: self._creator_stop)
+
+        def done(result) -> None:
+            if result.requests:
+                index = creator_names.load_index(db)
+                self._model.set_creator_index(index)
+                self._proxy.refresh_scope()                 # a creator: filter typed meanwhile finds them now
+                if self._download_tab is not None:
+                    self._download_tab.set_creator_index(index)
+
+        def finished() -> None:
+            self._creator_call = None
+
+        self._creator_call = start_call(work, done, lambda msg: _log.warning("Reading creator names failed: %s", msg),
+                                        finished)
 
     def _on_mu_start(self) -> None:
         if not self._mu_entries:
@@ -2991,6 +3042,10 @@ class MainWindow(QMainWindow):
             self._dupe_call.abandon()
         if self._same_call is not None:
             self._same_call.abandon()
+        self._creator_stop = True                   # the lookup ends after its request; what it read is cached
+        if self._creator_call is not None:
+            self._creator_call.abandon()
+            self._creator_call.wait(3000)
         if self._scan_retry is not None:
             self._scan_retry.stop()
         if self._rename_call is not None and hasattr(self._rename_call, "abandon"):
