@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor
 
+from ..alias_search import Creator, CreatorIndex, distinct_titles
 from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, from_own_matcher
 from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
@@ -198,6 +199,19 @@ def merge_folder_scan(entries: List[MangaEntry], root_id: Optional[int], root_fo
     return others + [e for name in sorted(groups, key=str.lower) for e in groups[name]]
 
 
+class RowAliases:
+    """A row's other names for the filter box: the record's titles (*titles*, with *folded* their case-folded form) and,
+    through :meth:`creators`, the people credited on its MangaUpdates series."""
+
+    __slots__ = ("titles", "folded", "mu_id", "_index")
+
+    def __init__(self, titles: Tuple[str, ...], folded: Tuple[str, ...], mu_id: Optional[str], index: CreatorIndex):
+        self.titles, self.folded, self.mu_id, self._index = titles, folded, mu_id, index
+
+    def creators(self) -> Tuple[Creator, ...]:
+        return self._index.creators_of(self.mu_id)
+
+
 class MangaTableModel(QAbstractTableModel):
     """The List's rows: one :class:`MangaEntry` per series, with its state (State / Gaps / Official source / English
     and the MangaUpdates columns) computed from the providers the window sets.
@@ -259,6 +273,11 @@ class MangaTableModel(QAbstractTableModel):
         self._sort_keys: Dict[int, Tuple[MangaEntry, Dict[int, Any]]] = {}
         # Which state filters a state passes (``id(state)`` -> (state, keys asked, keys passed)), for the chips' counts.
         self._filter_cache: Dict[int, Tuple[SeriesState, tuple, frozenset]] = {}
+        # What the filter box finds besides the shown titles (``id(entry)`` -> (entry, knowledge it was read from, aliases)):
+        # the series' alternative titles, case-folded once, and its MangaUpdates id (for its creators). Kept until the
+        # entry, its knowledge or its MangaUpdates data change; the creators come from the index the window sets.
+        self._aliases: Dict[int, Tuple[MangaEntry, Optional[SeriesKnowledge], tuple, "RowAliases"]] = {}
+        self._creator_index: CreatorIndex = CreatorIndex()
         self._today: Optional[datetime.date] = None
         # Where a row's inventory and knowledge come from. FALLBACK defaults: the inventory read from the
         # entry's file names (states.fallback_inventory_from_entry) and the own matcher's knowledge; the
@@ -333,6 +352,8 @@ class MangaTableModel(QAbstractTableModel):
                     self._stale_folders[str(e.folder)] = result
         for key in [k for k in self._sort_keys if k not in kept]:
             del self._sort_keys[key]
+        for key in [k for k in self._aliases if k not in kept]:
+            del self._aliases[key]
         for store in (self._generation, ):
             for key in [k for k in store if k not in kept]:
                 del store[key]
@@ -409,6 +430,7 @@ class MangaTableModel(QAbstractTableModel):
         keys = [id(self._entries[r]) for r in range(max(first, 0), min(last, n - 1) + 1)]
         for k in keys:                  # what a cell shows changed: its sort keys go (cheap; any column)
             self._sort_keys.pop(k, None)
+            self._aliases.pop(k, None)
         if self._pushing:
             return                      # a push's own repaint (or the same rows again): the states stay
         if top_left.column() == bottom_right.column() and top_left.column() in NOT_STATE_INPUTS:
@@ -687,6 +709,60 @@ class MangaTableModel(QAbstractTableModel):
             return ""
         title = f"{e.parent_folder.name} / {e.title}" if e.parent_folder is not None else e.title
         return f"{title}\n{e.english_title or ''}\n{e.verdict.value}".casefold()
+
+    def row_aliases(self, row: int) -> Optional["RowAliases"]:
+        """What the filter box finds in *row* besides :meth:`search_text`: the alternative titles of its record
+        (MangaPixer's, else MangaUpdates') and its creators. Read from the entry and the knowledge the row has already -
+        never computes a state, never asks the network - and kept per row (a keystroke filters ~700 rows)."""
+        e = self.entry_at(row)
+        if e is None:
+            return None
+        knowledge = self._known_knowledge(e)
+        token = (e.mu_id, e.mu_title, e.english_title, len(e.mu_associated or ()))
+        got = self._aliases.get(id(e))
+        if got is not None and got[0] is e and got[1] is knowledge and got[2] == token:
+            return got[3]
+        titles = distinct_titles((
+            knowledge.title if knowledge is not None else None,
+            knowledge.english_title if knowledge is not None else None,
+            *(knowledge.alt_titles if knowledge is not None else ()),
+            e.mu_title, *(e.mu_associated or ()),
+        ))
+        mu_id = (knowledge.mu_id if knowledge is not None and knowledge.mu_id else None) or e.mu_id
+        aliases = RowAliases(titles, tuple(t.casefold() for t in titles), None if mu_id is None else str(mu_id),
+                             self._creator_index)
+        self._aliases[id(e)] = (e, knowledge, token, aliases)
+        return aliases
+
+    def _known_knowledge(self, e: MangaEntry) -> Optional[SeriesKnowledge]:
+        """The knowledge *e*'s state was computed from - the up-to-date one, else the one it showed before (a series
+        keeps its record's titles across a rescan) - or None; never computed here."""
+        k = id(e)
+        cached = self._state_cache.get(k)
+        if cached is not None and cached[0] is e:
+            return cached[1][2]
+        stale = self._stale.get(k)
+        if stale is not None and stale[0] is e:
+            return stale[1][2]
+        folder = self._stale_folders.get(str(e.folder))
+        return folder[2] if folder is not None else None
+
+    def set_creator_index(self, index: CreatorIndex) -> None:
+        """The creators the ``creator:`` filter looks in (the window sets it once read, and again when more arrived)."""
+        self._creator_index = index
+        self._aliases.clear()
+
+    def creator_index(self) -> CreatorIndex:
+        return self._creator_index
+
+    def mu_ids(self) -> List[str]:
+        """The MangaUpdates ids of the shown series, once each (:meth:`row_aliases`' ids; for the creator-name lookup)."""
+        out: Dict[str, None] = {}
+        for row in range(len(self._entries)):
+            a = self.row_aliases(row)
+            if a is not None and a.mu_id is not None:
+                out[a.mu_id] = None
+        return list(out)
 
     def in_scope(self, row: int) -> bool:
         e = self.entry_at(row)

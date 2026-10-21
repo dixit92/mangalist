@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import config, mu_cache, process_pool, store, wanted
+from ..alias_search import TextFilter, hint_text
 from .._version import __version__
 from ..models import MangaEntry
 from ..scanner import (
@@ -64,8 +65,8 @@ from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
     COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MTIME,
-    COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label,
-    merge_folder_scan, state_matches, under_any,
+    COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, SUBTITLE_ROLE, MangaTableModel,
+    column_label, merge_folder_scan, state_matches, under_any,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
@@ -196,6 +197,9 @@ class _SortProxy(QSortFilterProxyModel):
         # the box's placeholder promises; the model's search_text) - never the 21 columns, some of which compute the
         # series' state or a MangaPixer view per call (UI Performance Research, stage 1 #1).
         self._needle = ""
+        # The same text read as a filter (``creator:`` values apart): the free text also looks in the record's
+        # alternative titles, the creators in the creator names (``mangalist.alias_search``).
+        self._filter = TextFilter()
 
     @contextmanager
     def _filter_change(self):
@@ -223,6 +227,7 @@ class _SortProxy(QSortFilterProxyModel):
             return
         with self._filter_change():
             self._needle = needle
+            self._filter = TextFilter.of(text)
 
     def text_filter(self) -> str:
         return self._needle
@@ -254,7 +259,7 @@ class _SortProxy(QSortFilterProxyModel):
             return True
         if not source_model.in_scope(source_row):     # the Library picker
             return False
-        if self._needle and self._needle not in source_model.search_text(source_row):
+        if not self._filter.empty and not self._text_matches(source_model, source_row):
             return False
         if self._state_filter is not None:
             # the state the row shows (never computed here: a state still being computed shows the one before)
@@ -263,6 +268,43 @@ class _SortProxy(QSortFilterProxyModel):
         if self._dupes_only:
             return source_model.is_duplicate(source_row)
         return True
+
+    def _text_matches(self, model, source_row: int) -> bool:
+        """Does the row hold the filter text: in its shown titles or Kind, else (MangaPixer's alt-title search) in an
+        alternative title of its record, and every ``creator:`` value among its creators. The rows' other names are kept
+        by the model; nothing is computed or asked here."""
+        own = model.search_text(source_row)
+        flt = self._filter
+        if not flt.creators and flt.needle in own:
+            return True
+        aliases_of = getattr(model, "row_aliases", None)
+        aliases = aliases_of(source_row) if aliases_of is not None else None
+        if aliases is None:
+            return not flt.creators and flt.needle in own
+        return flt.match(own, aliases.titles, aliases.folded, aliases.creators) is not None
+
+    def why_shown(self, source_row: int) -> str:
+        """What the row held beyond its own titles when the filter let it through (``aka <title>`` / ``by <creator>``),
+        '' when its own titles hold the text or no filter is typed."""
+        flt = self._filter
+        model = self.sourceModel()
+        aliases_of = getattr(model, "row_aliases", None)
+        if flt.empty or aliases_of is None:
+            return ""
+        aliases = aliases_of(source_row)
+        if aliases is None:
+            return ""
+        why = flt.match(model.search_text(source_row), aliases.titles, aliases.folded, aliases.creators)
+        return hint_text(why) if why else ""
+
+    def data(self, index, role=Qt.DisplayRole):
+        """The Title cell's second line says why a series is shown when the filter found it by another of its names
+        (``aka Delicious in Dungeon``); otherwise it is the matched series' title as before."""
+        if (role == SUBTITLE_ROLE and not self._filter.empty and index.isValid() and index.column() == COL_TITLE):
+            hint = self.why_shown(self.mapToSource(index).row())
+            if hint:
+                return hint
+        return super().data(index, role)
 
     def lessThan(self, left, right) -> bool:
         """Compare the rows' sort keys, kept per row by the model (``MangaTableModel.sort_key``: the value

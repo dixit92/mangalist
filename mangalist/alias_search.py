@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 MIN_ALT_CHARS = 3           # FTS5 trigram: a shorter query matches nothing
 MAX_FIELDS = 10             # FacetSearchSyntax.MaxFields
@@ -264,3 +264,59 @@ class CreatorIndex:
             others = author.get("n") or () if isinstance(author, Mapping) else ()
             out.append(Creator.of(name, (str(o) for o in others)))
         return tuple(out)
+
+
+# --- the filter box -------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TextFilter:
+    """The filter box's text, read once per change: the free text (case-folded, trimmed) a row's shown titles or alternative
+    titles must hold, and the typed words of each ``creator:`` value its creators must hold."""
+
+    needle: str = ""
+    creators: Tuple[Tuple[str, ...], ...] = ()
+
+    @classmethod
+    def of(cls, text: Optional[str]) -> "TextFilter":
+        parsed = parse_query(text)
+        return cls(fold_title(parsed.free).strip(), tuple(creator_words(v) for v in parsed.creators))
+
+    @property
+    def empty(self) -> bool:
+        return not self.needle and not self.creators
+
+    def match(self, own: str, titles: Sequence[str] = (), folded: Optional[Sequence[str]] = None,
+              creators: Callable[[], Sequence[Creator]] = lambda: ()) -> Optional[Tuple[str, ...]]:
+        """Does a series pass? *own*: its shown titles and kind, case-folded (what the box always searched); *titles* /
+        *folded*: its record's alternative titles; *creators*: asked only when a ``creator:`` value was typed. None when
+        it does not pass; otherwise why, beyond its own titles: ``("aka Delicious in Dungeon", "by Naoki Urasawa")`` -
+        empty when it passes by its own titles alone."""
+        why: List[str] = []
+        if self.needle and self.needle not in own:
+            alt = alt_title_hit(self.needle, titles, folded)
+            if alt is None:
+                return None
+            why.append(f"aka {alt}")
+        if self.creators:
+            credited = creators()
+            for typed in self.creators:
+                hit = creator_hit(typed, credited)
+                if hit is None:
+                    return None
+                why.append(creator_hint(*hit))
+        return tuple(dict.fromkeys(why))
+
+
+def hint_text(why: Sequence[str]) -> str:
+    """The line under a row that passed through other names: ``aka X`` / ``by Y`` / ``aka X  ·  by Y``."""
+    return "  ·  ".join(why)
+
+
+#: The filter boxes' wording (the List's placeholder says what it searches; the tip says how).
+SEARCH_PLACEHOLDER = "Filter title, other titles, creator:"
+SEARCH_TIP = ("Finds a series by its title, English title, kind or any other title of its MangaUpdates record "
+              "(shown under the title as \"aka ...\"; three letters or more).\n"
+              "creator:Urasawa or creator:\"Naoki Urasawa\" finds the series of a writer or artist, "
+              "also by their other names; add words to narrow it further.\n"
+              "Creator names are read from MangaUpdates after a MangaUpdates lookup.")
