@@ -56,7 +56,7 @@ def test_the_creators_are_read_and_the_filter_finds_them(make_window, mu):
     start(win)
     assert mu.calls == [("series", 101), ("series", 102), ("author", 151), ("author", 152)]
     assert win._model.creator_index().known(101)
-    win._proxy.set_text_filter('creator:"pen name 2"')
+    win._proxy.set_text_filter('creator:"pen name 102"')
     titles = [win._proxy.data(win._proxy.index(r, 2)) for r in range(win._proxy.rowCount())]
     assert titles == ["Beta Days"]
 
