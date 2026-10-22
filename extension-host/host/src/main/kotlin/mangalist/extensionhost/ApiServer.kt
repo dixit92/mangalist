@@ -15,6 +15,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import suwayomi.tachidesk.server.serverConfig
 import java.net.InetSocketAddress
 import java.net.URLDecoder
@@ -198,6 +200,13 @@ class ApiServer(
                     if (!serverConfig.kcefEnabled.value) throw HttpError(400, "the WebView is off (--webview off)")
                     WebViewSetup.start()
                     reply(ex, json.encodeToJsonElement(mapOf("state" to WebViewSetup.state())))
+                }
+                method == "POST" && path == "/webview/debug-eval" -> {
+                    val req = json.parseToJsonElement(body(ex)).jsonObject
+                    val url = req["url"]?.jsonPrimitive?.content ?: throw HttpError(400, "give url")
+                    val script = req["script"]?.jsonPrimitive?.content ?: throw HttpError(400, "give script")
+                    val wait = req["waitMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: 5000
+                    reply(ex, json.encodeToJsonElement(mapOf("result" to WebViewSetup.debugEval(url, script, wait))))
                 }
                 method == "GET" && path == "/repo" ->
                     reply(ex, json.encodeToJsonElement(repo.index(query["url"] ?: defaultRepo)))
