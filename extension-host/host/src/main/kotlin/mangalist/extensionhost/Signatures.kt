@@ -44,7 +44,13 @@ object Signatures {
 
     /** The certificates (SHA-256) an APK is signed with (v1 / v2 / v3); empty when it does not verify. */
     fun apkSigners(apk: Path): Set<String> {
-        val result = ApkVerifier.Builder(apk.toFile()).build().verify()
+        // Mihon runs on Android 8 (API 26) and up: the v2 / v3 schemes are enough (keiyoushi's APKs carry no v1 signature)
+        val result =
+            try {
+                ApkVerifier.Builder(apk.toFile()).setMinCheckedPlatformVersion(26).build().verify()
+            } catch (_: Exception) {
+                return emptySet() // not an APK
+            }
         if (!result.isVerified) return emptySet()
         return result.signerCertificates.map { sha256(it) }.toSet()
     }
