@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.54] - 2026-10-22
+
+The fifty-third MangaList release (testing build): alias search - series found by their other titles and by their creators.
+
 - **The List's filter finds a series by any of its other titles, and by its creator.** Type any alternative title of the series' MangaUpdates record (MangaPixer's, else MangaList's own match; three letters or more) and the series is listed with **aka <that title>** under its title, as MangaPixer's search does. **creator:Urasawa** or **creator:"Naoki Urasawa"** (add words to narrow it further) lists the series of a writer or artist, also by their other names (pen names, the name in Japanese script); the line under the title says who matched. The Download tab's **To get** filter does the same. For a series MangaPixer knows, the creators and their other names come from MangaPixer's export (`record.creators`; MangaList asks MangaUpdates nothing for those series, and an older MangaPixer that does not export them gives them none - they are still found by their titles). For a series MangaPixer does not know, they are read from MangaUpdates in the background when a MangaUpdates lookup ends (the automatic one after a scan, or **Look up**): one request per series and one per author, a second apart, kept for 180 days. Series with no other titles known are never hidden by this.
 
 ## [2026.10.53] - 2026-10-20
