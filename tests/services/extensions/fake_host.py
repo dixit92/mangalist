@@ -27,6 +27,10 @@ MANGADEX_PKG = "eu.kanade.tachiyomi.extension.all.mangadex"
 MANGADEX_EN = "2499283573021220255"
 WEEB_PKG = "eu.kanade.tachiyomi.extension.en.weebexample"
 WEEB_ID = "1000000000000000001"
+KEI_URL = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json"
+KEI_KEY = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+SECOND_URL = "https://second.example/repo/index.json"     # a second repository the fake host can add
+SECOND_KEY = "cbec121aa82ebb02aaa73806992e0368a97d47b5451ed6524816d03084c45905"
 PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
        b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7\x35\x81\x84\x00\x00\x00\x00IEND\xaeB`\x82")
 
@@ -56,6 +60,7 @@ class RepoEntry:
     lang: str
     sources: List[Tuple[str, str, str]]     # (id, name, lang)
     nsfw: bool = False
+    repo: str = KEI_URL                     # the repository listing it
 
 
 def display_name(name: str, lang: str) -> str:
@@ -89,6 +94,12 @@ class FakeHost:
             RepoEntry(WEEB_PKG, "Weeb Example", "1.4.3", "en", [(WEEB_ID, "Weeb Example", "en")]),
         ]
         self.installed: Dict[str, str] = {}                 # pkg -> version
+        self.installed_from: Dict[str, str] = {}            # pkg -> the repository it was installed from
+        # the host's repository list (url -> name, key) and the repositories it could add (anything else is refused)
+        self.repositories: Dict[str, Tuple[str, str]] = {KEI_URL: ("Keiyoushi", KEI_KEY)}
+        self.addable: Dict[str, Tuple[str, str]] = {SECOND_URL: ("Second", SECOND_KEY)}
+        self.busy: set = set()                              # pkgs whose source downloads now (update / uninstall: 409)
+        self.update_errors: Dict[str, str] = {}             # pkg -> the error its update answers (HTTP 400)
         self.catalog: Dict[str, List[FakeManga]] = {}       # source id -> its mangas
         self.manga_ids: Dict[Tuple[str, str], int] = {}     # (source id, url) -> id
         self.mangas: Dict[int, Dict[str, Any]] = {}         # id -> {sourceId, url, title, inLibrary}
@@ -160,6 +171,9 @@ class FakeHost:
 
             def do_POST(self):
                 self._handle("POST")
+
+            def do_DELETE(self):
+                self._handle("DELETE")
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
@@ -246,10 +260,30 @@ class FakeHost:
     def _queue_json(self) -> Dict[str, Any]:
         return {"state": "STARTED" if self.queue else "STOPPED", "queue": [dict(q) for q in self.queue]}
 
+    def _repo_name(self, url: str) -> str:
+        return (self.repositories.get(url) or self.addable.get(url) or (urlsplit(url).hostname or url, ""))[0]
+
+    def _listed(self) -> List[RepoEntry]:
+        order = list(self.repositories)
+        return sorted((e for e in self.repo if e.repo in self.repositories), key=lambda e: order.index(e.repo))
+
     def _extension_json(self, pkg: str) -> Dict[str, Any]:
-        entry = next(e for e in self.repo if e.pkg == pkg)
-        return {"pkg": pkg, "name": entry.name, "version": self.installed[pkg], "libVersion": "1.4", "nsfw": 0,
-                "sources": [s for s in self._sources() if s["extension"] == pkg]}
+        source_repo = self.installed_from.get(pkg) or next((e.repo for e in self.repo if e.pkg == pkg), KEI_URL)
+        entry = next((e for e in self.repo if e.pkg == pkg and e.repo == source_repo), None)
+        if entry is None:                                   # the repository dropped it: its name from another one
+            entry = next((e for e in self.repo if e.pkg == pkg), None)
+        listed = source_repo in self.repositories
+        offered = entry if (entry is not None and listed and entry.repo == source_repo) else None
+        newer = offered is not None and _vkey(offered.version) > _vkey(self.installed[pkg])
+        return {"pkg": pkg, "name": entry.name if entry else pkg, "version": self.installed[pkg], "libVersion": "1.4",
+                "nsfw": 0, "sources": [s for s in self._sources() if s["extension"] == pkg], "repo": source_repo,
+                "repoName": self._repo_name(source_repo), "repoListed": listed,
+                "repoVersion": offered.version if offered else None, "updateAvailable": newer,
+                "signatureHash": (self.repositories.get(source_repo) or ("", ""))[1] or None}
+
+    def _repos_json(self) -> List[Dict[str, Any]]:
+        return [{"url": url, "name": name, "signingKey": key, "extensions": sum(1 for e in self.repo if e.repo == url),
+                 "lastFetch": 1761100000000, "error": None} for url, (name, key) in self.repositories.items()]
 
     def route(self, method: str, path: str, query: Dict[str, List[str]], body: Dict[str, Any]) -> Tuple[int, Any]:
         with self.lock:
@@ -260,23 +294,65 @@ class FakeHost:
         if method == "GET" and path == "/health":
             return 200, {"ok": True, "version": self.version, "sources": len(self._sources()), "flareSolverr": "off"}
         if method == "GET" and path == "/repo":
+            only = (query.get("url") or [None])[0]
             return 200, [{"name": e.name, "pkg": e.pkg, "version": e.version, "libVersion": "1.4", "lang": e.lang,
                           "nsfw": e.nsfw, "apkUrl": f"https://example.invalid/{e.pkg}.apk", "jarUrl": None,
-                          "sources": [{"id": i, "name": n, "lang": lang, "baseUrl": ""} for i, n, lang in e.sources]}
-                         for e in self.repo]
+                          "sources": [{"id": i, "name": n, "lang": lang, "baseUrl": ""} for i, n, lang in e.sources],
+                          "repo": e.repo, "repoName": self._repo_name(e.repo)}
+                         for e in self._listed() if only is None or e.repo == only]
+        if method == "GET" and path == "/repos":
+            return 200, self._repos_json()
+        if method == "POST" and path == "/repos":
+            url = str(body.get("url") or "").strip()
+            if url not in self.repositories:
+                if url not in self.addable:
+                    raise HttpError(400, f"{url} is not an extension repository: not JSON")
+                self.repositories[url] = self.addable[url]
+            return 200, next(r for r in self._repos_json() if r["url"] == url)
+        if (method == "DELETE" and path == "/repos") or (method == "POST" and path == "/repos/remove"):
+            url = str(body.get("url") or (query.get("url") or [""])[0]).strip()
+            if url not in self.repositories:
+                raise HttpError(404, f"{url} is not in the repository list")
+            gone = next(r for r in self._repos_json() if r["url"] == url)
+            del self.repositories[url]
+            return 200, gone
         if method == "GET" and path == "/extensions":
             return 200, [self._extension_json(p) for p in self.installed]
-        if method == "POST" and path in ("/extensions/install", "/extensions/update"):
-            entry = next((e for e in self.repo if e.pkg == body.get("pkg")), None)
+        if method == "POST" and path == "/extensions/install":
+            pkg, repo = body.get("pkg"), body.get("repo")
+            entry = next((e for e in self._listed() if e.pkg == pkg and (not repo or e.repo == repo)), None)
             if entry is None:
-                raise HttpError(404, f"no extension {body.get('pkg')} in the repository")
-            if path.endswith("update") and entry.pkg not in self.installed:
-                raise HttpError(400, f"{entry.pkg} is not installed")
+                raise HttpError(404, f"no extension {pkg} in the repository")
+            if pkg in self.installed and self.installed_from.get(pkg, entry.repo) != entry.repo:
+                raise HttpError(409, f"{pkg} is installed from another repository; uninstall it first", "HttpError")
             self.installed[entry.pkg] = entry.version
+            self.installed_from[entry.pkg] = entry.repo
             return 200, self._extension_json(entry.pkg)
+        if method == "POST" and path == "/extensions/update":
+            pkg = str(body.get("pkg"))
+            if pkg not in self.installed:
+                raise HttpError(404, f"{pkg} is not installed")
+            source_repo = self.installed_from.get(pkg, KEI_URL)
+            if body.get("repo") and body.get("repo") != source_repo:
+                raise HttpError(400, f"{pkg} updates only from {source_repo}")
+            if source_repo not in self.repositories:
+                raise HttpError(409, f"{pkg}'s repository is no longer in the list: it gets no updates")
+            if pkg in self.busy:
+                raise HttpError(409, f"{pkg} is downloading a chapter: try again when the download finishes")
+            if pkg in self.update_errors:
+                raise HttpError(400, self.update_errors[pkg], "SignatureException")
+            entry = next((e for e in self.repo if e.pkg == pkg and e.repo == source_repo), None)
+            if entry is None:
+                raise HttpError(404, f"no extension {pkg} in the repository")
+            if _vkey(entry.version) > _vkey(self.installed[pkg]):
+                self.installed[pkg] = entry.version
+            return 200, self._extension_json(pkg)
         if method == "POST" and path == "/extensions/uninstall":
+            if str(body.get("pkg")) in self.busy:
+                raise HttpError(409, f"{body.get('pkg')} is downloading a chapter")
             if self.installed.pop(str(body.get("pkg")), None) is None:
                 raise HttpError(404, f"{body.get('pkg')} is not installed")
+            self.installed_from.pop(str(body.get("pkg")), None)
             return 200, {"pkg": body.get("pkg")}
         if method == "GET" and path == "/sources":
             return 200, self._sources()
@@ -365,6 +441,12 @@ class FakeHost:
                         folder = folder.parent
             return 200, {"ids": ids}
         raise HttpError(404, f"no such endpoint: {method} /compat{path}")
+
+
+def _vkey(version: str) -> Tuple[int, ...]:
+    import re
+
+    return tuple(int(p) for p in re.findall(r"\d+", version or ""))
 
 
 class HttpError(Exception):

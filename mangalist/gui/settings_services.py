@@ -182,6 +182,17 @@ class ServicesPage(SectionPage):
         self.ext_card.btn_secondary.clicked.connect(self.test_extension_host)
         self.ext_card.btn_primary.clicked.connect(self.edit_extension_host)
         self.ext_card.set_status(NOT_IN_USE, "muted")
+        # the extension update notice (the scheduled check's last result) and Check for updates
+        self.ext_updates_label = label("", wrap=True, selectable=True)
+        self.ext_updates_label.setObjectName("extensionUpdates")
+        self.btn_check_updates = button("Check for updates", link=True,
+                                        tip="Ask the extension host now which installed extensions have an update "
+                                            "(with Auto-update on, install them)")
+        self.btn_check_updates.clicked.connect(self.check_extension_updates)
+        self.ext_updates_row = QWidget()
+        self.ext_updates_row.setLayout(hbox(self.ext_updates_label, self.btn_check_updates, spacing=8))
+        self.ext_updates_row.layout().setContentsMargins(0, 4, 0, 0)
+        self.ext_card.column.addWidget(self.ext_updates_row)
         self.backend_combo.activated.connect(self._backend_chosen)
         self.refresh()
 
@@ -216,6 +227,7 @@ class ServicesPage(SectionPage):
         folder = config.download_dir or config.downloads_path or "the host's own (learned at Test)"
         card.detail_label.setText(f"{config.url} · download folder {folder}")
         on = chosen == "extensions"
+        self._show_extension_updates()
         if not on:
             card.set_status(NOT_IN_USE, "muted")
             card.set_note("Chapter downloads go through Suwayomi; choose \"Built-in extensions\" above to use it.",
@@ -230,6 +242,49 @@ class ServicesPage(SectionPage):
             self.suwayomi_card.set_status("Not checked", "muted")
             self.suwayomi_card.set_note("")
             self._refresh_suwayomi()
+
+    def extension_updates_text(self) -> str:
+        return self.ext_updates_label.text() if self.ext_updates_row.isVisibleTo(self) else ""
+
+    def _show_extension_updates(self) -> None:
+        """The update notice on the Built-in extensions card (while it is chosen): the last check's result."""
+        from .download_style import set_tone
+
+        reader = getattr(self._backend, "extension_update_notice", None)
+        if not callable(reader) or not self.builtin():
+            self.ext_updates_row.setVisible(False)
+            return
+        try:
+            check = reader()
+        except Exception:  # noqa: BLE001 - a notice only
+            check = None
+        self.ext_updates_row.setVisible(True)
+        if check is None:
+            self.ext_updates_label.setText("Extension updates: not checked yet (daily; Check for updates asks now).")
+            set_tone(self.ext_updates_label, "muted")
+            return
+        self.ext_updates_label.setText(check.detail_text())
+        set_tone(self.ext_updates_label, "warn" if (check.pending or check.errors or not check.ok) else "muted")
+
+    def check_extension_updates(self) -> bool:
+        if not self._ext_backend() or not self.builtin() or not self.btn_check_updates.isEnabled():
+            return False
+        backend = self._backend
+        self.btn_check_updates.setEnabled(False)
+        self.ext_updates_label.setText("Checking the extensions for updates...")
+
+        def done(_check) -> None:
+            self.btn_check_updates.setEnabled(True)
+            self._show_extension_updates()
+
+        def failed(message: str) -> None:
+            self.btn_check_updates.setEnabled(True)
+            self._show_extension_updates()
+            if "could not be asked" not in self.ext_updates_label.text():
+                self.ext_updates_label.setText(f"Extension updates: not checked: {message}")
+
+        self._spawn(lambda: backend.check_extension_updates(), done, failed)
+        return True
 
     def _backend_chosen(self, _index: int = 0) -> bool:
         key = self.backend_combo.currentData()
@@ -320,9 +375,17 @@ class ServicesPage(SectionPage):
         self._clear_editor()
         panel = ExtensionsPanel(self._backend, self.editor_page)
         panel.changed.connect(self.downloads_changed.emit)
+        panel.changed.connect(self._extensions_changed)
         self.extensions_panel = panel
         self._open_editor("Extensions", panel)
         return panel
+
+    def _extensions_changed(self) -> None:
+        """An extension was installed / updated / removed by hand: the stored notice is checked again (quietly)."""
+        backend = self._backend
+        if callable(getattr(backend, "check_extension_updates", None)) and self.builtin():
+            self._spawn(lambda: backend.check_extension_updates(auto=False), lambda _c: self._show_extension_updates(),
+                        lambda _m: None)
 
     def _suwayomi_backend(self) -> bool:
         return self._backend is not None and callable(getattr(self._backend, "load_suwayomi", None))

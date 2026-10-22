@@ -32,6 +32,7 @@ from .roots_dialog import BrowseFn
 from .settings_appearance import SECTION_APPEARANCE, AppearancePage
 from .settings_common import SectionPage
 from .settings_library import LibraryPage
+from .extension_notice import SECTION_EXTENSIONS
 from .settings_sections import SECTION_LOGGING, AutomationPage, LoggingPage, MatchingPage, SourcesPage
 from .settings_services import ServicesPage
 from .settings_tasks import SECTION_TASKS, ScheduledTasksPage
@@ -197,7 +198,7 @@ class SettingsDialog(QDialog):
         body.addWidget(self.stack, 1)
         outer.addLayout(body, 1)
         apply_style(self)
-        self.show_section(section if section in DIALOG_SECTIONS else SECTION_LIBRARY)
+        self.show_section(section if section in DIALOG_SECTIONS or section == SECTION_EXTENSIONS else SECTION_LIBRARY)
 
     def _attach_page(self, key: str, page: SectionPage) -> None:
         """A page just built: into its section's scroll area (a page outside the dialog's sections stays unshown)."""
@@ -213,6 +214,12 @@ class SettingsDialog(QDialog):
         self._flags[name] = True
 
     def show_section(self, section: str) -> None:
+        if section == SECTION_EXTENSIONS:              # Connected services with the Extensions page open
+            self.show_section(SECTION_SERVICES)
+            opener = getattr(self.pages[SECTION_SERVICES], "open_extensions", None)
+            if callable(opener):
+                opener()
+            return
         if section not in self.pages:
             return
         self.current = section

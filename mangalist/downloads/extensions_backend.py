@@ -311,13 +311,15 @@ class ExtensionsBackendMixin:
             return False
         return extension_updates.is_due(self.suwayomi.store, schedule_interval(self.suwayomi.store))
 
-    def check_extension_updates(self):
-        """Ask the host for updates now (and, with Auto-update on, install them) and store the result; blocks."""
+    def check_extension_updates(self, auto: Optional[bool] = None):
+        """Ask the host for updates now and store the result; with Auto-update on (*auto* None: the setting) install
+        them. Blocks."""
         from . import extension_updates
 
         host = self._host()
         try:
-            return extension_updates.run_check(self.suwayomi.store, host, auto=self.suwayomi.extension_auto_update())
+            return extension_updates.run_check(self.suwayomi.store, host,
+                                               auto=self.suwayomi.extension_auto_update() if auto is None else auto)
         except ExtensionHostError as exc:
             raise BackendError(str(exc)) from None
         finally:
