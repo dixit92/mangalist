@@ -483,3 +483,65 @@ def test_a_filed_file_that_is_really_gone_still_keeps_the_torrent(ledger, sent, 
     report = run_arrivals(qbt, ledger)
     assert report.removed == [] and status(ledger, sent) == S.FILED
     assert "is no longer in the library" in ledger.get(sent.id).error
+
+
+# --- a filed volume an upgrade replaced (owner, 2026-10-22: "check why these two finished ones are not removed from
+# qbittorrent" - download 246's volume 3 was replaced by a better copy and held, the holding batch later emptied; the
+# check looked for it in the library every hour and kept the torrent) ----------------------------------------------------
+
+def _hold(ledger, sdir, tmp_path, name="Series A v03 (Digital).cbz"):
+    journal = Journal(ledger.store)
+    plan = journal.plan_holding("replaced chapters", [str(sdir / name)], root_path=str(sdir.parent),
+                                holding_dir=str(tmp_path / "holding" / "batch 1"))
+    journal.apply(plan.id)
+    held = tmp_path / "holding" / "batch 1" / sdir.name / name
+    assert held.exists() and not (sdir / name).exists()
+    return journal, plan, held
+
+
+@pytest.mark.parametrize("emptied", [False, True])
+def test_a_filed_volume_an_upgrade_replaced_lets_the_torrent_go(ledger, sent, qbt, series, tmp_path, emptied):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.FILED
+    _, _, held = _hold(ledger, sdir, tmp_path)
+    if emptied:                                  # the owner emptied the holding folder since
+        held.unlink()
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [sent.id] and status(ledger, sent) == S.REMOVED
+    assert (sdir / "Series A v02 (Digital).cbz").read_bytes() == PACK["Series A v02 (Digital).cbz"]   # the rest stays
+    assert held.exists() != emptied              # a held copy is a link of its own: removing the torrent keeps it
+
+
+def test_an_undone_hold_puts_the_volume_back_and_it_is_checked_as_any_filed_volume(ledger, sent, qbt, series, tmp_path):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    journal, plan, _ = _hold(ledger, sdir, tmp_path)
+    journal.undo(plan.id)
+    assert (sdir / "Series A v03 (Digital).cbz").exists()
+    (sdir / "Series A v03 (Digital).cbz").unlink()            # then really gone: not "replaced" any more
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [] and "is no longer in the library" in ledger.get(sent.id).error
+
+
+def test_a_held_volume_whose_series_folder_was_renamed_later_still_lets_the_torrent_go(ledger, sent, qbt, series,
+                                                                                        tmp_path):
+    # the owner's case: held on 10-13, the series folder renamed to the scheme on 10-17 - the follower carried the
+    # already-held file along with the folder and no longer saw the hold
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    _, _, held = _hold(ledger, sdir, tmp_path)
+    held.unlink()                                                # the holding folder emptied since
+    journal = Journal(ledger.store)
+    folder = sdir.parent / "Series A [Renamed]"
+    plan = journal.plan("rename to the scheme", [(str(sdir), str(folder))], root_path=str(sdir.parent))
+    journal.apply(plan.id)
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [sent.id] and status(ledger, sent) == S.REMOVED
+    assert (folder / "Series A v02 (Digital).cbz").read_bytes() == PACK["Series A v02 (Digital).cbz"]
