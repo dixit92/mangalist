@@ -86,6 +86,7 @@ def test_schedule_rows_read_the_container_environment():
                     "File finished downloads": ("every hour (and Check downloads now)", False),
                     SCHEDULE_BY_JOB["dispatch-batch"].label: ("daily 04:30 (and Find now)", False),   # the find pass
                     "Check for new chapters": ("every 6 hours", False),
+                    "Check for extension updates": ("daily 05:15", False),
                     "Clear finished download records": ("every Sunday 05:30 (records older than a week)", False)}
     rows = {w: (when, env) for w, when, env in rules.schedule_rows(
         {"MANGALIST_RESCAN_SCHEDULE": "off", "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "daily@02:00",

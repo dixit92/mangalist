@@ -67,10 +67,11 @@ def state(**kw):
 def test_one_card_per_task_in_order_with_what_it_does(qapp, db):
     page = make(db)
     assert list(page.cards) == ["mangapixer-sync", "rescan", "downloads", "dispatch-batch", "chapter-check",
-                                "clean-records"]
+                                "extension-updates", "clean-records"]
     text = text_of(page)
     for title in ("Sync with MangaPixer", "Full re-read of the library", "Check downloads",
-                  "Find missing volumes and chapters", "Check for new chapters", "Clear finished download records"):
+                  "Find missing volumes and chapters", "Check for new chapters", "Check for extension updates",
+                  "Clear finished download records"):
         assert title in text
     assert "Times are in the container's time zone: UTC (UTC+00:00), now 14:05." in text
     assert "The background runner is running." in text
@@ -279,3 +280,15 @@ def test_nothing_to_clear_is_said_without_asking(qapp, db, records):
     page = make(db)
     page.clear_finished_now(400, "")
     assert page.asked == [] and page.clear_status.text() == "Nothing to clear."
+
+
+def test_the_extension_update_check_is_daily_at_05_15_with_the_usual_choices(qapp, db):
+    # lane U, 2026-10-22: "Update notice" - daily by default; Weekly, Daily, 12 h, 6 h or Off like the others
+    page = make(db, downloads=False)
+    assert choices(page, "extension-updates") == ["Weekly", "Daily", "Every 12 hours", "Every 6 hours", "Off"]
+    assert page.schedule_modes["extension-updates"].currentData() == "daily"
+    assert page.schedule_times["extension-updates"].time() == QTime(5, 15)
+    assert page.run_buttons["extension-updates"].isEnabled()           # not gated on downloads: it skips itself
+    pick(page, "extension-updates", "Weekly")
+    assert db.get_setting("schedule_extension_updates").startswith("weekly@")
+    page.stop()

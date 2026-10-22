@@ -20,12 +20,13 @@ host/build/install/mangalist-extension-host/bin/mangalist-extension-host --data 
 ```
 
 Options: `--data DIR` (`MANGALIST_EXTENSIONS_DATA`), `--bind 127.0.0.1`, `--port 4570`, `--downloads DIR` (default
-`<data>/downloads`), `--repo URL` (default keiyoushi's `index.json`), `--webview on|off` (default on),
+`<data>/downloads`), `--repo URL` (more than once for several: the first start's repository list, default keiyoushi's
+`index.json`; later starts add one not listed yet - see "Repositories" below), `--webview on|off` (default on),
 `--download-parallel 2` (1-4), `--flaresolverr URL` and its `--flaresolverr-timeout 60`, `--flaresolverr-session
 mangalist`, `--flaresolverr-session-ttl 15`.
 
-The data folder: `host.db` (SQLite: manga / chapter ids and the download queue), `extensions/` (the jars and
-`installed.json`), `android/` (AndroidCompat's files, among them the sources' preferences in `settings/`),
+The data folder: `host.db` (SQLite: manga / chapter ids and the download queue), `repos.json` (the repository list,
+each with its signing key), `extensions/` (the jars and `installed.json`), `android/` (AndroidCompat's files, among them the sources' preferences in `settings/`),
 `cache/downloads/<chapter id>/` (pages of a download in progress), and with the WebView `bin/kcef/` (Chromium, ~530 MB,
 downloaded the first time an extension opens a WebView) and `cache/kcef/` (its profile).
 
@@ -61,11 +62,14 @@ Binds `127.0.0.1` by default and has **no login** - keep it on localhost (in Man
 | Call | Answer |
 | --- | --- |
 | `GET /health` | `{ok, version, sources, flareSolverr, webView}` |
-| `GET /repo?url=<index url>` | the repository's extensions (current `index.json` and legacy `index.min.json` formats) |
-| `GET /extensions` | installed extensions: `{pkg, name, version, versionCode, libVersion, nsfw, signatureHash, repoVersion, repoVersionCode, updateAvailable, sources}` |
-| `POST /extensions/install {pkg, repo?, format: jar\|apk}` | install (signature checked first, below) |
-| `POST /extensions/update {pkg, repo?}` | install the repository's newer version (no newer one: answers the installed one) |
-| `POST /extensions/uninstall {pkg}` | remove it (its sources' preferences stay) |
+| `GET /repos` | the repository list: `[{url, name, signingKey, extensions, lastFetch, error}]` (each read from a 10-minute cache) |
+| `POST /repos {url}` | add a repository: its index is fetched and checked first (400: not an extension index, or no signing key); one already listed is answered as it is |
+| `DELETE /repos {url}` (or `?url=`; also `POST /repos/remove {url}`) | remove one (404: not listed); extensions installed from it stay installed and keep working, with no updates |
+| `GET /repo` | every listed repository's extensions, each with `repo` (its index URL) and `repoName`; the same package in two repositories is listed twice. `?url=` one repository (current `index.json` and legacy `index.min.json` formats) |
+| `GET /extensions` | installed extensions: `{pkg, name, version, versionCode, libVersion, nsfw, signatureHash, repo, repoName, repoListed, repoVersion, repoVersionCode, updateAvailable, sources}` - the versions of the repository it was installed from |
+| `POST /extensions/install {pkg, repo?, format: jar\|apk, waitSeconds?}` | install from `repo` (one of the list; default: the first that lists `pkg`), checked against that repository's key (below); 409 when it is installed from another repository (uninstall it first) |
+| `POST /extensions/update {pkg, waitSeconds?}` | install the newer version from the repository it was installed from (`repo` naming another: 400; its repository removed: 409; no newer one: answers the installed one); 409 while a chapter of its sources downloads (below) |
+| `POST /extensions/uninstall {pkg, waitSeconds?}` | remove it (its sources' preferences stay); 409 while a chapter of its sources downloads |
 | `GET /sources` | every loaded source |
 | `GET /sources/{id}/preferences` | a configurable source's preferences: `[{position, key, type: list\|multiselect\|edittext\|switch\|checkbox, title, summary, entries, entryValues, dialogTitle, dialogMessage, currentValue, defaultValue, enabled, visible}]` |
 | `POST /sources/{id}/preferences {key, value}` | set one (a string; `true`/`false`; a list of strings for multiselect); the extension's sources are made again; answers the whole list again |
@@ -78,8 +82,9 @@ Binds `127.0.0.1` by default and has **no login** - keep it on localhost (in Man
 | `POST /webview/debug-eval {url, script, waitMs}` | diagnostics: open a page, run a script, answer what it left in `window.__mlDebug` |
 | `/compat/...` | what MangaList asked Suwayomi, with Suwayomi's semantics: the contract is [`COMPAT.md`](COMPAT.md) |
 
-Errors: `{error, type}` with 400 (a bad call, a refused signature), 404 (unknown source, manga, package or endpoint), 502
-(the extension or its site failed).
+Errors: `{error, type}` with 400 (a bad call, a refused signature), 404 (unknown source, manga, package or endpoint), 409
+(not now: a chapter of the extension's sources is downloading, or it is installed from another repository / its
+repository was removed), 502 (the extension or its site failed).
 
 ### `/compat` as built
 
@@ -116,7 +121,28 @@ v2.4.2366 does it (its code was read for each):
 - **Delete downloaded**: the CBZ (or a folder of images) and the folders left empty under `mangas/`; `downloaded` false;
   the same answer when the file is already gone.
 
-## Extensions: signature check, updates, preferences
+## Extensions: repositories, signature check, updates, preferences
+
+**Repositories** (lane U, 2026-10-22; Suwayomi's `extensionRepos`, Mihon's repository list): the host keeps a list in
+`<data>/repos.json` - `[{url, name, signingKey, addedAt}]`. The first start seeds it with the `--repo` options (none:
+keiyoushi's `index.json`); a later start adds an `--repo` that is not listed yet and never removes one (removing is
+`DELETE /repos`). `POST /repos` fetches the index first and refuses an address that is not an extension index (not JSON,
+no `extensionList.extensions` / legacy list) or that gives no signing key; it keeps the repository's name and key. A
+repository given with `--repo` keeps the key of its first fetch. **Each repository's own key is enforced** at install and
+update; an index that later names another key is not trusted (400 "its signing key changed", shown in `GET /repos`'
+`error`) until the repository is removed and added again. An installed extension records its repository and is
+**updated only from that one**: the same package in two repositories is two entries of `GET /repo`, and installing it
+from the other one while it is installed is refused (409; uninstall first). An extension whose repository was removed
+stays installed and working (`repoListed: false`, no `updateAvailable`, update 409).
+
+**An update never runs under a download of its own sources** (lane U): the old version's source object is what a
+running chapter download uses, and an update closes that version's class loader and deletes its jar - a class the
+download still needed would then fail to load. So update, reinstall and uninstall go through the download queue
+(`Downloader.whileIdle`): the extension's sources are held (no new chapter of theirs starts; other sources go on), a
+chapter of theirs that is downloading is waited for up to `waitSeconds` (default 0), and when one still is, nothing
+changes and the call answers 409 "... is downloading a chapter: try again when the download finishes". The held
+chapters start right after, with the new version's sources. MangaList's scheduled update waits up to 60 s, then leaves
+the update for its next run; the Extensions page's Update waits 10 s.
 
 An extension is installed only when it is signed with its repository's key: the SHA-256 of its signing certificate must
 equal `index.json`'s `signingKey` (keiyoushi's `9add655a...`; legacy repositories: `repo.json`'s
@@ -180,11 +206,15 @@ Memory (`docker stats`, the same container): idle with no WebView 117 MiB (174 M
 
 ## Tests
 
-`./gradlew :host:test`: 42 tests - 33 unit (CBZ layout and names against MangaList's `suwayomi_name`, ComicInfo, ids
+`./gradlew :host:test`: 53 tests - 39 unit (CBZ layout and names against MangaList's `suwayomi_name`, ComicInfo, ids
 across a restart, the chapter merge, the queue: success, 3 failures -> ERROR, one more try, restart, dequeue, two
-sources at once; signatures of jars and v2 APKs; preferences; the repository index), 8 HTTP (`/compat` and extension
-management against an in-process server with a fake source and a local image / repository server), 1 process (the real
-host program started, stopped and started again: ids and queue kept).
+sources at once, an update waiting for its source's download with that source's queue held; signatures of jars and v2
+APKs; preferences; the repository index; the repository list: seeding and persistence, add checked first, remove, the
+key kept per repository and a changed key refused, every repository's extensions), 13 HTTP (`/compat`, extension
+management and the repositories - `/repos`, `GET /repo` from two repositories with a shared package, each repository's
+own key at install, updates only from the repository installed from, a removed repository - against an in-process
+server with a fake source and local image / repository servers), 1 process (the real host program started, stopped and
+started again: ids and queue kept).
 
 ## Not in the prototype
 
