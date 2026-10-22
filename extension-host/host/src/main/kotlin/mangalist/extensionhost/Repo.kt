@@ -46,6 +46,10 @@ data class RepoExtension(
     val libVersion: String,
     val nsfw: Boolean,
     val sources: List<RepoSource>,
+    /** The repository index it is listed in (filled when the host lists several repositories). */
+    val repo: String = "",
+    /** That repository's name (its index's `name`, else its address's host). */
+    val repoName: String = "",
 )
 
 const val DEFAULT_REPO = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json"
@@ -55,6 +59,8 @@ data class RepoIndex(
     val url: String,
     val signingKey: String?,
     val extensions: List<RepoExtension>,
+    /** The index's `name` (legacy: `repo.json`'s `meta.name`), else the address's host. */
+    val name: String = Repo.fallbackName(url),
 )
 
 class Repo(
@@ -76,19 +82,18 @@ class Repo(
         val now = System.currentTimeMillis()
         if (!fresh) cache[indexUrl]?.let { (at, index) -> if (now - at < cacheMillis) return index }
         val root = json.parseToJsonElement(get(indexUrl) ?: error("the repository answered nothing for $indexUrl"))
-        val key =
-            signingKey(root)
-                ?: if (root is JsonArray) {
-                    // the legacy format keeps its key next to it, in repo.json
-                    runCatching {
-                        get(indexUrl.substringBeforeLast('/') + "/repo.json")?.let { body ->
-                            json.parseToJsonElement(body).jsonObject["meta"]?.jsonObject?.str("signingKeyFingerprint")
-                        }
-                    }.getOrNull()
-                } else {
-                    null
-                }
-        val index = RepoIndex(indexUrl, key, parse(root, indexUrl))
+        // the legacy format keeps its key and name next to it, in repo.json
+        val meta =
+            if (root is JsonArray) {
+                runCatching {
+                    get(indexUrl.substringBeforeLast('/') + "/repo.json")?.let { body -> json.parseToJsonElement(body).jsonObject["meta"]?.jsonObject }
+                }.getOrNull()
+            } else {
+                null
+            }
+        val key = signingKey(root) ?: meta?.str("signingKeyFingerprint")
+        val name = ((root as? JsonObject)?.str("name") ?: meta?.str("name"))?.takeIf { it.isNotBlank() } ?: fallbackName(indexUrl)
+        val index = RepoIndex(indexUrl, key, parse(root, indexUrl).map { it.copy(repo = indexUrl, repoName = name) }, name)
         cache[indexUrl] = now to index
         return index
     }
@@ -100,6 +105,9 @@ class Repo(
         }
 
     companion object {
+        /** A repository's name when its index gives none: its address's host (`raw.githubusercontent.com`). */
+        fun fallbackName(url: String): String = runCatching { java.net.URI(url).host }.getOrNull() ?: url
+
         /** `index.json`'s `signingKey` (null in the legacy format). */
         fun signingKey(root: JsonElement): String? = (root as? JsonObject)?.str("signingKey")
 
@@ -109,7 +117,9 @@ class Repo(
         ): List<RepoExtension> =
             when (root) {
                 is JsonArray -> root.map { legacy(it.jsonObject, indexUrl.substringBeforeLast('/')) }
-                is JsonObject -> root["extensionList"]!!.jsonObject["extensions"]!!.jsonArray.map { current(it.jsonObject) }
+                is JsonObject ->
+                    (root["extensionList"] as? JsonObject)?.get("extensions")?.let { it as? JsonArray }?.map { current(it.jsonObject) }
+                        ?: error("not an extension index (no extensionList.extensions)")
                 else -> error("not an extension index")
             }
 

@@ -51,13 +51,20 @@ data class ExtensionDto(
     val repoVersionCode: Int?,
     val updateAvailable: Boolean,
     val sources: List<SourceDto>,
+    /** The repository it was installed from (where its updates come from; it gets none once that one is removed). */
+    val repo: String? = null,
+    val repoName: String? = null,
+    /** False when [repo] is no longer in the host's repository list (no updates). */
+    val repoListed: Boolean = true,
 )
 
 @Serializable
 data class PkgRequest(
     val pkg: String,
-    /** update: the repository to take it from (default: the one it was installed from, else `--repo`). */
+    /** update: only the repository it was installed from is accepted (default: that one). */
     val repo: String? = null,
+    /** update / uninstall: how long to wait for a chapter of its sources that is downloading (else HTTP 409). */
+    val waitSeconds: Int = 0,
 )
 
 @Serializable
@@ -105,11 +112,13 @@ data class PageDto(
 @Serializable
 data class InstallRequest(
     val pkg: String? = null,
-    /** The repository's index (default: the host's `--repo`). */
+    /** The repository's index, one of the host's list (default: the first one listing [pkg]). */
     val repo: String? = null,
     val apkUrl: String? = null,
     /** "jar" (default: keiyoushi's ready jar when the index has one) or "apk" (convert the APK with dex2jar). */
     val format: String = "jar",
+    /** How long to wait for a chapter of its sources that is downloading, when it is installed (else HTTP 409). */
+    val waitSeconds: Int = 0,
 )
 
 @Serializable
@@ -140,8 +149,10 @@ class HttpError(
  * The host's local API (JDK HttpServer; binds 127.0.0.1 by default - it has no login):
  *
  * - `GET  /health`
- * - `GET  /repo?url=<index url>` - the repository's extensions (default: keiyoushi's)
- * - `GET  /extensions`, `POST /extensions/install {pkg[, repo][, format: jar|apk] | apkUrl}`
+ * - `GET  /repos`, `POST /repos {url}`, `DELETE /repos {url}` - the repository list ([RepoList])
+ * - `GET  /repo[?url=<index url>]` - every listed repository's extensions (or one repository's), each with its `repo`
+ * - `GET  /extensions`, `POST /extensions/install {pkg[, repo][, format: jar|apk] | apkUrl}`,
+ *   `POST /extensions/update {pkg[, waitSeconds]}`, `POST /extensions/uninstall {pkg[, waitSeconds]}`
  * - `GET  /sources`
  * - `GET  /sources/{id}/popular?page=1`, `GET /sources/{id}/latest?page=1`, `GET /sources/{id}/search?q=..&page=1`
  * - `POST /sources/{id}/manga {url}` (details), `POST /sources/{id}/chapters {url}`
@@ -156,7 +167,12 @@ class ApiServer(
     private val compat: CompatApi? = null,
     private val defaultRepo: String = DEFAULT_REPO,
     private val preferences: SourcePreferences? = null,
+    repoList: RepoList? = null,
+    /** The download queue: an extension is updated or removed only while none of its sources downloads. */
+    private val downloader: Downloader? = null,
 ) {
+    val repos: RepoList = repoList ?: RepoList(null, repo, listOf(defaultRepo))
+
     private val json =
         Json {
             ignoreUnknownKeys = true
@@ -210,42 +226,81 @@ class ApiServer(
                     val wait = req["waitMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: 5000
                     reply(ex, json.encodeToJsonElement(mapOf("result" to WebViewSetup.debugEval(url, script, wait))))
                 }
-                method == "GET" && path == "/repo" ->
-                    reply(ex, json.encodeToJsonElement(repo.index(query["url"] ?: defaultRepo)))
+                method == "GET" && path == "/repos" -> reply(ex, json.encodeToJsonElement(repos.dtos()))
+                method == "POST" && path == "/repos" -> reply(ex, json.encodeToJsonElement(repos.add(repoUrl(ex, query))))
+                (method == "DELETE" && path == "/repos") || (method == "POST" && path == "/repos/remove") ->
+                    reply(ex, json.encodeToJsonElement(repos.remove(repoUrl(ex, query))))
+                method == "GET" && path == "/repo" -> {
+                    val url = query["url"]
+                    val list =
+                        when {
+                            url == null -> repos.allExtensions()
+                            url in repos -> repos.index(url, fresh = true).extensions
+                            else -> repo.fetch(url, fresh = true).extensions // a look at a repository not listed
+                        }
+                    reply(ex, json.encodeToJsonElement(list))
+                }
                 method == "GET" && path == "/extensions" -> reply(ex, json.encodeToJsonElement(extensions()))
                 method == "POST" && path == "/extensions/install" -> {
                     val req = json.decodeFromString<InstallRequest>(body(ex))
-                    val repoUrl = req.repo ?: defaultRepo
-                    val index = repo.fetch(repoUrl, fresh = true)
+                    val repoUrl =
+                        req.repo?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: req.pkg?.let { pkg -> repos.urls().firstOrNull { u -> runCatching { repos.index(u) }.getOrNull()?.extensions?.any { it.pkg == pkg } == true } }
+                            ?: repos.first()
+                            ?: throw HttpError(400, "the host has no repository: add one first")
+                    if (repoUrl !in repos) throw HttpError(400, "$repoUrl is not in the repository list: add it first")
+                    val index = repos.index(repoUrl, fresh = true)
                     val url =
                         req.apkUrl ?: run {
                             val pkg = req.pkg ?: throw HttpError(400, "give pkg (with repo) or apkUrl")
                             val entry =
                                 index.extensions.firstOrNull { it.pkg == pkg }
-                                    ?: throw HttpError(404, "$pkg is not in $repoUrl")
+                                    ?: throw HttpError(404, "$pkg is not in ${index.name} ($repoUrl)")
                             if (req.format == "apk") entry.apkUrl else entry.jarUrl ?: entry.apkUrl
                         }
-                    val (ext, _) = install(url, index.signingKey, repoUrl)
+                    val current = req.pkg?.let { registry.installed[it] }
+                    if (current != null) {
+                        val from = current.repo ?: defaultRepo
+                        if (from != repoUrl) {
+                            throw HttpError(
+                                409,
+                                "${current.name} is installed from ${repoName(from)}; it updates only from there - uninstall it first to take it from ${index.name}",
+                            )
+                        }
+                    }
+                    val ext =
+                        guarded(current?.pkg, current?.name, req.waitSeconds) {
+                            install(url, index.signingKey, repoUrl).first
+                        }
                     reply(ex, json.encodeToJsonElement(extensionDto(ext, index)))
                 }
                 method == "POST" && path == "/extensions/update" -> {
                     val req = json.decodeFromString<PkgRequest>(body(ex))
                     val pkg = req.pkg
                     val current = registry.installed[pkg] ?: throw HttpError(404, "$pkg is not installed")
-                    val repoUrl = req.repo ?: current.repo ?: defaultRepo
-                    val index = repo.fetch(repoUrl, fresh = true)
-                    val entry = index.extensions.firstOrNull { it.pkg == pkg } ?: throw HttpError(404, "$pkg is not in $repoUrl")
+                    val repoUrl = current.repo ?: defaultRepo
+                    if (req.repo != null && req.repo.trim() != repoUrl) {
+                        throw HttpError(400, "${current.name} was installed from ${repoName(repoUrl)}: it updates only from there")
+                    }
+                    if (repoUrl !in repos) {
+                        throw HttpError(409, "${current.name}'s repository ($repoUrl) is no longer in the list: it gets no updates")
+                    }
+                    val index = repos.index(repoUrl, fresh = true)
+                    val entry = index.extensions.firstOrNull { it.pkg == pkg } ?: throw HttpError(404, "$pkg is not in ${index.name} ($repoUrl)")
                     val ext =
                         if (entry.versionCode > current.versionCode) {
-                            install(entry.jarUrl ?: entry.apkUrl, index.signingKey, repoUrl).first
+                            guarded(pkg, current.name, req.waitSeconds) {
+                                install(entry.jarUrl ?: entry.apkUrl, index.signingKey, repoUrl).first
+                            }.also { logger.info { "Updated ${it.name} ${current.version} -> ${it.version} from ${index.name}" } }
                         } else {
                             current
                         }
                     reply(ex, json.encodeToJsonElement(extensionDto(ext, index)))
                 }
                 method == "POST" && path == "/extensions/uninstall" -> {
-                    val pkg = json.decodeFromString<PkgRequest>(body(ex)).pkg
-                    val ext = registry.uninstall(pkg)
+                    val req = json.decodeFromString<PkgRequest>(body(ex))
+                    val current = registry.installed[req.pkg] ?: throw HttpError(404, "${req.pkg} is not installed")
+                    val ext = guarded(req.pkg, current.name, req.waitSeconds) { registry.uninstall(req.pkg) }
                     reply(ex, json.encodeToJsonElement(extensionDto(ext, null)))
                 }
                 method == "GET" && path == "/sources" ->
@@ -369,13 +424,42 @@ class ApiServer(
         throw HttpError(400, e.message ?: "signature check failed")
     }
 
-    /** Installed extensions with the repository's versions (a repository that does not answer: no update shown). */
+    /** Run [block] while none of [pkg]'s sources downloads a chapter (see [Downloader.whileIdle]); HTTP 409 when one still does. */
+    private fun <T> guarded(
+        pkg: String?,
+        name: String?,
+        waitSeconds: Int,
+        block: () -> T,
+    ): T {
+        val queue = downloader ?: return block()
+        if (pkg == null) return block()
+        return try {
+            queue.whileIdle(registry.sourceIds(pkg), name ?: pkg, waitSeconds.coerceIn(0, 600) * 1000L, block)
+        } catch (e: Downloader.ExtensionBusyException) {
+            throw HttpError(409, e.message ?: "busy")
+        }
+    }
+
+    private fun repoUrl(
+        ex: HttpExchange,
+        query: Map<String, String>,
+    ): String =
+        query["url"] ?: body(ex).takeIf { it.isNotBlank() }?.let { json.decodeFromString<RepoUrlRequest>(it).url }
+            ?: throw HttpError(400, "give url")
+
+    private fun repoName(url: String): String = repos.record(url)?.name?.takeIf { it.isNotBlank() } ?: Repo.fallbackName(url)
+
+    /**
+     * Installed extensions with the versions of the repository each was installed from (a repository that does not
+     * answer, or that is no longer listed: no update shown).
+     */
     private fun extensions(): List<ExtensionDto> {
         val indexes =
             registry.installed.values
                 .map { it.repo ?: defaultRepo }
                 .distinct()
-                .associateWith { url -> runCatching { repo.fetch(url) }.onFailure { logger.warn { "Repository $url: ${it.message}" } }.getOrNull() }
+                .filter { it in repos }
+                .associateWith { url -> runCatching { repos.index(url) }.onFailure { logger.warn { "Repository $url: ${it.message}" } }.getOrNull() }
         return registry.installed.values.sortedBy { it.pkg }.map { extensionDto(it, indexes[it.repo ?: defaultRepo]) }
     }
 
@@ -383,7 +467,8 @@ class ApiServer(
         ext: InstalledExtension,
         index: RepoIndex?,
     ): ExtensionDto {
-        val entry = index?.extensions?.firstOrNull { it.pkg == ext.pkg }
+        val from = ext.repo ?: defaultRepo
+        val entry = index?.takeIf { it.url == from }?.extensions?.firstOrNull { it.pkg == ext.pkg }
         return ExtensionDto(
             pkg = ext.pkg,
             name = ext.name,
@@ -396,6 +481,9 @@ class ApiServer(
             repoVersionCode = entry?.versionCode,
             updateAvailable = entry != null && entry.versionCode > ext.versionCode,
             sources = registry.sources.values.filter { registry.extensionOf(it.id)?.pkg == ext.pkg }.map { sourceDto(it) },
+            repo = from,
+            repoName = repoName(from),
+            repoListed = from in repos,
         )
     }
 

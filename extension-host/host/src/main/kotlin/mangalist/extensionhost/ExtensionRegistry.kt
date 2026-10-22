@@ -268,6 +268,9 @@ class ExtensionRegistry(
         root.resolve(old.jar).deleteIfExists()
     }
 
+    /** The ids of an installed extension's sources (none when it is not installed). */
+    fun sourceIds(pkg: String): List<Long> = sourcesByPkg[pkg].orEmpty()
+
     fun extensionOf(sourceId: Long): InstalledExtension? =
         sourcesByPkg.entries.firstOrNull { sourceId in it.value }?.let { installed[it.key] }
 

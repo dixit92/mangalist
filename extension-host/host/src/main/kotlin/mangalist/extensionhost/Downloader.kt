@@ -63,6 +63,10 @@ class Downloader(
 
     class EmptyChapterException : Exception("Chapter does not have any pages to download")
 
+    class ExtensionBusyException(
+        message: String,
+    ) : Exception(message)
+
     private class Item(
         val chapterId: Int,
         val sourceId: Long,
@@ -78,6 +82,9 @@ class Downloader(
     private val lock = Any()
     private val queue = mutableListOf<Item>()
     private val runners = mutableMapOf<Long, Job>()
+
+    /** Sources whose queue is held (an update of their extension is installing): source id -> holds. */
+    private val held = mutableMapOf<Long, Int>()
 
     init {
         library.onChaptersRemoved = { dequeue(it) }
@@ -157,6 +164,47 @@ class Downloader(
         scope.cancel()
     }
 
+    /** Whether a chapter of one of [sourceIds] is downloading now. */
+    fun downloading(sourceIds: Collection<Long>): Boolean =
+        synchronized(lock) { queue.any { it.sourceId in sourceIds && it.state == DOWNLOADING } }
+
+    /**
+     * Run [block] (an extension's update or removal) while no chapter of [sourceIds] downloads: their queue is held
+     * (no new chapter of theirs starts), a chapter of theirs already downloading is waited for up to [waitMs], and
+     * when one still is, nothing is done ([ExtensionBusyException]: try again later). The queue goes on afterwards,
+     * with the sources made by the new version. Why: a running download holds the old version's source object, whose
+     * class loader the update closes (and whose jar it deletes) - a class the download still needs would then fail to
+     * load.
+     */
+    fun <T> whileIdle(
+        sourceIds: Collection<Long>,
+        what: String,
+        waitMs: Long = 0,
+        block: () -> T,
+    ): T {
+        val ids = sourceIds.toSet()
+        if (ids.isEmpty()) return block()
+        synchronized(lock) { ids.forEach { held[it] = (held[it] ?: 0) + 1 } }
+        try {
+            val deadline = System.currentTimeMillis() + waitMs
+            while (downloading(ids)) {
+                if (System.currentTimeMillis() >= deadline) {
+                    throw ExtensionBusyException("$what is downloading a chapter: try again when the download finishes")
+                }
+                Thread.sleep(200)
+            }
+            return block()
+        } finally {
+            synchronized(lock) {
+                ids.forEach {
+                    val left = (held[it] ?: 1) - 1
+                    if (left <= 0) held.remove(it) else held[it] = left
+                }
+            }
+            kick()
+        }
+    }
+
     private fun cacheDir(chapterId: Int): Path = cacheRoot.resolve(chapterId.toString())
 
     /** Callers hold [lock]. */
@@ -167,7 +215,7 @@ class Downloader(
     /** Start a runner for each source with queued chapters, up to [parallel] at once, in queue order. */
     private fun kick() {
         synchronized(lock) {
-            val waiting = queue.filter { it.state == QUEUED }.map { it.sourceId }.distinct()
+            val waiting = queue.filter { it.state == QUEUED && it.sourceId !in held }.map { it.sourceId }.distinct()
             for (sourceId in waiting) {
                 if (runners.size >= parallel) break
                 if (runners.containsKey(sourceId)) continue
@@ -182,7 +230,7 @@ class Downloader(
             while (currentCoroutineContext().isActive) {
                 val item =
                     synchronized(lock) {
-                        queue.firstOrNull { it.sourceId == sourceId && it.state == QUEUED }?.also {
+                        queue.firstOrNull { it.sourceId == sourceId && it.state == QUEUED && sourceId !in held }?.also {
                             it.state = DOWNLOADING
                             it.progress = 0f
                         }

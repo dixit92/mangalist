@@ -50,8 +50,11 @@ data class Options(
     val flareSolverrSessionTtl: Int = 15,
     /** Where chapters are downloaded (`<downloads>/mangas/...`); default `<data>/downloads`. */
     val downloadsDir: Path = dataDir.resolve("downloads"),
-    /** The extension repository's index (`index.json`). */
-    val repo: String = DEFAULT_REPO,
+    /**
+     * The extension repositories' indexes (`index.json`; `--repo`, more than once for several): the first start's list,
+     * kept in `<data>/repos.json`; a later start adds one not listed yet (removing is `DELETE /repos`). Empty: keiyoushi's.
+     */
+    val repos: List<String> = emptyList(),
     /** A browser engine (Chromium through JCEF, downloaded at first use) for extensions that open a WebView. */
     val webView: Boolean = true,
     /** Chapters downloaded at once (from different sources; one at a time per source). */
@@ -59,7 +62,7 @@ data class Options(
 ) {
     companion object {
         const val USAGE =
-            "mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--downloads DIR] [--repo URL] " +
+            "mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--downloads DIR] [--repo URL ...] " +
                 "[--webview on|off] [--download-parallel 2] [--flaresolverr URL] [--flaresolverr-timeout 60] " +
                 "[--flaresolverr-session mangalist] [--flaresolverr-session-ttl 15]"
 
@@ -72,7 +75,7 @@ data class Options(
             var flareSession = "mangalist"
             var flareTtl = 15
             var downloads: String? = null
-            var repo = DEFAULT_REPO
+            val repos = mutableListOf<String>()
             var webView = true
             var parallel = 2
             var i = 0
@@ -82,7 +85,7 @@ data class Options(
                     "--bind" -> bind = args[++i]
                     "--port" -> port = args[++i].toInt()
                     "--downloads" -> downloads = args[++i]
-                    "--repo" -> repo = args[++i]
+                    "--repo" -> args[++i].trim().takeIf { it.isNotEmpty() && it !in repos }?.let { repos += it }
                     "--webview" ->
                         webView =
                             when (args[++i].lowercase()) {
@@ -107,7 +110,7 @@ data class Options(
             return Options(
                 dataDir, bind, port, flare, flareTimeout, flareSession, flareTtl,
                 downloadsDir = downloads?.let { Path(it).absolute() } ?: dataDir.resolve("downloads"),
-                repo = repo,
+                repos = repos,
                 webView = webView,
                 downloadParallel = parallel,
             )
@@ -177,7 +180,11 @@ fun main(args: Array<String>) {
     downloader.restore()
     val compat = CompatApi(library, downloader, registry) { WebViewSetup.state() }
     val preferences = SourcePreferences({ Injekt.get<xyz.nulldev.androidcompat.androidimpl.CustomContext>() })
-    val server = ApiServer(options.bind, options.port, registry, Repo(network.client), compat, options.repo, preferences)
+    val repo = Repo(network.client)
+    val repos = RepoList(options.dataDir.resolve("repos.json"), repo, options.repos)
+    // an extension installed before the repository list (no repository recorded) updates from the first one
+    val defaultRepo = options.repos.firstOrNull() ?: DEFAULT_REPO
+    val server = ApiServer(options.bind, options.port, registry, repo, compat, defaultRepo, preferences, repos, downloader)
     server.start()
     logger.info { "Listening on http://${options.bind}:${server.port}" }
 }
