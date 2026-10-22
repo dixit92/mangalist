@@ -105,19 +105,65 @@ def wanted(data_dir: Path, *, env: Optional[Mapping[str, str]] = None, open_sett
                   why="always on" if mode == "on" else "Built-in extensions chosen")
 
 
+class _SettingsOnly:
+    """The two settings the supervisor reads (and the one it writes) straight from MangaList's database, without the
+    :class:`~mangalist.store.Store` - which would migrate the schema, racing the window and the headless runner that
+    create it at the container's first start (seen 2026-10-22: "duplicate column name"). Reads are read-only; the
+    database is never created or migrated here."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def _connect(self, readonly: bool = True):
+        import sqlite3
+
+        uri = f"file:{self.path}?mode=ro" if readonly else f"file:{self.path}?mode=rw"
+        return sqlite3.connect(uri, uri=True, timeout=10)
+
+    def get_setting(self, key: str, default=None):
+        import json
+
+        con = self._connect()
+        try:
+            row = con.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        finally:
+            con.close()
+        if row is None:
+            return default
+        try:
+            return json.loads(row[0])
+        except ValueError:
+            return default
+
+    def set_setting(self, key: str, value) -> None:
+        import json
+
+        con = self._connect(readonly=False)
+        try:
+            with con:
+                con.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                            (key, json.dumps(value, ensure_ascii=False)))
+        finally:
+            con.close()
+
+
 def _open_settings(data_dir: Path):
-    """MangaList's settings, or None while its database does not exist yet (never created here)."""
-    from ... import paths, store
+    """MangaList's settings, or None while its database does not exist yet or has no settings table (it is never
+    created or migrated here: see :class:`_SettingsOnly`)."""
+    from ... import paths
     from ...store.downloads import SuwayomiSettings
 
     db = paths.db_file()
     if not db.is_file():
         return None
+    settings = SuwayomiSettings(_SettingsOnly(db))
     try:
-        return SuwayomiSettings(store.get_store(db))
-    except Exception:  # noqa: BLE001 - a database being migrated by the GUI: next poll
-        _log.info("Extension host: MangaList's settings could not be read now", exc_info=True)
+        settings.backend()
+    except Exception:  # noqa: BLE001 - the window or the runner is still creating it: next poll
+        _log.info("Extension host: MangaList's settings could not be read yet (%s)", db)
         return None
+    return settings
 
 
 class Supervisor:

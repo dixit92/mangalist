@@ -159,3 +159,26 @@ def test_a_binary_that_cannot_start_waits(tmp_path, settings):
     sup = sv.Supervisor(tmp_path, spawn=spawn, clock=clock, env={}, open_settings=lambda: settings)
     sup.tick()
     assert sup.process is None and sup.not_before == clock.now + sv.BACKOFF_SECONDS
+
+
+def test_the_settings_are_read_without_migrating_the_database(tmp_path, monkeypatch):
+    # three processes creating the database at the container's first start raced ("duplicate column name", 2026-10-22):
+    # the supervisor only reads the settings table, and only once it exists
+    import sqlite3
+
+    data = tmp_path / "cfg"
+    data.mkdir()
+    monkeypatch.setenv("MANGALIST_DATA_DIR", str(data))
+    db = data / "mangalist.db"
+    sqlite3.connect(db).close()                                # being created: no settings table yet
+    assert sv._open_settings(data) is None
+    assert sqlite3.connect(db).execute("PRAGMA user_version").fetchone()[0] == 0     # nothing migrated
+    store.reset_stores()
+    real = SuwayomiSettings(store.get_store(db))
+    real.set_backend(CHAPTER_BACKEND_EXTENSIONS)
+    real.save_extension_host(ExtensionHostConfig(url="http://127.0.0.1:4571"))
+    mine = sv._open_settings(data)
+    assert mine.builtin and mine.extension_host().url == "http://127.0.0.1:4571"
+    mine.learn_downloads_path("/config/extension-host/downloads")
+    assert real.extension_host().downloads_path == "/config/extension-host/downloads"
+    assert sv.wanted(data, env={}).run
