@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **Chapters without Suwayomi (prototype).** Chapter downloads can go through MangaList's own extension host instead of Suwayomi: choose **Built-in extensions** under Settings > Connected services > Chapter downloads. The host runs the same Mihon / Tachiyomi extensions as Suwayomi, starts by itself in the container while it is chosen, and keeps its data in `/config/extension-host`. Its card has **Extensions** - the repository's extensions with Install, Update and Uninstall buttons and each source's own settings - and Edit for FlareSolverr, the repository and the WebView. The chapters panel, the checks for new chapters, automatic downloads, filing and Retry / Cancel work as they do with Suwayomi. Suwayomi stays the default.
+
 ## [2026.10.53] - 2026-10-20
 
 The fifty-second MangaList release (testing build): chapter downloads Suwayomi gave up on can be retried.

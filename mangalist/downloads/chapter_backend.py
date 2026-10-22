@@ -38,6 +38,27 @@ def name_of(conn: Optional[SuwayomiConnection]) -> str:
     return NAMES.get(backend, "Suwayomi")
 
 
+def is_builtin(client) -> bool:
+    """The client is the built-in extension host's (:class:`~mangalist.services.extensions.compat.ExtensionsChapterClient`)."""
+    return getattr(client, "backend", "") == CHAPTER_BACKEND_EXTENSIONS
+
+
+_WORDING = (("Settings > Connected services > Suwayomi", "Settings > Connected services > Built-in extensions"),
+            ("Suwayomi's settings", "the extension host's settings"), ("Suwayomi's", "the extension host's"),
+            ("Suwayomi", "the extension host"))
+
+
+def wording(text: Optional[str], builtin: bool) -> Optional[str]:
+    """A message written for Suwayomi, worded for the program that answers: unchanged for Suwayomi; for the built-in
+    extensions "Suwayomi" becomes "the extension host" (capitalized at the start of a sentence)."""
+    if not text or not builtin or "Suwayomi" not in text:
+        return text
+    for old, new in _WORDING:
+        text = text.replace(old, new)
+    text = text[:1].upper() + text[1:] if text.startswith("the extension host") else text
+    return text.replace(". the extension host", ". The extension host")
+
+
 def not_set_up(builtin: bool) -> str:
     """The sentence for "no chapter client can be built" (where the owner sets it up)."""
     if builtin:

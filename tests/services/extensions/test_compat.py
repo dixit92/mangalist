@@ -282,3 +282,16 @@ def test_over_http_a_failing_chapter_ends_in_error_and_enqueue_retries_it(fake_h
     fake_host.run_downloads()
     assert client.queue() == [] and client.chapters_by_id([2])[0].downloaded
     client.close()
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Suwayomi could not be asked about its downloads: X", "The extension host could not be asked about its downloads: X"),
+    ("no longer in Suwayomi's download queue", "no longer in the extension host's download queue"),
+    ("not set (Settings > Connected services > Suwayomi); nothing filed",
+     "not set (Settings > Connected services > Built-in extensions); nothing filed"),
+    ("filed. Suwayomi's copy kept", "filed. The extension host's copy kept"), ("", ""), (None, None)])
+def test_messages_name_the_program_that_answers(text, expected):
+    assert chapter_backend.wording(text, True) == expected
+    assert chapter_backend.wording(text, False) == text
+    assert chapter_backend.is_builtin(ExtensionsChapterClient(base_url=BASE, session=FakeSession({})))
+    assert not chapter_backend.is_builtin(object())
