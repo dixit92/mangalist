@@ -486,11 +486,13 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
 
     from .records_job import DESCRIPTION as CLEAN_DESCRIPTION, JOB_NAME as CLEAN_JOB, make_clean_records
     from .chapter_check_job import DESCRIPTION as CC_DESCRIPTION, JOB_NAME as CC_JOB, make_chapter_check
+    from .extension_updates_job import DESCRIPTION as EU_DESCRIPTION, JOB_NAME as EU_JOB, make_extension_updates
 
     clean_schedule = getattr(settings, "clean_records_schedule", None)
     mp_schedule = getattr(settings, "mangapixer_schedule", None)
     dl_schedule = getattr(settings, "downloads_schedule", None)
     cc_schedule = getattr(settings, "chapter_check_schedule", None)
+    eu_schedule = getattr(settings, "extension_updates_schedule", None)
     return JobRegistry([
         # First, so the rescan after it already sees MangaPixer's latest links; skipped while no
         # MangaPixer server is set up.
@@ -509,6 +511,9 @@ def build_registry(settings: "Any", provider: Optional[RootsProvider] = None) ->
         Job(CC_JOB, make_chapter_check(settings.downloads_enabled), cc_schedule,
             enabled=bool(settings.downloads_enabled) and cc_schedule is not None,
             description=CC_DESCRIPTION, catch_up=settings.catch_up, gate=bool(settings.downloads_enabled)),
+        # The built-in extensions' update check (skips itself unless Built-in extensions is chosen and the host is up).
+        Job(EU_JOB, make_extension_updates(), eu_schedule, enabled=eu_schedule is not None,
+            description=EU_DESCRIPTION, catch_up=settings.catch_up),
         # Last: after the arrivals pass has looked at what was filed (the replaced-chapters look comes with it).
         Job(CLEAN_JOB, make_clean_records(), clean_schedule, enabled=clean_schedule is not None,
             description=CLEAN_DESCRIPTION, catch_up=settings.catch_up),

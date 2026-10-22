@@ -410,7 +410,9 @@ def series_names_for(records: Sequence[DownloadRecord], wanted: Iterable[WantedS
 # automatic downloads (2026-10-10, :mod:`mangalist.downloads.finding`; default daily 04:30) - the headless runner names
 # its label. ``clean-records`` clears finished download records (2026-10-15; Weekly until chosen, 2026-10-16).
 # ``chapter-check`` asks the saved sources for chapters newer than the newest held (2026-10-18; every 6 hours).
-SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads", "dispatch-batch", "chapter-check", "clean-records")
+# ``extension-updates`` checks the built-in extensions for updates (2026-10-22; daily 05:15).
+SCHEDULE_JOBS = ("rescan", "mangapixer-sync", "downloads", "dispatch-batch", "chapter-check", "extension-updates",
+                 "clean-records")
 
 #: The choices each schedule offers (owner, 2026-10-10: "good options are: Weekly, Daily, Every 12 hours and Every 6
 #: hours"), plus Off. Filing finished downloads also keeps Every hour - its default; without it filing could not run
@@ -431,7 +433,8 @@ CLEAN_CHOICES: Tuple[Tuple[str, str], ...] = ((CHOICE_OFF, "Off"), (CHOICE_DAILY
                                               (CHOICE_MONTHLY, "Monthly"))
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 DEFAULT_AT = (3, 30)                    # the time a schedule switched to Weekly or Daily starts from
-DEFAULT_AT_BY_JOB = {"clean-records": (5, 30)}      # ... after the rescan (03:30) and the find pass (04:30)
+DEFAULT_AT_BY_JOB = {"clean-records": (5, 30),     # ... after the rescan (03:30) and the find pass (04:30)
+                     "extension-updates": (5, 15)}
 DEFAULT_WEEKDAY = 6                     # ... and the day (Sunday) a Weekly one starts from
 DEFAULT_MONTHDAY = 1                    # ... and the day of the month a Monthly one starts from
 

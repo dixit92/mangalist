@@ -116,6 +116,10 @@ class Extension:
     repo_version: Optional[str] = None
     update_available: bool = False
     signature_hash: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class Manga:
     url: str                          # the source's own path for the manga (what every later call takes)
     title: str
     thumbnail_url: Optional[str] = None

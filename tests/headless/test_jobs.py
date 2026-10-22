@@ -54,7 +54,7 @@ def test_default_settings_rescan_on_downloads_off():
     reg = build_registry(s, ListRoots())
     assert s.mangapixer_schedule == DailyAt(3, 15)  # before the rescan
     assert reg.names() == ["mangapixer-sync", "rescan", "dispatch-batch", "downloads", "chapter-check",
-                           "clean-records"]
+                           "extension-updates", "clean-records"]
     assert reg.get("rescan").active
     assert not reg.get("dispatch-batch").enabled
     assert not reg.get("downloads").enabled and s.downloads_schedule == EveryHours(1)
@@ -87,7 +87,8 @@ def test_downloads_schedule_is_configurable():
 def test_rescan_can_be_turned_off():
     reg = build_registry(HeadlessSettings.from_env({"MANGALIST_RESCAN_SCHEDULE": "off",
                                                     "MANGALIST_MANGAPIXER_SYNC_SCHEDULE": "off",
-                                                    "MANGALIST_CLEAN_RECORDS_SCHEDULE": "off"}),
+                                                    "MANGALIST_CLEAN_RECORDS_SCHEDULE": "off",
+                                                    "MANGALIST_EXTENSION_UPDATES_SCHEDULE": "off"}),
                          ListRoots())
     assert reg.active() == []
 
