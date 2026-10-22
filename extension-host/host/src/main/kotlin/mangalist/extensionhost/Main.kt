@@ -28,15 +28,15 @@ import kotlin.io.path.createDirectories
  * and answers MangaList over a small local JSON API ([ApiServer]). No Suwayomi server, database or web UI: only
  * Suwayomi's Android compatibility layer and Tachiyomi source API, vendored (vendor/suwayomi, MPL-2.0).
  *
- * Usage: `mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--flaresolverr URL]
- * [--flaresolverr-timeout 60] [--flaresolverr-session mangalist] [--flaresolverr-session-ttl 15]`
+ * Usage: [Options.USAGE]. MangaList's own calls are `/compat/...` ([CompatApi], contract `extension-host/COMPAT.md`):
+ * stable manga / chapter ids in `<data>/host.db` ([Store]) and Suwayomi's chapter downloader ([Downloader]).
  *
  * Cloudflare: with `--flaresolverr` (or `MANGALIST_FLARESOLVERR_URL`) a request Cloudflare challenges is solved by the
  * owner's FlareSolverr container through Suwayomi's CloudflareInterceptor (vendored unchanged); without it such a
  * request fails ("Cloudflare bypass currently disabled").
  */
 
-const val HOST_VERSION = "0.1.0-prototype"
+const val HOST_VERSION = "0.2.0-prototype"
 
 private val logger = KotlinLogging.logger {}
 
