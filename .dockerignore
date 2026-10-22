@@ -1,9 +1,15 @@
-# Docker build context for packaging/docker/Dockerfile: only requirements.txt, mangalist/, packaging/docker/ and
-# the icon (packaging/icons/mangalist-512.png, the web GUI's icons) are needed.
+# Docker build context for packaging/docker/Dockerfile: only requirements.txt, mangalist/, packaging/docker/,
+# the icon (packaging/icons/mangalist-512.png, the web GUI's icons) and the extension host's sources (extension-host/,
+# built in the image's JDK stage; never its build outputs or Gradle caches) are needed.
 **
 !requirements.txt
 !mangalist/
 !packaging/docker/
 !packaging/icons/mangalist-512.png
+!extension-host/
+extension-host/**/build/
+extension-host/.gradle/
+extension-host/**/.gradle/
+extension-host/.data/
 **/__pycache__
 **/*.py[cod]

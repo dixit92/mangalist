@@ -129,6 +129,28 @@ parts do not start at `.1` (`38` with `38.2`: the whole stands in for the missin
 chapters gets the whole chapter, never its parts. A part that turns up later (`38.1` after `38.2` was filed) is fetched
 too. The chapters panel shows the other form unticked, with the reason.
 
+**Chapters without Suwayomi: the built-in extensions (prototype branch `prototype/mihon-mangalist`).** Chapter
+downloads can also go through MangaList's own extension host instead of Suwayomi: a small Java program shipped in the
+image (`extension-host/`, about 210 MB with its Java 21 runtime) that runs the same Mihon / Tachiyomi extensions -
+MangaDex, Weeb Central, MangaFire, ... - and answers MangaList the way Suwayomi does, so the chapters panel, Check for new
+chapters, the find pass, filing and Retry / Cancel work unchanged. To use it:
+
+- **Settings > Connected services > Chapter downloads through: Built-in extensions** (Suwayomi stays the default).
+  Switching is refused while chapter downloads are still in progress with the other program. In the container the host
+  starts by itself within a minute of choosing it (the `extension-host` service; its data - the installed extensions,
+  the id database, the download queue and the WebView's Chromium bundle - lives in `/config/extension-host`) and stops
+  when you switch back. `MANGALIST_EXTENSION_HOST=1` keeps it always running, `0` turns the service off.
+- **Extensions** (on the Built-in extensions card): the repository's extensions (keiyoushi's by default) with
+  **Install**, **Update** (and Update all) and **Uninstall** buttons for the selected one, and **Source settings** for a
+  source's own settings (languages, image quality, ...). Install MangaDex first; which sources MangaList may use is set
+  under Download sources, as before (source ids are the extensions' own, so the choice made for Suwayomi carries over).
+- **Edit** on the same card: FlareSolverr's address for sources behind Cloudflare (or `MANGALIST_FLARESOLVERR_URL`), the
+  extension repository (or `MANGALIST_EXTENSION_REPO`), the WebView switch (sources such as Comix need a browser engine)
+  and, on a desktop, the address of a host you started yourself.
+
+Each series' match on the host is kept apart from its Suwayomi match (the host numbers its manga itself); the scanlation
+group you picked carries over.
+
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 
 > **Local use only - do not expose it to the internet.** MangaList is a personal, single-user desktop

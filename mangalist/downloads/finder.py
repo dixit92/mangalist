@@ -652,9 +652,13 @@ def _chapter_client(ctx: _Context):
         return None
     if ctx.chapter_client is not None:
         return ctx.chapter_client
+    from .chapter_backend import wording
+
+    settings = getattr(ctx.backend, "suwayomi", None)
+    builtin = bool(getattr(settings, "builtin", False))
     ready = getattr(ctx.backend, "suwayomi_ready", None)
     if not callable(ready) or not ready():
-        ctx.chapters_off = "Suwayomi is not set up"
+        ctx.chapters_off = wording("Suwayomi is not set up", builtin)
         _log.info("%s: chapters not searched: Suwayomi is not set up", ctx.who)
         return None
     try:
@@ -662,7 +666,7 @@ def _chapter_client(ctx: _Context):
         ctx.sources = allowed_sources(list(client.sources()), ctx.backend.suwayomi.sources(),
                                       ctx.backend._source_languages())
     except Exception as exc:  # noqa: BLE001 - Suwayomi down: chapters wait for the next pass
-        ctx.chapters_off = f"Suwayomi did not answer ({type(exc).__name__})"
+        ctx.chapters_off = wording(f"Suwayomi did not answer ({type(exc).__name__})", builtin)
         ctx.report.errors += 1
         ctx.report.lines.append(f"chapters not searched: {ctx.chapters_off}")
         _log.warning("%s: chapters not searched: Suwayomi did not answer: %s: %s", ctx.who,

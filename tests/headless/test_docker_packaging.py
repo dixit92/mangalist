@@ -120,3 +120,55 @@ def test_dockerignore_keeps_the_context_small():
     lines = (REPO / ".dockerignore").read_text(encoding="utf-8").splitlines()
     assert "**" in lines
     assert {"!requirements.txt", "!mangalist/", "!packaging/docker/"} <= set(lines)
+
+
+# --- the built-in extensions backend (prototype/mihon-mangalist) ------------------------------------------------------
+
+EXTHOST = DOCKER / "rootfs" / "etc" / "services.d" / "extension-host"
+
+
+def test_the_extension_host_is_built_from_source_and_runs_on_a_java_21_runtime():
+    df = _dockerfile()
+    assert re.search(r"^ARG JDKIMAGE=eclipse-temurin:21-jdk$", df, flags=re.M)
+    assert "FROM ${JDKIMAGE} AS exthost" in df and "COPY extension-host /src/extension-host" in df
+    assert "./gradlew --no-daemon -q :host:installDist" in df
+    assert "FROM ${JDKIMAGE} AS jre" in df and "jlink --add-modules java.se,jdk.httpserver,jdk.unsupported" in df
+    assert "COPY --from=jre /opt/jre /opt/mangalist/jre" in df
+    assert "COPY --from=exthost /opt/extension-host /opt/mangalist/extension-host" in df
+    # the final stage is still MangaList's own base image
+    assert df.rstrip().count("FROM ${BASEIMAGE}") == 1 and df.index("FROM ${BASEIMAGE}") > df.index("AS jre")
+
+
+def test_the_extension_host_service_follows_the_setting():
+    from mangalist.services.extensions import supervisor
+
+    env = _env()
+    assert env["MANGALIST_EXTENSION_HOST"] == "auto" and env["JAVA_HOME"] == "/opt/mangalist/jre"
+    assert env["MANGALIST_EXTENSION_HOST_BIN"] == supervisor.DEFAULT_BIN
+    assert "MANGALIST_EXTENSION_HOST_OPTS" in env                     # the JVM's heap cap (the host's start script)
+    run = (EXTHOST / "run").read_text(encoding="utf-8")
+    assert run.startswith("#!/bin/sh") and "-m mangalist.services.extensions.supervisor" in run and "exec " in run
+    disabled = (EXTHOST / "disabled").read_text(encoding="utf-8")
+    assert "MANGALIST_EXTENSION_HOST" in disabled and (EXTHOST / "respawn").exists()
+    assert (DOCKER / "rootfs" / "etc" / "services.d" / "default" / "extension-host.dep").exists()
+    assert "/etc/services.d/extension-host/run /etc/services.d/extension-host/disabled" in _dockerfile()
+    for f in (EXTHOST / "run", EXTHOST / "disabled"):
+        assert b"\r\n" not in f.read_bytes(), f"{f.name}: LF line endings"
+
+
+def test_the_extension_host_scripts_are_executable_in_git():
+    try:
+        out = subprocess.run(["git", "ls-files", "-s", "packaging/docker/rootfs/etc/services.d/extension-host"],
+                             cwd=str(REPO), capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("git not available")
+    if out.returncode != 0 or not out.stdout.strip():
+        pytest.skip("not a git checkout")
+    modes = {line.split("\t")[1]: line.split()[0] for line in out.stdout.splitlines()}
+    for name in ("run", "disabled"):
+        assert modes.get(f"packaging/docker/rootfs/etc/services.d/extension-host/{name}") == "100755", name
+
+
+def test_dockerignore_lets_the_host_sources_through_but_not_its_build_outputs():
+    lines = (REPO / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert "!extension-host/" in lines and "extension-host/**/build/" in lines and "extension-host/.gradle/" in lines

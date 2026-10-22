@@ -260,6 +260,12 @@ class DownloadStore(Protocol):
 # --- Suwayomi (the Suwayomi MVP: chapters, 2026-10-10) ---------------------------------------------------------
 
 
+#: The programs that can download chapters for MangaList (Settings > Connected services > Chapter downloads).
+CHAPTER_BACKEND_SUWAYOMI = "suwayomi"
+CHAPTER_BACKEND_EXTENSIONS = "extensions"       # MangaList's built-in extension host (extension-host/)
+CHAPTER_BACKENDS = (CHAPTER_BACKEND_SUWAYOMI, CHAPTER_BACKEND_EXTENSIONS)
+
+
 @dataclass(frozen=True)
 class SuwayomiConnection:
     """Suwayomi-Server's address, its optional basic-auth login, and the folder MangaList reads its downloads from
@@ -269,6 +275,13 @@ class SuwayomiConnection:
     username: str = ""
     password: str = field(default="", repr=False)   # never logged, never repr'd
     download_dir: str = ""
+    # Which program answers (prototype/mihon-mangalist): Suwayomi-Server, or MangaList's own extension host (its
+    # Suwayomi-compatible /compat API; no login). :mod:`mangalist.downloads.chapter_backend` builds the client for it.
+    backend: str = "suwayomi"           # CHAPTER_BACKEND_SUWAYOMI | CHAPTER_BACKEND_EXTENSIONS
+
+    @property
+    def builtin(self) -> bool:
+        return self.backend == CHAPTER_BACKEND_EXTENSIONS
 
 
 @dataclass(frozen=True)

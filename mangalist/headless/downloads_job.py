@@ -176,11 +176,12 @@ def _queue_work(ledger) -> bool:
 
 
 def _default_chapter_client_factory(conn):
+    """The chosen program's client: Suwayomi, or the built-in extension host (one factory for both)."""
     try:
-        from ..services import suwayomi
+        from ..downloads import chapter_backend
     except ImportError:         # pragma: no cover - the client ships with MangaList
         return None
-    return suwayomi.client_from_connection(conn)
+    return chapter_backend.client_from_connection(conn)
 
 
 class _Merged:
