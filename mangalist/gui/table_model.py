@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor
 
-from ..alias_search import Creator, CreatorIndex, distinct_titles
+from ..alias_search import Creator, CreatorIndex, creators_from_export, distinct_titles
 from ..knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, OfficialLink, SeriesKnowledge, from_own_matcher
 from ..models import MangaEntry
 from ..mu_match import match_tooltip, needs_review
@@ -203,13 +203,16 @@ class RowAliases:
     """A row's other names for the filter box: the record's titles (*titles*, with *folded* their case-folded form) and,
     through :meth:`creators`, the people credited on its MangaUpdates series."""
 
-    __slots__ = ("titles", "folded", "mu_id", "_index")
+    __slots__ = ("titles", "folded", "mu_id", "_index", "_exported")
 
-    def __init__(self, titles: Tuple[str, ...], folded: Tuple[str, ...], mu_id: Optional[str], index: CreatorIndex):
-        self.titles, self.folded, self.mu_id, self._index = titles, folded, mu_id, index
+    def __init__(self, titles: Tuple[str, ...], folded: Tuple[str, ...], mu_id: Optional[str], index: CreatorIndex,
+                 exported: Optional[Tuple[Creator, ...]] = None):
+        self.titles, self.folded, self.mu_id, self._index, self._exported = titles, folded, mu_id, index, exported
 
     def creators(self) -> Tuple[Creator, ...]:
-        return self._index.creators_of(self.mu_id)
+        """MangaPixer's creators when MangaPixer knows the series (none when it exports none), else what MangaList read
+        from MangaUpdates for the series' id."""
+        return self._exported if self._exported is not None else self._index.creators_of(self.mu_id)
 
 
 class MangaTableModel(QAbstractTableModel):
@@ -728,9 +731,12 @@ class MangaTableModel(QAbstractTableModel):
             *(knowledge.alt_titles if knowledge is not None else ()),
             e.mu_title, *(e.mu_associated or ()),
         ))
-        mu_id = (knowledge.mu_id if knowledge is not None and knowledge.mu_id else None) or e.mu_id
-        aliases = RowAliases(titles, tuple(t.casefold() for t in titles), None if mu_id is None else str(mu_id),
-                             self._creator_index)
+        folded = tuple(t.casefold() for t in titles)
+        if knowledge is not None and knowledge.source == SOURCE_MANGAPIXER:     # MangaPixer knows it: its creators, or none
+            aliases = RowAliases(titles, folded, None, self._creator_index, creators_from_export(knowledge.creators or ()))
+        else:
+            mu_id = (knowledge.mu_id if knowledge is not None and knowledge.mu_id else None) or e.mu_id
+            aliases = RowAliases(titles, folded, None if mu_id is None else str(mu_id), self._creator_index)
         self._aliases[id(e)] = (e, knowledge, token, aliases)
         return aliases
 
@@ -754,15 +760,6 @@ class MangaTableModel(QAbstractTableModel):
 
     def creator_index(self) -> CreatorIndex:
         return self._creator_index
-
-    def mu_ids(self) -> List[str]:
-        """The MangaUpdates ids of the shown series, once each (:meth:`row_aliases`' ids; for the creator-name lookup)."""
-        out: Dict[str, None] = {}
-        for row in range(len(self._entries)):
-            a = self.row_aliases(row)
-            if a is not None and a.mu_id is not None:
-                out[a.mu_id] = None
-        return list(out)
 
     def in_scope(self, row: int) -> bool:
         e = self.entry_at(row)

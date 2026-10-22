@@ -252,3 +252,31 @@ def test_an_empty_filter_passes_everything_and_a_plain_search_is_unchanged():
 def test_hints_are_joined_in_one_line():
     assert hint_text(["aka X", "by Y"]) == "aka X  ·  by Y"
     assert hint_text([]) == ""
+
+
+# --- the creators MangaPixer exports (record.creators) ------------------------------------------------------------
+
+
+def test_the_exported_creators_are_read_with_their_other_names():
+    from mangalist.knowledge import from_mangapixer_item
+
+    from ..states.helpers import item
+
+    creators = [{"name": "Naoki Urasawa", "role": "Author, Artist", "muAuthorId": 7, "otherNames": ["浦沢直樹", " "]},
+                {"name": "Free Artist", "role": "Artist", "muAuthorId": None, "otherNames": []},
+                {"name": "", "role": "Artist"}, "junk", {"name": "No Others", "role": "Author"}]
+    knowledge = from_mangapixer_item(item(record__creators=creators))
+    assert knowledge.creators == (("Naoki Urasawa", ("浦沢直樹",)), ("Free Artist", ()), ("No Others", ()))
+    assert from_mangapixer_item(item(record__creators=[])).creators == ()          # exported, none credited
+    assert from_mangapixer_item(item()).creators is None                           # an older MangaPixer: not exported
+    assert from_mangapixer_item(item(record__creators="x")).creators is None
+    made = alias.creators_from_export(knowledge.creators)
+    assert hit_names(made, "浦沢直樹") == "Naoki Urasawa"
+
+
+def hit_names(creators, typed):
+    got = creator_hit(creator_words(typed), creators)
+    return None if got is None else got[0].name
+
+
+import mangalist.alias_search as alias  # noqa: E402

@@ -102,3 +102,25 @@ def test_the_download_tab_gets_the_creators_too(make_window, mu):
     number_series(win, [101])
     start(win)
     assert win._download_tab is not None and win._download_tab._creators.known(101)
+
+
+def test_series_mangapixer_knows_are_never_asked_for_and_unknown_ones_still_are(make_window, mu):
+    from mangalist.knowledge import LINK_CONFIRMED, SOURCE_MANGAPIXER, SeriesKnowledge
+
+    win = make_window(_backend())
+    number_series(win, [101, 102, 103])                         # Alpha Saga, Beta Days, Gamma Tales
+    with_creators = SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=LINK_CONFIRMED, mu_id="101", title="Alpha Saga",
+                                    creators=(("Exported Writer", ("Pen Name",)),))
+    without = SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=LINK_CONFIRMED, mu_id="102", title="Beta Days")
+    known = {"Alpha Saga": with_creators, "Beta Days": without}
+    win._knowledge_for = lambda e: known.get(e.title)
+    win._model.set_state_providers(knowledge_for=win._knowledge_for)
+    start(win)
+    assert mu.calls == [("series", 103), ("author", 153)]       # only the series MangaPixer does not know
+    win._proxy.set_text_filter('creator:"exported writer"')
+    assert [win._proxy.data(win._proxy.index(r, 2)) for r in range(win._proxy.rowCount())] == []   # (its state is not computed yet)
+    win._model.state_at(0)
+    win._proxy.refresh_scope()
+    assert [win._proxy.data(win._proxy.index(r, 2)) for r in range(win._proxy.rowCount())] == ["Alpha Saga"]
+    win._proxy.set_text_filter('creator:"writer 103"')
+    assert [win._proxy.data(win._proxy.index(r, 2)) for r in range(win._proxy.rowCount())] == ["Gamma Tales"]

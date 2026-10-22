@@ -324,4 +324,59 @@ def test_the_wanted_list_carries_the_names_the_filter_needs():
                             upgrade_volumes=())
     got = wanted_series(folder="/lib/Monster", title="Monster", english_title=None, state=state, knowledge=record,
                         held=("1",), series_id=1, volumes=None)
-    assert got and got[0].mu_id == "12" and got[0].alt_titles == ("Monster", "Monster (EN)", "Monsutā")
+    assert got and got[0].mu_id is None and got[0].creators == () and got[0].alt_titles == ("Monster", "Monster (EN)", "Monsutā")
+
+
+# --- MangaPixer's creators and MangaUpdates' --------------------------------------------------------------------------
+
+
+def exported(*pairs):
+    return SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=LINK_CONFIRMED, mu_id="12", title="Monster",
+                           creators=tuple(pairs))
+
+
+def test_a_series_mangapixer_knows_takes_its_creators_from_the_export(made):
+    model, proxy = made
+    record = exported(("Exported Writer", ("Pen Name",)))
+    model.set_state_providers(knowledge_for=lambda e: record if e.title == "Monster" else None)
+    model.state_at(1)
+    proxy.set_text_filter('creator:"pen name"')
+    assert titles(proxy) == ["Monster"] and aka(proxy, "Monster") == "by Exported Writer (aka Pen Name)"
+    proxy.set_text_filter("creator:Urasawa")             # (what MangaUpdates said of series 12 is not used for it)
+    assert titles(proxy) == ["Pluto"]
+
+
+def test_a_series_mangapixer_knows_without_exported_creators_has_none(made):
+    model, proxy = made
+    model.set_state_providers(knowledge_for=lambda e: exported() if e.title == "Monster" else None)
+    model.state_at(1)
+    record_old = SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=LINK_CONFIRMED, mu_id="12", title="Monster")
+    model.set_state_providers(knowledge_for=lambda e: record_old if e.title == "Monster" else None)
+    model.state_at(1)
+    proxy.set_text_filter("creator:Urasawa")
+    assert titles(proxy) == ["Pluto"]                    # still found by its titles
+    proxy.set_text_filter("monster")
+    assert titles(proxy) == ["Monster"]
+
+
+def test_the_to_get_list_takes_mangapixers_creators_for_its_series():
+    from types import SimpleNamespace
+
+    from mangalist.gui.list_text import wanted_series
+
+    state = SimpleNamespace(gaps=True, missing_volumes=("2",), missing_volumes_text="2", missing_chapters=(),
+                            upgrade_volumes=())
+
+    def make_wanted(knowledge):
+        return wanted_series(folder="/lib/Monster", title="Monster", english_title=None, state=state,
+                             knowledge=knowledge, held=("1",), series_id=1, volumes=None)[0]
+
+    known = make_wanted(exported(("Exported Writer", ("Pen Name",))))
+    assert known.mu_id is None and [c.name for c in known.creators] == ["Exported Writer"]
+    assert dr.matches_filter(known, "creator:pen", INDEX) and not dr.matches_filter(known, "creator:Urasawa", INDEX)
+    older = make_wanted(SeriesKnowledge(source=SOURCE_MANGAPIXER, link_state=LINK_CONFIRMED, mu_id="12", title="Monster"))
+    assert older.creators == () and not dr.matches_filter(older, "creator:Urasawa", INDEX)
+    from mangalist.knowledge import SOURCE_OWN_MATCHER
+
+    own = make_wanted(SeriesKnowledge(source=SOURCE_OWN_MATCHER, link_state=LINK_CONFIRMED, mu_id="12", title="Monster"))
+    assert own.creators is None and own.mu_id == "12" and dr.matches_filter(own, "creator:Urasawa", INDEX)

@@ -15,8 +15,9 @@ person by the key ``DeclaredFactsComparer.NameKey``: lower-case words without ac
 ``ODA, Eiichiro`` and ``Eiichiro Oda`` are one name. MangaPixer compares the typed key to each of the creator's names
 for equality; MangaList's filter box narrows as you type, so a typed word counts when it starts a word of the name
 (``creator:Urasawa`` finds ``Naoki Urasawa``; the complete name finds it exactly as in MangaPixer). A creator's names are
-the credited name and the author's other names (:mod:`mangalist.creator_names`); a ``Name (Other)`` / ``Name [Other]``
-credit is every name in it (``NameKeys``).
+the credited name and the author's other names: MangaPixer's export gives them (``record.creators``: name, other names)
+for the series it knows; for a series it does not know they come from MangaUpdates (:mod:`mangalist.creator_names`). A
+``Name (Other)`` / ``Name [Other]`` credit is every name in it (``NameKeys``).
 """
 
 from __future__ import annotations
@@ -191,6 +192,11 @@ class Creator:
         return cls(name, names, tuple(forms))
 
 
+def creators_from_export(pairs: Iterable[Tuple[str, Iterable[str]]]) -> Tuple[Creator, ...]:
+    """The creators of a MangaPixer record (``knowledge.creators``: name and other names of each)."""
+    return tuple(Creator.of(name, others) for name, others in pairs)
+
+
 def creator_words(value: str) -> Tuple[str, ...]:
     """The words of a typed creator value (its :func:`name_key`); () when it holds no letter or digit."""
     return tuple(name_key(value).split())
@@ -319,4 +325,4 @@ SEARCH_TIP = ("Finds a series by its title, English title, kind or any other tit
               "(shown under the title as \"aka ...\"; three letters or more).\n"
               "creator:Urasawa or creator:\"Naoki Urasawa\" finds the series of a writer or artist, "
               "also by their other names; add words to narrow it further.\n"
-              "Creator names are read from MangaUpdates after a MangaUpdates lookup.")
+              "Creator names come from MangaPixer's export, or from MangaUpdates (after a lookup) for series MangaPixer does not know.")

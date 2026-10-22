@@ -1,7 +1,10 @@
-"""The creators of the library's series and the other names of each, for the List's ``creator:`` filter. No Qt.
+"""The creators of the series MangaPixer does not know, and the other names of each author, for the List's ``creator:``
+filter. No Qt.
 
-MangaPixer's export carries no creators, and MangaList kept none (a series record is read for its licence and progress
-and dropped), so this module asks MangaUpdates, the way MangaPixer 1.45.0 does ("MangaUpdates Author Aliases"):
+For a series MangaPixer knows, the creators come from its export (``record.creators``: name, role, MangaUpdates author
+id, other names) and nothing is asked here - a MangaPixer that exports none gives such a series none (owner, 2026-10-22:
+"ask MangaPixer to export them"; MangaList fetches nothing itself for the folders MangaPixer knows). Only a series MangaPixer
+has no item for is read from MangaUpdates, the way MangaPixer 1.45.0 does ("MangaUpdates Author Aliases"):
 
 - ``GET /v1/series/{id}`` -> the record's ``authors`` (name, author id, role);
 - ``GET /v1/authors/{id}`` -> the author's ``name``, ``associated`` other names and ``actualname`` (the name in its own

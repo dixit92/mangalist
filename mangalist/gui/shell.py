@@ -67,7 +67,9 @@ class WantedSeries:
     by_hand: bool = False               # not searched automatically, but the owner may search nyaa by hand (a declared
                                         # edition's volumes, owner 2026-10-15) - never by the find pass or a bulk search
     alt_titles: Tuple[str, ...] = ()    # every title of the series' record (the filter finds them; ``titles`` is capped)
-    mu_id: Optional[str] = None         # the record's MangaUpdates id (the filter's ``creator:`` looks its creators up)
+    mu_id: Optional[str] = None         # a series MangaPixer does not know: its MangaUpdates id (the filter's ``creator:``
+                                        # looks its creators up in what MangaList read from MangaUpdates)
+    creators: Optional[tuple] = None    # MangaPixer's record creators (alias_search.Creator); None: not from MangaPixer
 
 
 # --- Settings ---------------------------------------------------------------------------------------------

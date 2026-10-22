@@ -194,10 +194,12 @@ titles are not known is still found by its own.
 
 `creator:Urasawa` or `creator:"Naoki Urasawa"` lists the series of a writer or artist, also by the author's other names
 (`creator:浦沢直樹`), and combines with words (`creator:Urasawa pluto`) and with more creators. A typed word counts when it
-starts a word of the name, in any order and ignoring accents and punctuation (MangaPixer's name key). The creators are
-read from MangaUpdates in the background when a MangaUpdates lookup ends - the series' record, then each author's page
-for the other names, a request a second, kept for 180 days (`mangalist/creator_names.py`) - so a series is found by
-creator once its creators are read; a series whose creators are not read yet is found by its titles only.
+starts a word of the name, in any order and ignoring accents and punctuation (MangaPixer's name key). For a series
+MangaPixer knows, the creators and their other names come from MangaPixer's export (`record.creators`; a MangaPixer
+that does not export them yet gives those series none, and MangaList asks MangaUpdates nothing for them - they are
+still found by their titles). A series MangaPixer does not know is read from MangaUpdates in the background when a
+MangaUpdates lookup ends - the series' record, then each author's page for the other names, a request a second, kept for
+180 days (`mangalist/creator_names.py`) - and found by creator once read.
 
 ## Several libraries
 

@@ -2151,22 +2151,18 @@ class MainWindow(QMainWindow):
             self._start_creator_names()
 
     def _start_creator_names(self) -> None:
-        """Read the creators of the series (and the other names of each author) from MangaUpdates for the List's
-        ``creator:`` filter, in the background, at the end of a MangaUpdates lookup (so it asks MangaUpdates only when the
-        owner lets MangaList: the automatic lookup is on, or Look up was pressed). One run at a time; what is cached is
-        not asked again for 180 days (:mod:`mangalist.creator_names`)."""
+        """Read the creators of the series MangaPixer does NOT know (and the other names of each author) from MangaUpdates
+        for the List's ``creator:`` filter, in the background, at the end of a MangaUpdates lookup (so it asks MangaUpdates
+        only when the owner lets MangaList: the automatic lookup is on, or Look up was pressed). A series MangaPixer knows
+        takes its creators from MangaPixer's export (``record.creators``) and is never asked for - with an older
+        MangaPixer that exports none, it simply has none. One run at a time; what is cached is not asked again for 180
+        days (:mod:`mangalist.creator_names`)."""
         if self._creator_call is not None or self._model.rowCount() == 0:
             return
         clients = lanes.creator_name_clients()
         if clients is None:
             return
-        ids = self._model.mu_ids()
-        try:
-            if not ids or not creator_names.pending(self._db, ids):
-                return
-        except Exception:  # noqa: BLE001 - a broken cache is read again by the run itself
-            _log.warning("Counting the creator names to read failed", exc_info=True)
-            return
+        entries = self._model.entries()
         from .background import start_call
 
         get_series, get_author, not_found = clients
@@ -2174,6 +2170,11 @@ class MainWindow(QMainWindow):
         self._creator_stop = False
 
         def work():
+            # the folders MangaPixer knows are told apart here, off the UI thread (its items are resolved per folder)
+            ids = list(dict.fromkeys(str(e.mu_id) for e in entries if e.mu_id is not None
+                                     and self._knowledge_for(e) is None))
+            if not ids or not creator_names.pending(db, ids):
+                return creator_names.FillResult()
             return creator_names.fill(db, ids, get_series=get_series, get_author=get_author, not_found=not_found,
                                       should_stop=lambda: self._creator_stop)
 

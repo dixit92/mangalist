@@ -73,7 +73,8 @@ def filter_why(series: WantedSeries, text: str, creators: Optional[CreatorIndex]
         return ()
     own = "\n".join((series.title, *series.titles)).casefold()
     index = creators if creators is not None else CreatorIndex()
-    return flt.match(own, series.alt_titles, creators=lambda: index.creators_of(series.mu_id))
+    return flt.match(own, series.alt_titles, creators=lambda: (series.creators if series.creators is not None
+                                                         else index.creators_of(series.mu_id)))
 
 
 def matches_filter(series: WantedSeries, text: str, creators: Optional[CreatorIndex] = None) -> bool:
