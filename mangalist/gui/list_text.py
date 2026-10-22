@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Sequence, Tuple
 
+from ..alias_search import creators_from_export, distinct_titles
 from ..knowledge import (LINK_AUTO, LINK_COLLECTION_ABOUT, LINK_CONFIRMED, LINK_DONT_MATCH, LINK_NEEDS_REVIEW,
                          LINK_NOT_A_WORK, LINK_NOT_LOOKED_UP, LINK_UNMATCHED, SOURCE_MANGAPIXER, SeriesKnowledge,
                          fmt_num, to_decimal)
@@ -138,6 +139,12 @@ def wanted_series(*, folder: str, title: str, english_title: Optional[str], stat
     else:
         titles = tuple(dict.fromkeys(t.strip() for t in (english_title, title) if t and t.strip()))
     common = dict(series_id=series_id, folder=folder, title=title, held=tuple(held), titles=titles)
+    if knowledge is not None:       # the filter box also finds a series by any other title of its record, or its creator
+        common.update(alt_titles=distinct_titles((knowledge.title, knowledge.english_title, *knowledge.alt_titles)))
+        if knowledge.source == SOURCE_MANGAPIXER:       # MangaPixer's creators (none exported yet: none, nothing asked)
+            common.update(creators=creators_from_export(knowledge.creators or ()))
+        else:                                           # a series MangaPixer does not know: what was read from MangaUpdates
+            common.update(mu_id=knowledge.mu_id)
     out: List[WantedSeries] = []
     if state.missing_volumes:
         findable = bool(volumes is not None and volumes.enabled)

@@ -37,7 +37,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, mu_cache, process_pool, store, wanted
+from .. import config, creator_names, mu_cache, process_pool, store, wanted
+from ..alias_search import TextFilter, hint_text
 from .._version import __version__
 from ..models import MangaEntry
 from ..scanner import (
@@ -64,8 +65,8 @@ from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
     COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MTIME,
-    COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, MangaTableModel, column_label,
-    merge_folder_scan, state_matches, under_any,
+    COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, SUBTITLE_ROLE, MangaTableModel,
+    column_label, merge_folder_scan, state_matches, under_any,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
@@ -196,6 +197,9 @@ class _SortProxy(QSortFilterProxyModel):
         # the box's placeholder promises; the model's search_text) - never the 21 columns, some of which compute the
         # series' state or a MangaPixer view per call (UI Performance Research, stage 1 #1).
         self._needle = ""
+        # The same text read as a filter (``creator:`` values apart): the free text also looks in the record's
+        # alternative titles, the creators in the creator names (``mangalist.alias_search``).
+        self._filter = TextFilter()
 
     @contextmanager
     def _filter_change(self):
@@ -223,6 +227,7 @@ class _SortProxy(QSortFilterProxyModel):
             return
         with self._filter_change():
             self._needle = needle
+            self._filter = TextFilter.of(text)
 
     def text_filter(self) -> str:
         return self._needle
@@ -254,7 +259,7 @@ class _SortProxy(QSortFilterProxyModel):
             return True
         if not source_model.in_scope(source_row):     # the Library picker
             return False
-        if self._needle and self._needle not in source_model.search_text(source_row):
+        if not self._filter.empty and not self._text_matches(source_model, source_row):
             return False
         if self._state_filter is not None:
             # the state the row shows (never computed here: a state still being computed shows the one before)
@@ -263,6 +268,43 @@ class _SortProxy(QSortFilterProxyModel):
         if self._dupes_only:
             return source_model.is_duplicate(source_row)
         return True
+
+    def _text_matches(self, model, source_row: int) -> bool:
+        """Does the row hold the filter text: in its shown titles or Kind, else (MangaPixer's alt-title search) in an
+        alternative title of its record, and every ``creator:`` value among its creators. The rows' other names are kept
+        by the model; nothing is computed or asked here."""
+        own = model.search_text(source_row)
+        flt = self._filter
+        if not flt.creators and flt.needle in own:
+            return True
+        aliases_of = getattr(model, "row_aliases", None)
+        aliases = aliases_of(source_row) if aliases_of is not None else None
+        if aliases is None:
+            return not flt.creators and flt.needle in own
+        return flt.match(own, aliases.titles, aliases.folded, aliases.creators) is not None
+
+    def why_shown(self, source_row: int) -> str:
+        """What the row held beyond its own titles when the filter let it through (``aka <title>`` / ``by <creator>``),
+        '' when its own titles hold the text or no filter is typed."""
+        flt = self._filter
+        model = self.sourceModel()
+        aliases_of = getattr(model, "row_aliases", None)
+        if flt.empty or aliases_of is None:
+            return ""
+        aliases = aliases_of(source_row)
+        if aliases is None:
+            return ""
+        why = flt.match(model.search_text(source_row), aliases.titles, aliases.folded, aliases.creators)
+        return hint_text(why) if why else ""
+
+    def data(self, index, role=Qt.DisplayRole):
+        """The Title cell's second line says why a series is shown when the filter found it by another of its names
+        (``aka Delicious in Dungeon``); otherwise it is the matched series' title as before."""
+        if (role == SUBTITLE_ROLE and not self._filter.empty and index.isValid() and index.column() == COL_TITLE):
+            hint = self.why_shown(self.mapToSource(index).row())
+            if hint:
+                return hint
+        return super().data(index, role)
 
     def lessThan(self, left, right) -> bool:
         """Compare the rows' sort keys, kept per row by the model (``MangaTableModel.sort_key``: the value
@@ -347,6 +389,7 @@ class MainWindow(QMainWindow):
         self.resize(int(win.get("w", 1440)), int(win.get("h", 900)))
 
         self._model = MangaTableModel()
+        self._model.set_creator_index(creator_names.load_index(self._db))
         self._proxy = _SortProxy(self)
         self._proxy.setSourceModel(self._model)
         # MangaPixer source: a folder MangaPixer knows takes its knowledge from the export; the others
@@ -371,6 +414,8 @@ class MainWindow(QMainWindow):
         self._dupe_focus: Optional[str] = None      # "Review duplicate files": the series the view opens on
         self._dupe_call = None
         self._same_call = None                      # the same series in two folders, being looked for
+        self._creator_call = None                   # the creators of the series, being read from MangaUpdates
+        self._creator_stop = False
         self._wanted_series: List[WantedSeries] = []
         self._wanted_cache: Dict[int, tuple] = {}    # id(entry) -> (entry, its state, series id, its To get entries)
         self._dupe_per_folder: Dict[str, Tuple[int, int]] = {}
@@ -519,6 +564,8 @@ class MainWindow(QMainWindow):
             if hasattr(tab, "set_series_host"):         # the series menus' List side (series_actions.py)
                 tab.set_series_host(self)
             self._download_tab = tab
+            if hasattr(tab, "set_creator_index"):       # the creators its ``creator:`` filter looks in
+                tab.set_creator_index(self._model.creator_index())
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
         self._make_auto_modes()
@@ -2005,6 +2052,7 @@ class MainWindow(QMainWindow):
             self._mu_worker = None
 
         if not entries:
+            self._start_creator_names()
             return
         entries = list(entries)
         unresolved = [(e.root_id, str(e.folder)) for e in entries if str(e.folder) not in self._mp_items]
@@ -2041,6 +2089,7 @@ class MainWindow(QMainWindow):
             self._status_label.setText(
                 f"{len(skipped)} folder(s) skipped: MangaPixer knows them (sync MangaPixer to refresh)")
             if not entries:
+                self._start_creator_names()
                 return
 
         # Build (source_row, entry) pairs - the row of each entry still in the model (a scan may have replaced it
@@ -2053,6 +2102,7 @@ class MainWindow(QMainWindow):
         pairs = [(folder_to_row[str(e.folder)], e) for e in entries
                  if str(e.folder) in folder_to_row and self._model.entry_at(folder_to_row[str(e.folder)]) is e]
         if not pairs:
+            self._start_creator_names()
             return
 
         worker = MuWorker(pairs)
@@ -2092,10 +2142,55 @@ class MainWindow(QMainWindow):
             self._table.resizeColumnToContents(col)
 
     def _on_mu_thread_finished(self) -> None:
+        stopped = bool(getattr(self._mu_worker, "aborted", False))
         self._model.set_mu_processing_row(None)
         self._mu_thread = None
         self._mu_worker = None
         self._list.set_mu_running(False)
+        if not stopped:
+            self._start_creator_names()
+
+    def _start_creator_names(self) -> None:
+        """Read the creators of the series MangaPixer does NOT know (and the other names of each author) from MangaUpdates
+        for the List's ``creator:`` filter, in the background, at the end of a MangaUpdates lookup (so it asks MangaUpdates
+        only when the owner lets MangaList: the automatic lookup is on, or Look up was pressed). A series MangaPixer knows
+        takes its creators from MangaPixer's export (``record.creators``) and is never asked for - with an older
+        MangaPixer that exports none, it simply has none. One run at a time; what is cached is not asked again for 180
+        days (:mod:`mangalist.creator_names`)."""
+        if self._creator_call is not None or self._model.rowCount() == 0:
+            return
+        clients = lanes.creator_name_clients()
+        if clients is None:
+            return
+        entries = self._model.entries()
+        from .background import start_call
+
+        get_series, get_author, not_found = clients
+        db = self._db
+        self._creator_stop = False
+
+        def work():
+            # the folders MangaPixer knows are told apart here, off the UI thread (its items are resolved per folder)
+            ids = list(dict.fromkeys(str(e.mu_id) for e in entries if e.mu_id is not None
+                                     and self._knowledge_for(e) is None))
+            if not ids or not creator_names.pending(db, ids):
+                return creator_names.FillResult()
+            return creator_names.fill(db, ids, get_series=get_series, get_author=get_author, not_found=not_found,
+                                      should_stop=lambda: self._creator_stop)
+
+        def done(result) -> None:
+            if result.requests:
+                index = creator_names.load_index(db)
+                self._model.set_creator_index(index)
+                self._proxy.refresh_scope()                 # a creator: filter typed meanwhile finds them now
+                if hasattr(self._download_tab, "set_creator_index"):
+                    self._download_tab.set_creator_index(index)
+
+        def finished() -> None:
+            self._creator_call = None
+
+        self._creator_call = start_call(work, done, lambda msg: _log.warning("Reading creator names failed: %s", msg),
+                                        finished)
 
     def _on_mu_start(self) -> None:
         if not self._mu_entries:
@@ -2949,6 +3044,11 @@ class MainWindow(QMainWindow):
             self._dupe_call.abandon()
         if self._same_call is not None:
             self._same_call.abandon()
+        self._creator_stop = True                   # the lookup ends after its request; what it read is cached
+        if self._creator_call is not None:
+            self._creator_call.abandon()
+            if hasattr(self._creator_call, "wait"):
+                self._creator_call.wait(3000)          # (a thread; it ends after its request)
         if self._scan_retry is not None:
             self._scan_retry.stop()
         if self._rename_call is not None and hasattr(self._rename_call, "abandon"):

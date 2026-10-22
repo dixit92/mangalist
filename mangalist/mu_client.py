@@ -1,8 +1,9 @@
 """Thin wrapper around the MangaUpdates v1 API.
 
-Only the two endpoints we need are implemented:
+Only the endpoints we need are implemented:
   - POST /series/search  -> list of candidate matches
-  - GET  /series/{id}    -> full record including licensed + publishers
+  - GET  /series/{id}    -> full record including licensed + publishers + authors
+  - GET  /authors/{id}   -> an author's other names (the List's ``creator:`` filter)
 """
 
 from __future__ import annotations
@@ -69,6 +70,15 @@ def get_series(series_id: int) -> Dict[str, Any]:
     record does not exist)."""
     _log.debug("get_series: id=%s", series_id)
     resp = _SESSION.get(f"{_BASE}/series/{series_id}", timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_author(author_id: int) -> Dict[str, Any]:
+    """Return the AuthorModelV1 dict for *author_id* (``name``, ``associated`` other names, ``actualname``; raises
+    ``requests.HTTPError``, 404 when the author does not exist)."""
+    _log.debug("get_author: id=%s", author_id)
+    resp = _SESSION.get(f"{_BASE}/authors/{int(author_id)}", timeout=15)
     resp.raise_for_status()
     return resp.json()
 

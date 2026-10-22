@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..alias_search import SEARCH_PLACEHOLDER, SEARCH_TIP
 from ..states import State
 from . import theme
 from .chips import ChipButton, FlowLayout
@@ -140,7 +141,8 @@ class ListTab(QWidget):
         row.setContentsMargins(20, 12, 20, 12)
         row.setSpacing(12)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter title, English title, verdict")
+        self.search.setPlaceholderText(SEARCH_PLACEHOLDER)
+        self.search.setToolTip(SEARCH_TIP)
         self.search.setAccessibleName("Filter series")
         self.search.setClearButtonEnabled(True)
         self.search.setMinimumWidth(200)

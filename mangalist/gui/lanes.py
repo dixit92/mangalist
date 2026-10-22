@@ -39,3 +39,11 @@ def find_same_series_function() -> Callable:
     from ..same_series import find_same_series
 
     return find_same_series
+
+
+def creator_name_clients():
+    """``(get_series, get_author, not_found)`` of MangaUpdates for the creator-name lookup (:mod:`mangalist.creator_names`),
+    or None when none is to be asked (the tests: no test asks MangaUpdates)."""
+    from .. import mu_client
+
+    return mu_client.get_series, mu_client.get_author, mu_client.is_not_found
