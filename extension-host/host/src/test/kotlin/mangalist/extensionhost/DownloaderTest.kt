@@ -10,6 +10,7 @@ import kotlin.io.path.name
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -194,5 +195,39 @@ class DownloaderTest {
         gate.complete(Unit)
         waitFor(what = "all downloads") { downloader.status().queue.isEmpty() }
         waitFor(what = "STOPPED") { downloader.status().state == Downloader.STOPPED }
+    }
+
+    @Test
+    fun `an extension update waits for its sources' running download and holds their queue meanwhile`() {
+        val all = chapters()
+        val c1 = all.getValue("/c/1")
+        val c2 = all.getValue("/c/2")
+        val gate = CompletableDeferred<Unit>()
+        source.gate = gate
+        downloader.enqueue(listOf(c2.id))
+        waitFor(what = "downloading") { downloader.status().queue.singleOrNull()?.state == Downloader.DOWNLOADING }
+        assertTrue(downloader.downloading(listOf(source.id)))
+        // no wait: refused at once, nothing run
+        var ran = false
+        val busy = assertFailsWith<Downloader.ExtensionBusyException> { downloader.whileIdle(listOf(source.id), "Fake", 0) { ran = true } }
+        assertTrue("Fake is downloading a chapter" in busy.message!!, busy.message)
+        assertFalse(ran)
+        // another source's ids are not held up
+        assertEquals("other", downloader.whileIdle(listOf(424242L), "Other", 0) { "other" })
+        // with a wait: the download finishes, then the update runs; a chapter queued meanwhile waits until it is done
+        Thread {
+            Thread.sleep(300)
+            gate.complete(Unit)
+        }.start()
+        downloader.whileIdle(listOf(source.id), "Fake", 10_000) {
+            assertTrue(store.chapter(c2.id)!!.downloaded)
+            downloader.enqueue(listOf(c1.id))
+            Thread.sleep(300)
+            assertEquals(Downloader.QUEUED, downloader.status().queue.single().state) // held
+            ran = true
+        }
+        assertTrue(ran)
+        waitFor(what = "the held chapter") { downloader.status().queue.isEmpty() } // released: it goes on
+        assertTrue(store.chapter(c1.id)!!.downloaded)
     }
 }
