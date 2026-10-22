@@ -60,3 +60,17 @@ Agreed from the lanes' reports; MangaList's client relies on these.
 - `chapterNumber` is written in its shortest float form (`1.1`).
 - Difference from Suwayomi, deliberate: an `ERROR` chapter stays `ERROR` across a host restart (Suwayomi gives it 3 fresh
   tries); MangaList's chapter_retry re-enqueues it on its schedule.
+
+## Repositories and updates - 2026-10-22 (integrator, after merging lane U)
+
+- `GET /repos` (url, name, signing-key fingerprint, extension count, last fetch / error), `POST /repos {url}` (the index is
+  fetched and checked first; a non-index URL is refused), `DELETE /repos {url}` (also `POST /repos/remove`). Kept in the
+  host's `repos.json`; `--repo` may be given more than once (keiyoushi's `index.json` stays the default).
+- `GET /repo` lists every repository's extensions; each entry carries `repo` (its index URL) and `repoName`; installed
+  extensions carry the repository they came from and `repoListed` (false once that repository is removed: no updates).
+- Each repository's own signing key is enforced; a key that changes later makes that repository untrusted. An extension
+  updates only from its own repository (`400` otherwise); the same package from another repository needs an uninstall
+  first (`409`).
+- `POST /extensions/update {pkg, repo?, waitSeconds?}`: while a source of that extension is downloading, the host holds
+  that source's queue and waits up to `waitSeconds`, else answers `409` (MangaList's `extension-updates` job waits 60 s and
+  otherwise tries again at its next run).
