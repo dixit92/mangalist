@@ -564,7 +564,8 @@ class MainWindow(QMainWindow):
             if hasattr(tab, "set_series_host"):         # the series menus' List side (series_actions.py)
                 tab.set_series_host(self)
             self._download_tab = tab
-            tab.set_creator_index(self._model.creator_index())
+            if hasattr(tab, "set_creator_index"):       # the creators its ``creator:`` filter looks in
+                tab.set_creator_index(self._model.creator_index())
             self._pages.addWidget(tab)
             self._top.set_download_available(True)
         self._make_auto_modes()
@@ -2181,7 +2182,7 @@ class MainWindow(QMainWindow):
                 index = creator_names.load_index(db)
                 self._model.set_creator_index(index)
                 self._proxy.refresh_scope()                 # a creator: filter typed meanwhile finds them now
-                if self._download_tab is not None:
+                if hasattr(self._download_tab, "set_creator_index"):
                     self._download_tab.set_creator_index(index)
 
         def finished() -> None:
