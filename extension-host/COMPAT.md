@@ -44,3 +44,19 @@ folder), like Suwayomi's.
 
 `--data DIR`, `--bind`, `--port`, `--downloads DIR` (default `<data>/downloads`), `--flaresolverr URL`, `--repo URL`
 (default keiyoushi's `index.json`), `--webview on|off`.
+
+## Additions as built - 2026-10-22 (integrator, after merging lanes H and M)
+
+Agreed from the lanes' reports; MangaList's client relies on these.
+
+- Extension management (outside `/compat`, used by MangaList's Extensions page): `GET /extensions` (with `repoVersion`,
+  `updateAvailable`, `signatureHash`), `POST /extensions/update {pkg, repo?}`, `POST /extensions/uninstall {pkg}` (answers
+  the extension), `GET /sources/{id}/preferences` (each with `position`), `POST /sources/{id}/preferences {key, value}`
+  (answers the whole list). An extension whose signing key differs from the repository's `signingKey` is refused.
+- `GET /webview`, `POST /webview/start`; `POST /webview/debug-eval` is a diagnostics call (local API only; candidate to put
+  behind a flag).
+- Host option `--download-parallel N` (sources downloading at once, default 2; one chapter at a time per source).
+- A manga whose source lists no chapters answers `200` with `chapters: []` (not an error).
+- `chapterNumber` is written in its shortest float form (`1.1`).
+- Difference from Suwayomi, deliberate: an `ERROR` chapter stays `ERROR` across a host restart (Suwayomi gives it 3 fresh
+  tries); MangaList's chapter_retry re-enqueues it on its schedule.
