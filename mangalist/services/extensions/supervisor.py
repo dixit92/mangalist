@@ -14,7 +14,10 @@ else the environment:
 - ``--bind 127.0.0.1 --port <the port of the host's address in Settings>`` (4570): the host has no login, it stays on
   the container's loopback;
 - ``--flaresolverr``: the FlareSolverr address in Settings, else ``MANGALIST_FLARESOLVERR_URL``;
-- ``--repo``: the repository in Settings, else ``MANGALIST_EXTENSION_REPO`` (none: the host's default, keiyoushi's);
+- ``--repo`` (once per repository): the repository list as the owner last left it in Settings (Built-in extensions),
+  else ``MANGALIST_EXTENSION_REPO`` (none: the host's own list - keiyoushi's on its first start). The host keeps its
+  list in its data folder and takes an ``--repo`` it does not list yet; adding or removing a repository in Settings goes
+  to the running host at once (its API), so a change of the list alone does not restart the host;
 - ``--webview on|off``: the WebView switch in Settings (on by default; ``MANGALIST_EXTENSION_WEBVIEW=0`` turns it off).
 
 A changed option restarts the host; a host that exits is started again (after :data:`BACKOFF_SECONDS` when it keeps
@@ -69,7 +72,7 @@ def switch(env: Optional[Mapping[str, str]] = None) -> str:
 def host_command(config, data_dir: Path, *, env: Optional[Mapping[str, str]] = None,
                  binary: Optional[str] = None) -> tuple:
     """The host's command line for *config* (:class:`mangalist.store.downloads.ExtensionHostConfig`)."""
-    from ...downloads.extensions_backend import flaresolverr_url, repo_url
+    from ...downloads.extensions_backend import flaresolverr_url, repo_urls
 
     env = os.environ if env is None else env
     host_dir = Path(data_dir) / DATA_NAME
@@ -78,12 +81,27 @@ def host_command(config, data_dir: Path, *, env: Optional[Mapping[str, str]] = N
     cmd: List[str] = [binary or env.get(ENV_BIN, DEFAULT_BIN), "--data", str(host_dir), "--bind", "127.0.0.1",
                       "--port", str(port), "--downloads", str(host_dir / "downloads"),
                       "--webview", "on" if webview else "off"]
-    flare, repo = flaresolverr_url(config, env), repo_url(config, env)
+    flare = flaresolverr_url(config, env)
     if flare:
         cmd += ["--flaresolverr", flare]
-    if repo:
+    for repo in repo_urls(config, env):
         cmd += ["--repo", repo]
     return tuple(cmd)
+
+
+def without_repos(command: Sequence[str]) -> tuple:
+    """*command* without its ``--repo`` options: what a restart is decided on (the running host already has a
+    repository added or removed in Settings - through its API)."""
+    out: List[str] = []
+    skip = False
+    for part in command:
+        if skip:
+            skip = False
+        elif part == "--repo":
+            skip = True
+        else:
+            out.append(part)
+    return tuple(out)
 
 
 def wanted(data_dir: Path, *, env: Optional[Mapping[str, str]] = None, open_settings: Optional[Callable] = None,
@@ -206,8 +224,11 @@ class Supervisor:
                 self.stop()
             return
         if self.process is not None and want.command != self.command:
-            _log.info("Extension host: its options changed; restarting it")
-            self.stop()
+            if without_repos(want.command) == without_repos(self.command):
+                self.command = want.command             # the repository list: the host has it already
+            else:
+                _log.info("Extension host: its options changed; restarting it")
+                self.stop()
         if self.process is None and self._clock() >= self.not_before:
             self._start(want)
 

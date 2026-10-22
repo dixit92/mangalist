@@ -642,7 +642,8 @@ SETTING_SUWAYOMI_SOURCES = "downloads.suwayomi_sources"     # the source ids Man
 # The built-in extensions backend (prototype/mihon-mangalist): which program downloads chapters, and MangaList's own
 # extension host. Plain settings (no secret: the host has no login).
 SETTING_CHAPTER_BACKEND = "downloads.chapter_backend"      # 'suwayomi' (default) | 'extensions'
-SETTING_EXTENSION_HOST = "downloads.extension_host"        # {url, download_dir, downloads_path, repo_url, ...}
+SETTING_EXTENSION_HOST = "downloads.extension_host"        # {url, download_dir, downloads_path, repos, ...}
+SETTING_EXTENSION_AUTO_UPDATE = "downloads.extension_auto_update"   # bool: the update job installs what it finds
 META_EXTENSIONS_SERIES = "extensions.series."              # + the series id: the per-series choices on the host
 DEFAULT_EXTENSION_HOST_URL = "http://127.0.0.1:4570"
 #: keiyoushi's repository (the one MangaList's Suwayomi uses; the host's own default too).
@@ -655,8 +656,13 @@ class ExtensionHostConfig:
 
     ``download_dir`` is the folder MangaList files finished chapters from, as MangaList sees it (empty: the host's own
     ``downloadsPath`` - right whenever the host runs next to MangaList, as in the container); ``downloads_path`` is the
-    host's own answer, learned at the last connection test or host start. ``flaresolverr_url`` / ``repo_url`` empty:
-    the environment's (``MANGALIST_FLARESOLVERR_URL`` / ``MANGALIST_EXTENSION_REPO``), else none / keiyoushi's."""
+    host's own answer, learned at the last connection test or host start. ``flaresolverr_url`` empty: the environment's
+    (``MANGALIST_FLARESOLVERR_URL``), else none.
+
+    ``repos``: the extension repositories as the owner last left the host's list (Settings > Built-in extensions; each
+    added one checked by the host first) - the container's host is started with them (``--repo`` each), so a new data
+    folder gets the same list. None: never edited - the single ``repo_url`` of an older version, else
+    ``MANGALIST_EXTENSION_REPO``, else the host's default (keiyoushi's)."""
 
     url: str = DEFAULT_EXTENSION_HOST_URL
     download_dir: str = ""
@@ -664,6 +670,7 @@ class ExtensionHostConfig:
     repo_url: str = ""
     flaresolverr_url: str = ""
     webview: bool = True
+    repos: Optional[Tuple[str, ...]] = None
 
     @property
     def files_from(self) -> str:
@@ -709,17 +716,31 @@ class SuwayomiSettings:
             return value.strip() if isinstance(value, str) else ""
 
         webview = data.get("webview")
+        repos = data.get("repos")
         return ExtensionHostConfig(url=text("url") or DEFAULT_EXTENSION_HOST_URL, download_dir=text("download_dir"),
                                    downloads_path=text("downloads_path"), repo_url=text("repo_url"),
                                    flaresolverr_url=text("flaresolverr_url"),
-                                   webview=webview if isinstance(webview, bool) else True)
+                                   webview=webview if isinstance(webview, bool) else True,
+                                   repos=tuple(r.strip() for r in repos if isinstance(r, str) and r.strip())
+                                   if isinstance(repos, list) else None)
 
     def save_extension_host(self, config: ExtensionHostConfig) -> None:
-        self.store.set_setting(SETTING_EXTENSION_HOST, {
+        data = {
             "url": (config.url or "").strip() or DEFAULT_EXTENSION_HOST_URL,
             "download_dir": (config.download_dir or "").strip(), "downloads_path": (config.downloads_path or "").strip(),
             "repo_url": (config.repo_url or "").strip(), "flaresolverr_url": (config.flaresolverr_url or "").strip(),
-            "webview": bool(config.webview)})
+            "webview": bool(config.webview)}
+        if config.repos is not None:
+            data["repos"] = [r.strip() for r in config.repos if r and r.strip()]
+        self.store.set_setting(SETTING_EXTENSION_HOST, data)
+
+    def extension_auto_update(self) -> bool:
+        """Whether the scheduled extension update check installs the updates it finds (off unless the owner turns it
+        on)."""
+        return self.store.get_setting(SETTING_EXTENSION_AUTO_UPDATE, False) is True
+
+    def set_extension_auto_update(self, on: bool) -> None:
+        self.store.set_setting(SETTING_EXTENSION_AUTO_UPDATE, bool(on))
 
     def learn_downloads_path(self, path: str) -> None:
         """Keep the host's own downloads folder (its ``/compat/settings`` answer, or what the container started it with)."""

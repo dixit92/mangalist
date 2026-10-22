@@ -3,14 +3,19 @@
 The host runs Mihon / Tachiyomi extensions on a JVM and answers a small local JSON API (it binds 127.0.0.1 and has
 no login). Source ids are 64-bit numbers and travel as strings. Endpoints (``extension-host/.../ApiServer.kt``):
 
-- ``GET /health``; ``GET /repo?url=`` (the repository's extensions; keiyoushi's ``index.json`` by default)
-- ``GET /extensions``; ``POST /extensions/install {pkg, repo?, format: jar|apk}``
+- ``GET /health``; ``GET /repo`` (every listed repository's extensions, each naming its repository; ``?url=`` one)
+- ``GET /repos``, ``POST /repos {url}`` (the index is fetched and checked first), ``DELETE /repos {url}``: the host's
+  repository list (keiyoushi's ``index.json`` until changed); each repository's own signing key is enforced
+- ``GET /extensions``; ``POST /extensions/install {pkg, repo?, format: jar|apk}``; ``POST /extensions/update {pkg,
+  waitSeconds?}`` (only from the repository it was installed from; HTTP 409 while one of its sources downloads a
+  chapter); ``POST /extensions/uninstall {pkg}``
 - ``GET /sources``; ``GET /sources/{id}/search?q=&page=``, ``/popular?page=``, ``/latest?page=``
 - ``POST /sources/{id}/manga {url, title}``, ``/chapters {url, title}``, ``/pages {url}`` (``?resolve=true``),
   ``/image {index, url, imageUrl}`` (the image's bytes)
 
-Errors answer ``{"error", "type"}``: 400 a bad call, 404 an unknown source / endpoint / package, 502 the source (or the
-network behind it) failed.
+Errors answer ``{"error", "type"}``: 400 a bad call, 404 an unknown source / endpoint / package, 409 busy (a chapter of the
+extension's sources is downloading; try again later) or not allowed now, 502 the source (or the network behind it)
+failed.
 """
 
 from __future__ import annotations
@@ -45,6 +50,11 @@ class SourceFailed(ExtensionHostError):
     """HTTP 502: the extension (or the site behind it) failed; the message is the extension's."""
 
 
+class Busy(ExtensionHostError):
+    """HTTP 409: not now - a chapter of the extension's sources is downloading (an update or removal waits for it), or
+    the extension is installed from another repository / its repository was removed."""
+
+
 @dataclass(frozen=True)
 class RepoSource:
     id: str
@@ -66,6 +76,20 @@ class RepoExtension:
     apk_url: str
     jar_url: Optional[str]
     sources: Tuple[RepoSource, ...] = ()
+    repo: str = ""                    # the repository index it is listed in
+    repo_name: str = ""
+
+
+@dataclass(frozen=True)
+class Repository:
+    """One repository of the host's list (``GET /repos``)."""
+
+    url: str
+    name: str
+    signing_key: Optional[str] = None     # SHA-256 its extensions must be signed with
+    extensions: Optional[int] = None      # at the last fetch (None: never fetched)
+    last_fetch: Optional[int] = None      # ms since the epoch
+    error: Optional[str] = None           # why the last fetch failed (or the key changed)
 
 
 @dataclass(frozen=True)
@@ -86,10 +110,12 @@ class Extension:
     lib_version: str
     nsfw: int = 0
     sources: Tuple[Source, ...] = ()
-
-
-@dataclass(frozen=True)
-class Manga:
+    repo: str = ""                    # the repository it was installed from (its updates come only from there)
+    repo_name: str = ""
+    repo_listed: bool = True          # False: that repository was removed from the list (no updates)
+    repo_version: Optional[str] = None
+    update_available: bool = False
+    signature_hash: Optional[str] = None
     url: str                          # the source's own path for the manga (what every later call takes)
     title: str
     thumbnail_url: Optional[str] = None
@@ -190,14 +216,26 @@ def _chapter(d: Mapping[str, Any]) -> Chapter:
 
 def _extension(d: Mapping[str, Any]) -> Extension:
     return Extension(d["pkg"], d["name"], d["version"], d.get("libVersion") or "", int(d.get("nsfw") or 0),
-                     tuple(_source(s) for s in d.get("sources") or ()))
+                     tuple(_source(s) for s in d.get("sources") or ()), repo=str(d.get("repo") or ""),
+                     repo_name=str(d.get("repoName") or ""), repo_listed=d.get("repoListed", True) is not False,
+                     repo_version=d.get("repoVersion"), update_available=bool(d.get("updateAvailable")),
+                     signature_hash=d.get("signatureHash"))
 
 
 def _repo_extension(d: Mapping[str, Any]) -> RepoExtension:
     return RepoExtension(d["name"], d["pkg"], d.get("version") or "", d.get("libVersion") or "", d.get("lang") or "",
                          bool(d.get("nsfw")), d.get("apkUrl") or "", d.get("jarUrl"),
                          tuple(RepoSource(str(s["id"]), s["name"], s.get("lang") or "", s.get("baseUrl") or "")
-                               for s in d.get("sources") or ()))
+                               for s in d.get("sources") or ()), str(d.get("repo") or ""), str(d.get("repoName") or ""))
+
+
+def _repository(d: Mapping[str, Any]) -> Repository:
+    def _int(key: str) -> Optional[int]:
+        value = d.get(key)
+        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    return Repository(str(d["url"]), str(d.get("name") or d["url"]), d.get("signingKey"), _int("extensions"),
+                      _int("lastFetch"), d.get("error"))
 
 
 class ExtensionHostClient:
@@ -243,7 +281,7 @@ class ExtensionHostClient:
                 message, kind = str(err.get("error") or message), str(err.get("type") or "")
             except (ValueError, AttributeError, UnicodeDecodeError):
                 pass
-            cls = NotFound if status == 404 else SourceFailed if status == 502 else ExtensionHostError
+            cls = {404: NotFound, 409: Busy, 502: SourceFailed}.get(status, ExtensionHostError)
             raise cls(message, status, kind)
         if raw:
             return resp
@@ -259,8 +297,22 @@ class ExtensionHostClient:
         return self._call("GET", "/health")
 
     def repo(self, index_url: Optional[str] = None) -> List[RepoExtension]:
+        """Every listed repository's extensions (each names its repository); *index_url*: that repository's only."""
         path = "/repo" + (f"?url={quote(index_url, safe='')}" if index_url else "")
         return [_repo_extension(d) for d in self._call("GET", path)]
+
+    def repos(self) -> List[Repository]:
+        """The host's repository list."""
+        return [_repository(d) for d in self._call("GET", "/repos")]
+
+    def add_repo(self, url: str) -> Repository:
+        """Add a repository: the host fetches and checks its index first (an address that is not an extension index,
+        or one without a signing key, is refused: :class:`ExtensionHostError` with the host's reason)."""
+        return _repository(self._call("POST", "/repos", {"url": url}))
+
+    def remove_repo(self, url: str) -> Repository:
+        """Remove a repository; the extensions installed from it stay installed (and get no updates)."""
+        return _repository(self._call("POST", "/repos/remove", {"url": url}))
 
     def extensions(self) -> List[Extension]:
         return [_extension(d) for d in self._call("GET", "/extensions")]
@@ -271,11 +323,15 @@ class ExtensionHostClient:
             body["repo"] = repo
         return _extension(self._call("POST", "/extensions/install", body))
 
-    def update(self, pkg: str, *, repo: Optional[str] = None) -> Extension:
-        """Install the repository's newer version of an installed extension (its sources are loaded again)."""
+    def update(self, pkg: str, *, repo: Optional[str] = None, wait_seconds: int = 0) -> Extension:
+        """Install the newer version of an installed extension from the repository it was installed from (its sources
+        are loaded again). While a chapter of its sources downloads the host waits up to *wait_seconds*, then answers
+        :class:`Busy` (nothing changed)."""
         body: Dict[str, Any] = {"pkg": pkg}
         if repo:
             body["repo"] = repo
+        if wait_seconds:
+            body["waitSeconds"] = int(wait_seconds)
         return _extension(self._call("POST", "/extensions/update", body))
 
     def uninstall(self, pkg: str) -> None:
@@ -341,6 +397,6 @@ class ExtensionHostClient:
         return resp.content, str(headers.get("Content-Type") or headers.get("content-type") or "")
 
 
-__all__ = ["DEFAULT_URL", "Chapter", "Extension", "ExtensionHostClient", "ExtensionHostError", "HostUnreachable",
-           "Manga", "MangasPage", "NotFound", "Page", "RepoExtension", "RepoSource", "Source", "SourceFailed",
+__all__ = ["DEFAULT_URL", "Busy", "Chapter", "Extension", "ExtensionHostClient", "ExtensionHostError", "HostUnreachable",
+           "Manga", "MangasPage", "NotFound", "Page", "RepoExtension", "RepoSource", "Repository", "Source", "SourceFailed",
            "SourcePreference", "PREF_CHECKBOX", "PREF_EDITTEXT", "PREF_LIST", "PREF_MULTISELECT", "PREF_SWITCH"]

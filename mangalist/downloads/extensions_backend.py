@@ -1,6 +1,8 @@
 """The GUI backend's "Built-in extensions" part (prototype/mihon-mangalist): the chapter backend choice, MangaList's
-own extension host (address, folders, options, Test connection) and its extensions (repository, install / update /
-uninstall, source settings). Mixed into :class:`mangalist.downloads.adapter.Backend`. No Qt.
+own extension host (address, folders, options, Test connection), its repository list (add - checked by the host first -
+and remove), its extensions (install from a repository / update / uninstall, source settings) and the extension update
+check (:mod:`.extension_updates`: the notice, Auto-update). Mixed into :class:`mangalist.downloads.adapter.Backend`.
+No Qt.
 
 Every call that asks the host may block (the GUI calls them off the UI thread); a failure the owner should read is a
 :class:`~mangalist.gui.downloads_backend.BackendError` with the host's own message.
@@ -20,6 +22,7 @@ from ..services.extensions.client import (
     ExtensionHostClient,
     ExtensionHostError,
     RepoExtension,
+    Repository,
     SourcePreference,
 )
 from ..services.suwayomi import SuwayomiError
@@ -32,10 +35,22 @@ ENV_REPO = "MANGALIST_EXTENSION_REPO"
 ENV_FLARESOLVERR = "MANGALIST_FLARESOLVERR_URL"
 
 
+def repo_urls(config: ExtensionHostConfig, env: Optional[Mapping[str, str]] = None) -> Tuple[str, ...]:
+    """The repositories the host is started with (``--repo`` each): the list as the owner last left it (Settings), else
+    an older version's single repository setting, else ``MANGALIST_EXTENSION_REPO`` (several separated by spaces,
+    commas or semicolons), else none (the host's own list; on its first start keiyoushi's)."""
+    if config.repos is not None:
+        return tuple(config.repos)
+    if config.repo_url:
+        return (config.repo_url,)
+    raw = (os.environ if env is None else env).get(ENV_REPO, "")
+    return tuple(dict.fromkeys(u for u in re.split(r"[\s,;]+", raw) if u))
+
+
 def repo_url(config: ExtensionHostConfig, env: Optional[Mapping[str, str]] = None) -> str:
-    """The repository MangaList installs from: the setting, else ``MANGALIST_EXTENSION_REPO``, else '' (the host's
-    default, keiyoushi's)."""
-    return config.repo_url or (os.environ if env is None else env).get(ENV_REPO, "").strip()
+    """The first of :func:`repo_urls` ('' for none)."""
+    urls = repo_urls(config, env)
+    return urls[0] if urls else ""
 
 
 def flaresolverr_url(config: ExtensionHostConfig, env: Optional[Mapping[str, str]] = None) -> str:
@@ -50,15 +65,21 @@ def version_key(version: str) -> Tuple:
 
 @dataclass(frozen=True)
 class ExtensionRow:
-    """One extension as the Extensions page lists it: the repository's entry and what is installed of it."""
+    """One extension of one repository as the Extensions page lists it, and what is installed of it. The same package
+    in two repositories is two rows (an extension installed from one of them is installed in that row only; the other
+    says so in :attr:`installed_from`)."""
 
     pkg: str
     name: str
     lang: str
     nsfw: bool = False
     repo_version: str = ""              # '' when the repository no longer lists it
-    installed_version: str = ""         # '' when not installed
+    installed_version: str = ""         # '' when not installed (from this repository)
     sources: Tuple[Tuple[str, str, str], ...] = ()      # (id, name, lang)
+    repo: str = ""                      # the repository's index URL ('' from a host that names none)
+    repo_name: str = ""
+    installed_from: str = ""            # installed from ANOTHER repository: its name (not installable here)
+    repo_listed: bool = True            # False: installed from a repository no longer in the list (no updates)
 
     @property
     def installed(self) -> bool:
@@ -70,20 +91,41 @@ class ExtensionRow:
                 and version_key(self.repo_version) > version_key(self.installed_version))
 
 
+def _repo_label(url: str, name: str = "") -> str:
+    if name:
+        return name
+    from urllib.parse import urlsplit
+
+    return urlsplit(url).hostname or url
+
+
 def extension_rows(repo: Sequence[RepoExtension], installed: Sequence[Extension]) -> List[ExtensionRow]:
-    """The repository's extensions joined with the installed ones (an installed one the repository dropped stays
-    listed), installed first, then by name."""
+    """Every repository's extensions joined with the installed ones - each installed extension with the repository it
+    came from (an installed one its repository dropped, or whose repository was removed, stays listed), installed
+    first, then by name and repository."""
     have = {e.pkg: e for e in installed}
+    placed: set = set()
     rows = []
     for r in repo:
-        mine = have.pop(r.pkg, None)
-        sources = tuple((s.id, s.name, s.lang) for s in (mine.sources if mine else r.sources))
+        mine = have.get(r.pkg)
+        same = mine is not None and r.pkg not in placed and (not mine.repo or not r.repo or mine.repo == r.repo)
+        if same:
+            placed.add(r.pkg)
+        sources = tuple((s.id, s.name, s.lang) for s in (mine.sources if same else r.sources))
         rows.append(ExtensionRow(pkg=r.pkg, name=r.name, lang=r.lang, nsfw=r.nsfw, repo_version=r.version,
-                                 installed_version=mine.version if mine else "", sources=sources))
+                                 installed_version=mine.version if same else "", sources=sources, repo=r.repo,
+                                 repo_name=_repo_label(r.repo, r.repo_name) if r.repo else "",
+                                 installed_from=_repo_label(mine.repo, mine.repo_name)
+                                 if mine is not None and not same and mine.repo else "",
+                                 repo_listed=mine.repo_listed if same else True))
     for e in have.values():
+        if e.pkg in placed:
+            continue
         rows.append(ExtensionRow(pkg=e.pkg, name=e.name, lang="", nsfw=bool(e.nsfw), installed_version=e.version,
-                                 sources=tuple((s.id, s.name, s.lang) for s in e.sources)))
-    rows.sort(key=lambda r: (not r.installed, r.name.casefold(), r.lang))
+                                 sources=tuple((s.id, s.name, s.lang) for s in e.sources), repo=e.repo,
+                                 repo_name=_repo_label(e.repo, e.repo_name) if e.repo else "",
+                                 repo_listed=e.repo_listed))
+    rows.sort(key=lambda r: (not r.installed, r.name.casefold(), r.lang, r.repo_name.casefold()))
     return rows
 
 
@@ -118,7 +160,10 @@ class ExtensionsBackendMixin:
         return self.suwayomi.extension_host()
 
     def save_extension_host(self, config: ExtensionHostConfig) -> None:
-        self.suwayomi.save_extension_host(self._checked_host(config))
+        """Save the host's form. The repository list is not part of it (it changes through
+        :meth:`add_extension_repository` / :meth:`remove_extension_repository`): the stored one is kept."""
+        current = self.suwayomi.extension_host()
+        self.suwayomi.save_extension_host(replace(self._checked_host(config), repos=current.repos))
 
     def _checked_host(self, config: ExtensionHostConfig) -> ExtensionHostConfig:
         from ..services.extensions.compat import normalize_host_url
@@ -127,7 +172,7 @@ class ExtensionsBackendMixin:
             url = normalize_host_url(config.url)
         except ValueError as exc:
             raise BackendError(str(exc)) from None
-        for name, value in (("repository", config.repo_url), ("FlareSolverr", config.flaresolverr_url)):
+        for name, value in (("FlareSolverr", config.flaresolverr_url),):
             if value and not re.match(r"^https?://", value.strip(), re.I):
                 raise BackendError(f"the {name} address must start with http:// or https://")
         return replace(config, url=url)
@@ -177,26 +222,106 @@ class ExtensionsBackendMixin:
             _close(host)
 
     def extension_repo(self) -> List[ExtensionRow]:
-        """The repository's extensions (the configured repository, else the host's default) with what is installed."""
-        config = self.suwayomi.extension_host()
-        url = repo_url(config) or None
-        return self._host_call("reading the repository",
-                               lambda h: extension_rows(h.repo(url), h.extensions()))
+        """Every repository's extensions (the host's list) with what is installed, each with its repository."""
+        return self._host_call("reading the repositories", lambda h: extension_rows(h.repo(), h.extensions()))
 
     def installed_extensions(self) -> List[Extension]:
         return self._host_call("listing the extensions", lambda h: h.extensions())
 
-    def install_extension(self, pkg: str) -> Extension:
-        url = repo_url(self.suwayomi.extension_host()) or None
-        ext = self._host_call(f"installing {pkg}", lambda h: h.install(pkg, repo=url))
-        _log.info("Extensions: installed %s %s (%d source(s))", ext.name, ext.version, len(ext.sources))
+    def install_extension(self, pkg: str, repo: Optional[str] = None) -> Extension:
+        """Install *pkg* from *repo* (one of the host's repositories; None: the first that lists it). The host checks
+        it against that repository's own signing key."""
+        ext = self._host_call(f"installing {pkg}", lambda h: h.install(pkg, repo=repo or None))
+        _log.info("Extensions: installed %s %s from %s (%d source(s))", ext.name, ext.version,
+                  ext.repo_name or ext.repo or "the repository", len(ext.sources))
         return ext
 
-    def update_extension(self, pkg: str) -> Extension:
-        url = repo_url(self.suwayomi.extension_host()) or None
-        ext = self._host_call(f"updating {pkg}", lambda h: h.update(pkg, repo=url))
+    def update_extension(self, pkg: str, wait_seconds: int = 10) -> Extension:
+        """Update *pkg* from the repository it was installed from (the host waits up to *wait_seconds* for a chapter
+        of its sources that is downloading, then refuses: try again later)."""
+        ext = self._host_call(f"updating {pkg}", lambda h: h.update(pkg, wait_seconds=wait_seconds))
         _log.info("Extensions: updated %s to %s", ext.name, ext.version)
         return ext
+
+    # --- the repositories ---------------------------------------------------------------------------------------
+
+    def extension_repositories(self) -> List[Repository]:
+        """The host's repository list, each with its name, signing key, extension count and last fetch."""
+        return self._host_call("reading the repository list", lambda h: h.repos())
+
+    def _remember_repos(self, repos: Sequence[Repository]) -> None:
+        config = self.suwayomi.extension_host()
+        self.suwayomi.save_extension_host(replace(config, repos=tuple(r.url for r in repos)))
+
+    def add_extension_repository(self, url: str) -> Repository:
+        """Add a repository by its index URL: the host fetches and checks it first (not an extension index, or no
+        signing key: refused with the host's reason); then the list is remembered for the host's next start."""
+        url = (url or "").strip()
+        if not re.match(r"^https?://", url, re.I):
+            raise BackendError("a repository address starts with http:// or https://")
+
+        def add(h):
+            added = h.add_repo(url)
+            return added, h.repos()
+
+        added, repos = self._host_call(f"adding the repository {url}", add)
+        self._remember_repos(repos)
+        _log.info("Extensions: repository added: %s (%s), %s extension(s)", added.name, added.url,
+                  "?" if added.extensions is None else added.extensions)
+        return added
+
+    def remove_extension_repository(self, url: str) -> Repository:
+        """Remove a repository; the extensions installed from it stay installed (and get no updates)."""
+
+        def remove(h):
+            gone = h.remove_repo(url)
+            return gone, h.repos()
+
+        gone, repos = self._host_call(f"removing the repository {url}", remove)
+        self._remember_repos(repos)
+        _log.info("Extensions: repository removed: %s (%s)", gone.name, gone.url)
+        return gone
+
+    # --- updates: the notice and Auto-update ---------------------------------------------------------------------
+
+    def extension_auto_update(self) -> bool:
+        return self.suwayomi.extension_auto_update()
+
+    def set_extension_auto_update(self, on: bool) -> None:
+        if bool(on) != self.suwayomi.extension_auto_update():
+            self.suwayomi.set_extension_auto_update(on)
+            _log.info("Extensions: auto-update %s", "on" if on else "off")
+
+    def extension_update_notice(self):
+        """The last update check's result (:class:`~.extension_updates.UpdateCheck`), or None - also while
+        "Built-in extensions" is not chosen. A quick database read."""
+        from . import extension_updates
+
+        if not self.suwayomi.builtin:
+            return None
+        return extension_updates.read_check(self.suwayomi.store)
+
+    def extension_updates_due(self) -> bool:
+        """Whether the window should check now: Built-in extensions chosen and the stored result older than the
+        schedule's interval (none stored: due; the schedule off: never)."""
+        from ..headless.extension_updates_job import schedule_interval
+        from . import extension_updates
+
+        if not self.suwayomi.builtin:
+            return False
+        return extension_updates.is_due(self.suwayomi.store, schedule_interval(self.suwayomi.store))
+
+    def check_extension_updates(self):
+        """Ask the host for updates now (and, with Auto-update on, install them) and store the result; blocks."""
+        from . import extension_updates
+
+        host = self._host()
+        try:
+            return extension_updates.run_check(self.suwayomi.store, host, auto=self.suwayomi.extension_auto_update())
+        except ExtensionHostError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(host)
 
     def uninstall_extension(self, pkg: str) -> None:
         self._host_call(f"removing {pkg}", lambda h: h.uninstall(pkg))

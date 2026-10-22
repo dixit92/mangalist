@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .client import (
     DEFAULT_URL,
+    Busy,
     Chapter,
     Extension,
     ExtensionHostClient,
@@ -22,12 +23,13 @@ from .client import (
     NotFound,
     Page,
     RepoExtension,
+    Repository,
     Source,
     SourceFailed,
     SourcePreference,
 )
 
 __all__ = [
-    "DEFAULT_URL", "Chapter", "Extension", "ExtensionHostClient", "ExtensionHostError", "HostUnreachable", "Manga",
-    "MangasPage", "NotFound", "Page", "RepoExtension", "Source", "SourceFailed", "SourcePreference",
+    "DEFAULT_URL", "Busy", "Chapter", "Extension", "ExtensionHostClient", "ExtensionHostError", "HostUnreachable", "Manga",
+    "MangasPage", "NotFound", "Page", "RepoExtension", "Repository", "Source", "SourceFailed", "SourcePreference",
 ]
