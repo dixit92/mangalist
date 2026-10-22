@@ -277,8 +277,8 @@ def run_check(db: Any, client: Any, *, auto: bool = False, wait_seconds: int = W
     elif previous is not None and previous.updated:
         at = _parse(previous.updated_at)
         if at is not None and (now or _now()) - at < timedelta(days=KEEP_UPDATED_DAYS):
-            current = {e.pkg for e in installed}
-            check.updated = [u for u in previous.updated if u.pkg in current]
+            current = {e.pkg: e.version for e in installed}       # still at the version Auto-update installed
+            check.updated = [u for u in previous.updated if current.get(u.pkg) == u.new_version]
             check.updated_at = previous.updated_at if check.updated else ""
     save_check(db, check)
     _log.info("Extension updates: %s", check.summary())

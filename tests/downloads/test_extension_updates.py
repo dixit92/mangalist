@@ -71,6 +71,10 @@ def test_auto_update_installs_them_and_the_notice_says_what_was_updated(db, host
     later = eu.run_check(db, client, auto=True, now=NOW + timedelta(days=1))
     assert [u.name for u in later.updated] == ["MangaDex", "Weeb Example"] and later.updated_at == check.updated_at
     assert "updated automatically" not in later.summary()                    # the log line is this run's
+    host.installed[WEEB_PKG] = "1.4.2"                  # changed since (here: by hand): no longer "updated automatically"
+    host.repo[1].version = "1.4.2"
+    changed = eu.run_check(db, client, now=NOW + timedelta(days=2))
+    assert [u.name for u in changed.updated] == ["MangaDex"]
     gone = eu.run_check(db, client, auto=True, now=NOW + timedelta(days=8))
     assert gone.updated == [] and gone.short_text() == ""
 
