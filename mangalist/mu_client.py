@@ -1,8 +1,9 @@
 """Thin wrapper around the MangaUpdates v1 API.
 
-Only the two endpoints we need are implemented:
+Only the endpoints we need are implemented:
   - POST /series/search  -> list of candidate matches
-  - GET  /series/{id}    -> full record including licensed + publishers
+  - GET  /series/{id}    -> full record including licensed + publishers + authors
+  - GET  /authors/{id}   -> an author's other names (the List's ``creator:`` filter)
 """
 
 from __future__ import annotations

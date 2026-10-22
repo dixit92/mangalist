@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **The List's filter finds a series by any of its other titles, and by its creator.** Type any alternative title of the series' MangaUpdates record (MangaPixer's, else MangaList's own match; three letters or more) and the series is listed with **aka <that title>** under its title, as MangaPixer's search does. **creator:Urasawa** or **creator:"Naoki Urasawa"** (add words to narrow it further) lists the series of a writer or artist, also by their other names (pen names, the name in Japanese script); the line under the title says who matched. The Download tab's **To get** filter does the same. Creator names are read from MangaUpdates in the background, once, when a MangaUpdates lookup ends (the automatic one after a scan, or **Look up**): one request per series and one per author, a second apart, kept for 180 days; a series whose creators are not read yet is found by its titles only. Series with no other titles known are never hidden by this.
+
 ## [2026.10.53] - 2026-10-20
 
 The fifty-second MangaList release (testing build): chapter downloads Suwayomi gave up on can be retried.
