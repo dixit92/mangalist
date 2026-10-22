@@ -170,7 +170,8 @@ fun main(args: Array<String>) {
     val downloader = Downloader(store, library, options.dataDir.resolve("cache").resolve("downloads"), options.downloadParallel)
     downloader.restore()
     val compat = CompatApi(library, downloader, registry)
-    val server = ApiServer(options.bind, options.port, registry, Repo(network.client), compat)
+    val preferences = SourcePreferences({ Injekt.get<xyz.nulldev.androidcompat.androidimpl.CustomContext>() })
+    val server = ApiServer(options.bind, options.port, registry, Repo(network.client), compat, options.repo, preferences)
     server.start()
     logger.info { "Listening on http://${options.bind}:${server.port}" }
 }

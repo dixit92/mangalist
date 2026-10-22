@@ -39,9 +39,27 @@ data class ExtensionDto(
     val pkg: String,
     val name: String,
     val version: String,
+    val versionCode: Int,
     val libVersion: String,
     val nsfw: Int,
+    /** SHA-256 of its signing certificate, checked against the repository's key at install (null: installed before). */
+    val signatureHash: String?,
+    /** The repository's current version (null: not in the repository, or the repository did not answer). */
+    val repoVersion: String?,
+    val repoVersionCode: Int?,
+    val updateAvailable: Boolean,
     val sources: List<SourceDto>,
+)
+
+@Serializable
+data class PkgRequest(
+    val pkg: String,
+)
+
+@Serializable
+data class PreferenceChange(
+    val key: String,
+    val value: JsonElement,
 )
 
 @Serializable
@@ -83,7 +101,8 @@ data class PageDto(
 @Serializable
 data class InstallRequest(
     val pkg: String? = null,
-    val repo: String = DEFAULT_REPO,
+    /** The repository's index (default: the host's `--repo`). */
+    val repo: String? = null,
     val apkUrl: String? = null,
     /** "jar" (default: keiyoushi's ready jar when the index has one) or "apk" (convert the APK with dex2jar). */
     val format: String = "jar",
@@ -131,6 +150,8 @@ class ApiServer(
     private val registry: ExtensionRegistry,
     private val repo: Repo,
     private val compat: CompatApi? = null,
+    private val defaultRepo: String = DEFAULT_REPO,
+    private val preferences: SourcePreferences? = null,
 ) {
     private val json =
         Json {
@@ -172,26 +193,61 @@ class ApiServer(
                         ),
                     )
                 method == "GET" && path == "/repo" ->
-                    reply(ex, json.encodeToJsonElement(repo.index(query["url"] ?: DEFAULT_REPO)))
-                method == "GET" && path == "/extensions" ->
-                    reply(ex, json.encodeToJsonElement(registry.installed.values.sortedBy { it.pkg }.map { extensionDto(it) }))
+                    reply(ex, json.encodeToJsonElement(repo.index(query["url"] ?: defaultRepo)))
+                method == "GET" && path == "/extensions" -> reply(ex, json.encodeToJsonElement(extensions()))
                 method == "POST" && path == "/extensions/install" -> {
                     val req = json.decodeFromString<InstallRequest>(body(ex))
+                    val repoUrl = req.repo ?: defaultRepo
+                    val index = repo.fetch(repoUrl, fresh = true)
                     val url =
                         req.apkUrl ?: run {
                             val pkg = req.pkg ?: throw HttpError(400, "give pkg (with repo) or apkUrl")
                             val entry =
-                                repo.index(req.repo).firstOrNull { it.pkg == pkg }
-                                    ?: throw HttpError(404, "$pkg is not in ${req.repo}")
+                                index.extensions.firstOrNull { it.pkg == pkg }
+                                    ?: throw HttpError(404, "$pkg is not in $repoUrl")
                             if (req.format == "apk") entry.apkUrl else entry.jarUrl ?: entry.apkUrl
                         }
-                    val (ext, _) = registry.install(url)
-                    reply(ex, json.encodeToJsonElement(extensionDto(ext)))
+                    val (ext, _) = install(url, index.signingKey, repoUrl)
+                    reply(ex, json.encodeToJsonElement(extensionDto(ext, index)))
+                }
+                method == "POST" && path == "/extensions/update" -> {
+                    val pkg = json.decodeFromString<PkgRequest>(body(ex)).pkg
+                    val current = registry.installed[pkg] ?: throw HttpError(404, "$pkg is not installed")
+                    val repoUrl = current.repo ?: defaultRepo
+                    val index = repo.fetch(repoUrl, fresh = true)
+                    val entry = index.extensions.firstOrNull { it.pkg == pkg } ?: throw HttpError(404, "$pkg is not in $repoUrl")
+                    val ext =
+                        if (entry.versionCode > current.versionCode) {
+                            install(entry.jarUrl ?: entry.apkUrl, index.signingKey, repoUrl).first
+                        } else {
+                            current
+                        }
+                    reply(ex, json.encodeToJsonElement(extensionDto(ext, index)))
+                }
+                method == "POST" && path == "/extensions/uninstall" -> {
+                    val pkg = json.decodeFromString<PkgRequest>(body(ex)).pkg
+                    val ext = registry.uninstall(pkg)
+                    reply(ex, json.encodeToJsonElement(extensionDto(ext, null)))
                 }
                 method == "GET" && path == "/sources" ->
                     reply(ex, json.encodeToJsonElement(registry.sources.values.sortedBy { it.name }.map { sourceDto(it) }))
                 parts.firstOrNull() == "compat" && compat != null ->
                     reply(ex, compat.handle(method, parts.drop(1)) { body(ex) } ?: throw HttpError(404, "no such endpoint: $method $path"))
+                parts.size == 3 && parts[0] == "sources" && parts[2] == "preferences" -> {
+                    val prefs = preferences ?: throw HttpError(404, "no preferences here")
+                    val src = source(parts[1])
+                    when (method) {
+                        "GET" -> reply(ex, json.encodeToJsonElement(prefs.list(src)))
+                        "POST" -> {
+                            val change = json.decodeFromString<PreferenceChange>(body(ex))
+                            val after = prefs.set(src, change.key, change.value)
+                            // as Suwayomi (unregisterSource): the extension's sources are made again with the new value
+                            registry.extensionOf(src.id)?.let { registry.reloadPackage(it.pkg) }
+                            reply(ex, json.encodeToJsonElement(after))
+                        }
+                        else -> throw HttpError(404, "no such endpoint: $method $path")
+                    }
+                }
                 parts.size == 3 && parts[0] == "sources" -> sourceCall(ex, method, source(parts[1]), parts[2], query)
                 else -> throw HttpError(404, "no such endpoint: $method $path")
             }
@@ -282,15 +338,45 @@ class ApiServer(
             extension = registry.extensionOf(source.id)?.pkg,
         )
 
-    private fun extensionDto(ext: InstalledExtension) =
-        ExtensionDto(
+    private fun install(
+        url: String,
+        signingKey: String?,
+        repoUrl: String,
+    ) = try {
+        registry.install(url, signingKey, repoUrl)
+    } catch (e: SignatureException) {
+        throw HttpError(400, e.message ?: "signature check failed")
+    }
+
+    /** Installed extensions with the repository's versions (a repository that does not answer: no update shown). */
+    private fun extensions(): List<ExtensionDto> {
+        val indexes =
+            registry.installed.values
+                .map { it.repo ?: defaultRepo }
+                .distinct()
+                .associateWith { url -> runCatching { repo.fetch(url) }.onFailure { logger.warn { "Repository $url: ${it.message}" } }.getOrNull() }
+        return registry.installed.values.sortedBy { it.pkg }.map { extensionDto(it, indexes[it.repo ?: defaultRepo]) }
+    }
+
+    private fun extensionDto(
+        ext: InstalledExtension,
+        index: RepoIndex?,
+    ): ExtensionDto {
+        val entry = index?.extensions?.firstOrNull { it.pkg == ext.pkg }
+        return ExtensionDto(
             pkg = ext.pkg,
             name = ext.name,
             version = ext.version,
+            versionCode = ext.versionCode,
             libVersion = ext.libVersion,
             nsfw = ext.nsfw,
+            signatureHash = ext.signatureHash,
+            repoVersion = entry?.version,
+            repoVersionCode = entry?.versionCode,
+            updateAvailable = entry != null && entry.versionCode > ext.versionCode,
             sources = registry.sources.values.filter { registry.extensionOf(it.id)?.pkg == ext.pkg }.map { sourceDto(it) },
         )
+    }
 
     private fun mangasPage(
         page: eu.kanade.tachiyomi.source.model.MangasPage,
