@@ -23,11 +23,8 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.cef.CefApp
 import org.cef.CefSettings.LogSeverity
 import org.cef.SystemBootstrap
-import suwayomi.tachidesk.server.ApplicationDirs
 import suwayomi.tachidesk.server.generated.BuildConfig
 import suwayomi.tachidesk.server.serverConfig
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import xyz.nulldev.androidcompat.webkit.CefHelper
 import java.io.BufferedOutputStream
@@ -66,16 +63,24 @@ import kotlin.streams.asSequence
 
 private val logger = KotlinLogging.logger {}
 
+// MangaList extension host: the CEF folders come from the host's data folder (serverConfig.dataRoot / cacheRoot, not
+// Suwayomi's ApplicationDirs), CEF is started once (no live kcefEnabled setting to follow), and [started] tells whether
+// it was asked for - the host starts it at the first WebView an extension opens, not at boot.
 @OptIn(ExperimentalPathApi::class)
 object CEFManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + Dispatchers.IO)
-    private val applicationDirs by lazy { Injekt.get<ApplicationDirs>() }
-    private val cefDir by lazy { Path(applicationDirs.dataRoot) / "bin/kcef" }
+    private val cefDir by lazy { Path(serverConfig.dataRoot.value) / "bin/kcef" }
     private val releaseFile by lazy { cefDir / "release" }
 
-    fun init() =
+    @Volatile var started = false
+        private set
+
+    @Synchronized
+    fun init() {
+        if (started) return
+        started = true
         scope.launch {
-            serverConfig.subscribeTo(serverConfig.kcefEnabled, CEFManager::initAsync, ignoreInitialValue = false)
+            initAsync()
 
             Runtime.getRuntime().addShutdownHook(
                 thread(start = false) {
@@ -87,6 +92,7 @@ object CEFManager {
                 },
             )
         }
+    }
 
     private suspend fun initAsync(): Unit =
         try {
@@ -130,7 +136,7 @@ object CEFManager {
                             )
                             cefSettings.apply {
                                 windowless_rendering_enabled = true
-                                cache_path = (Path(applicationDirs.cacheDir) / "kcef").absolutePathString()
+                                cache_path = (Path(serverConfig.cacheRoot.value) / "kcef").absolutePathString()
                                 log_severity =
                                     if (serverConfig.debugLogsEnabled.value) {
                                         LogSeverity.LOGSEVERITY_VERBOSE

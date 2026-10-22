@@ -14,6 +14,8 @@ dependencyResolutionManagement {
         google()
         maven("https://github.com/Suwayomi/Suwayomi-Server/raw/android-jar/")
         maven("https://jitpack.io")
+        // JetBrains' JCEF (the WebView), as Suwayomi
+        maven("https://packages.jetbrains.team/maven/p/ij/intellij-dependencies")
     }
 }
 

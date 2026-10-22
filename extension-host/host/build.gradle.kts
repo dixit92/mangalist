@@ -26,6 +26,8 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.50.3.0")
     // the signature check of APK installs (v1 / v2 / v3 signing schemes)
     implementation(libs.apksig)
+    // CEFManager (vendored) unpacks the downloaded Chromium (.tar.gz)
+    implementation(libs.commonscompress)
     testImplementation(libs.kotlin.test.junit5)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

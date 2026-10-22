@@ -116,7 +116,10 @@ data class Options(
 }
 
 /** Start the Android compatibility layer the way Suwayomi does, minus its server (ServerSetup.applicationSetup). */
-fun boot(dataDir: Path) {
+fun boot(
+    dataDir: Path,
+    webView: Boolean = false,
+) {
     dataDir.createDirectories()
     val extensions = dataDir.resolve("extensions").createDirectories()
     // AndroidCompat keeps its files (SharedPreferences of the extensions, caches) under this root
@@ -132,8 +135,10 @@ fun boot(dataDir: Path) {
     }, "android-main").apply { isDaemon = true }.start()
     looperReady.await()
     val app = App()
-    startKoin { modules(createAppModule(app), androidCompatModule(), configManagerModule()) }
+    startKoin { modules(createAppModule(app), androidCompatModule(), configManagerModule(), WebViewSetup.koinModule()) }
     AndroidCompatInitializer().init()
+    // the KCEF WebView provider (Suwayomi's), Chromium started at the first WebView an extension opens
+    WebViewSetup.configure(webView, dataDir)
     AndroidCompat().startApp(app)
     // Injekt (what extensions use) answers from Koin through injekt-koin
     val network = Injekt.get<NetworkHelper>()
@@ -151,7 +156,8 @@ fun main(args: Array<String>) {
             "Cloudflare: no FlareSolverr (--flaresolverr URL); challenged requests fail"
         }
     }
-    boot(options.dataDir)
+    boot(options.dataDir, options.webView)
+    logger.info { "WebView: ${if (options.webView) "on (Chromium is prepared when an extension first opens one)" else "off"}" }
     val network = Injekt.get<NetworkHelper>()
     val registry = ExtensionRegistry(options.dataDir.resolve("extensions"), network.client)
     registry.loadInstalled()
@@ -169,7 +175,7 @@ fun main(args: Array<String>) {
     val library = Library(store, { registry.sources[it] }, DownloadsLayout(options.downloadsDir))
     val downloader = Downloader(store, library, options.dataDir.resolve("cache").resolve("downloads"), options.downloadParallel)
     downloader.restore()
-    val compat = CompatApi(library, downloader, registry)
+    val compat = CompatApi(library, downloader, registry) { WebViewSetup.state() }
     val preferences = SourcePreferences({ Injekt.get<xyz.nulldev.androidcompat.androidimpl.CustomContext>() })
     val server = ApiServer(options.bind, options.port, registry, Repo(network.client), compat, options.repo, preferences)
     server.start()

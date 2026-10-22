@@ -189,9 +189,16 @@ class ApiServer(
                                 "version" to HOST_VERSION,
                                 "sources" to registry.sources.size.toString(),
                                 "flareSolverr" to if (serverConfig.flareSolverrEnabled.value) serverConfig.flareSolverrUrl.value else "off",
+                                "webView" to WebViewSetup.state(),
                             ),
                         ),
                     )
+                method == "GET" && path == "/webview" -> reply(ex, json.encodeToJsonElement(mapOf("state" to WebViewSetup.state())))
+                method == "POST" && path == "/webview/start" -> {
+                    if (!serverConfig.kcefEnabled.value) throw HttpError(400, "the WebView is off (--webview off)")
+                    WebViewSetup.start()
+                    reply(ex, json.encodeToJsonElement(mapOf("state" to WebViewSetup.state())))
+                }
                 method == "GET" && path == "/repo" ->
                     reply(ex, json.encodeToJsonElement(repo.index(query["url"] ?: defaultRepo)))
                 method == "GET" && path == "/extensions" -> reply(ex, json.encodeToJsonElement(extensions()))
