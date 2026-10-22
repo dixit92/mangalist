@@ -7,6 +7,11 @@ like qBittorrent's and never logged), and the folder MangaList reads Suwayomi's 
 folder as MangaList sees it - chosen at install). Test connection shows Suwayomi's version and warns when "Download as
 CBZ" or FlareSolverr is off in Suwayomi (FlareSolverr is set in Suwayomi itself, e.g. ``http://<unraid-ip>:8191``).
 
+**Chapter downloads** (prototype/mihon-mangalist): a chooser at the top - "Suwayomi" (the default) or "Built-in
+extensions", MangaList's own extension host - and the host's card (its status; Extensions, Test, Edit:
+:mod:`mangalist.gui.extensions_page`). The card of the program not chosen says it is not in use. Switching is refused
+while chapter downloads are still in progress with the other program (the backend says why).
+
 The status is checked live the first time the section is shown (off the UI thread, with the stored login) and by Test.
 Passwords and tokens stay write-only: the forms never show a stored one, the cards never mention one.
 """
@@ -16,7 +21,9 @@ from __future__ import annotations
 from typing import Callable, List, Optional
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFormLayout, QLineEdit, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox, QFormLayout, QLineEdit, QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
+)
 
 from ..services.mangapixer import client as mpc
 from ..store.mangapixer import MangaPixerCache
@@ -46,6 +53,15 @@ SUWAYOMI_FLARESOLVERR_NOTE = ("Sources behind Cloudflare need FlareSolverr: set 
                               "(FlareSolverr on, URL e.g. http://<unraid-ip>:8191 - the box's address, not localhost).")
 SUWAYOMI_PASSWORD_STORED = "A password is stored (hidden). Leave empty to keep it."
 SUWAYOMI_PASSWORD_EMPTY = "Only when Suwayomi uses basic authentication"
+EXT_WHAT = ("MangaList's own extension host: runs Mihon / Tachiyomi extensions and downloads chapters, without "
+            "Suwayomi.")
+EXT_INFO = ("The built-in extensions are MangaList's own alternative to Suwayomi for chapter downloads: a small program "
+            "(the extension host) runs the same Mihon / Tachiyomi extensions Suwayomi uses - MangaDex, Weeb Central, "
+            "MangaFire, ... - and downloads the chapters you send, as CBZ archives MangaList files into the series "
+            "folder. Choose it under \"Chapter downloads\"; install the extensions under Extensions.")
+CHOOSER_LEAD = "Chapter downloads through:"
+BACKENDS = (("suwayomi", "Suwayomi"), ("extensions", "Built-in extensions"))
+NOT_IN_USE = "Not in use"
 SCAN_FORBIDDEN_NOTE = ("This token cannot request library scans, so MangaList cannot ask MangaPixer to rescan after "
                        "filing. Create a new token with \"Request library scans\" ticked and enter it under Edit.")
 
@@ -102,6 +118,9 @@ class ServicesPage(SectionPage):
         self.mp_panel: Optional[MangaPixerPanel] = None
         self.qbt_panel: Optional[QbittorrentPanel] = None
         self.suwayomi_panel: Optional["SuwayomiPanel"] = None
+        self.host_panel = None                  # ExtensionHostPanel while Edit is open
+        self.extensions_panel = None            # ExtensionsPanel while Extensions is open
+        self._ext_tested = False
 
         self.stack = QStackedWidget()
         self.body.addWidget(self.stack)
@@ -112,7 +131,19 @@ class ServicesPage(SectionPage):
         self.mp_card = ServiceCard("MangaPixer", MANGAPIXER_WHAT, "Matching, Automation")
         self.qbt_card = ServiceCard("qBittorrent", QBT_WHAT, "nyaa")
         self.suwayomi_card = ServiceCard("Suwayomi", SUWAYOMI_WHAT, "Suwayomi sources (chapters)")
-        for c in (self.mp_card, self.qbt_card, self.suwayomi_card):
+        self.ext_card = ServiceCard("Built-in extensions", EXT_WHAT, "Suwayomi sources (chapters), when chosen")
+        self.backend_combo = QComboBox()
+        self.backend_combo.setObjectName("chapterBackend")
+        for key, text in BACKENDS:
+            self.backend_combo.addItem(text, key)
+        self.backend_note = label("", "muted", wrap=True)
+        self.chooser = QWidget()
+        chooser = QVBoxLayout(self.chooser)
+        chooser.setContentsMargins(0, 0, 0, 0)
+        chooser.setSpacing(4)
+        chooser.addLayout(hbox(label(CHOOSER_LEAD), self.backend_combo, None))
+        chooser.addWidget(self.backend_note)
+        for c in (self.mp_card, self.qbt_card, self.chooser, self.suwayomi_card, self.ext_card):
             cv.addWidget(c)
         cv.addStretch(1)
         self.stack.addWidget(cards)
@@ -140,6 +171,18 @@ class ServicesPage(SectionPage):
         self.suwayomi_card.btn_secondary.clicked.connect(self.test_suwayomi)
         self.suwayomi_card.btn_primary.clicked.connect(self.edit_suwayomi)
         self.suwayomi_card.set_status("Not set up", "muted")
+        self.ext_info = button("What is it?", link=True)
+        self.ext_info.clicked.connect(lambda: self._info(self, "Built-in extensions", EXT_INFO))
+        self.ext_card.buttons.insertWidget(0, self.ext_info)
+        self.btn_extensions = button("Extensions", tip="Install, update or remove extensions; change a source's "
+                                                       "settings")
+        self.btn_extensions.clicked.connect(self.open_extensions)
+        self.ext_card.buttons.insertWidget(self.ext_card.buttons.indexOf(self.ext_card.btn_secondary),
+                                           self.btn_extensions)
+        self.ext_card.btn_secondary.clicked.connect(self.test_extension_host)
+        self.ext_card.btn_primary.clicked.connect(self.edit_extension_host)
+        self.ext_card.set_status(NOT_IN_USE, "muted")
+        self.backend_combo.activated.connect(self._backend_chosen)
         self.refresh()
 
     # --- the cards ---------------------------------------------------------------------------------------------
@@ -148,6 +191,138 @@ class ServicesPage(SectionPage):
         self._refresh_mangapixer()
         self._refresh_qbittorrent()
         self._refresh_suwayomi()
+        self._refresh_extensions()
+
+    # --- the chapter backend (prototype/mihon-mangalist) -------------------------------------------------------
+
+    def _ext_backend(self) -> bool:
+        return self._backend is not None and callable(getattr(self._backend, "chapter_backend", None))
+
+    def chapter_backend(self) -> str:
+        return self._backend.chapter_backend() if self._ext_backend() else "suwayomi"
+
+    def builtin(self) -> bool:
+        return self.chapter_backend() == "extensions"
+
+    def _refresh_extensions(self) -> None:
+        card = self.ext_card
+        self.chooser.setVisible(self._ext_backend())
+        card.setVisible(self._ext_backend())
+        if not self._ext_backend():
+            return
+        chosen = self.chapter_backend()
+        self.backend_combo.setCurrentIndex(max(0, self.backend_combo.findData(chosen)))
+        config = self._backend.load_extension_host()
+        folder = config.download_dir or config.downloads_path or "the host's own (learned at Test)"
+        card.detail_label.setText(f"{config.url} · download folder {folder}")
+        on = chosen == "extensions"
+        if not on:
+            card.set_status(NOT_IN_USE, "muted")
+            card.set_note("Chapter downloads go through Suwayomi; choose \"Built-in extensions\" above to use it.",
+                          "muted")
+        elif card.badge.text() == NOT_IN_USE:
+            card.set_status("Not checked", "muted")
+            card.set_note("")
+        if on and self.suwayomi_card.badge.text() != NOT_IN_USE:
+            self.suwayomi_card.set_status(NOT_IN_USE, "muted")
+            self.suwayomi_card.set_note("Chapter downloads go through the built-in extensions.", "muted")
+        elif not on and self.suwayomi_card.badge.text() == NOT_IN_USE:
+            self.suwayomi_card.set_status("Not checked", "muted")
+            self.suwayomi_card.set_note("")
+            self._refresh_suwayomi()
+
+    def _backend_chosen(self, _index: int = 0) -> bool:
+        key = self.backend_combo.currentData()
+        if not self._ext_backend() or key == self.chapter_backend():
+            return False
+        from .downloads_backend import BackendError as _BackendError
+
+        try:
+            self._backend.set_chapter_backend(key)
+        except _BackendError as exc:
+            self.backend_note.setText(f"Not switched: {exc}")
+            from .download_style import set_tone
+
+            set_tone(self.backend_note, "bad")
+            self._refresh_extensions()
+            return False
+        self.backend_note.setText("")
+        self.downloads_changed.emit()
+        self.refresh()
+        if key == "extensions":
+            self.test_extension_host()
+        else:
+            self.test_suwayomi()
+        return True
+
+    def choose_backend(self, key: str) -> bool:
+        """Pick a chapter backend as the owner would (tests)."""
+        self.backend_combo.setCurrentIndex(self.backend_combo.findData(key))
+        return self._backend_chosen()
+
+    def test_extension_host(self) -> bool:
+        if not self._ext_backend():
+            return False
+        backend = self._backend
+        card = self.ext_card
+        card.btn_secondary.setEnabled(False)
+        card.set_status("Checking...", "muted")
+        card.set_note("")
+        self._spawn(lambda: backend.test_extension_host(), self._ext_ok, self._ext_failed)
+        return True
+
+    def _ext_ok(self, check) -> None:
+        card = self.ext_card
+        card.btn_secondary.setEnabled(True)
+        card.set_status(f"Connected {check.version}".strip(), "ok")
+        notes = check.notes()
+        detail = f"{check.extensions} extension(s), {check.sources} source(s)"
+        card.set_note(detail + (". " + " ".join(notes) if notes else ""), "warn" if notes else "muted")
+        config = self._backend.load_extension_host()
+        card.detail_label.setText(f"{config.url} · download folder {check.files_from or '?'}")
+        if not self.builtin():
+            card.set_status(NOT_IN_USE, "muted")
+
+    def _ext_failed(self, message: str) -> None:
+        card = self.ext_card
+        card.btn_secondary.setEnabled(True)
+        card.set_status("Not connected" if self.builtin() else NOT_IN_USE, "bad" if self.builtin() else "muted")
+        card.set_note(message + (" In the container the host starts by itself within a minute of choosing it; on a "
+                                 "desktop, start it and check its address (Edit).") if self.builtin() else message,
+                      "bad" if self.builtin() else "muted")
+
+    def edit_extension_host(self):
+        if not self._ext_backend():
+            return None
+        from .extensions_page import ExtensionHostPanel
+
+        self._clear_editor()
+        panel = ExtensionHostPanel(self._backend, self.editor_page)
+        panel.saved_changes.connect(self._host_saved)
+        self.host_panel = panel
+        save = button("Save", primary=True)
+        save.clicked.connect(panel.save)
+        cancel = button("Cancel")
+        cancel.clicked.connect(self.close_editor)
+        self._open_editor("Built-in extensions", panel, cancel, save)
+        return panel
+
+    def _host_saved(self) -> None:
+        self.downloads_changed.emit()
+        self.close_editor()
+        self.test_extension_host()
+
+    def open_extensions(self):
+        if not self._ext_backend():
+            return None
+        from .extensions_page import ExtensionsPanel
+
+        self._clear_editor()
+        panel = ExtensionsPanel(self._backend, self.editor_page)
+        panel.changed.connect(self.downloads_changed.emit)
+        self.extensions_panel = panel
+        self._open_editor("Extensions", panel)
+        return panel
 
     def _suwayomi_backend(self) -> bool:
         return self._backend is not None and callable(getattr(self._backend, "load_suwayomi", None))
@@ -228,7 +403,10 @@ class ServicesPage(SectionPage):
         self._checked = True
         self.test_mangapixer()
         self.test_qbittorrent()
-        self.test_suwayomi()
+        if self.builtin():
+            self.test_extension_host()
+        else:
+            self.test_suwayomi()
 
     def _spawn(self, fn, on_done, on_error) -> None:
         made: list = []
@@ -363,6 +541,10 @@ class ServicesPage(SectionPage):
         card.set_status(f"Connected {check.version}".strip(), "ok")
         notes = check.notes()
         card.set_note(" ".join(notes), "warn" if notes else "muted")
+        if self.builtin():
+            card.set_status(NOT_IN_USE, "muted")
+            card.set_note(f"Reachable ({check.version}), but chapter downloads go through the built-in extensions.",
+                          "muted")
 
     def _suwayomi_failed(self, message: str) -> None:
         self.suwayomi_card.set_status("Not connected", "bad")
@@ -436,10 +618,10 @@ class ServicesPage(SectionPage):
             self.test_mangapixer()
 
     def _clear_editor(self) -> None:
-        for panel in (self.mp_panel, self.qbt_panel, self.suwayomi_panel):
+        for panel in (self.mp_panel, self.qbt_panel, self.suwayomi_panel, self.host_panel, self.extensions_panel):
             if panel is not None:
                 panel.stop()
-        self.mp_panel = self.qbt_panel = self.suwayomi_panel = None
+        self.mp_panel = self.qbt_panel = self.suwayomi_panel = self.host_panel = self.extensions_panel = None
         clear_layout(self.editor_layout)
 
     def stop(self) -> None:
