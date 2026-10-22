@@ -64,11 +64,11 @@ Binds `127.0.0.1` by default and has **no login** - keep it on localhost (in Man
 | `GET /repo?url=<index url>` | the repository's extensions (current `index.json` and legacy `index.min.json` formats) |
 | `GET /extensions` | installed extensions: `{pkg, name, version, versionCode, libVersion, nsfw, signatureHash, repoVersion, repoVersionCode, updateAvailable, sources}` |
 | `POST /extensions/install {pkg, repo?, format: jar\|apk}` | install (signature checked first, below) |
-| `POST /extensions/update {pkg}` | install the repository's newer version (no newer one: answers the installed one) |
+| `POST /extensions/update {pkg, repo?}` | install the repository's newer version (no newer one: answers the installed one) |
 | `POST /extensions/uninstall {pkg}` | remove it (its sources' preferences stay) |
 | `GET /sources` | every loaded source |
-| `GET /sources/{id}/preferences` | a configurable source's preferences: `[{key, type: list\|multiselect\|edittext\|switch\|checkbox, title, summary, entries, entryValues, dialogTitle, dialogMessage, currentValue, defaultValue, enabled, visible}]` |
-| `POST /sources/{id}/preferences {key, value}` | set one (a string; `true`/`false`; a list of strings for multiselect); the extension's sources are made again |
+| `GET /sources/{id}/preferences` | a configurable source's preferences: `[{position, key, type: list\|multiselect\|edittext\|switch\|checkbox, title, summary, entries, entryValues, dialogTitle, dialogMessage, currentValue, defaultValue, enabled, visible}]` |
+| `POST /sources/{id}/preferences {key, value}` | set one (a string; `true`/`false`; a list of strings for multiselect); the extension's sources are made again; answers the whole list again |
 | `GET /sources/{id}/search?q=&page=`, `/popular?page=`, `/latest?page=` | `{mangas: [{url, title, thumbnailUrl, ...}], hasNextPage}` |
 | `POST /sources/{id}/manga {url, title}` | details |
 | `POST /sources/{id}/chapters {url, title}` | `[{url, name, chapterNumber, scanlator, dateUpload, webUrl}]` |

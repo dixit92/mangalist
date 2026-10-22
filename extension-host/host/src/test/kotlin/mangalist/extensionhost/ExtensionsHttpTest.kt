@@ -147,7 +147,8 @@ class ExtensionsHttpTest {
         assertEquals("lang", list.jsonArray[0].jsonObject["key"]!!.jsonPrimitive.content)
         val (s2, after) = call("POST", "/sources/${source.id}/preferences", """{"key": "lang", "value": "ja"}""")
         assertEquals(200, s2, after.toString())
-        assertEquals(JsonPrimitive("ja"), after.jsonObject["currentValue"])
+        assertEquals(JsonPrimitive("ja"), after.jsonArray[0].jsonObject["currentValue"]) // the whole screen again
+        assertEquals(JsonPrimitive(4), after.jsonArray[4].jsonObject["position"])
         assertEquals(JsonPrimitive("ja"), call("GET", "/sources/${source.id}/preferences").second.jsonArray[0].jsonObject["currentValue"])
         assertEquals(400, call("POST", "/sources/${source.id}/preferences", """{"key": "lang", "value": "xx"}""").first)
         assertEquals(404, call("GET", "/sources/1/preferences").first)

@@ -25,6 +25,8 @@ import kotlinx.serialization.json.jsonPrimitive
 /** One preference of a source, as `GET /sources/{id}/preferences` answers it. */
 @Serializable
 data class PreferenceDto(
+    /** Its place on the source's screen (Suwayomi's `setSourcePreference` addresses a preference by it). */
+    val position: Int,
     val key: String?,
     /** `list`, `multiselect`, `edittext`, `checkbox`, `switch` (or the class name of another kind). */
     val type: String,
@@ -62,7 +64,7 @@ class SourcePreferences(
         return screen.preferences
     }
 
-    fun list(source: Source): List<PreferenceDto> = screen(source).map { dto(it) }
+    fun list(source: Source): List<PreferenceDto> = screen(source).mapIndexed { i, p -> dto(p, i) }
 
     /**
      * Set [key] to [value] (a string for list / edittext, a boolean for checkbox / switch, a list of strings for
@@ -74,7 +76,8 @@ class SourcePreferences(
         value: JsonElement,
     ): PreferenceDto {
         if (source !is ConfigurableSource) throw HttpError(400, "${source.name} has no preferences")
-        val pref = screen(source).firstOrNull { it.key == key } ?: throw HttpError(404, "${source.name} has no preference $key")
+        val prefs = screen(source)
+        val pref = prefs.firstOrNull { it.key == key } ?: throw HttpError(404, "${source.name} has no preference $key")
         if (!pref.isEnabled) throw HttpError(400, "$key is disabled")
         val newValue: Any =
             when (runCatching { pref.defaultValueType }.getOrNull()) {
@@ -92,7 +95,7 @@ class SourcePreferences(
         // as Suwayomi: saved, then the source's listener told (what it answers is not asked)
         pref.saveNewValue(newValue)
         pref.callChangeListener(newValue)
-        return dto(pref)
+        return dto(pref, prefs.indexOf(pref))
     }
 
     companion object {
@@ -115,7 +118,10 @@ class SourcePreferences(
                 else -> JsonPrimitive(v.toString())
             }
 
-        fun dto(p: Preference): PreferenceDto {
+        fun dto(
+            p: Preference,
+            position: Int,
+        ): PreferenceDto {
             val (entries, values) =
                 when (p) {
                     is ListPreference -> p.entries to p.entryValues
@@ -124,6 +130,7 @@ class SourcePreferences(
                 }
             val dialog = p as? DialogPreference
             return PreferenceDto(
+                position = position,
                 key = p.key,
                 type = type(p),
                 title = p.title?.toString(),

@@ -56,6 +56,8 @@ data class ExtensionDto(
 @Serializable
 data class PkgRequest(
     val pkg: String,
+    /** update: the repository to take it from (default: the one it was installed from, else `--repo`). */
+    val repo: String? = null,
 )
 
 @Serializable
@@ -227,9 +229,10 @@ class ApiServer(
                     reply(ex, json.encodeToJsonElement(extensionDto(ext, index)))
                 }
                 method == "POST" && path == "/extensions/update" -> {
-                    val pkg = json.decodeFromString<PkgRequest>(body(ex)).pkg
+                    val req = json.decodeFromString<PkgRequest>(body(ex))
+                    val pkg = req.pkg
                     val current = registry.installed[pkg] ?: throw HttpError(404, "$pkg is not installed")
-                    val repoUrl = current.repo ?: defaultRepo
+                    val repoUrl = req.repo ?: current.repo ?: defaultRepo
                     val index = repo.fetch(repoUrl, fresh = true)
                     val entry = index.extensions.firstOrNull { it.pkg == pkg } ?: throw HttpError(404, "$pkg is not in $repoUrl")
                     val ext =
@@ -256,10 +259,12 @@ class ApiServer(
                         "GET" -> reply(ex, json.encodeToJsonElement(prefs.list(src)))
                         "POST" -> {
                             val change = json.decodeFromString<PreferenceChange>(body(ex))
-                            val after = prefs.set(src, change.key, change.value)
+                            prefs.set(src, change.key, change.value)
                             // as Suwayomi (unregisterSource): the extension's sources are made again with the new value
-                            registry.extensionOf(src.id)?.let { registry.reloadPackage(it.pkg) }
-                            reply(ex, json.encodeToJsonElement(after))
+                            val pkg = registry.extensionOf(src.id)?.pkg
+                            if (pkg != null) registry.reloadPackage(pkg)
+                            // the whole screen again, from the new source (a change can show / hide others)
+                            reply(ex, json.encodeToJsonElement(prefs.list(registry.sources[src.id] ?: src)))
                         }
                         else -> throw HttpError(404, "no such endpoint: $method $path")
                     }
