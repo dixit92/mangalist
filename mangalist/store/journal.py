@@ -1070,7 +1070,8 @@ class MoveFollower:
     an undone move is not followed). The journal's moves are read once.
 
     Checks that a filed volume is still in the library use it (owner, 2026-10-12: completed torrents were not removed
-    and the holding folder could not be emptied - the automatic rename had renamed the filed volumes)."""
+    and the holding folder could not be emptied - the automatic rename had renamed the filed volumes). It also knows
+    which files a ``hold`` step then took out of the library (:meth:`held`: an upgrade replaced them)."""
 
     def __init__(self, journal: "Journal"):
         self.journal = journal
@@ -1080,6 +1081,7 @@ class MoveFollower:
         self._moves: Optional[Dict[str, List[Tuple[Tuple[int, int], str]]]] = None
         self._folders: List[Tuple[Tuple[int, int], str, str]] = []  # (place, source key, destination) of folder moves
         self._plans: List[Tuple[int, str]] = []                 # (id, created_at) of every plan
+        self._holds: Dict[str, List[Tuple[int, int]]] = {}      # source key -> places of the hold steps applied to it
 
     def _read(self) -> Dict[str, List[Tuple[Tuple[int, int], str]]]:
         if self._moves is None:
@@ -1088,6 +1090,9 @@ class MoveFollower:
                 for plan in self.journal.list_plans():
                     self._plans.append((plan.id, plan.created_at))
                     for step in plan.steps:
+                        if step.op == "hold" and step.state == "done":       # an undone hold put the file back
+                            self._holds.setdefault(_key(step.src), []).append((plan.id, step.seq))
+                            continue
                         if step.op != "move" or step.state != "done":
                             continue
                         place = (plan.id, step.seq)
@@ -1108,6 +1113,19 @@ class MoveFollower:
 
     def current_path(self, path: str, after_plan: int) -> str:
         """*path* followed through the moves applied by plans after *after_plan*, each once, in plan and step order."""
+        return self._follow(path, after_plan)[0]
+
+    def held(self, path: str, after_plan: int) -> bool:
+        """Whether the file at *path* (followed through the moves after *after_plan*) was then taken out of the library
+        into a holding folder by a ``hold`` step: an upgrade replaced it with a better copy - the owner's choice - and
+        its held copy may since have been emptied (owner, 2026-10-22: a completed torrent whose filed volume was replaced
+        that way was never removed from qBittorrent)."""
+        return self._follow(path, after_plan)[2]
+
+    def _follow(self, path: str, after_plan: int) -> Tuple[str, Tuple[int, float], bool]:
+        """(where *path* is now, the place of the last move that took it there, whether a hold then took it out of the
+        library). A hold ends the trail: a folder renamed after it no longer carries the file (owner's Alya volume 3:
+        held on 10-13, its series folder renamed to the scheme on 10-17)."""
         moves = self._read()
         seen = set()
         current, since = str(path), (after_plan, math.inf)
@@ -1118,11 +1136,13 @@ class MoveFollower:
             later += [(place, dst + _norm(current)[len(src):]) for place, src, dst in self._folders
                       if place > since and key.startswith(src.rstrip(os.sep) + os.sep)
                       and len(_norm(current)) == len(key)]
+            hold = min((place for place in self._holds.get(key, ()) if place > since), default=None)
+            if hold is not None and (not later or hold < min(later)[0]):
+                return current, hold, True
             if not later:
                 break
             since, current = min(later)
-        return current
-
+        return current, since, False
 
 def _key(p) -> str:
     return os.path.normcase(_norm(p))

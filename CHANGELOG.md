@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.55] - 2026-10-22
+
+The fifty-fourth MangaList release (testing build): a finished torrent whose volume was replaced by a better copy is removed from qBittorrent.
+
+- **Replaced volumes no longer keep their torrent.** When a volume a torrent filed was later replaced by a better copy (it went to the holding folder), MangaList kept looking for it in the library and never removed the finished torrent from qBittorrent - also after the holding folder was emptied and the series folder renamed. Such a volume now counts as handled: the torrent and its downloaded copy are removed at its seed goal (or with Remove now). A filed volume that is really missing still keeps its torrent.
+
 ## [2026.10.54] - 2026-10-22
 
 The fifty-third MangaList release (testing build): alias search - series found by their other titles and by their creators.
