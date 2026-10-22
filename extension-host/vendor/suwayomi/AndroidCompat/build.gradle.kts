@@ -1,5 +1,5 @@
 // MangaList extension host (prototype): simplified from Suwayomi-Server's AndroidCompat/build.gradle.kts (no ktlint,
-// no JCEF / KCEF: the WebView provider is left out).
+// no version-catalog bundles). JCEF is in: the KCEF WebView provider (Chromium, downloaded at first use).
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
@@ -28,6 +28,7 @@ dependencies {
     api(libs.apk.parser)
     api(libs.axml)
     api(libs.jackson.annotations)
+    api(libs.jcef)
     compileOnly(libs.xmlpull)
     compileOnly(libs.apksig)
     compileOnly(libs.android.annotations)

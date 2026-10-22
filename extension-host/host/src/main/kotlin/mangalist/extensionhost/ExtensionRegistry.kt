@@ -45,6 +45,10 @@ data class InstalledExtension(
     val className: String,
     val jar: String,
     val nsfw: Int = 0,
+    /** SHA-256 of the certificate the package was signed with, checked against its repository's key at install. */
+    val signatureHash: String? = null,
+    /** The repository index it was installed from (where an update comes from). */
+    val repo: String? = null,
 )
 
 /**
@@ -99,10 +103,15 @@ class ExtensionRegistry(
 
     /**
      * Download the extension at [url] and install it (replacing an installed version of the same package): a `.jar`
-     * (keiyoushi's ready JVM jar, as Suwayomi prefers) or an `.apk` (converted with dex2jar).
+     * (keiyoushi's ready JVM jar, as Suwayomi prefers) or an `.apk` (converted with dex2jar). It must be signed with
+     * [signingKey] (its repository's key, [Signatures.check]), else it is refused before anything is loaded.
      */
     @Synchronized
-    fun install(url: String): Pair<InstalledExtension, List<Source>> {
+    fun install(
+        url: String,
+        signingKey: String?,
+        repo: String? = null,
+    ): Pair<InstalledExtension, List<Source>> {
         val dir = root.resolve("download").createDirectories()
         val file = dir.resolve(url.substringAfterLast('/').substringBefore('?'))
         client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
@@ -110,10 +119,42 @@ class ExtensionRegistry(
             Files.copy(resp.body.byteStream(), file, StandardCopyOption.REPLACE_EXISTING)
         }
         try {
-            return if (file.toString().endsWith(".jar")) installJar(file) else installApk(file)
+            return installFile(file, signingKey, repo)
         } finally {
             file.deleteIfExists()
         }
+    }
+
+    /** Check and install a downloaded package file (see [install]). */
+    @Synchronized
+    fun installFile(
+        file: Path,
+        signingKey: String?,
+        repo: String? = null,
+    ): Pair<InstalledExtension, List<Source>> {
+        val fingerprint = Signatures.check(file, signingKey)
+        val (ext, made) = if (file.toString().endsWith(".jar")) installJar(file) else installApk(file)
+        val recorded = ext.copy(signatureHash = fingerprint, repo = repo)
+        installed[ext.pkg] = recorded
+        saveManifest()
+        return recorded to made
+    }
+
+    /** Remove an installed extension: its sources, its jar and its record. Its sources' preferences are kept. */
+    @Synchronized
+    fun uninstall(pkg: String): InstalledExtension {
+        val ext = installed[pkg] ?: throw HttpError(404, "$pkg is not installed")
+        unload(pkg)
+        saveManifest()
+        logger.info { "Uninstalled ${ext.name} ${ext.version} ($pkg)" }
+        return ext
+    }
+
+    /** Make one extension's sources again (after a preference change, as Suwayomi's `unregisterSource`). */
+    @Synchronized
+    fun reloadPackage(pkg: String) {
+        val ext = installed[pkg] ?: return
+        register(ext, instantiate(root.resolve(ext.jar), ext.className))
     }
 
     /** What both package kinds say about themselves (Suwayomi's `Extension.PackageMetadata`). */
@@ -126,7 +167,7 @@ class ExtensionRegistry(
         val meta: (String) -> String?,
     )
 
-    fun installJar(file: Path): Pair<InstalledExtension, List<Source>> {
+    private fun installJar(file: Path): Pair<InstalledExtension, List<Source>> {
         val manifest =
             ZipFile(file.toFile()).use { zip ->
                 val entry = zip.getEntry("AndroidManifest.xml") ?: error("the jar has no AndroidManifest.xml")
@@ -145,7 +186,7 @@ class ExtensionRegistry(
         return finish(meta) { jar -> Files.copy(file, jar, StandardCopyOption.REPLACE_EXISTING) }
     }
 
-    fun installApk(file: Path): Pair<InstalledExtension, List<Source>> {
+    private fun installApk(file: Path): Pair<InstalledExtension, List<Source>> {
         val info = PackageTools.getPackageInfo(file)
         val bundle = info.applicationInfo.metaData
         val meta =
@@ -182,7 +223,7 @@ class ExtensionRegistry(
                 name = m.meta(METADATA_NAME) ?: m.label?.substringAfter("Tachiyomi: ") ?: pkg,
                 version = m.versionName,
                 versionCode = m.versionCode,
-                libVersion = m.meta(METADATA_EXTENSION_LIB)?.takeUnless { it == "0" } ?: libVersion.toString(),
+                libVersion = m.meta(METADATA_EXTENSION_LIB)?.takeUnless { it == "0" || it.startsWith("{") } ?: libVersion.toString(),
                 className = className,
                 jar = "$pkg-v${m.versionName}.jar",
                 nsfw = m.meta(METADATA_NSFW)?.toIntOrNull() ?: 0,

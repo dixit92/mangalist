@@ -54,3 +54,6 @@ extension-host/.gradle/
 extension-host/**/build/
 extension-host/.data/
 extension-host/.kotlin/
+
+# extension host lane H: throwaway data / downloads of live checks
+extension-host/.data-h/

@@ -50,22 +50,59 @@ data class RepoExtension(
 
 const val DEFAULT_REPO = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json"
 
+/** A repository: its extensions and the SHA-256 of the certificate they must be signed with (null: none given). */
+data class RepoIndex(
+    val url: String,
+    val signingKey: String?,
+    val extensions: List<RepoExtension>,
+)
+
 class Repo(
     private val client: OkHttpClient,
+    /** How long a fetched index is reused (the extensions list asks for the repository's versions). */
+    private val cacheMillis: Long = 10 * 60 * 1000,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, RepoIndex>>()
 
     /** The repository's extensions ([indexUrl]: the index file's URL). */
-    fun index(indexUrl: String = DEFAULT_REPO): List<RepoExtension> {
-        val body =
-            client.newCall(Request.Builder().url(indexUrl).build()).execute().use { resp ->
-                check(resp.isSuccessful) { "the repository answered HTTP ${resp.code} for $indexUrl" }
-                resp.body.string()
-            }
-        return parse(json.parseToJsonElement(body), indexUrl)
+    fun index(indexUrl: String = DEFAULT_REPO): List<RepoExtension> = fetch(indexUrl, fresh = true).extensions
+
+    /** The repository's index with its signing key ([fresh]: not from the cache). */
+    fun fetch(
+        indexUrl: String = DEFAULT_REPO,
+        fresh: Boolean = false,
+    ): RepoIndex {
+        val now = System.currentTimeMillis()
+        if (!fresh) cache[indexUrl]?.let { (at, index) -> if (now - at < cacheMillis) return index }
+        val root = json.parseToJsonElement(get(indexUrl) ?: error("the repository answered nothing for $indexUrl"))
+        val key =
+            signingKey(root)
+                ?: if (root is JsonArray) {
+                    // the legacy format keeps its key next to it, in repo.json
+                    runCatching {
+                        get(indexUrl.substringBeforeLast('/') + "/repo.json")?.let { body ->
+                            json.parseToJsonElement(body).jsonObject["meta"]?.jsonObject?.str("signingKeyFingerprint")
+                        }
+                    }.getOrNull()
+                } else {
+                    null
+                }
+        val index = RepoIndex(indexUrl, key, parse(root, indexUrl))
+        cache[indexUrl] = now to index
+        return index
     }
 
+    private fun get(url: String): String? =
+        client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            check(resp.isSuccessful) { "the repository answered HTTP ${resp.code} for $url" }
+            resp.body.string()
+        }
+
     companion object {
+        /** `index.json`'s `signingKey` (null in the legacy format). */
+        fun signingKey(root: JsonElement): String? = (root as? JsonObject)?.str("signingKey")
+
         fun parse(
             root: JsonElement,
             indexUrl: String,

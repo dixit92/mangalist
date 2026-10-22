@@ -28,15 +28,15 @@ import kotlin.io.path.createDirectories
  * and answers MangaList over a small local JSON API ([ApiServer]). No Suwayomi server, database or web UI: only
  * Suwayomi's Android compatibility layer and Tachiyomi source API, vendored (vendor/suwayomi, MPL-2.0).
  *
- * Usage: `mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--flaresolverr URL]
- * [--flaresolverr-timeout 60] [--flaresolverr-session mangalist] [--flaresolverr-session-ttl 15]`
+ * Usage: [Options.USAGE]. MangaList's own calls are `/compat/...` ([CompatApi], contract `extension-host/COMPAT.md`):
+ * stable manga / chapter ids in `<data>/host.db` ([Store]) and Suwayomi's chapter downloader ([Downloader]).
  *
  * Cloudflare: with `--flaresolverr` (or `MANGALIST_FLARESOLVERR_URL`) a request Cloudflare challenges is solved by the
  * owner's FlareSolverr container through Suwayomi's CloudflareInterceptor (vendored unchanged); without it such a
  * request fails ("Cloudflare bypass currently disabled").
  */
 
-const val HOST_VERSION = "0.1.0-prototype"
+const val HOST_VERSION = "0.2.0-prototype"
 
 private val logger = KotlinLogging.logger {}
 
@@ -48,8 +48,21 @@ data class Options(
     val flareSolverrTimeout: Int = 60,
     val flareSolverrSession: String = "mangalist",
     val flareSolverrSessionTtl: Int = 15,
+    /** Where chapters are downloaded (`<downloads>/mangas/...`); default `<data>/downloads`. */
+    val downloadsDir: Path = dataDir.resolve("downloads"),
+    /** The extension repository's index (`index.json`). */
+    val repo: String = DEFAULT_REPO,
+    /** A browser engine (Chromium through JCEF, downloaded at first use) for extensions that open a WebView. */
+    val webView: Boolean = true,
+    /** Chapters downloaded at once (from different sources; one at a time per source). */
+    val downloadParallel: Int = 2,
 ) {
     companion object {
+        const val USAGE =
+            "mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--downloads DIR] [--repo URL] " +
+                "[--webview on|off] [--download-parallel 2] [--flaresolverr URL] [--flaresolverr-timeout 60] " +
+                "[--flaresolverr-session mangalist] [--flaresolverr-session-ttl 15]"
+
         fun parse(args: Array<String>): Options {
             var data = System.getenv("MANGALIST_EXTENSIONS_DATA") ?: "extension-host-data"
             var bind = "127.0.0.1"
@@ -58,34 +71,55 @@ data class Options(
             var flareTimeout = 60
             var flareSession = "mangalist"
             var flareTtl = 15
+            var downloads: String? = null
+            var repo = DEFAULT_REPO
+            var webView = true
+            var parallel = 2
             var i = 0
             while (i < args.size) {
                 when (args[i]) {
                     "--data" -> data = args[++i]
                     "--bind" -> bind = args[++i]
                     "--port" -> port = args[++i].toInt()
+                    "--downloads" -> downloads = args[++i]
+                    "--repo" -> repo = args[++i]
+                    "--webview" ->
+                        webView =
+                            when (args[++i].lowercase()) {
+                                "on", "true", "yes" -> true
+                                "off", "false", "no" -> false
+                                else -> throw IllegalArgumentException("--webview takes on or off")
+                            }
+                    "--download-parallel" -> parallel = args[++i].toInt().coerceIn(1, 4)
                     "--flaresolverr" -> flare = args[++i].takeIf { it.isNotBlank() }
                     "--flaresolverr-timeout" -> flareTimeout = args[++i].toInt()
                     "--flaresolverr-session" -> flareSession = args[++i]
                     "--flaresolverr-session-ttl" -> flareTtl = args[++i].toInt()
                     "--help", "-h" -> {
-                        println(
-                            "mangalist-extension-host [--data DIR] [--bind 127.0.0.1] [--port 4570] [--flaresolverr URL] " +
-                                "[--flaresolverr-timeout 60] [--flaresolverr-session mangalist] [--flaresolverr-session-ttl 15]",
-                        )
+                        println(USAGE)
                         kotlin.system.exitProcess(0)
                     }
                     else -> throw IllegalArgumentException("unknown argument ${args[i]}")
                 }
                 i++
             }
-            return Options(Path(data).absolute(), bind, port, flare, flareTimeout, flareSession, flareTtl)
+            val dataDir = Path(data).absolute()
+            return Options(
+                dataDir, bind, port, flare, flareTimeout, flareSession, flareTtl,
+                downloadsDir = downloads?.let { Path(it).absolute() } ?: dataDir.resolve("downloads"),
+                repo = repo,
+                webView = webView,
+                downloadParallel = parallel,
+            )
         }
     }
 }
 
 /** Start the Android compatibility layer the way Suwayomi does, minus its server (ServerSetup.applicationSetup). */
-fun boot(dataDir: Path) {
+fun boot(
+    dataDir: Path,
+    webView: Boolean = false,
+) {
     dataDir.createDirectories()
     val extensions = dataDir.resolve("extensions").createDirectories()
     // AndroidCompat keeps its files (SharedPreferences of the extensions, caches) under this root
@@ -101,8 +135,10 @@ fun boot(dataDir: Path) {
     }, "android-main").apply { isDaemon = true }.start()
     looperReady.await()
     val app = App()
-    startKoin { modules(createAppModule(app), androidCompatModule(), configManagerModule()) }
+    startKoin { modules(createAppModule(app), androidCompatModule(), configManagerModule(), WebViewSetup.koinModule()) }
     AndroidCompatInitializer().init()
+    // the KCEF WebView provider (Suwayomi's), Chromium started at the first WebView an extension opens
+    WebViewSetup.configure(webView, dataDir)
     AndroidCompat().startApp(app)
     // Injekt (what extensions use) answers from Koin through injekt-koin
     val network = Injekt.get<NetworkHelper>()
@@ -120,7 +156,8 @@ fun main(args: Array<String>) {
             "Cloudflare: no FlareSolverr (--flaresolverr URL); challenged requests fail"
         }
     }
-    boot(options.dataDir)
+    boot(options.dataDir, options.webView)
+    logger.info { "WebView: ${if (options.webView) "on (Chromium is prepared when an extension first opens one)" else "off"}" }
     val network = Injekt.get<NetworkHelper>()
     val registry = ExtensionRegistry(options.dataDir.resolve("extensions"), network.client)
     registry.loadInstalled()
@@ -134,7 +171,13 @@ fun main(args: Array<String>) {
             logger.info { "User-Agent changed (FlareSolverr): making the sources again" }
             registry.reloadSources()
         }.launchIn(GlobalScope)
-    val server = ApiServer(options.bind, options.port, registry, Repo(network.client))
+    val store = Store(options.dataDir.resolve("host.db"))
+    val library = Library(store, { registry.sources[it] }, DownloadsLayout(options.downloadsDir))
+    val downloader = Downloader(store, library, options.dataDir.resolve("cache").resolve("downloads"), options.downloadParallel)
+    downloader.restore()
+    val compat = CompatApi(library, downloader, registry) { WebViewSetup.state() }
+    val preferences = SourcePreferences({ Injekt.get<xyz.nulldev.androidcompat.androidimpl.CustomContext>() })
+    val server = ApiServer(options.bind, options.port, registry, Repo(network.client), compat, options.repo, preferences)
     server.start()
     logger.info { "Listening on http://${options.bind}:${server.port}" }
 }
