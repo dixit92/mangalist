@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFormLayout, QLineEdit, QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
+    QComboBox, QFormLayout, QHBoxLayout, QLineEdit, QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..services.mangapixer import client as mpc
@@ -190,8 +190,11 @@ class ServicesPage(SectionPage):
                                             "(with Auto-update on, install them)")
         self.btn_check_updates.clicked.connect(self.check_extension_updates)
         self.ext_updates_row = QWidget()
-        self.ext_updates_row.setLayout(hbox(self.ext_updates_label, self.btn_check_updates, spacing=8))
-        self.ext_updates_row.layout().setContentsMargins(0, 4, 0, 0)
+        row = QHBoxLayout(self.ext_updates_row)
+        row.setContentsMargins(0, 4, 0, 0)
+        row.setSpacing(8)
+        row.addWidget(self.ext_updates_label, 1)
+        row.addWidget(self.btn_check_updates, 0, Qt.AlignmentFlag.AlignTop)
         self.ext_card.column.addWidget(self.ext_updates_row)
         self.backend_combo.activated.connect(self._backend_chosen)
         self.refresh()
