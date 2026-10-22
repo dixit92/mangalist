@@ -182,3 +182,35 @@ def test_the_settings_are_read_without_migrating_the_database(tmp_path, monkeypa
     mine.learn_downloads_path("/config/extension-host/downloads")
     assert real.extension_host().downloads_path == "/config/extension-host/downloads"
     assert sv.wanted(data, env={}).run
+
+
+# --- several repositories (lane U, 2026-10-22) -----------------------------------------------------------------------
+
+def test_every_repository_of_the_list_is_passed_and_the_environment_may_name_several(tmp_path):
+    mine = ExtensionHostConfig(repos=("https://a.example/index.json", "https://b.example/index.json"))
+    cmd = sv.host_command(mine, Path("/config"), env={"MANGALIST_EXTENSION_REPO": "https://env/index.json"})
+    assert [cmd[i + 1] for i, part in enumerate(cmd) if part == "--repo"] == [
+        "https://a.example/index.json", "https://b.example/index.json"]               # the list wins
+    emptied = sv.host_command(ExtensionHostConfig(repos=()), Path("/config"),
+                              env={"MANGALIST_EXTENSION_REPO": "https://env/index.json"})
+    assert "--repo" not in emptied                     # the owner removed them all: the host's own list stays as it is
+    env = sv.host_command(ExtensionHostConfig(), Path("/config"),
+                          env={"MANGALIST_EXTENSION_REPO": "https://one/index.json, https://two/index.json"})
+    assert [env[i + 1] for i, part in enumerate(env) if part == "--repo"] == ["https://one/index.json",
+                                                                              "https://two/index.json"]
+    assert sv.without_repos(cmd) == sv.without_repos(emptied)
+
+
+def test_a_changed_repository_list_alone_does_not_restart_the_host(tmp_path, settings):
+    settings.set_backend(CHAPTER_BACKEND_EXTENSIONS)
+    sup, spawned, _clock = make(tmp_path, settings)
+    sup.tick()
+    # added through the host's API from Settings: the running host has it already
+    settings.save_extension_host(ExtensionHostConfig(repos=("https://a.example/index.json",)))
+    sup.tick()
+    assert len(spawned) == 1 and not spawned[0].terminated
+    assert "https://a.example/index.json" in sup.command            # the next start passes it
+    settings.save_extension_host(ExtensionHostConfig(repos=("https://a.example/index.json",), webview=False))
+    sup.tick()
+    assert spawned[0].terminated and len(spawned) == 2
+    assert spawned[1].args[spawned[1].args.index("--repo") + 1] == "https://a.example/index.json"

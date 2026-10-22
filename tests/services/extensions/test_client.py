@@ -124,3 +124,40 @@ def test_the_demo_reports_each_source_and_survives_a_failing_one():
                                              "Alpha Scans): 2 pages, page 1 image/png 10 bytes")
     assert lines["Comix (en)"] == "FAILED: No factory registered"
     assert lines["Weeb Central (en)"] == "FAILED: no installed source 'Weeb Central/en'"
+
+
+# --- repositories, the repository of an extension, a busy update (lane U, 2026-10-22) --------------------------------
+
+KEI = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json"
+
+
+def test_the_repository_list_and_each_extension_s_repository():
+    from mangalist.services.extensions import Busy, Repository
+
+    repos = [{"url": KEI, "name": "Keiyoushi", "signingKey": "9add", "extensions": 1444, "lastFetch": 1761100000000,
+              "error": None},
+             {"url": "https://b/index.json", "name": "B", "signingKey": None, "extensions": None, "lastFetch": None,
+              "error": "the repository answered HTTP 404"}]
+    c = client({("GET", "/repos"): repos, ("POST", "/repos"): repos[0], ("POST", "/repos/remove"): repos[1],
+                ("GET", "/repo"): [{"name": "MangaDex", "pkg": "p.md", "version": "1.6.0", "repo": KEI,
+                                    "repoName": "Keiyoushi"}],
+                ("GET", "/extensions"): [{"pkg": "p.md", "name": "MangaDex", "version": "1.5.0", "repo": KEI,
+                                          "repoName": "Keiyoushi", "repoListed": True, "repoVersion": "1.6.0",
+                                          "updateAvailable": True, "signatureHash": "9add"}],
+                ("POST", "/extensions/update"): Resp(409, {"error": "MangaDex is downloading a chapter",
+                                                           "type": "HttpError"})})
+    got = c.repos()
+    assert got[0] == Repository(KEI, "Keiyoushi", "9add", 1444, 1761100000000, None)
+    assert got[1].extensions is None and "404" in got[1].error
+    assert c.add_repo(KEI).name == "Keiyoushi"
+    assert c._session.requests[-1]["body"] == {"url": KEI}
+    assert c.remove_repo("https://b/index.json").name == "B"
+    assert c._session.requests[-1]["path"] == "/repos/remove"
+    (entry,) = c.repo()
+    assert (entry.repo, entry.repo_name) == (KEI, "Keiyoushi")
+    assert c._session.requests[-1]["path"] == "/repo"                       # every repository: no url
+    (ext,) = c.extensions()
+    assert ext.update_available and ext.repo_version == "1.6.0" and ext.repo_name == "Keiyoushi" and ext.repo_listed
+    with pytest.raises(Busy, match="downloading") as caught:
+        c.update("p.md", wait_seconds=60)
+    assert caught.value.status == 409 and c._session.requests[-1]["body"] == {"pkg": "p.md", "waitSeconds": 60}

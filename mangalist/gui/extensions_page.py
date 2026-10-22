@@ -303,9 +303,10 @@ class RepositoriesEditor(QWidget):
         return True
 
     def _unreadable(self, message: str) -> None:
-        stored = self._backend.load_extension_host().repos or ()
+        from ..downloads.extensions_backend import repo_urls
+
         self.list.clear()
-        for url in stored:
+        for url in repo_urls(self._backend.load_extension_host()):        # what the host is started with
             self.list.addItem(QListWidgetItem(url))
         _say(self.status_label, f"The host's repositories could not be read: {message}. Start the host (or check its "
                                 "address) to add or remove one.", "bad")
