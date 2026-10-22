@@ -2142,7 +2142,7 @@ class MainWindow(QMainWindow):
             self._table.resizeColumnToContents(col)
 
     def _on_mu_thread_finished(self) -> None:
-        stopped = self._mu_worker is not None and self._mu_worker.aborted
+        stopped = bool(getattr(self._mu_worker, "aborted", False))
         self._model.set_mu_processing_row(None)
         self._mu_thread = None
         self._mu_worker = None
