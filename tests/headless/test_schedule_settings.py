@@ -103,7 +103,7 @@ def test_from_env_uses_the_stored_schedules_and_ignores_a_bad_variable_that_is_o
 def test_every_schedule_has_its_own_setting_key():
     assert len({spec.key for spec in SCHEDULES}) == len(SCHEDULES) == 7
     assert {spec.job for spec in SCHEDULES} == {"rescan", "mangapixer-sync", "dispatch-batch", "downloads",
-                                                "clean-records", "chapter-check"}
+                                                "clean-records", "chapter-check", "extension-updates"}
 
 
 # --- the scheduler picks a change up ----------------------------------------------------------------------------

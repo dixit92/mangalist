@@ -145,19 +145,19 @@ def test_extensions_page_lists_and_installs_with_buttons(qapp, db, backend, host
     panel.btn_install.click()
     settle(qapp, panel)
     assert host.installed == {MANGADEX_PKG: "1.4.200"} and changed
-    assert "Installed MangaDex." in panel.status_label.text()
+    assert "Installed MangaDex from Keiyoushi." in panel.status_label.text()
     assert panel.selected().pkg == MANGADEX_PKG and panel.selected().installed
-    assert table.item(0, 3).text() == "Installed"
+    assert table.item(0, 4).text() == "Installed"
     assert panel.btn_uninstall.isEnabled() and panel.btn_prefs.isEnabled() and not panel.btn_install.isEnabled()
     # A newer version in the repository: Update (and Update all).
     host.repo[0].version = "1.4.201"
     panel.reload()
     settle(qapp, panel)
-    assert table.item(0, 3).text() == "Update: 1.4.200 → 1.4.201" and panel.btn_update_all.isEnabled()
+    assert table.item(0, 4).text() == "Update: 1.4.200 → 1.4.201" and panel.btn_update_all.isEnabled()
     panel.select(MANGADEX_PKG)
     panel.btn_update.click()
     settle(qapp, panel)
-    assert host.installed[MANGADEX_PKG] == "1.4.201" and table.item(0, 3).text() == "Installed"
+    assert host.installed[MANGADEX_PKG] == "1.4.201" and table.item(0, 4).text() == "Installed"
     # Filter and installed only.
     panel.filter_edit.setText("weeb")
     assert [table.item(r, 0).text() for r in range(table.rowCount())] == ["Weeb Example"]
