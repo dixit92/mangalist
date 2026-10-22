@@ -223,7 +223,7 @@ class ExtensionRegistry(
                 name = m.meta(METADATA_NAME) ?: m.label?.substringAfter("Tachiyomi: ") ?: pkg,
                 version = m.versionName,
                 versionCode = m.versionCode,
-                libVersion = m.meta(METADATA_EXTENSION_LIB)?.takeUnless { it == "0" } ?: libVersion.toString(),
+                libVersion = m.meta(METADATA_EXTENSION_LIB)?.takeUnless { it == "0" || it.startsWith("{") } ?: libVersion.toString(),
                 className = className,
                 jar = "$pkg-v${m.versionName}.jar",
                 nsfw = m.meta(METADATA_NSFW)?.toIntOrNull() ?: 0,
