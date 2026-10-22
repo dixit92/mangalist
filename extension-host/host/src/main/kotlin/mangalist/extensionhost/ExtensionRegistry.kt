@@ -113,7 +113,8 @@ class ExtensionRegistry(
         repo: String? = null,
     ): Pair<InstalledExtension, List<Source>> {
         val dir = root.resolve("download").createDirectories()
-        val file = dir.resolve(url.substringAfterLast('/').substringBefore('?'))
+        // a URL that names no file (a repository pointing at a web page) still gets a file of its own, never the folder
+        val file = dir.resolve(url.substringBefore('?').substringAfterLast('/').ifBlank { "package.download" })
         client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
             check(resp.isSuccessful) { "the extension download answered HTTP ${resp.code} for $url" }
             Files.copy(resp.body.byteStream(), file, StandardCopyOption.REPLACE_EXISTING)

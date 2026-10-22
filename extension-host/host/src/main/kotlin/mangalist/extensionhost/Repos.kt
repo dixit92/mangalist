@@ -108,6 +108,8 @@ class RepoList(
         val index =
             try {
                 repo.fetch(url, fresh = true)
+            } catch (e: kotlinx.serialization.SerializationException) {
+                throw HttpError(400, "$url is not an extension repository: it does not answer JSON (give the address of its index.json)")
             } catch (e: Exception) {
                 throw HttpError(400, "$url is not an extension repository: ${e.message ?: e.javaClass.simpleName}")
             }
