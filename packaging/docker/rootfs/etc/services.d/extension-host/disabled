@@ -1,0 +1,8 @@
+#!/bin/sh
+# Prints the service's "disabled" value: MANGALIST_EXTENSION_HOST=0 turns the extension host's supervisor off.
+set -u
+if is-bool-val-false "${MANGALIST_EXTENSION_HOST:-auto}"; then
+    echo "true"
+else
+    echo "false"
+fi

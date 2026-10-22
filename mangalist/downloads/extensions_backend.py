@@ -12,7 +12,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
 
 from ..gui.downloads_backend import BackendError, ExtensionHostCheck
 from ..services.extensions.client import (
@@ -32,14 +32,15 @@ ENV_REPO = "MANGALIST_EXTENSION_REPO"
 ENV_FLARESOLVERR = "MANGALIST_FLARESOLVERR_URL"
 
 
-def repo_url(config: ExtensionHostConfig) -> str:
+def repo_url(config: ExtensionHostConfig, env: Optional[Mapping[str, str]] = None) -> str:
     """The repository MangaList installs from: the setting, else ``MANGALIST_EXTENSION_REPO``, else '' (the host's
     default, keiyoushi's)."""
-    return config.repo_url or os.environ.get(ENV_REPO, "").strip()
+    return config.repo_url or (os.environ if env is None else env).get(ENV_REPO, "").strip()
 
 
-def flaresolverr_url(config: ExtensionHostConfig) -> str:
-    return config.flaresolverr_url or os.environ.get(ENV_FLARESOLVERR, "").strip()
+def flaresolverr_url(config: ExtensionHostConfig, env: Optional[Mapping[str, str]] = None) -> str:
+    """The FlareSolverr the host uses: the setting, else ``MANGALIST_FLARESOLVERR_URL``, else '' (none)."""
+    return config.flaresolverr_url or (os.environ if env is None else env).get(ENV_FLARESOLVERR, "").strip()
 
 
 def version_key(version: str) -> Tuple:

@@ -13,7 +13,27 @@
 #
 # Base image: Debian 12 (glibc, so the PySide6 wheels from PyPI work; Alpine's musl does not) with
 # Debian's Python 3.11, which the test matrix covers. Pinned to an exact base version; bump it here.
+#
+# Built-in extensions (prototype/mihon-mangalist): MangaList's own extension host (extension-host/, a JVM program
+# running Mihon / Tachiyomi extensions without Suwayomi) is built in a JDK stage and runs on a jlink'd Java 21 runtime
+# in the final image, supervised as the "extension-host" service (rootfs/etc/services.d/extension-host) while the owner
+# has chosen "Built-in extensions" for chapter downloads. Its data: /config/extension-host.
 ARG BASEIMAGE=jlesage/baseimage-gui:debian-12-v4.14.0
+ARG JDKIMAGE=eclipse-temurin:21-jdk
+
+# --- the extension host: built from extension-host/ with its Gradle wrapper (Gradle and the dependencies download here)
+FROM ${JDKIMAGE} AS exthost
+COPY extension-host /src/extension-host
+WORKDIR /src/extension-host
+RUN ./gradlew --no-daemon -q :host:installDist \
+    && cp -r host/build/install/mangalist-extension-host /opt/extension-host
+
+# --- a trimmed Java 21 runtime for it (jlink): the Java SE modules plus what the host and its extensions use
+# (com.sun.net.httpserver, sun.misc.Unsafe, EC crypto, zip file systems, DNS, all charsets / locales).
+FROM ${JDKIMAGE} AS jre
+RUN jlink --add-modules java.se,jdk.httpserver,jdk.unsupported,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.zipfs,jdk.charsets,jdk.localedata,jdk.naming.dns,jdk.management \
+        --strip-debug --no-man-pages --no-header-files --compress=zip-6 --output /opt/jre
+
 FROM ${BASEIMAGE}
 
 # Python, the Qt xcb platform plugin's libraries, and a font (the base image ships none for Qt).
@@ -31,6 +51,11 @@ RUN add-pkg \
 RUN add-pkg pcmanfm \
     && sed -i 's/^use_trash=1$/use_trash=0/' /etc/xdg/libfm/libfm.conf \
     && grep -qx 'use_trash=0' /etc/xdg/libfm/libfm.conf
+
+# The extension host's WebView (KCEF: a Chromium bundle the host downloads into /config/extension-host on first use)
+# needs Chromium's shared libraries; the X / font libraries above serve it too.
+RUN add-pkg libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libxcomposite1 libxdamage1 \
+        libxrandr2 libxtst6 libasound2 libpango-1.0-0 libcairo2 libxshmfence1
 
 # Dependencies first (cached while only the code changes). The GUI uses QtCore / QtGui / QtWidgets
 # only, so the image installs PySide6-Essentials instead of the full PySide6 (saves ~250 MB).
@@ -51,11 +76,15 @@ RUN install_app_icon.sh "file:///tmp/mangalist-icon.png" && rm -f /tmp/mangalist
 # Declared here, not at the top: a changing version stamp must not invalidate the layers above.
 ARG DOCKER_IMAGE_VERSION=dev
 
+COPY --from=jre /opt/jre /opt/mangalist/jre
+COPY --from=exthost /opt/extension-host /opt/mangalist/extension-host
+
 COPY mangalist /opt/mangalist/app/mangalist
 COPY packaging/docker/startapp.sh /startapp.sh
 COPY packaging/docker/rootfs/ /
 
 RUN chmod 755 /startapp.sh /etc/services.d/headless/run /etc/services.d/headless/disabled \
+        /etc/services.d/extension-host/run /etc/services.d/extension-host/disabled \
     && /opt/mangalist/venv/bin/python -m compileall -q /opt/mangalist/app \
     && APP_VERSION="$(cd /opt/mangalist/app && /opt/mangalist/venv/bin/python -m mangalist --version | sed 's/^MangaList //')" \
     && set-cont-env APP_NAME "MangaList" \
@@ -86,6 +115,12 @@ ENV \
     # Volumes MVP (with MANGALIST_DOWNLOADS=1): file finished downloads, remove completed torrents.
     MANGALIST_DOWNLOADS_SCHEDULE=every:1h \
     MANGALIST_CATCH_UP=1 \
+    # Built-in extensions (prototype): the extension host runs while Settings chooses it (auto), always (1) or never
+    # (0). FlareSolverr and the repository are set in Settings, else here; the JVM's heap is capped.
+    MANGALIST_EXTENSION_HOST=auto \
+    MANGALIST_EXTENSION_HOST_BIN=/opt/mangalist/extension-host/bin/mangalist-extension-host \
+    MANGALIST_EXTENSION_HOST_OPTS="-Xms32m -Xmx768m -XX:+UseSerialGC" \
+    JAVA_HOME=/opt/mangalist/jre \
     # A WARNING in the log when the window is blocked for more than 250 ms (mangalist/gui/watchdog.py).
     MANGALIST_UI_WATCHDOG=1 \
     PYTHONPATH=/opt/mangalist/app \
