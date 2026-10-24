@@ -223,6 +223,12 @@ class CompatApi(
                     val title = (req["title"] as? JsonPrimitive)?.contentOrNull ?: ""
                     json.encodeToJsonElement(manga(library.register(sourceId, url, title)))
                 }
+                method == "GET" && parts.size == 2 && parts[0] == "manga" -> {
+                    // the host's manga by its id, as stored (no request to the source): its source and url, e.g. to
+                    // find the same manga in Suwayomi (MangaList's carry-back)
+                    val m = library.store.manga(id(parts[1])) ?: throw HttpError(404, "no manga ${parts[1]}")
+                    json.encodeToJsonElement(manga(m))
+                }
                 method == "POST" && parts.size == 3 && parts[0] == "manga" && parts[2] == "chapters" -> {
                     val fetchDetails = (obj(body())["fetchDetails"] as? JsonPrimitive)?.booleanOrNull ?: false
                     val got = library.chapters(id(parts[1]), fetchDetails)

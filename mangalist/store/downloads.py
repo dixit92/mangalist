@@ -926,6 +926,12 @@ class SuwayomiSettings:
                 data[name] = value
                 if name == "group":
                     data.pop("group_cleared", None)
+        if "manga_id" in changes:
+            # chosen here now: no longer the other program's choice carried over / back (the carry-back - audit B8 -
+            # takes only what was decided in the program it carries from)
+            for mark in ("carried_from", "carried_back"):
+                if mark not in changes:
+                    data.pop(mark, None)
         if builtin and "manga_id" in changes:
             instance = self.store.get_meta(META_HOST_INSTANCE)
             if changes["manga_id"] is not None and instance:

@@ -190,6 +190,23 @@ class ExtensionsBackendMixin:
                 raise BackendError(f"the {name} address must start with http:// or https://")
         return replace(config, url=url)
 
+    #: Tests: the host's liveness probe for :meth:`_host_up` (None: a real ``GET /health``).
+    _host_probe: Optional[Callable[[], Any]] = None
+
+    def _host_up(self, config: Optional[ExtensionHostConfig] = None) -> None:
+        """Before a call to the host: with Suwayomi chosen, ask for the host on demand and wait for it (transition audit
+        C1: the Extensions page, Test connection and the carry-over work before switching); a host that cannot run here
+        is a :class:`BackendError` saying why."""
+        from ..services.extensions.on_demand import HostNotRunning, ensure_running
+
+        if self.suwayomi.builtin or (self._host_client_factory is not None and self._host_probe is None):
+            return
+        try:
+            ensure_running(self.suwayomi.store, (config or self.suwayomi.extension_host()).url, probe=self._host_probe)
+        except HostNotRunning as exc:
+            text = str(exc)
+            raise BackendError(text[:1].upper() + text[1:]) from None
+
     def _host(self, config: Optional[ExtensionHostConfig] = None):
         url = (config or self.suwayomi.extension_host()).url
         factory = self._host_client_factory
@@ -200,12 +217,16 @@ class ExtensionsBackendMixin:
         from . import chapter_backend
 
         config = self._checked_host(config or self.suwayomi.extension_host())
+        self._host_up(config)
         conn = SuwayomiConnection(base_url=config.url, backend=CHAPTER_BACKEND_EXTENSIONS)
         compat = (self._chapter_client_factory or chapter_backend.client_from_connection)(conn)
         host = self._host(config)
         try:
             info = compat.server_settings()
             installed = host.extensions()
+            from . import host_identity
+
+            host_identity.check(self.suwayomi.store, compat)
         except (SuwayomiError, ExtensionHostError) as exc:
             raise BackendError(str(exc)) from None
         finally:
@@ -225,6 +246,7 @@ class ExtensionsBackendMixin:
     # --- the extensions -----------------------------------------------------------------------------------------
 
     def _host_call(self, what: str, fn: Callable[[Any], Any]) -> Any:
+        self._host_up()
         host = self._host()
         try:
             return fn(host)
