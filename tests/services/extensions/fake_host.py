@@ -132,6 +132,18 @@ class FakeHost:
 
     # --- set-up helpers --------------------------------------------------------------------------------------------
 
+    def reset_database(self, instance: str = "fake-host-db-2") -> None:
+        """``host.db`` deleted (or restored from another day): a new database id, every manga / chapter id forgotten -
+        the next ones start at 1 again - and an empty queue (MangaList's transition audit B4)."""
+        with self.lock:
+            self.instance = instance
+            self.manga_ids.clear()
+            self.mangas.clear()
+            self.chapter_ids.clear()
+            self.chapters.clear()
+            self.downloaded.clear()
+            self.queue.clear()
+
     def add_manga(self, source_id: str, manga: FakeManga) -> FakeManga:
         self.catalog.setdefault(source_id, []).append(manga)
         return manga
@@ -412,6 +424,11 @@ class FakeHost:
                                                     "title": str(body.get("title") or ""), "inLibrary": False,
                                                     "fake": fake or FakeManga(key[1], str(body.get("title") or ""))}
             return 200, self._manga_json(self.manga_ids[key])
+        if method == "GET" and len(parts) == 2 and parts[0] == "manga":       # a manga as stored (the carry-back)
+            mid = int(parts[1])
+            if mid not in self.mangas:
+                raise HttpError(404, f"no manga {mid}")
+            return 200, self._manga_json(mid)
         if len(parts) == 3 and parts[0] == "manga" and parts[2] in ("chapters", "library"):
             mid = int(parts[1])
             if mid not in self.mangas:
