@@ -73,6 +73,8 @@ from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .. import config
 from .background import describe_error, start_call
 from .chips import ChipButton, FlowLayout
+from .chapter_queue import ChapterQueueBar
+from .chapter_words import label_of, reword
 from .chapters_panel import ChaptersPanel
 from .automation_rules import bulk_find_label, by_series, has_automation, needs_source, report_text, series_line
 from ..alias_search import SEARCH_PLACEHOLDER, SEARCH_TIP, CreatorIndex, hint_text
@@ -461,6 +463,10 @@ class DownloadTab(QWidget):
         self.downloads.set_find_available(self._automation)
         self.downloads.find_now_requested.connect(self.find_now)
         bv.addWidget(self.downloads)
+        # the chosen program's chapter queue (transition fixes E2, 2026-10-24): what Suwayomi's web page showed
+        self.queue_bar = ChapterQueueBar(self._backend, bottom)
+        self.queue_bar.changed.connect(self.downloads.refresh)
+        bv.addWidget(self.queue_bar)
         self.vsplitter.addWidget(bottom)
         self.vsplitter.setStretchFactor(0, 1)
         self.vsplitter.setStretchFactor(1, 0)
@@ -570,7 +576,7 @@ class DownloadTab(QWidget):
                 continue
             header = QTreeWidgetItem(self.tree)
             header.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            note, tone = group_note(group, self.suwayomi_ready())
+            note, tone = self._group_note(group)
             header.setData(0, ROLE_HEADER, f"{GROUP_TITLES[group].upper()} · {len(items)}")
             header.setData(0, ROLE_ASIDE, note)
             header.setData(0, ROLE_NOTE_TONE, tone)
@@ -861,8 +867,30 @@ class DownloadTab(QWidget):
                             titles=series.titles or (series.title,), missing=series.missing, held=series.held,
                             upgrade=upgrade)
 
+    def _w(self, text: str) -> str:
+        """*text*, written for Suwayomi, worded for the chapter backend in force (transition fixes A4, 2026-10-24)."""
+        return reword(self._backend, text) or ""
+
+    def _group_note(self, group: str):
+        """(note, tone) at the right of a group's header: the Missing chapters group names the program that gets them
+        ("Suwayomi" / "Built-in extensions"; "needs ..." in amber while it is not set up)."""
+        note, tone = group_note(group, self.suwayomi_ready())
+        if group != GROUP_CHAPTERS:
+            return note, tone
+        return (label_of(self._backend), tone) if self.suwayomi_ready() else (self._w(note), tone)
+
+    def _reword_menu(self, menu: QMenu) -> None:
+        """The tooltips of a series menu, in the words of the chapter backend in force (the menu's own texts come from
+        :mod:`.series_actions`, which words them for Suwayomi)."""
+        for act in menu.actions():
+            if act.toolTip():
+                act.setToolTip(self._w(act.toolTip()))
+            if act.menu() is not None:
+                self._reword_menu(act.menu())
+
     def suwayomi_ready(self) -> bool:
-        """Suwayomi is connected: the Missing chapters group can be looked up (quick: one database read)."""
+        """The chapter program can be asked: an address is stored (quick: one database read). Whether it answers is what
+        Settings > Connected services > Test says."""
         ready = getattr(self._backend, "suwayomi_ready", None)
         try:
             return bool(ready()) if callable(ready) else False
@@ -1015,12 +1043,13 @@ class DownloadTab(QWidget):
             actions.add_fix_mu()
             menu.addSeparator()
             act_new = menu.addAction(CHECK_NEW_CHAPTERS)
-            act_new.setToolTip("Ask the series' Suwayomi source for chapters newer than the newest one you have (for "
-                               "volumes: the last chapter of your newest volume)")
+            act_new.setToolTip(self._w("Ask the series' Suwayomi source for chapters newer than the newest one you have "
+                                       "(for volumes: the last chapter of your newest volume)"))
             if self._chapters_entry(folder) is not None and callable(getattr(self._backend, "other_candidates", None)):
                 act_source = menu.addAction(CHANGE_SOURCE)
-                act_source.setToolTip(CHANGE_SOURCE_TIP)
+                act_source.setToolTip(self._w(CHANGE_SOURCE_TIP))
                 act_source.setEnabled(self.suwayomi_ready() and refs[0].series_id is not None)
+        self._reword_menu(menu)
         chosen = self._exec_menu(menu, self.tree.viewport().mapToGlobal(pos))
         said = actions.run(chosen)
         if said is not None:
@@ -1057,13 +1086,15 @@ class DownloadTab(QWidget):
         actions.add_modes()
         menu.addSeparator()
         if any(needs_source(f) for f in findings):        # nothing to send until the series has a source
-            actions.add_action(CHANGE_SOURCE, lambda: self._change_source_from_found(series_id), CHANGE_SOURCE_TIP)
+            actions.add_action(CHANGE_SOURCE, lambda: self._change_source_from_found(series_id),
+                               self._w(CHANGE_SOURCE_TIP))
         n = len(findings)
         act_skip = actions.add_action(f"Skip all of this series' findings ({n})" if n > 1 else
                                       "Skip all of this series' findings",
                                       lambda: self._skip_series(series_id, n),
                                       "Not offered again: every finding of this series leaves Found", bool(n))
         del act_to_get, act_skip
+        self._reword_menu(menu)
         said = actions.run(self._exec_menu(menu, pos))
         if said:
             self.found.say(said)
@@ -1134,7 +1165,7 @@ class DownloadTab(QWidget):
         if not self.suwayomi_ready() or series_id is None:
             self.panels.setCurrentIndex(PANEL_RELEASES)
             ready = self.suwayomi_ready()
-            self.releases.show_message(title, NOT_NYAA_REASONS[GROUP_CHAPTERS] if not ready else
+            self.releases.show_message(title, self._w(NOT_NYAA_REASONS[GROUP_CHAPTERS]) if not ready else
                                        "MangaList has not scanned this folder yet: rescan first.",
                                        None if ready else "Open Settings", None if ready else SECTION_SERVICES)
             self.releases.subtitle_label.setText("")
@@ -1186,7 +1217,7 @@ class DownloadTab(QWidget):
     def _show_unavailable(self, series: WantedSeries, reason: str) -> None:
         self.panels.setCurrentIndex(PANEL_RELEASES)
         needs_suwayomi = series.group == GROUP_CHAPTERS and not self.suwayomi_ready()
-        self.releases.show_message(series.title, reason, "Open Settings" if needs_suwayomi else None,
+        self.releases.show_message(series.title, self._w(reason), "Open Settings" if needs_suwayomi else None,
                                    SECTION_SERVICES if needs_suwayomi else None)
         self.releases.subtitle_label.setText(f"Wanted: {series.gaps}")
         if series.by_hand and series.group in (GROUP_VOLUMES, GROUP_UPGRADES):
