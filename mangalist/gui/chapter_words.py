@@ -49,9 +49,19 @@ def program(backend) -> str:
 CARD_TITLE = "Chapter sources"
 
 
-def reword(backend, text: Optional[str]) -> Optional[str]:
+def reword_for(builtin: bool, text: Optional[str]) -> Optional[str]:
     """*text*, written for Suwayomi, worded for the program in force. "Suwayomi sources" (the card's old name) is "chapter
-    sources" under either backend; otherwise Suwayomi's own wording stays as it is."""
+    sources" under either backend; a source line "Suwayomi · MangaDex (EN)" (a finding's) names the choice, "Built-in
+    extensions · MangaDex (EN)"; otherwise Suwayomi's own wording stays as it is."""
     if text and "Suwayomi sources" in text:
         text = text.replace("Suwayomi sources", CARD_TITLE.lower())
-    return chapter_backend.wording(text, is_builtin(backend))
+    if text and builtin and "Suwayomi source" in text:
+        text = text.replace("Suwayomi source", "chapter source")
+    if text and builtin and "Suwayomi · " in text:
+        text = text.replace("Suwayomi · ", f"{chapter_backend.LABELS[CHAPTER_BACKEND_EXTENSIONS]} · ")
+    return chapter_backend.wording(text, builtin)
+
+
+def reword(backend, text: Optional[str]) -> Optional[str]:
+    """:func:`reword_for` the backend in force."""
+    return reword_for(is_builtin(backend), text)

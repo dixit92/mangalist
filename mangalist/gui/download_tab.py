@@ -879,6 +879,16 @@ class DownloadTab(QWidget):
             return note, tone
         return (label_of(self._backend), tone) if self.suwayomi_ready() else (self._w(note), tone)
 
+    def _refresh_backend_words(self) -> None:
+        """The chapter backend may have been switched in Settings: the group's note and the queue bar follow it."""
+        header = self._header_items.get(GROUP_CHAPTERS)
+        if header is not None:
+            note, tone = self._group_note(GROUP_CHAPTERS)
+            header.setData(0, ROLE_ASIDE, note)
+            header.setData(0, ROLE_NOTE_TONE, tone)
+            self.tree.viewport().update()
+        self.queue_bar.refresh()
+
     def _reword_menu(self, menu: QMenu) -> None:
         """The tooltips of a series menu, in the words of the chapter backend in force (the menu's own texts come from
         :mod:`.series_actions`, which words them for Suwayomi)."""
@@ -1543,6 +1553,7 @@ class DownloadTab(QWidget):
         for record in records:
             by_series.setdefault(record.series_id, []).append(record)
         self._records = by_series
+        self._refresh_backend_words()
         self._refresh_statuses()
         self.releases.refresh_downloads()
         self.refresh_replaced()
