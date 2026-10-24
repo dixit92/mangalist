@@ -79,6 +79,7 @@ from .chapters import (
     mangadex_id_for,
     newer_lookup,
     newer_text,
+    remember_match,
     send_chapters,
     title_candidates,
 )
@@ -379,26 +380,58 @@ class Backend(ExtensionsBackendMixin):
         return done
 
     def retry_chapter_downloads(self, record_ids: Sequence[int]) -> int:
-        """The owner's Retry of chapter downloads Suwayomi gave up on: back in Suwayomi's queue now
-        (:func:`~.chapter_retry.retry`). Returns how many were retried."""
-        return self._stuck_call("retry", record_ids)
+        """The owner's Retry of chapter downloads their program gave up on: back in its queue now
+        (:func:`~.chapter_retry.retry`), each with the program it was sent to. Returns how many were retried."""
+        return self._chapter_records_call("retry", record_ids)
 
     def cancel_chapter_downloads(self, record_ids: Sequence[int]) -> int:
-        """The owner's Cancel of chapter downloads Suwayomi gave up on: out of Suwayomi's queue, the records cancelled
-        (:func:`~.chapter_retry.cancel`). Returns how many were cancelled."""
-        return self._stuck_call("cancel", record_ids)
+        """The owner's Cancel of chapter downloads still on their way (stuck or not): out of their program's queue, the
+        records cancelled (:func:`~.chapter_retry.cancel`) - also when that program cannot be asked. Returns how many
+        were cancelled."""
+        return self._chapter_records_call("cancel", record_ids)
 
-    def _stuck_call(self, what: str, record_ids: Sequence[int]) -> int:
-        from . import chapter_retry
+    def _chapter_records_call(self, what: str, record_ids: Sequence[int]) -> int:
+        """Retry / Cancel *record_ids*, grouped by the program each record belongs to (transition audit B1 / B2): a
+        record of the program not chosen now is asked of that program, never of the chosen one."""
+        from . import chapter_backend, chapter_retry
+        from .contracts import CHAPTER_BACKEND_EXTENSIONS, CHAPTER_BACKEND_SUWAYOMI
 
-        if not self.suwayomi_ready():
-            raise BackendError("Suwayomi is not set up")
-        try:
-            return getattr(chapter_retry, what)(self.db, self._chapter_client(), [int(i) for i in record_ids])
-        except chapter_retry.RetryRefused as exc:
-            raise BackendError(str(exc)) from None
-        except SuwayomiError as exc:
-            raise BackendError(str(exc) if self.suwayomi.builtin else f"Suwayomi: {exc}") from None
+        chosen = self.suwayomi.backend()
+        groups: Dict[str, List[int]] = {}
+        for rid in record_ids:
+            rec = self.chapter_ledger.get(int(rid))
+            if rec is not None:
+                groups.setdefault(rec.backend or chosen, []).append(int(rid))
+        if not groups:
+            raise BackendError("it is no longer on its way (it was downloaded, filed, or cancelled meanwhile)")
+        done, errors = 0, []
+        for backend in sorted(groups, key=lambda b: b != chosen):
+            ids = groups[backend]
+            name = chapter_backend.name_of_backend(backend)
+            conn = self.suwayomi.connection_for(backend)
+            client = None
+            try:
+                if conn is not None and conn.base_url:
+                    client = self._chapter_client(conn)
+                elif what == "retry":
+                    raise BackendError(chapter_backend.not_set_up(backend == CHAPTER_BACKEND_EXTENSIONS).capitalize())
+                if what == "retry":
+                    done += chapter_retry.retry(self.db, client, ids)
+                else:
+                    done += chapter_retry.cancel(self.db, client, ids, backend=backend or CHAPTER_BACKEND_SUWAYOMI)
+            except chapter_retry.RetryRefused as exc:
+                errors.append(str(exc))
+            except SuwayomiError as exc:
+                errors.append(str(exc) if backend == CHAPTER_BACKEND_EXTENSIONS else f"{name}: {exc}")
+            except BackendError as exc:
+                errors.append(str(exc))
+            finally:
+                _close(client)
+        if not done and errors:
+            raise BackendError("; ".join(errors))
+        if errors:
+            _log.info("Chapter downloads: %s: %s", what, "; ".join(errors))
+        return done
 
     def set_remove_completed(self, on: bool) -> None:
         self.ledger.set_remove_completed(on)
@@ -510,8 +543,14 @@ class Backend(ExtensionsBackendMixin):
         if conn is None or not conn.base_url:
             raise BackendError(chapter_backend.not_set_up(self.suwayomi.builtin).capitalize())
         if self._chapter_client_factory is not None:
-            return self._chapter_client_factory(conn)
-        return chapter_backend.client_from_connection(conn)
+            client = self._chapter_client_factory(conn)
+        else:
+            client = chapter_backend.client_from_connection(conn)
+        if chapter_backend.is_builtin(client):
+            from . import host_identity
+
+            host_identity.check(self.db, client)     # a replaced host database: its stored ids are found again (B4)
+        return client
 
     def suwayomi_sources(self) -> List[tuple]:
         """``[(SuwayomiSource, allowed)]``: the allowed sources first, in the owner's order, then the other installed
@@ -549,6 +588,8 @@ class Backend(ExtensionsBackendMixin):
         """Find the series in Suwayomi and list its missing chapters (see :mod:`mangalist.downloads.chapters`).
         *newer* ("Check for new chapters", owner 2026-10-11): ignore *missing* and list what the source has after the
         newest chapter held - ahead of MangaUpdates, which is what the gaps count up to."""
+        from . import chapter_backend
+
         lookup = ChapterLookup(series_id=series_id, missing=() if newer else tuple(missing), newer=newer)
         try:
             lookup.placement = chapter_placement_for(self.db, series_id)
@@ -564,7 +605,7 @@ class Backend(ExtensionsBackendMixin):
                           "extension is not installed in the extension host (Settings > Connected services > "
                           "Built-in extensions > Extensions)")
                 return lookup
-            stored = self.suwayomi.series_choice(series_id)
+            stored = self.suwayomi.series_choice(series_id, chapter_backend.backend_of(client))
             found = find_manga(client, sources, mangadex_id=mangadex_id_for(self.db, series_id), titles=titles,
                                stored=stored)
             lookup.notes = list(found.notes)
@@ -584,10 +625,9 @@ class Backend(ExtensionsBackendMixin):
                                      in_hand=in_hand)
             built.placement, built.placement_error = lookup.placement, lookup.placement_error
             built.notes = lookup.notes + built.notes
-            if found.match.how == HOW_MANGADEX and stored.get("manga_id") != found.match.manga.id:
-                self.suwayomi.set_series_choice(series_id, source_id=found.match.source.id,
-                                                manga_id=found.match.manga.id, manga_title=built.manga_title,
-                                                how=HOW_MANGADEX)
+            if remember_match(self.suwayomi, series_id, found, stored) and built.manga_title:
+                self.suwayomi.set_series_choice(series_id, backend=found.match.backend or None,
+                                                manga_title=built.manga_title)
             if (not built.available and not built.queued_in_suwayomi and found.match.how == HOW_MANGADEX
                     and (built.missing or built.source_empty)):
                 # MangaDex has none of them: the owner's other sources, by title (owner: "when MangaDex has nothing")
@@ -607,7 +647,7 @@ class Backend(ExtensionsBackendMixin):
         except SuwayomiError as exc:
             # the panel shows it; the log keeps why (owner, 2026-10-11: three "Lookup failed" rows, nothing logged)
             _log.warning("Chapters: looking up series %s in %s failed: %s", series_id,
-                         "the extension host" if self.suwayomi.builtin else "Suwayomi", exc)
+                         chapter_backend.name_of_backend(chapter_backend.backend_of(client)), exc)
             raise BackendError(str(exc)) from None
         finally:
             _close(client)
@@ -664,20 +704,35 @@ class Backend(ExtensionsBackendMixin):
             _close(client)
 
     def confirm_match(self, series_id: int, match: MangaMatch) -> None:
-        """The owner confirmed a title match: it is the series' Suwayomi manga from now on."""
-        self.suwayomi.set_series_choice(series_id, source_id=match.source.id, manga_id=int(match.manga.id),
-                                        manga_title=match.manga.title, how=HOW_CONFIRMED)
+        """The owner confirmed a title match: it is the series' manga from now on - in the program that found it
+        (``match.backend``; a switch while the panel was open never files it under the other program: audit B5)."""
+        self._same_program(match)
+        self.suwayomi.set_series_choice(series_id, backend=match.backend or None, source_id=match.source.id,
+                                        manga_id=int(match.manga.id), manga_title=match.manga.title,
+                                        manga_url=match.manga.url or None, how=HOW_CONFIRMED, stale_manga_id=None)
         _log.info("Chapters: series %s matched to %s manga %s by the owner", series_id, match.source.display_name,
                   match.manga.id)
 
     def forget_match(self, series_id: int) -> None:
-        self.suwayomi.set_series_choice(series_id, source_id=None, manga_id=None, manga_title=None, how=None)
+        self.suwayomi.set_series_choice(series_id, source_id=None, manga_id=None, manga_title=None, manga_url=None,
+                                        how=None, stale_manga_id=None)
 
     def set_series_group(self, series_id: int, group: Optional[str]) -> None:
         self.suwayomi.set_series_choice(series_id, group=group or None)
 
+    def _same_program(self, match: MangaMatch) -> None:
+        """Refuse a match another program found than the one chosen now (the chapter downloads were switched while the
+        panel or a dialog was open: its manga and chapter ids are that program's - transition audit B5)."""
+        from . import chapter_backend
+
+        if match.backend and match.backend != self.suwayomi.backend():
+            raise BackendError(f"the chapter downloads were switched to {chapter_backend.name_of_backend(self.suwayomi.backend())} "
+                               f"since this list was made by {chapter_backend.name_of_backend(match.backend)}: look the "
+                               "series up again")
+
     def send_chapters(self, series_id: int, match: MangaMatch, picks: Sequence, target_dir: str,
                       manga_title: str = "", source_name: str = "") -> ChapterSendOutcome:
+        self._same_program(match)
         client = self._chapter_client()
         try:
             return send_chapters(client, self.chapter_ledger, series_id, match, picks, target_dir,

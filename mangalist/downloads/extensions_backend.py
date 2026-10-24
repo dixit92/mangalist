@@ -141,15 +141,28 @@ class ExtensionsBackendMixin:
         return self.suwayomi.backend()
 
     def set_chapter_backend(self, backend: str) -> None:
+        """Switch the program that downloads chapters. Refused while a chapter download of the current program is still
+        on its way (sent, downloaded: its program must finish it - Cancel is offered for every such row, transition audit
+        B1), and while a find pass or a chapter check runs (it holds the current program's client: B5). A filed record
+        does not hold a switch: its program deletes its copy whichever is chosen (C2)."""
+        from . import chapter_backend
+        from .contracts import DownloadStatus
+
         if backend not in CHAPTER_BACKENDS:
             raise BackendError(f"unknown chapter backend {backend!r}")
-        if backend == self.suwayomi.backend():
+        current = self.suwayomi.backend()
+        if backend == current:
             return
-        busy = [r for r in self.chapter_ledger.active()]
+        now = chapter_backend.name_of_backend(current)
+        busy = [r for r in self.chapter_ledger.active() if r.status in (DownloadStatus.SENT, DownloadStatus.DOWNLOADED)
+                and r.backend in (current, "")]
         if busy:
-            now = "the extension host" if self.suwayomi.builtin else "Suwayomi"
-            raise BackendError(f"{len(busy)} chapter download(s) are still in progress with {now}: switch once they "
-                               "are filed (or cancel them in the Download tab's In progress list)")
+            raise BackendError(f"{len(busy)} chapter download(s) are still on their way with {now}: switch once they "
+                               "are filed, or cancel them (Download tab > In progress: right-click the row > Cancel "
+                               "download...)")
+        running = passes_running(self.suwayomi.store)
+        if running:
+            raise BackendError(f"{running} is running with {now}: switch when it has finished")
         self.suwayomi.set_backend(backend)
         _log.info("Chapter downloads: now through %s", "the built-in extensions" if backend == CHAPTER_BACKEND_EXTENSIONS
                   else "Suwayomi")
@@ -337,6 +350,36 @@ class ExtensionsBackendMixin:
                               lambda h: h.set_preference(source_id, pref, value))
         _log.info("Extensions: source %s: %s set", source_id, pref.key)
         return out
+
+
+#: A chapter check the headless runner started longer ago than this is not counted as running (a crashed runner).
+CHECK_STALE_HOURS = 2
+
+
+def passes_running(db) -> str:
+    """What holds a chapter program's client now - "a find pass" or "a chapter check" (in this process, or the
+    container's runner: its find run not finished, its state file's running job) - else ''."""
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    from . import chapter_check, finder
+    from ..store.findings import FindingStore
+
+    if finder._PASS.locked() or finder._busy_elsewhere(FindingStore(db)):
+        return "a find pass"
+    if chapter_check._CHECK.locked():
+        return "a chapter check"
+    try:
+        from .. import paths
+        from ..headless.chapter_check_job import JOB_NAME
+        from ..headless.state import STATE_NAME
+
+        data = json.loads((paths.data_dir() / STATE_NAME).read_text(encoding="utf-8"))
+        since = datetime.fromisoformat(str(data["jobs"][JOB_NAME]["running_since"]).replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    since = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+    return "a chapter check" if datetime.now(timezone.utc) - since < timedelta(hours=CHECK_STALE_HOURS) else ""
 
 
 def _close(client) -> None:

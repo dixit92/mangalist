@@ -427,6 +427,7 @@ class MangaMatch:
     source: SuwayomiSource
     manga: SuwayomiManga
     how: str                                        # HOW_*
+    backend: str = ""                               # the program whose manga id it is ('' : not known)
 
     @property
     def confirmed(self) -> bool:
@@ -438,6 +439,7 @@ class FindResult:
     match: Optional[MangaMatch] = None              # confirmed (or stored): its chapters can be listed and sent
     candidates: List[MangaMatch] = field(default_factory=list)      # title matches waiting for the owner
     notes: List[str] = field(default_factory=list)  # what was looked at, for the panel ("MangaDex: no id linked")
+    reresolved: bool = False                        # the stored choice's manga was found again by its url (store it)
 
 
 def allowed_sources(installed: Sequence[SuwayomiSource], chosen: Optional[Sequence[str]],
@@ -528,23 +530,42 @@ def find_manga(client: ChapterClient, sources: Sequence[SuwayomiSource], *, mang
                titles: Sequence[str], stored: Optional[Mapping[str, object]] = None,
                title_search: bool = True) -> FindResult:
     """Find the series in Suwayomi (see the module docstring). *stored*: the series' stored choice (``source_id``,
-    ``manga_id``, ``manga_title``, ``how``). *title_search*: also search the other sources by title when no confirmed
-    match is found."""
+    ``manga_id``, ``manga_title``, ``manga_url``, ``how``). *title_search*: also search the other sources by title when
+    no confirmed match is found.
+
+    A stored choice without its manga id but with the manga's url (the extension host's database was replaced:
+    :mod:`mangalist.downloads.host_identity`) finds its manga again by that url when the program can register one
+    (``manga_by_url``; the host) - ``reresolved`` then asks the caller to store the new id."""
+    from .chapter_backend import backend_of
+
+    backend = backend_of(client)
     out = FindResult()
     by_id = {s.id: s for s in sources}
     stored = stored or {}
     sid, mid = str(stored.get("source_id") or ""), stored.get("manga_id")
+    url = str(stored.get("manga_url") or "")
     if sid in by_id and isinstance(mid, int) and stored.get("how") in (HOW_MANGADEX, HOW_CONFIRMED):
-        out.match = MangaMatch(by_id[sid], SuwayomiManga(id=mid, title=str(stored.get("manga_title") or ""), url="",
-                                                         source_id=sid), str(stored.get("how")))
+        out.match = MangaMatch(by_id[sid], SuwayomiManga(id=mid, title=str(stored.get("manga_title") or ""), url=url,
+                                                         source_id=sid), str(stored.get("how")), backend)
         return out
+    by_url = getattr(client, "manga_by_url", None)
+    if (sid in by_id and mid is None and url and callable(by_url)
+            and stored.get("how") in (HOW_MANGADEX, HOW_CONFIRMED)):
+        try:
+            manga = by_url(sid, url, str(stored.get("manga_title") or ""))
+            out.match = MangaMatch(by_id[sid], manga, str(stored.get("how")), backend)
+            out.reresolved = True
+            return out
+        except Exception as exc:  # noqa: BLE001 - not found again: the usual lookup below
+            _log.info("Chapters: the stored manga %s on %s could not be found again by its url (%s)", url,
+                      by_id[sid].display_name, type(exc).__name__)
     mangadex = [s for s in sources if s.is_mangadex]
     if mangadex_id and mangadex:
         for source in mangadex:
             found = [m for m in client.search(source.id, f"id:{mangadex_id}")
                      if m.url.rstrip("/").lower().endswith(mangadex_id.lower())]
             if found:
-                out.match = MangaMatch(source, found[0], HOW_MANGADEX)
+                out.match = MangaMatch(source, found[0], HOW_MANGADEX, backend)
                 return out
         out.notes.append("MangaDex has no manga with the MangaDex id MangaPixer links")
     elif mangadex:
@@ -554,9 +575,28 @@ def find_manga(client: ChapterClient, sources: Sequence[SuwayomiSource], *, mang
     return out
 
 
+def remember_match(settings, series_id: int, found: FindResult, stored: Mapping[str, object]) -> bool:
+    """Store a match the lookup found by itself - by the MangaDex id (a new or changed manga id), or found again by its
+    url (:attr:`FindResult.reresolved`) - as the series' choice of the program that answered (``match.backend``: never
+    the backend chosen at the time of writing, transition audit B5). True when stored."""
+    m = found.match
+    if m is None:
+        return False
+    if not (found.reresolved or (m.how == HOW_MANGADEX and stored.get("manga_id") != m.manga.id)):
+        return False
+    settings.set_series_choice(series_id, backend=m.backend or None, source_id=m.source.id, manga_id=int(m.manga.id),
+                               manga_title=m.manga.title or str(stored.get("manga_title") or "") or None,
+                               manga_url=m.manga.url or str(stored.get("manga_url") or "") or None, how=m.how,
+                               stale_manga_id=None)
+    return True
+
+
 def title_candidates(client: ChapterClient, sources: Sequence[SuwayomiSource], titles: Sequence[str]) -> List[MangaMatch]:
     """Title search results on *sources*, in source order: candidates the owner must confirm. A source that fails is
     skipped (logged); the others still answer."""
+    from .chapter_backend import backend_of
+
+    backend = backend_of(client)
     out: List[MangaMatch] = []
     queries = [t for t in dict.fromkeys(t.strip() for t in titles if t and t.strip())][:MAX_TITLE_QUERIES]
     for source in sources:
@@ -567,7 +607,7 @@ def title_candidates(client: ChapterClient, sources: Sequence[SuwayomiSource], t
                 _log.info("Chapters: %s search failed (%s)", source.display_name, type(exc).__name__)
                 break
             if found:
-                out.extend(MangaMatch(source, m, HOW_TITLE) for m in found[:MAX_CANDIDATES_PER_SOURCE])
+                out.extend(MangaMatch(source, m, HOW_TITLE, backend) for m in found[:MAX_CANDIDATES_PER_SOURCE])
                 break
     return out
 

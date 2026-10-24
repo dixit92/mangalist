@@ -360,7 +360,7 @@ def _gate(db, ctx, series: Sequence[Candidate], should_stop: Callable[[], bool],
 
 def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should_stop: Callable[[], bool],
            pause: float, sleep: Callable[[float], None], gate_args: Optional[Dict[str, Any]] = None) -> None:
-    from .finder import _chapter_client, _close, _Context
+    from .finder import _chapter_client, _close, _Context, _w
     from .finding import FindReport, TRIGGER_SCHEDULE
 
     store = FindingStore(db)
@@ -370,12 +370,12 @@ def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should
     try:
         client = _chapter_client(ctx)
         if client is None:                # (Suwayomi not answering counts as an error there)
-            report.not_checked = ctx.chapters_off or "Suwayomi is not available"
+            report.not_checked = ctx.chapters_off or _w(ctx, "Suwayomi is not available")
             return
         try:
             queue = list(client.queue())
         except Exception:  # noqa: BLE001 - a courtesy check, as in the chapters panel; the ledger guards the sends
-            _log.info("%s: Suwayomi's download queue could not be read", LABEL)
+            _log.info("%s: %s", LABEL, _w(ctx, "Suwayomi's download queue could not be read"))
             queue = []
         gate = _gate(db, ctx, series, should_stop, report, **(gate_args or {}))
         for i, cand in enumerate(series):
@@ -388,7 +388,7 @@ def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should
             try:
                 _check_one(ctx, report, cand, queue, gate)
             except _Stop:
-                report.lines.append("Suwayomi stopped answering; the rest waits for the next check")
+                report.lines.append(_w(ctx, "Suwayomi stopped answering; the rest waits for the next check"))
                 break
     finally:
         report.sent, report.waiting = ctx.report.sent, ctx.report.found
@@ -403,28 +403,31 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
 
     gate = gate if gate is not None else Gate.off(ctx.db)
 
+    from .chapter_backend import backend_of
+    from .chapters import remember_match
+    from .finder import _w
+
     sid, name = cand.series_id, cand.name
     suwayomi = ctx.backend.suwayomi
-    stored = suwayomi.series_choice(sid)
+    stored = suwayomi.series_choice(sid, backend_of(ctx.chapter_client))     # the program asked (audit B5)
     try:
         found = find_manga(ctx.chapter_client, ctx.sources or [], mangadex_id=cand.mangadex_id, titles=(),
                            stored=stored, title_search=False)
     except Exception as exc:  # noqa: BLE001 - MangaDex's id search failed: next time
         if not _suwayomi_up(ctx):
             ctx.report.errors += 1
-            _line(ctx, name, f"Suwayomi did not answer ({type(exc).__name__})")
+            _line(ctx, name, _w(ctx, f"Suwayomi did not answer ({type(exc).__name__})"))
             raise _Stop() from exc
         report.unreadable += 1
-        _log.info("%s: %s: Suwayomi's MangaDex search failed (%s); next time", LABEL, name, type(exc).__name__)
+        _log.info("%s: %s: %s; next time", LABEL, name, _w(ctx, f"Suwayomi's MangaDex search failed "
+                                                               f"({type(exc).__name__})"))
         return
     match = found.match
     if match is None:                   # the saved source is no longer allowed, or MangaDex lacks the linked id
         report.skipped[SKIP_NO_SOURCE] += 1
         _log.debug("%s: %s: no source to ask (%s)", LABEL, name, "; ".join(found.notes) or "none saved")
         return
-    if match.how == HOW_MANGADEX and stored.get("manga_id") != match.manga.id:
-        suwayomi.set_series_choice(sid, source_id=match.source.id, manga_id=match.manga.id,
-                                   manga_title=match.manga.title, how=HOW_MANGADEX)
+    remember_match(suwayomi, sid, found, stored)
     report.series_checked += 1
     if sid in gate.planned and match.source.is_mangadex:
         try:
@@ -445,7 +448,7 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
     except Exception as exc:  # noqa: BLE001 - the source failed (Cloudflare, taken down): next time
         if not _suwayomi_up(ctx):
             ctx.report.errors += 1
-            _line(ctx, name, f"Suwayomi did not answer ({type(exc).__name__})")
+            _line(ctx, name, _w(ctx, f"Suwayomi did not answer ({type(exc).__name__})"))
             raise _Stop() from exc
         report.unreadable += 1
         _log.info("%s: %s: %s manga %s could not be read (%s: %s); next time", LABEL, name,

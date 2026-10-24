@@ -652,28 +652,41 @@ def _chapter_client(ctx: _Context):
         return None
     if ctx.chapter_client is not None:
         return ctx.chapter_client
-    from .chapter_backend import wording
+    from .chapter_backend import is_builtin, wording
 
     settings = getattr(ctx.backend, "suwayomi", None)
     builtin = bool(getattr(settings, "builtin", False))
     ready = getattr(ctx.backend, "suwayomi_ready", None)
     if not callable(ready) or not ready():
         ctx.chapters_off = wording("Suwayomi is not set up", builtin)
-        _log.info("%s: chapters not searched: Suwayomi is not set up", ctx.who)
+        _log.info("%s: chapters not searched: %s", ctx.who, ctx.chapters_off)
         return None
     try:
         client = ctx.backend._chapter_client()
         ctx.sources = allowed_sources(list(client.sources()), ctx.backend.suwayomi.sources(),
                                       ctx.backend._source_languages())
+        if is_builtin(client):
+            from . import host_identity
+
+            host_identity.check(ctx.db, client)     # a replaced host database: its stored ids are found again (B4)
     except Exception as exc:  # noqa: BLE001 - Suwayomi down: chapters wait for the next pass
         ctx.chapters_off = wording(f"Suwayomi did not answer ({type(exc).__name__})", builtin)
         ctx.report.errors += 1
         ctx.report.lines.append(f"chapters not searched: {ctx.chapters_off}")
-        _log.warning("%s: chapters not searched: Suwayomi did not answer: %s: %s", ctx.who,
-                     type(exc).__name__, exc)
+        _log.warning("%s: chapters not searched: %s: %s", ctx.who, ctx.chapters_off, exc)
         return None
     ctx.chapter_client = client
     return client
+
+
+def _w(ctx: _Context, text: str) -> str:
+    """*text* (written for Suwayomi) worded for the program the pass asks (transition audit A5)."""
+    from .chapter_backend import is_builtin, wording
+
+    client = ctx.chapter_client
+    builtin = is_builtin(client) if client is not None else bool(getattr(getattr(ctx.backend, "suwayomi", None),
+                                                                         "builtin", False))
+    return wording(text, builtin) or text
 
 
 def _suwayomi_up(ctx: _Context) -> bool:
@@ -700,8 +713,11 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
     if client is None:
         return False
     missing = tuple(_numbers(v for e in entries for v in e.missing))
+    from .chapter_backend import backend_of
+    from .chapters import remember_match
+
     suwayomi = ctx.backend.suwayomi
-    stored = suwayomi.series_choice(sid)
+    stored = suwayomi.series_choice(sid, backend_of(client))   # the program the pass asks, whatever is chosen now (B5)
     existing = {(f.kind, f.pick_key): f for f in ctx.store.list(None, sid)}
     keep: Set[str] = set()
     try:
@@ -709,7 +725,7 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
                            stored=stored, title_search=False)
     except Exception as exc:  # noqa: BLE001 - MangaDex's id search failed: try again next pass
         ctx.report.errors += 1
-        _line(ctx, name, f"Suwayomi's MangaDex search failed ({type(exc).__name__})")
+        _line(ctx, name, _w(ctx, f"Suwayomi's MangaDex search failed ({type(exc).__name__})"))
         return False
     match = found.match
     if match is None:
@@ -721,16 +737,15 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
             _line(ctx, name, f"{_text(missing, volumes=False)} wait: {REASON_NO_SOURCE}")
         _retire_chapters(ctx, sid, keep)
         return True
-    if match.how == HOW_MANGADEX and stored.get("manga_id") != match.manga.id:
-        suwayomi.set_series_choice(sid, source_id=match.source.id, manga_id=match.manga.id,
-                                   manga_title=match.manga.title, how=HOW_MANGADEX)
+    remember_match(suwayomi, sid, found, stored)
     source_name = match.source.display_name
     try:
         fetched = client.chapters(match.manga.id)
     except Exception as exc:  # noqa: BLE001 - the saved manga cannot be fetched: dropped, unless Suwayomi is down
         if not _suwayomi_up(ctx):
             ctx.report.errors += 1
-            _line(ctx, name, f"Suwayomi did not answer ({type(exc).__name__}); chapters wait for the next pass")
+            _line(ctx, name, _w(ctx, f"Suwayomi did not answer ({type(exc).__name__}); chapters wait for the next "
+                                     "pass"))
             return False
         _log.info("Find pass %d: %s: %s manga %s cannot be fetched: %s: %s", ctx.run_id, name, source_name,
                   match.manga.id, type(exc).__name__, exc)
@@ -802,7 +817,8 @@ def chapter_pick(match, picks: Sequence[SuwayomiChapter], group: Optional[str], 
                  f"{_text(chosen, volumes=False)} from {source_name} ({group or 'no group'})", chosen, None,
                  {"type": PAYLOAD_SUWAYOMI, "source_id": match.source.id, "source_name": source_name,
                   "manga_id": int(match.manga.id), "manga_title": manga_title, "manga_url": match.manga.url,
-                  "how": match.how, "chapter_ids": ids, "group": group, **payload})
+                  "how": match.how, "chapter_ids": ids, "group": group, "backend": getattr(match, "backend", ""),
+                  **payload})
 
 
 def is_newer(finding) -> bool:
@@ -836,7 +852,7 @@ def _queued_numbers(ctx: _Context, client, chapters: Sequence[SuwayomiChapter], 
         return {str(by_id[q.chapter_id].number) for q in client.queue()
                 if q.chapter_id in by_id and to_decimal(by_id[q.chapter_id].number) in wanted}
     except Exception:  # noqa: BLE001 - a courtesy check, as in the chapters panel
-        _log.info("%s: Suwayomi's download queue could not be read", ctx.who)
+        _log.info("%s: %s", ctx.who, _w(ctx, "Suwayomi's download queue could not be read"))
         return set()
 
 
@@ -861,7 +877,7 @@ def _dropped(ctx: _Context, sid: int, name: str, match, missing: Tuple[str, ...]
     pick = _Pick(KIND_CHAPTERS, f"chapters:{match.source.id}:{key}",
                  title or f"{_text(missing, volumes=False)} (not on {source})", missing, None,
                  {"type": PAYLOAD_DROPPED, "source_id": match.source.id, "source_name": source,
-                  "manga_id": int(match.manga.id)})
+                  "manga_id": int(match.manga.id), "backend": getattr(match, "backend", "")})
     keep.add(pick.pick_key)
     if _settled(existing, pick.kind, pick.pick_key):
         return
@@ -893,7 +909,7 @@ def _send_chapters(ctx: _Context, sid: int, name: str, pick: _Pick, match, picks
     if not sent:
         if outcome.error:
             ctx.report.errors += 1
-            return f"Suwayomi did not take the download: {outcome.error}"
+            return _w(ctx, f"Suwayomi did not take the download: {outcome.error}")
         return outcome.text()
     _mark_sent(ctx, sid, pick, sent[0].id)
     if said is None:
@@ -1014,6 +1030,7 @@ def _send_nyaa_finding(store: FindingStore, backend, f, fills: Tuple[str, ...]) 
 
 def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str, ...]) -> str:
     from ..gui.downloads_backend import BackendError
+    from .chapter_backend import backend_of, name_of_backend, wording
     from .chapters import HOW_CONFIRMED, MangaMatch, ChapterSendRefused, chapter_placement_for, send_chapters
 
     p = f.payload
@@ -1021,18 +1038,33 @@ def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str,
         client = backend._chapter_client()
     except BackendError as exc:
         return f"Not sent: {exc}."
+    now = backend_of(client)
+    name = name_of_backend(now)
+    builtin = now != "suwayomi"
     try:
-        source = next((s for s in client.sources() if s.id == str(p.get("source_id"))), None)
-        if source is None:
-            return "Not sent: the series' source is not installed in Suwayomi any more."
-        try:
-            fetched = client.chapters(int(p["manga_id"]))
-        except Exception as exc:  # noqa: BLE001 - the manga is gone from the source
-            return _gone(store, f.id, f"{p.get('source_name') or source.display_name} no longer has the series "
-                                      f"({type(exc).__name__})")
-        ids = {int(i) for i in p.get("chapter_ids") or ()}
-        keys = {_key(v) for v in fills}
-        picks = [c for c in fetched.chapters if c.id in ids and _key(c.number) in keys]
+        foreign = _foreign_finding(backend, f, now)
+        if foreign:
+            # found by the other program before a switch: its manga and chapter ids are that program's - ask the
+            # program chosen now by the series' own choice, and pick the chapters by number (transition audit B3)
+            got = _relocate(db, backend, client, f, fills, now)
+            if isinstance(got, str):
+                return got
+            source, manga, how, fetched, picks = got
+        else:
+            source = next((s for s in client.sources() if s.id == str(p.get("source_id"))), None)
+            if source is None:
+                return wording("Not sent: the series' source is not installed in Suwayomi any more.", builtin)
+            try:
+                fetched = client.chapters(int(p["manga_id"]))
+            except Exception as exc:  # noqa: BLE001 - the manga is gone from the source
+                return _gone(store, f.id, f"{p.get('source_name') or source.display_name} no longer has the series "
+                                          f"({type(exc).__name__})")
+            ids = {int(i) for i in p.get("chapter_ids") or ()}
+            keys = {_key(v) for v in fills}
+            picks = [c for c in fetched.chapters if c.id in ids and _key(c.number) in keys]
+            manga = SuwayomiManga(id=int(p["manga_id"]), title=p.get("manga_title") or "",
+                                  url=p.get("manga_url") or "", source_id=source.id)
+            how = p.get("how") or HOW_CONFIRMED
         if not picks:
             return _gone(store, f.id, f"the chapters are not on {source.display_name} any more")
         try:
@@ -1042,9 +1074,7 @@ def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str,
         if not placement.target_dir:
             return (f"Not sent: where to file the chapters is not decided ({placement.reason}); choose a folder in "
                     "the series' chapters first.")
-        manga = SuwayomiManga(id=int(p["manga_id"]), title=p.get("manga_title") or "", url=p.get("manga_url") or "",
-                              source_id=source.id)
-        match = MangaMatch(source, manga, p.get("how") or HOW_CONFIRMED)
+        match = MangaMatch(source, manga, how, now)
         try:
             outcome = send_chapters(client, backend.chapter_ledger, f.series_id, match, picks, placement.target_dir,
                                     manga_title=fetched.manga.title or manga.title,
@@ -1053,7 +1083,7 @@ def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str,
             return f"Not sent: {exc}."
     except Exception as exc:  # noqa: BLE001 - Suwayomi down: the finding waits
         _log.warning("Finding %s: not sent: %s: %s", f.id, type(exc).__name__, exc)
-        return f"Not sent: Suwayomi could not be reached ({type(exc).__name__})."
+        return f"Not sent: {name} could not be reached ({type(exc).__name__})."
     finally:
         _close(client)
     sent = [r for r in outcome.records if r.status == DownloadStatus.SENT]
@@ -1063,8 +1093,48 @@ def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str,
         store.set_status(f.id, SENT, expect=(WAITING,), record_id=sent[0].id)
     except FindingConflict as exc:
         _log.info("Finding %s: sent, but not marked so: %s", f.id, exc)
-    _log.info("Finding %s: %d chapter(s) sent by the owner", f.id, len(sent))
+    _log.info("Finding %s: %d chapter(s) sent by the owner%s", f.id, len(sent),
+              " (found by the other program: looked up again)" if foreign else "")
     return outcome.text() + "."
+
+
+def _foreign_finding(backend, f, now: str) -> bool:
+    """Whether a chapter finding's ids are another program's than *now*: its payload says so, or - a finding from before
+    the payload named its program - its manga is not the series' choice in *now* (and one is stored)."""
+    said = str(f.payload.get("backend") or "")
+    if said:
+        return said != now
+    stored = backend.suwayomi.series_choice(f.series_id, now).get("manga_id")
+    return stored is not None and stored != f.payload.get("manga_id")
+
+
+def _relocate(db, backend, client, f, fills: Tuple[str, ...], now: str):
+    """The finding's chapters through the series' choice in the program chosen now: ``(source, manga, how, fetched,
+    picks)``, or why it is not sent (a sentence; the finding keeps waiting)."""
+    from .chapter_backend import name_of_backend
+    from .chapters import allowed_sources, find_manga, group_key, mangadex_id_for, remember_match
+
+    name = name_of_backend(now)
+    stored = backend.suwayomi.series_choice(f.series_id, now)
+    sources = allowed_sources(list(client.sources()), backend.suwayomi.sources(), backend._source_languages())
+    found = find_manga(client, sources, mangadex_id=mangadex_id_for(db, f.series_id), titles=(), stored=stored,
+                       title_search=False)
+    if found.match is None:
+        return (f"Not sent: this was found before the chapter downloads moved to {name}, and the series has no source "
+                f"in {name} yet: open its chapters to pick one (the next find pass also looks again).")
+    remember_match(backend.suwayomi, f.series_id, found, stored)
+    match = found.match
+    fetched = client.chapters(int(match.manga.id))
+    keys = {_key(v) for v in fills}
+    want = group_key(f.payload.get("group"))
+    picks = []
+    for key in sorted(k for k in keys if k is not None):
+        same = [c for c in fetched.chapters if _key(c.number) == key]
+        if same:
+            picks.append(next((c for c in same if group_key(c.scanlator) == want), same[0]))
+    _log.info("Finding %s: found by the other program; looked up again in %s: %s manga %s, %d of %d chapter(s)",
+              f.id, name, match.source.display_name, match.manga.id, len(picks), len(keys))
+    return match.source, match.manga, match.how, fetched, picks
 
 
 def _close(client) -> None:
