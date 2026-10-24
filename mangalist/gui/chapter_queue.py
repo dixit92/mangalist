@@ -42,8 +42,7 @@ STATE_TEXT = {"QUEUED": "Waiting", "DOWNLOADING": "Downloading", "FINISHED": "Fi
 #: The records a queue entry can belong to: the chapter is not yet filed (a filed record's chapter has left the queue).
 _OPEN = (DownloadStatus.SENT, DownloadStatus.DOWNLOADED, DownloadStatus.QUEUED)
 TITLE = "Chapter download queue"
-BAR_TIP = ("The chapters {program} has queued, with their state, progress and tries - what its own web page showed "
-           "(read from {program} now)")
+BAR_TIP = "The download queue as Suwayomi reports it now: each chapter's state, progress and tries"
 LEAD = ("The chapters Suwayomi has queued, as it reports them now. Finished chapters leave the queue when MangaList has "
         "filed them. A chapter that failed after its tries can be retried here or in In progress; MangaList also "
         "retries by itself every 6 hours.")
@@ -215,13 +214,15 @@ class ChapterQueueDialog(QDialog):
         self._calls.append(call)
         return call
 
-    def load(self) -> bool:
-        """Read the queue, MangaList's records and the series names (off the UI thread)."""
+    def load(self, keep_status: bool = False) -> bool:
+        """Read the queue, MangaList's records and the series names (off the UI thread). *keep_status*: after a retry or
+        a cancel, whose result stays on the status line."""
         backend = self._backend
         self._apply_wording()
         self.btn_reload.setEnabled(False)
-        set_tone(self.status_label, "")
-        self.status_label.setText(self._w("Asking Suwayomi for its queue..."))
+        if not keep_status:
+            set_tone(self.status_label, "")
+            self.status_label.setText(self._w("Asking Suwayomi for its queue..."))
 
         def run() -> QueueView:
             items = fetch_queue(backend)
@@ -246,7 +247,8 @@ class ChapterQueueDialog(QDialog):
     def _show(self, view: QueueView) -> None:
         self.btn_reload.setEnabled(True)
         self.rows = list(view.rows)
-        self.status_label.setText("")
+        if self.status_label.property("tone") != "ok":          # the result of a retry / cancel stays until the next action
+            self.status_label.setText("")
         self.summary_label.setText(summary_text(self.rows))
         self.table.setRowCount(len(self.rows))
         for r, row in enumerate(self.rows):
@@ -303,7 +305,7 @@ class ChapterQueueDialog(QDialog):
         set_tone(self.status_label, "ok")
         self.status_label.setText(self._w(done.format(n=n, s="" if n == 1 else "s")))
         self.changed.emit()
-        self.load()
+        self.load(keep_status=True)
 
     def _failed_action(self, message: str) -> None:
         set_tone(self.status_label, "bad")
@@ -339,7 +341,7 @@ class ChapterQueueBar(QWidget):
     def refresh(self) -> None:
         """Visible while the backend can read the queue; the tooltip names the program in force."""
         self.setVisible(queue_available(self._backend))
-        self.btn_open.setToolTip(BAR_TIP.format(program=reword(self._backend, "Suwayomi")))
+        self.btn_open.setToolTip(reword(self._backend, BAR_TIP) or "")
 
     def open_queue(self) -> Optional[ChapterQueueDialog]:
         if not queue_available(self._backend):
