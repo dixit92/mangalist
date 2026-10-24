@@ -433,6 +433,8 @@ class _Pass:
             except OSError:
                 size = None
             if size is None:
+                if self._held(s.dst, plan_id):
+                    continue        # an upgrade replaced it (the owner's choice): the torrent's copy is not needed
                 return f"{name} is no longer in the library"
             if size != s.src_size:
                 return f"{name} in the library is not the filed size"
@@ -443,11 +445,18 @@ class _Pass:
     def _current_path(self, path: str, after_plan: int) -> str:
         """Where a file filed at *path* is now: followed through the moves the journal applied after plan *after_plan*
         (the renamer's renames to the scheme, their undos) - see :class:`~mangalist.store.journal.MoveFollower`."""
+        return self._follower().current_path(path, after_plan)
+
+    def _held(self, path: str, after_plan: int) -> bool:
+        """Whether the file filed at *path* was later replaced by an upgrade (held, perhaps since emptied)."""
+        return self._follower().held(path, after_plan)
+
+    def _follower(self):
         if self._moves is None:
             from ..store.journal import MoveFollower
 
             self._moves = MoveFollower(self.journal)
-        return self._moves.current_path(path, after_plan)
+        return self._moves
 
     def _library_problem(self, rec: DownloadRecord, t: TorrentInfo) -> Optional[str]:
         """Why the torrent may not be deleted yet (None: every filed file verified, its data outside the library)."""

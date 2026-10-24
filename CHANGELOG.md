@@ -11,6 +11,18 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 - **More extension repositories.** Built-in extensions > Edit lists the extension repositories (keiyoushi's at first) with **Add repository** and **Remove** buttons. A new repository is read and checked before it is added; one that is not a Mihon extension repository, or gives no signing key, is refused. The Extensions page lists every repository's extensions with a Repository column and filter. Each repository's own signing key is checked at every install and update, and an extension installed from one repository updates only from that one. Removing a repository keeps the extensions installed from it; they just get no more updates.
 - **Extension updates: a notice, and Auto-update if you want it.** A new scheduled task, **Check for extension updates** (daily by default), asks which installed extensions have a newer version. The Built-in extensions card and the Download tab say so ("2 extension updates", with **Open Extensions**), and the app also checks at start when the last check is old. **Update extensions automatically** (Built-in extensions > Edit, off by default) installs them during that task; the notice then says what was updated, and an update that fails keeps the old version and says why. An extension is never updated while one of its chapters is downloading; it waits for the next check.
 
+## [2026.10.55] - 2026-10-22
+
+The fifty-fourth MangaList release (testing build): a finished torrent whose volume was replaced by a better copy is removed from qBittorrent.
+
+- **Replaced volumes no longer keep their torrent.** When a volume a torrent filed was later replaced by a better copy (it went to the holding folder), MangaList kept looking for it in the library and never removed the finished torrent from qBittorrent - also after the holding folder was emptied and the series folder renamed. Such a volume now counts as handled: the torrent and its downloaded copy are removed at its seed goal (or with Remove now). A filed volume that is really missing still keeps its torrent.
+
+## [2026.10.54] - 2026-10-22
+
+The fifty-third MangaList release (testing build): alias search - series found by their other titles and by their creators.
+
+- **The List's filter finds a series by any of its other titles, and by its creator.** Type any alternative title of the series' MangaUpdates record (MangaPixer's, else MangaList's own match; three letters or more) and the series is listed with **aka <that title>** under its title, as MangaPixer's search does. **creator:Urasawa** or **creator:"Naoki Urasawa"** (add words to narrow it further) lists the series of a writer or artist, also by their other names (pen names, the name in Japanese script); the line under the title says who matched. The Download tab's **To get** filter does the same. For a series MangaPixer knows, the creators and their other names come from MangaPixer's export (`record.creators`; MangaList asks MangaUpdates nothing for those series, and an older MangaPixer that does not export them gives them none - they are still found by their titles). For a series MangaPixer does not know, they are read from MangaUpdates in the background when a MangaUpdates lookup ends (the automatic one after a scan, or **Look up**): one request per series and one per author, a second apart, kept for 180 days. Series with no other titles known are never hidden by this.
+
 ## [2026.10.53] - 2026-10-20
 
 The fifty-second MangaList release (testing build): chapter downloads Suwayomi gave up on can be retried.

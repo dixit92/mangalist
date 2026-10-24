@@ -64,6 +64,10 @@ class MuWorker(QObject):
     def abort(self) -> None:
         self._abort = True
 
+    @property
+    def aborted(self) -> bool:
+        return self._abort
+
     def run(self) -> None:
         last_started: Optional[tuple] = None
         total = len(self._entries)

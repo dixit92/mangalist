@@ -308,6 +308,9 @@ class SeriesKnowledge:
     title: Optional[str] = None
     english_title: Optional[str] = None         # for store searches; may be None
     alt_titles: Tuple[str, ...] = ()
+    # The record's creators as MangaPixer exports them (``record.creators``: name + other names; None = this MangaPixer
+    # does not export them, () = it does and the record has none). The own matcher's knowledge never has them.
+    creators: Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]] = None
     series_type: Optional[str] = None           # "Manga", "Manhwa", ...
     # origin
     origin_status: Optional[str] = None         # "Ongoing" | "Complete" | ...
@@ -579,6 +582,7 @@ def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str
         title=_s(rec.get("title")),
         english_title=english_title,
         alt_titles=tuple(t for t in (_s(a) for a in rec.get("altTitles") or ()) if t),
+        creators=_creators_from_mangapixer(rec.get("creators")),
         series_type=_s(rec.get("type")),
         origin_status=_s(rec.get("originStatus")),
         origin_volumes=to_decimal(rec.get("originVolumes")),
@@ -605,6 +609,20 @@ def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str
         fetched_at=_s(rec.get("fetchedAt")) or _s(refresh.get("lastFetchedAt")),
         next_due_at=_s(refresh.get("nextDueAt")),
     )
+
+
+def _creators_from_mangapixer(raw: Any) -> Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]]:
+    """``record.creators`` (``[{name, role, muAuthorId, otherNames}]``, MangaPixer's export since the creators field):
+    ``(name, other names)`` for each creator; None when the field is absent (an older MangaPixer), () when it is empty."""
+    if not isinstance(raw, (list, tuple)):
+        return None
+    out = []
+    for c in raw:
+        name = _s(c.get("name")) if isinstance(c, Mapping) else None
+        if name:
+            others = c.get("otherNames")
+            out.append((name, tuple(o for o in (_s(x) for x in others) if o) if isinstance(others, (list, tuple)) else ()))
+    return tuple(out)
 
 
 # --- own matcher (MangaEntry + cached MangaUpdates / AniList data) -> knowledge ------------------

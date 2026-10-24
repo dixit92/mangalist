@@ -75,8 +75,10 @@ from .background import describe_error, start_call
 from .chips import ChipButton, FlowLayout
 from .chapters_panel import ChaptersPanel
 from .automation_rules import bulk_find_label, by_series, has_automation, needs_source, report_text, series_line
+from ..alias_search import SEARCH_PLACEHOLDER, SEARCH_TIP, CreatorIndex, hint_text
 from .download_rules import (
     CHAPTER_CHIPS,
+    filter_why,
     GROUP_TITLES,
     NOT_NYAA_REASONS,
     SEARCH_FAILED,
@@ -231,6 +233,7 @@ class DownloadTab(QWidget):
         self._replaced_call = None
         self._retire_call = None                       # retiring filled findings (retire_stale_findings)
         self._wanted: List[WantedSeries] = []
+        self._creators = CreatorIndex()               # the creators the filter's ``creator:`` looks in
         self._entries: Dict[str, List[WantedSeries]] = {}
         self._by_folder: Dict[str, WantedSeries] = {}
         self._series_ids: Dict[str, Optional[int]] = {}
@@ -315,7 +318,8 @@ class DownloadTab(QWidget):
         self.count_label = label("0 series", "muted")
         hv.addLayout(hbox(label("To get", "h1"), None, self.count_label))
         self.filter_edit = QLineEdit()
-        self.filter_edit.setPlaceholderText("Filter")
+        self.filter_edit.setPlaceholderText(SEARCH_PLACEHOLDER)
+        self.filter_edit.setToolTip(SEARCH_TIP)
         self.filter_edit.setClearButtonEnabled(True)
         self.filter_edit.setAccessibleName("Filter series to get")
         self.filter_edit.textChanged.connect(self._rebuild)
@@ -484,6 +488,12 @@ class DownloadTab(QWidget):
 
     # --- the shell's data -------------------------------------------------------------------------------
 
+    def set_creator_index(self, index: CreatorIndex) -> None:
+        """The creators the filter's ``creator:`` looks in (the shell sets it once read, and again when more arrived)."""
+        self._creators = index
+        if self.filter_edit.text().strip():
+            self._rebuild()
+
     def set_wanted(self, series: Sequence[WantedSeries]) -> None:
         """The "To get" list (the shell sends it after every scan / sync). Results of an earlier search are kept for a
         series whose wanted volumes did not change."""
@@ -542,7 +552,8 @@ class DownloadTab(QWidget):
         self._items.clear()
         self._rows.clear()
         self._header_items.clear()
-        groups = grouped(self._wanted, self.filter_edit.text(), self.sort_key())
+        text = self.filter_edit.text()
+        groups = grouped(self._wanted, text, self.sort_key(), self._creators)
         counts = {g: len(items) for g, items in groups}
         found = self._found_by_series()
         counts[GROUP_FOUND] = len(self._findings)
@@ -569,7 +580,8 @@ class DownloadTab(QWidget):
                 row = QTreeWidgetItem(self.tree)
                 row.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
                 row.setText(0, series.title)
-                row.setData(0, ROLE_SUB, series.gaps)
+                why = filter_why(series, text, self._creators) if text.strip() else ()
+                row.setData(0, ROLE_SUB, f"{series.gaps}  ·  {hint_text(why)}" if why else series.gaps)
                 row.setData(0, ROLE_FOLDER, series.folder)
                 row.setData(0, ROLE_GROUP, group)
                 row.setCheckState(0, Qt.CheckState.Checked if series.folder in self._checked else Qt.CheckState.Unchecked)
