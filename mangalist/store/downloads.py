@@ -816,6 +816,46 @@ class SuwayomiSettings:
         data.pop("group_cleared", None)
         return data
 
+    # --- the carry-over from Suwayomi to the built-in extensions (mangalist.services.extensions.carry_over) -------
+
+    def suwayomi_series_choices(self) -> Dict[int, Dict[str, Any]]:
+        """Every series' stored Suwayomi choice (``suwayomi.series.<id>``), whichever backend is chosen: series id ->
+        the stored dict (forgotten / empty ones left out)."""
+        return self._choices(META_SUWAYOMI_SERIES)
+
+    def extensions_series_choices(self) -> Dict[int, Dict[str, Any]]:
+        """Every series' stored choice on the extension host (``extensions.series.<id>``), as stored."""
+        return self._choices(META_EXTENSIONS_SERIES)
+
+    def _choices(self, prefix: str) -> Dict[int, Dict[str, Any]]:
+        out: Dict[int, Dict[str, Any]] = {}
+        with self.store.connect() as con:
+            rows = con.execute("SELECT key, value FROM meta WHERE substr(key, 1, ?) = ? AND value IS NOT NULL",
+                               (len(prefix), prefix)).fetchall()
+        for key, value in rows:
+            tail = key[len(prefix):]
+            data = _loads(value, {})
+            if tail.isdigit() and data:
+                out[int(tail)] = data
+        return out
+
+    def carry_series_choice(self, series_id: int, choice: Dict[str, Any]) -> bool:
+        """Write *choice* as the series' choice on the extension host - only when it has no manga there yet (never
+        overwrites: keys already stored, e.g. a scanlation group picked on the host, are kept). One statement, so a
+        choice made at the same moment elsewhere wins. True when written."""
+        key = f"{META_EXTENSIONS_SERIES}{int(series_id)}"
+        value = json.dumps(dict(choice), ensure_ascii=False)
+        with self.store.connect() as con:
+            cur = con.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = "
+                "CASE WHEN meta.value IS NULL OR NOT json_valid(meta.value) THEN excluded.value "
+                "WHEN json_type(meta.value) = 'object' THEN json_patch(excluded.value, meta.value) "
+                "ELSE excluded.value END "
+                "WHERE CASE WHEN meta.value IS NULL OR NOT json_valid(meta.value) THEN 1 "
+                "WHEN json_type(meta.value) != 'object' THEN 1 "
+                "ELSE json_extract(meta.value, '$.manga_id') IS NULL END", (key, value))
+            return cur.rowcount > 0
+
     def set_series_choice(self, series_id: int, **changes: Any) -> Dict[str, Any]:
         """Merge *changes* into the series' choices (a value of None forgets that key); the stored result."""
         key = self._series_key(series_id)

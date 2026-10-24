@@ -9,6 +9,8 @@ no login). Source ids are 64-bit numbers and travel as strings. Endpoints (``ext
 - ``GET /extensions``; ``POST /extensions/install {pkg, repo?, format: jar|apk}``; ``POST /extensions/update {pkg,
   waitSeconds?}`` (only from the repository it was installed from; HTTP 409 while one of its sources downloads a
   chapter); ``POST /extensions/uninstall {pkg}``
+- ``POST /compat/manga {sourceId, url, title}``: the host's manga id for a source's manga (get-or-create; the
+  carry-over from Suwayomi) - the rest of ``/compat`` is :mod:`.compat`'s
 - ``GET /sources``; ``GET /sources/{id}/search?q=&page=``, ``/popular?page=``, ``/latest?page=``
 - ``POST /sources/{id}/manga {url, title}``, ``/chapters {url, title}``, ``/pages {url}`` (``?resolve=true``),
   ``/image {index, url, imageUrl}`` (the image's bytes)
@@ -366,6 +368,15 @@ class ExtensionHostClient:
         if not isinstance(items, list):
             return self.preferences(source_id)
         return [_preference(d, i) for i, d in enumerate(items) if isinstance(d, Mapping)]
+
+    def register_manga(self, source_id: str, url: str, title: str = "") -> Dict[str, Any]:
+        """``POST /compat/manga``: the host's manga for (*source_id*, *url*), made now when it never saw it (the
+        carry-over from Suwayomi); ``{id, title, url, sourceId, inLibrary}``. :class:`NotFound` when the source is not
+        installed."""
+        got = self._call("POST", "/compat/manga", {"sourceId": str(source_id), "url": url, "title": title or ""})
+        if not isinstance(got, Mapping) or not isinstance(got.get("id"), int):
+            raise ExtensionHostError("the extension host's answer to POST /compat/manga has no manga id")
+        return dict(got)
 
     # --- one source -----------------------------------------------------------------------------------------------
 

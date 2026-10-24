@@ -123,6 +123,8 @@ class FakeHost:
              "defaultValue": True, "currentValue": None},
         ]}
         self.requests: List[Tuple[str, str]] = []
+        self.registered: List[Tuple[str, str]] = []         # POST /compat/manga calls (source id, url)
+        self.install_errors: Dict[str, Tuple[int, str]] = {}    # pkg -> (HTTP status, message) its install answers
         self._server: Optional[ThreadingHTTPServer] = None
         self._worker: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -323,6 +325,9 @@ class FakeHost:
             entry = next((e for e in self._listed() if e.pkg == pkg and (not repo or e.repo == repo)), None)
             if entry is None:
                 raise HttpError(404, f"no extension {pkg} in the repository")
+            if pkg in self.install_errors:
+                status, message = self.install_errors[pkg]
+                raise HttpError(status, message, "SignatureException")
             if pkg in self.installed and self.installed_from.get(pkg, entry.repo) != entry.repo:
                 raise HttpError(409, f"{pkg} is installed from another repository; uninstall it first", "HttpError")
             self.installed[entry.pkg] = entry.version
@@ -391,6 +396,21 @@ class FakeHost:
                                                             "title": m.title, "inLibrary": False, "fake": m}
                     found.append(self._manga_json(self.manga_ids[key]))
             return 200, {"mangas": found, "hasNextPage": False}
+        if method == "POST" and path == "/manga":           # get-or-create by (source, url): the carry-over
+            if not str(body.get("sourceId") or "").strip():
+                raise HttpError(400, "give sourceId (the source's id, a string)")
+            if not str(body.get("url") or "").strip():
+                raise HttpError(400, "give url (the source's own path for the manga)")
+            source = self._source(body.get("sourceId"))
+            self.registered.append((source["id"], str(body["url"])))
+            key = (source["id"], str(body["url"]))
+            if key not in self.manga_ids:
+                fake = next((m for m in self.catalog.get(source["id"], []) if m.url == key[1]), None)
+                self.manga_ids[key] = len(self.manga_ids) + 1
+                self.mangas[self.manga_ids[key]] = {"sourceId": source["id"], "url": key[1],
+                                                    "title": str(body.get("title") or ""), "inLibrary": False,
+                                                    "fake": fake or FakeManga(key[1], str(body.get("title") or ""))}
+            return 200, self._manga_json(self.manga_ids[key])
         if len(parts) == 3 and parts[0] == "manga" and parts[2] in ("chapters", "library"):
             mid = int(parts[1])
             if mid not in self.mangas:
