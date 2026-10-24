@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import add_series as core
+from ..downloads.chapter_backend import wording
 from .background import BackgroundCall, start_call
 from .download_style import FONT_SANS, apply_style, set_tone
 from .download_widgets import button, card, hbox, label, vbox
@@ -66,6 +67,15 @@ class LiveBackend:
 
     def find_source(self, mangadex_id: str) -> core.SourceLookup:
         return core.find_mangadex_source(self.db, mangadex_id)
+
+    def chapter_builtin(self) -> bool:
+        """The chapters come through the built-in extensions (the texts then name the extension host, not Suwayomi)."""
+        from ..store.downloads import SuwayomiSettings
+
+        try:
+            return bool(SuwayomiSettings(self.db).builtin)
+        except Exception:  # noqa: BLE001 - a wording only
+            return False
 
     def existing(self, mu_id: Optional[int]) -> List[str]:
         return core.existing_folders_for(mu_id)
@@ -336,11 +346,20 @@ class AddSeriesDialog(QDialog):
         self.form_box.setVisible(True)
         self._check_name()
         if info.mangadex_id:
-            self.series_source.setText("Asking Suwayomi for the chapters' source...")
+            self.series_source.setText(self._w("Asking Suwayomi for the chapters' source..."))
             mdx = info.mangadex_id
             self._run(lambda: self.backend.find_source(mdx), lambda found: self._source_found(info, found))
         else:
-            self.series_source.setText("The chapters' source is found when you first open them (Suwayomi).")
+            self.series_source.setText(self._w("The chapters' source is found when you first open them (Suwayomi)."))
+
+    def _w(self, text: str) -> str:
+        """*text*, written for Suwayomi, in the words of the chapter backend in force (transition fixes A4)."""
+        asker = getattr(self.backend, "chapter_builtin", None)
+        try:
+            builtin = bool(asker()) if callable(asker) else False
+        except Exception:  # noqa: BLE001 - a wording only
+            builtin = False
+        return wording(text, builtin) or ""
 
     def _source_found(self, info: core.SeriesInfo, found: core.SourceLookup) -> None:
         if info is not self.info:

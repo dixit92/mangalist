@@ -17,11 +17,14 @@ the tooltip). Nothing else changes: no file is touched, a torrent still in qBitt
 against the download budget. A merged chapter row dismisses every chapter record it shows. It does not ask first (it
 changes no download); the status line says what was dismissed.
 
-**Stuck chapter downloads** (owner, 2026-10-20: "I can't manually retry this"): a chapter download Suwayomi gave up on
-(:mod:`mangalist.downloads.chapter_retry`; MangaList also retries it by itself every 6 h, up to 3 times) offers "Retry in
-Suwayomi" and "Cancel download..." in its row menu, and a line under the list names every such row with Retry and
-Cancel... buttons - reachable by tap too (the iPad, touch UX backlog). Retry puts the chapters back in Suwayomi's queue;
-Cancel (asked first) takes them out of it and marks the records cancelled.
+**Stuck chapter downloads** (owner, 2026-10-20: "I can't manually retry this"): a chapter download its program gave up
+on (:mod:`mangalist.downloads.chapter_retry`; MangaList also retries it by itself every 6 h, up to 3 times) offers "Retry
+in <program>" and "Cancel download..." in its row menu, and a line under the list names every such row with Retry and
+Cancel... buttons - reachable by tap too (the iPad, touch UX backlog). Retry puts the chapters back in their program's
+queue; Cancel (asked first) takes them out of it and marks the records cancelled. Since the transition fixes
+(2026-10-24, audit B1 / A3): a row is stuck by the state the arrivals pass saw (never by its note's words), every chapter
+download still on its way offers Cancel (the switch guard tells the owner to cancel them), and every text names the
+row's own program (Suwayomi or the extension host) when it is shown.
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import QMenu, QMessageBox, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
 
 from ..downloads.budget import BudgetState, gb_text
-from ..downloads.chapter_retry import is_stuck
+from ..downloads.chapter_retry import can_cancel, is_stuck
 from ..downloads.contracts import DownloadRecord, DownloadStatus
 from .background import BackgroundCall, start_call
 from .download_rules import badge_kind, in_progress, merge_batches, next_check_text, when_text
@@ -42,7 +45,7 @@ from .download_style import set_tone
 from .download_widgets import ElidedLabel, button, flat_table, hbox, label, pill
 from .downloads_backend import DownloadsBackend
 from .tables import cell, resizable_columns
-from .volumes_target import status_parts, status_tooltip
+from .volumes_target import chapter_words, status_parts, status_tooltip
 
 _log = logging.getLogger(__name__)
 
@@ -78,6 +81,7 @@ QUEUE_ACTIONS = {ACT_SEND_NOW: "send_queued_now", ACT_TO_FRONT: "move_to_front",
 ACT_DISMISS = "Dismiss"
 ACT_RETRY = "Retry in Suwayomi"
 ACT_CANCEL = "Cancel download…"
+#: Written for Suwayomi; shown worded for each row's program (:func:`~.volumes_target.chapter_words`).
 RETRY_TIP = ("Put the chapters back in Suwayomi's download queue now (Suwayomi gave up after its own tries; MangaList "
              "also retries them by itself every 6 hours, up to 3 times)")
 CANCEL_TIP = ("Take the chapters out of Suwayomi's download queue and out of In progress (marked cancelled, under Show "
@@ -138,11 +142,12 @@ class DownloadsList(QWidget):
         # Owner, 2026-10-09: "These labels need to be more clear" - one re-reads MangaList's own list, the other asks
         # qBittorrent; neither talks to MangaPixer.
         self.btn_refresh = button("Reload list", link=True)
-        self.btn_refresh.setToolTip("Show the latest saved state of these downloads (asks neither qBittorrent, Suwayomi "
-                                    "nor MangaPixer)")
+        self.btn_refresh.setToolTip("Show the latest saved state of these downloads (asks neither qBittorrent, the "
+                                    "chapter downloads' program nor MangaPixer)")
         self.btn_refresh.clicked.connect(self.refresh)
         # owner, 2026-10-10: "Check downloads now is misleading since we have another provider" - it asks Suwayomi too
-        self.btn_check = button("Check downloads now", tip="Ask qBittorrent and Suwayomi now: file finished downloads, "
+        self.btn_check = button("Check downloads now", tip="Ask qBittorrent and the chapter downloads' program (Suwayomi "
+                                                            "or the built-in extensions) now: file finished downloads, "
                                                             "remove completed torrents and hand queued torrents over "
                                                             "while they fit the download budget - the same check that "
                                                             "runs every hour on its own")
@@ -286,8 +291,10 @@ class DownloadsList(QWidget):
             return
         names = ", ".join(f"{self.name_of(r)} ({r.title})" for r in rows[:3]) + (", ..." if len(rows) > 3 else "")
         what = "a chapter download" if len(rows) == 1 else f"{len(rows)} chapter downloads"
-        self.stuck_label.setText(f"Suwayomi gave up on {what}: {names}")
-        self.stuck_label.setToolTip("\n".join(r.error or "" for r in rows))
+        programs = {r.backend for r in rows}
+        who = chapter_words(rows[0], "Suwayomi") if len(programs) == 1 else "Their program"
+        self.stuck_label.setText(f"{who} gave up on {what}: {names}")
+        self.stuck_label.setToolTip("\n".join(chapter_words(r, r.error or "") for r in rows))
 
     def _on_error(self, message: str) -> None:
         set_tone(self.status_label, "bad")
@@ -369,8 +376,8 @@ class DownloadsList(QWidget):
         if record.status == DownloadStatus.FAILED:
             self._failed_menu(record, pos)
             return
-        if record.is_chapters:              # a chapter download (Suwayomi): no torrent to remove, nothing queued
-            if is_stuck(record):
+        if record.is_chapters:              # a chapter download: no torrent to remove, nothing queued
+            if can_cancel(record):          # on its way: Cancel always, Retry when its program gave up (audit B1)
                 self._stuck_menu(record, pos)
             return
         if record.status == DownloadStatus.QUEUED:
@@ -463,12 +470,15 @@ class DownloadsList(QWidget):
 
     def _stuck_menu(self, record: DownloadRecord, pos: QPoint) -> None:
         menu = QMenu(self.table)
-        retry = menu.addAction(ACT_RETRY)
-        retry.setToolTip(RETRY_TIP)
+        retry = menu.addAction(chapter_words(record, ACT_RETRY))
+        retry.setToolTip(chapter_words(record, RETRY_TIP) if is_stuck(record) else
+                         chapter_words(record, "Only a chapter Suwayomi gave up on can be retried; this one is still "
+                                               "queued or downloading there"))
         cancel = menu.addAction(ACT_CANCEL)
-        cancel.setToolTip(CANCEL_TIP)
+        cancel.setToolTip(chapter_words(record, CANCEL_TIP))
         for act, name in ((retry, "retry_chapter_downloads"), (cancel, "cancel_chapter_downloads")):
             act.setEnabled(self._call is None and callable(getattr(self._backend, name, None)))
+        retry.setEnabled(retry.isEnabled() and is_stuck(record))
         menu.setToolTipsVisible(True)
         chosen = self._exec_menu(menu, self.table.viewport().mapToGlobal(pos))
         if chosen is retry:
@@ -479,12 +489,14 @@ class DownloadsList(QWidget):
     def retry_stuck(self, rows: Optional[Sequence[DownloadRecord]] = None) -> bool:
         """Retry stuck chapter downloads in Suwayomi (*rows*: shown rows; default every stuck row), off the UI thread;
         the list reloads after."""
-        return self._stuck_call("retry_chapter_downloads", list(rows if rows is not None else self.stuck_rows),
-                                "Retrying in Suwayomi...", "Retried", "Could not retry it")
+        rows = [r for r in (rows if rows is not None else self.stuck_rows) if is_stuck(r)]
+        busy = chapter_words(rows[0], "Retrying in Suwayomi...") if rows else "Retrying..."
+        return self._stuck_call("retry_chapter_downloads", rows, busy, "Retried", "Could not retry it")
 
     def cancel_stuck(self, rows: Optional[Sequence[DownloadRecord]] = None) -> bool:
-        """Cancel stuck chapter downloads (asked first), off the UI thread; the list reloads after."""
-        rows = [r for r in (rows if rows is not None else self.stuck_rows) if is_stuck(r)]
+        """Cancel chapter downloads still on their way - stuck or not (asked first), off the UI thread; the list reloads
+        after (transition audit B1: the switch guard's "cancel them" must always be possible)."""
+        rows = [r for r in (rows if rows is not None else self.stuck_rows) if can_cancel(r)]
         if not rows or self._call is not None or not self._confirm_cancel(rows):
             return False
         return self._stuck_call("cancel_chapter_downloads", rows, "Cancelling...", "Cancelled",
@@ -492,7 +504,7 @@ class DownloadsList(QWidget):
 
     def _stuck_call(self, name: str, rows: List[DownloadRecord], busy: str, done: str, failed: str) -> bool:
         fn = getattr(self._backend, name, None)
-        rows = [r for r in rows if is_stuck(r)]
+        rows = [r for r in rows if can_cancel(r)]
         if self._call is not None or not rows or not callable(fn):
             return False
         ids = [i for r in rows for i in members_of(r, self.records)]
@@ -518,7 +530,8 @@ class DownloadsList(QWidget):
     def _ask_cancel(self, rows: Sequence[DownloadRecord]) -> bool:
         names = "\n".join(f"- {self.name_of(r)}: {r.title}" for r in rows)
         box = QMessageBox(QMessageBox.Icon.Question, "Cancel these downloads?",
-                          f"Take these chapters out of Suwayomi's download queue and out of In progress?\n\n{names}"
+                          chapter_words(rows[0], "Take these chapters out of Suwayomi's download queue and out of In "
+                                                 "progress?") + f"\n\n{names}"
                           "\n\nNothing is deleted. A later check may find the chapters missing again.", parent=self)
         yes = box.addButton("Cancel downloads", QMessageBox.ButtonRole.DestructiveRole)
         no = box.addButton("Keep", QMessageBox.ButtonRole.RejectRole)

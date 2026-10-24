@@ -427,6 +427,7 @@ class MangaMatch:
     source: SuwayomiSource
     manga: SuwayomiManga
     how: str                                        # HOW_*
+    backend: str = ""                               # the program whose manga id it is ('' : not known)
 
     @property
     def confirmed(self) -> bool:
@@ -438,6 +439,7 @@ class FindResult:
     match: Optional[MangaMatch] = None              # confirmed (or stored): its chapters can be listed and sent
     candidates: List[MangaMatch] = field(default_factory=list)      # title matches waiting for the owner
     notes: List[str] = field(default_factory=list)  # what was looked at, for the panel ("MangaDex: no id linked")
+    reresolved: bool = False                        # the stored choice's manga was found again by its url (store it)
 
 
 def allowed_sources(installed: Sequence[SuwayomiSource], chosen: Optional[Sequence[str]],
@@ -528,23 +530,42 @@ def find_manga(client: ChapterClient, sources: Sequence[SuwayomiSource], *, mang
                titles: Sequence[str], stored: Optional[Mapping[str, object]] = None,
                title_search: bool = True) -> FindResult:
     """Find the series in Suwayomi (see the module docstring). *stored*: the series' stored choice (``source_id``,
-    ``manga_id``, ``manga_title``, ``how``). *title_search*: also search the other sources by title when no confirmed
-    match is found."""
+    ``manga_id``, ``manga_title``, ``manga_url``, ``how``). *title_search*: also search the other sources by title when
+    no confirmed match is found.
+
+    A stored choice without its manga id but with the manga's url (the extension host's database was replaced:
+    :mod:`mangalist.downloads.host_identity`) finds its manga again by that url when the program can register one
+    (``manga_by_url``; the host) - ``reresolved`` then asks the caller to store the new id."""
+    from .chapter_backend import backend_of
+
+    backend = backend_of(client)
     out = FindResult()
     by_id = {s.id: s for s in sources}
     stored = stored or {}
     sid, mid = str(stored.get("source_id") or ""), stored.get("manga_id")
+    url = str(stored.get("manga_url") or "")
     if sid in by_id and isinstance(mid, int) and stored.get("how") in (HOW_MANGADEX, HOW_CONFIRMED):
-        out.match = MangaMatch(by_id[sid], SuwayomiManga(id=mid, title=str(stored.get("manga_title") or ""), url="",
-                                                         source_id=sid), str(stored.get("how")))
+        out.match = MangaMatch(by_id[sid], SuwayomiManga(id=mid, title=str(stored.get("manga_title") or ""), url=url,
+                                                         source_id=sid), str(stored.get("how")), backend)
         return out
+    by_url = getattr(client, "manga_by_url", None)
+    if (sid in by_id and mid is None and url and callable(by_url)
+            and stored.get("how") in (HOW_MANGADEX, HOW_CONFIRMED)):
+        try:
+            manga = by_url(sid, url, str(stored.get("manga_title") or ""))
+            out.match = MangaMatch(by_id[sid], manga, str(stored.get("how")), backend)
+            out.reresolved = True
+            return out
+        except Exception as exc:  # noqa: BLE001 - not found again: the usual lookup below
+            _log.info("Chapters: the stored manga %s on %s could not be found again by its url (%s)", url,
+                      by_id[sid].display_name, type(exc).__name__)
     mangadex = [s for s in sources if s.is_mangadex]
     if mangadex_id and mangadex:
         for source in mangadex:
             found = [m for m in client.search(source.id, f"id:{mangadex_id}")
                      if m.url.rstrip("/").lower().endswith(mangadex_id.lower())]
             if found:
-                out.match = MangaMatch(source, found[0], HOW_MANGADEX)
+                out.match = MangaMatch(source, found[0], HOW_MANGADEX, backend)
                 return out
         out.notes.append("MangaDex has no manga with the MangaDex id MangaPixer links")
     elif mangadex:
@@ -554,9 +575,28 @@ def find_manga(client: ChapterClient, sources: Sequence[SuwayomiSource], *, mang
     return out
 
 
+def remember_match(settings, series_id: int, found: FindResult, stored: Mapping[str, object]) -> bool:
+    """Store a match the lookup found by itself - by the MangaDex id (a new or changed manga id), or found again by its
+    url (:attr:`FindResult.reresolved`) - as the series' choice of the program that answered (``match.backend``: never
+    the backend chosen at the time of writing, transition audit B5). True when stored."""
+    m = found.match
+    if m is None:
+        return False
+    if not (found.reresolved or (m.how == HOW_MANGADEX and stored.get("manga_id") != m.manga.id)):
+        return False
+    settings.set_series_choice(series_id, backend=m.backend or None, source_id=m.source.id, manga_id=int(m.manga.id),
+                               manga_title=m.manga.title or str(stored.get("manga_title") or "") or None,
+                               manga_url=m.manga.url or str(stored.get("manga_url") or "") or None, how=m.how,
+                               stale_manga_id=None)
+    return True
+
+
 def title_candidates(client: ChapterClient, sources: Sequence[SuwayomiSource], titles: Sequence[str]) -> List[MangaMatch]:
     """Title search results on *sources*, in source order: candidates the owner must confirm. A source that fails is
     skipped (logged); the others still answer."""
+    from .chapter_backend import backend_of
+
+    backend = backend_of(client)
     out: List[MangaMatch] = []
     queries = [t for t in dict.fromkeys(t.strip() for t in titles if t and t.strip())][:MAX_TITLE_QUERIES]
     for source in sources:
@@ -567,7 +607,7 @@ def title_candidates(client: ChapterClient, sources: Sequence[SuwayomiSource], t
                 _log.info("Chapters: %s search failed (%s)", source.display_name, type(exc).__name__)
                 break
             if found:
-                out.extend(MangaMatch(source, m, HOW_TITLE) for m in found[:MAX_CANDIDATES_PER_SOURCE])
+                out.extend(MangaMatch(source, m, HOW_TITLE, backend) for m in found[:MAX_CANDIDATES_PER_SOURCE])
                 break
     return out
 
@@ -596,6 +636,7 @@ class ChapterLookup:
     source_empty: bool = False                      # the matched manga lists no chapters at all on its source
     newer: bool = False                             # "Check for new chapters": *missing* is what the source lists
     newer_than: Optional[str] = None                # ... after this chapter, the newest held (None: none held)
+    backend: str = ""                               # the program that answered (its words in the texts)
 
     @property
     def available(self) -> List[ChapterRow]:
@@ -629,12 +670,16 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
                                if q.chapter_id in ids and to_decimal(ids[q.chapter_id].number) in wanted},
                               key=lambda n: to_decimal(n) or Decimal(0)))
     except Exception:  # noqa: BLE001 - the queue is a courtesy note
-        _log.info("Chapters: Suwayomi's download queue could not be read", exc_info=True)
+        from .chapter_backend import name_of_backend
+
+        _log.info("Chapters: %s's download queue could not be read", name_of_backend(getattr(match, "backend", "")),
+                  exc_info=True)
     return ChapterLookup(series_id=series_id, missing=tuple(missing), match=match,
                          manga_title=fetched.manga.title or match.manga.title,
                          manga_url=fetched.manga.url or match.manga.url,
                          source_name=fetched.source_name or match.source.display_name, rows=rows, group=choice,
-                         groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters)
+                         groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters,
+                         backend=getattr(match, "backend", ""))
 
 
 def newer_lookup(client: ChapterClient, db, *, series_id: int, match: MangaMatch,
@@ -699,7 +744,11 @@ def newer_text(lookup: ChapterLookup) -> str:
     if others:
         text += "; not taken: " + ", ".join(others)
     if lookup.queued_in_suwayomi:
-        text += f"; in Suwayomi's queue: ch {numbers_text(list(lookup.queued_in_suwayomi))}"
+        from .chapter_backend import wording
+        from .contracts import CHAPTER_BACKEND_EXTENSIONS
+
+        text += wording(f"; in Suwayomi's queue: ch {numbers_text(list(lookup.queued_in_suwayomi))}",
+                        lookup.backend == CHAPTER_BACKEND_EXTENSIONS)
     return text
 
 
@@ -714,9 +763,12 @@ class ChapterSendOutcome:
     records: List[DownloadRecord] = field(default_factory=list)     # SENT (or FAILED when the enqueue failed)
     skipped: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    backend: str = ""                   # the program it was sent to (the words name it)
 
     def text(self) -> str:
         from ..gui.volumes_target import numbers_text
+        from .chapter_backend import wording
+        from .contracts import CHAPTER_BACKEND_EXTENSIONS
 
         sent = [c for r in self.records if r.status == DownloadStatus.SENT for c in r.wanted_chapters]
         parts = []
@@ -726,7 +778,7 @@ class ChapterSendOutcome:
             parts.append(f"Suwayomi refused the download: {self.error}")
         if self.skipped:
             parts.append(f"skipped {len(self.skipped)} ({'; '.join(self.skipped[:3])})")
-        return "; ".join(parts) or "Nothing was sent."
+        return wording("; ".join(parts), self.backend == CHAPTER_BACKEND_EXTENSIONS) or "Nothing was sent."
 
 
 def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMatch, picks: Sequence[SuwayomiChapter],
@@ -749,10 +801,13 @@ def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMat
                             extension=match.source.extension)
     manga = SuwayomiManga(id=match.manga.id, title=manga_title or match.manga.title, url=match.manga.url,
                           source_id=match.source.id)
+    from .chapter_backend import backend_of, name_of_backend, record_extra
+
     batch = uuid.uuid4().hex[:12]
+    backend = backend_of(client)            # the program whose chapter ids these are (never the setting: B2 / B5)
     records, skipped = ledger.create_chapters(series_id, picks, source=source, manga=manga, target_dir=target_dir,
-                                              batch=batch)
-    out = ChapterSendOutcome(records=list(records), skipped=list(skipped))
+                                              batch=batch, backend=backend, extra=record_extra(client))
+    out = ChapterSendOutcome(records=list(records), skipped=list(skipped), backend=backend)
     if not records:
         return out
     try:
@@ -771,8 +826,9 @@ def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMat
             except StatusConflict:
                 failed.append(rec)
         out.records = failed
-        _log.warning("Chapters: series %s: Suwayomi did not take %d chapter(s): %s", series_id, len(records), why)
+        _log.warning("Chapters: series %s: %s did not take %d chapter(s): %s", series_id, name_of_backend(backend),
+                     len(records), why)
         return out
-    _log.info("Chapters: series %s: sent %d chapter(s) from %s to Suwayomi (batch %s)%s", series_id, len(records),
-              source.display_name, batch, f"; skipped {len(skipped)}" if skipped else "")
+    _log.info("Chapters: series %s: sent %d chapter(s) from %s to %s (batch %s)%s", series_id, len(records),
+              source.display_name, name_of_backend(backend), batch, f"; skipped {len(skipped)}" if skipped else "")
     return out

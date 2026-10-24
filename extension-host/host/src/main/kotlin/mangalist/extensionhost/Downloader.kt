@@ -90,19 +90,29 @@ class Downloader(
         library.onChaptersRemoved = { dequeue(it) }
     }
 
-    /** Load the persisted queue and start downloading. */
-    fun restore() {
+    /**
+     * Load the persisted queue and start downloading. [retryErrors] (the host's first start on a new version): the
+     * chapters in `ERROR` are queued again with fresh tries, as Suwayomi does at every start - the reason they failed may
+     * be what the new version fixes. Otherwise they stay in `ERROR` (MangaList retries them, or the owner does).
+     */
+    fun restore(retryErrors: Boolean = false) {
         val rows = store.loadQueue()
+        var retried = 0
         synchronized(lock) {
             for (row in rows) {
                 val chapter = store.chapter(row.chapterId) ?: continue
                 val manga = store.manga(chapter.mangaId) ?: continue
-                val state = if (row.state == ERROR) ERROR else QUEUED
-                queue += Item(row.chapterId, manga.sourceId, state, row.tries)
+                if (row.state == ERROR && retryErrors) {
+                    queue += Item(row.chapterId, manga.sourceId, QUEUED, 0)
+                    retried++
+                } else {
+                    queue += Item(row.chapterId, manga.sourceId, if (row.state == ERROR) ERROR else QUEUED, row.tries)
+                }
             }
             persist()
         }
         if (queue.isNotEmpty()) logger.info { "Download queue restored: ${queue.size} chapter(s)" }
+        if (retried > 0) logger.info { "New host version: $retried chapter(s) that had failed get fresh tries" }
         kick()
     }
 
@@ -132,7 +142,7 @@ class Downloader(
                     queue += Item(chapter.id, manga.sourceId, QUEUED, 0)
                     added = true
                 } else if (existing.state == ERROR) {
-                    logger.info { "Chapter ${chapter.id} failed before (${existing.tries} tries): one more try" }
+                    logger.info { "Chapter ${chapter.id} failed before (${existing.tries} tries): one more try (${tryText(existing.tries + 1)})" }
                     existing.state = QUEUED
                     existing.progress = 0f
                     added = true
@@ -252,7 +262,7 @@ class Downloader(
                     logger.warn { "Chapter ${item.chapterId} failed: ${e.message}" }
                     fail(item, maxTries)
                 } catch (e: Throwable) {
-                    logger.warn(e) { "Chapter ${item.chapterId} failed (try ${item.tries + 1} of $maxTries)" }
+                    logger.warn(e) { "Chapter ${item.chapterId} failed (${tryText(item.tries + 1)})" }
                     val queuedAgain = fail(item, item.tries + 1)
                     if (queuedAgain && retryDelayMs > 0) delay(retryDelayMs)
                 } finally {
@@ -267,6 +277,13 @@ class Downloader(
             if (scope.isActive) kick()
         }
     }
+
+    /**
+     * "try 2 of 3", or past the limit (an `ERROR` chapter queued again for one more try) "extra try 1 (after 3 tries)"
+     * - not "try 4 of 3" (MangaList's transition audit D5).
+     */
+    internal fun tryText(attempt: Int): String =
+        if (attempt <= maxTries) "try $attempt of $maxTries" else "extra try ${attempt - maxTries} (after $maxTries tries)"
 
     /** Count a failed try; true when the chapter is queued again, false when it is now in `ERROR`. */
     private fun fail(

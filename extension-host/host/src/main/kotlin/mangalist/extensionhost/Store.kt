@@ -132,6 +132,55 @@ class Store(
                 conn.autoCommit = true
             }
         }
+        if (version < 2) {
+            // The database's own id (MangaList's transition audit B4): MangaList keeps the ids above, and remembers which
+            // database they belong to - a host.db that was deleted, lost or restored from another day has another id,
+            // so MangaList notices instead of asking for other mangas and chapters by the same numbers. Made once,
+            // here; never changed. Also the host's version at its last start (a new version retries ERROR chapters).
+            conn.autoCommit = false
+            try {
+                conn.createStatement().use { st ->
+                    st.execute("CREATE TABLE host_info (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                    st.execute("PRAGMA user_version = 2")
+                }
+                conn.prepareStatement("INSERT INTO host_info (key, value) VALUES ('instance', ?)").use { ps ->
+                    ps.setString(1, java.util.UUID.randomUUID().toString())
+                    ps.executeUpdate()
+                }
+                conn.commit()
+            } catch (e: Throwable) {
+                conn.rollback()
+                throw e
+            } finally {
+                conn.autoCommit = true
+            }
+        }
+    }
+
+    /** The id of this database (made with it, never changed): `/compat/about` -> `instance`. */
+    @Synchronized
+    fun instance(): String = info("instance") ?: error("host.db has no instance id")
+
+    @Synchronized
+    fun info(key: String): String? = query("SELECT value FROM host_info WHERE key = ?", key) { it.getString(1) }.firstOrNull()
+
+    @Synchronized
+    fun setInfo(
+        key: String,
+        value: String,
+    ) {
+        update("INSERT INTO host_info (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value)
+    }
+
+    /**
+     * Remember [version] as the host's version at this start; true when it differs from the last start's (an upgrade -
+     * also the first start of a database from before the version was kept: such a database's queue is an older host's).
+     */
+    @Synchronized
+    fun startedWith(version: String): Boolean {
+        val before = info("version")
+        if (before != version) setInfo("version", version)
+        return before != version
     }
 
     @Synchronized

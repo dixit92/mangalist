@@ -873,8 +873,11 @@ class Journal:
         except Exception:
             _remove_own_temp(tmp)
             raise
-        _log.warning("Plan %d step %d: no hard link possible (%s); COPIED %s -> %s instead (double space until "
-                     "the download is removed)", step.plan_id, step.seq + 1, why.strerror or why, src, dst)
+        # another filesystem is expected (the download folder lives elsewhere): INFO; any other reason: a WARNING
+        # (transition audit B6: a WARNING per chapter for an expected cross-device copy)
+        level = logging.INFO if getattr(why, "errno", None) == errno.EXDEV else logging.WARNING
+        _log.log(level, "Plan %d step %d: no hard link possible (%s); COPIED %s -> %s instead (double space until "
+                 "the download is removed)", step.plan_id, step.seq + 1, why.strerror or why, src, dst)
         return "copy"
 
     def _link_made(self, step: Step) -> Optional[str]:

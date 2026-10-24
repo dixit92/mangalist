@@ -14,10 +14,12 @@
 # Base image: Debian 12 (glibc, so the PySide6 wheels from PyPI work; Alpine's musl does not) with
 # Debian's Python 3.11, which the test matrix covers. Pinned to an exact base version; bump it here.
 #
-# Built-in extensions (prototype/mihon-mangalist): MangaList's own extension host (extension-host/, a JVM program
-# running Mihon / Tachiyomi extensions without Suwayomi) is built in a JDK stage and runs on a jlink'd Java 21 runtime
-# in the final image, supervised as the "extension-host" service (rootfs/etc/services.d/extension-host) while the owner
-# has chosen "Built-in extensions" for chapter downloads. Its data: /config/extension-host.
+# Chapter downloads go through one of two programs, chosen in Settings > Connected services: Suwayomi-Server (its own
+# container, reached over the network) or MangaList's built-in extension host (extension-host/, a JVM program running
+# Mihon / Tachiyomi extensions without Suwayomi). The host is built in a JDK stage and runs on a jlink'd Java 21 runtime
+# in the final image, supervised as the "extension-host" service (rootfs/etc/services.d/extension-host): while
+# "Built-in extensions" is chosen, and on demand while Suwayomi is (the Extensions page, a test, a carry-over, a chapter
+# download of the host still to be finished). Its data: /config/extension-host; its log: /config/logs/extension-host.log.
 ARG BASEIMAGE=jlesage/baseimage-gui:debian-12-v4.14.0
 ARG JDKIMAGE=eclipse-temurin:21-jdk
 
@@ -115,9 +117,19 @@ ENV \
     # Volumes MVP (with MANGALIST_DOWNLOADS=1): file finished downloads, remove completed torrents.
     MANGALIST_DOWNLOADS_SCHEDULE=every:1h \
     MANGALIST_CATCH_UP=1 \
-    # Built-in extensions (prototype): the extension host runs while Settings chooses it (auto), always (1) or never
-    # (0). FlareSolverr and the repository are set in Settings, else here; the JVM's heap is capped.
+    # A UTF-8 locale for every process (the base image's en_US.UTF-8 is not installed, so the C library fell back to
+    # ASCII and the extension host could not write a chapter file named after "Les Poroïniens": 2026-10-24). C.UTF-8
+    # is built into glibc; the supervisor also starts the host in it.
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    # Built-in extensions: the extension host runs while Settings chooses it or asks for it (auto), always (1) or
+    # never (0). FlareSolverr and the repository are set in Settings, else here; the JVM's heap is capped.
     MANGALIST_EXTENSION_HOST=auto \
+    # Where the host downloads chapters: on the /data share (Unraid's appdata, next to Suwayomi's old folder), so a
+    # finished chapter is hard-linked into the library instead of copied across filesystems. Used when the folder or
+    # its parent exists (/data/appdata/mangalist is this container's /config on a usual Unraid set-up); else
+    # /config/extension-host/downloads.
+    MANGALIST_EXTENSION_DOWNLOADS=/data/appdata/mangalist/extension-host-downloads \
     MANGALIST_EXTENSION_HOST_BIN=/opt/mangalist/extension-host/bin/mangalist-extension-host \
     MANGALIST_EXTENSION_HOST_OPTS="-Xms32m -Xmx768m -XX:+UseSerialGC" \
     JAVA_HOME=/opt/mangalist/jre \

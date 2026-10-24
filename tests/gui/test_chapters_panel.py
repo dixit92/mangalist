@@ -177,7 +177,7 @@ def test_no_source_has_it_or_none_allowed_points_to_the_sources(qapp):
     panel.show_lookup(lookup_for(4, MISSING))                    # no match, no candidates
     panel._series_id = 4
     assert panel.stack.currentIndex() == cp.PAGE_MESSAGE
-    assert "None of your Suwayomi sources has this series" in panel.message_text.text()
+    assert "None of your chapter sources has this series" in panel.message_text.text()
     panel.message_action.click()
     panel.show_lookup(lookup_for(4, MISSING, error="no Suwayomi source is allowed"))
     assert "no Suwayomi source is allowed" in panel.message_text.text()
@@ -297,7 +297,7 @@ def test_no_other_source_has_it_says_so_and_keeps_the_chapters(qapp):
     assert panel.other_sources()
     settle(qapp, panel)
     assert panel.stack.currentIndex() == cp.PAGE_CHAPTERS
-    assert "None of your other Suwayomi sources has this series" in panel.status_label.text()
+    assert "None of your other chapter sources has this series" in panel.status_label.text()
 
 
 def test_extras_are_offered_unticked(qapp):

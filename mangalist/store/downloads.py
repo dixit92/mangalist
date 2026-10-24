@@ -30,6 +30,11 @@
   id and name, the manga's id and title, the batch it was sent in), the same statuses (SENT = in Suwayomi's queue,
   DOWNLOADED = Suwayomi has the CBZ, FILED = in the library, REMOVED = Suwayomi's copy deleted). Chapter downloads
   are outside the download budget (:mod:`mangalist.downloads.budget`: torrents only).
+- **Two chapter programs** (the transition fixes, 2026-10-24, schema 10): Suwayomi and MangaList's built-in extension
+  host both number their chapters from 1, so a chapter record says which program it belongs to (column ``backend``:
+  ``suwayomi`` | ``extensions``; NULL for a torrent, or a record an older build wrote - read as either program). The
+  "already sent" checks compare chapter ids within one program only (chapter numbers across both), each record is
+  finished with its own program, and a stuck chapter is marked by state (``request.stuck``), not by its note's words.
 - **Clearing finished records** (2026-10-15, owner: "Setting, user clearable, scheduled task to clear [Daily, Weekly,
   Monthly]"; :meth:`DownloadLedger.clear_finished`). Only the records the Download tab calls finished - REMOVED
   (the torrent left at its seed goal / Suwayomi's copy deleted) and CANCELLED - and only those not touched for the
@@ -151,6 +156,7 @@ def _record(r: sqlite3.Row) -> DownloadRecord:
     req = _loads(r["request"], {})
     tool = r["tool"] or TOOL_QBITTORRENT
     if tool != TOOL_QBITTORRENT:            # a chapter download: never counted against the budget, no size
+        backend = r["backend"] if "backend" in r.keys() else None
         return DownloadRecord(id=r["id"], series_id=r["series_id"], info_hash=r["external_ref"] or "",
                               title=str(req.get("title") or ""), wanted_volumes=(), target_dir=r["destination"] or "",
                               status=r["status"], created_at=r["created_at"], updated_at=r["updated_at"],
@@ -158,7 +164,9 @@ def _record(r: sqlite3.Row) -> DownloadRecord:
                               copied=bool(r["copied"]), error=r["error"], tool=tool,
                               wanted_chapters=tuple(str(c) for c in req.get("wanted_chapters") or ()),
                               batch=str(req.get("batch") or ""), source=str(req.get("source_name") or ""),
-                              group=str(req.get("scanlator") or ""))
+                              group=str(req.get("scanlator") or ""),
+                              backend=backend if backend in CHAPTER_BACKENDS else "",
+                              stuck=req.get("stuck") is True and r["status"] == DownloadStatus.SENT)
     size = _size(req.get("budget_bytes")) or _size(req.get("size_bytes"))
     source = str(req.get("budget_source") or "") if _size(req.get("budget_bytes")) else (SIZE_RELEASE if size else "")
     return DownloadRecord(id=r["id"], series_id=r["series_id"], info_hash=r["external_ref"] or "",
@@ -259,12 +267,17 @@ class DownloadLedger:
         return self.get(record_id)  # type: ignore[return-value]
 
     def create_chapters(self, series_id: int, chapters: Sequence[SuwayomiChapter], *, source: SuwayomiSource,
-                        manga: SuwayomiManga, target_dir: str, batch: str) -> Tuple[List[DownloadRecord], List[str]]:
+                        manga: SuwayomiManga, target_dir: str, batch: str, backend: str = CHAPTER_BACKEND_SUWAYOMI,
+                        extra: Optional[Dict[str, Any]] = None) -> Tuple[List[DownloadRecord], List[str]]:
         """New SENT chapter records (a Suwayomi ledger only), one per chapter, in one transaction - written BEFORE the
-        chapters are enqueued in Suwayomi (the caller marks them FAILED when the enqueue fails). A chapter already in
-        hand - the same Suwayomi chapter, or the same chapter number of this series, sent and not failed or cancelled -
-        is skipped. Returns (records made, why each skipped chapter was skipped)."""
+        chapters are enqueued in the program (the caller marks them FAILED when the enqueue fails). *backend*: the
+        program the chapters' ids belong to (the client that listed them; transition audit B2/B5). A chapter already in
+        hand - the same chapter of the same program, or the same chapter number of this series, sent and not failed or
+        cancelled - is skipped. *extra*: more request keys (the extension host's database id). Returns (records made,
+        why each skipped chapter was skipped)."""
         self._writable(TOOL_SUWAYOMI)
+        if backend not in CHAPTER_BACKENDS:
+            raise DownloadError(f"unknown chapter backend {backend!r}")
         if not target_dir:
             raise DownloadError("a chapter download needs its target folder")
         if not batch:
@@ -274,8 +287,8 @@ class DownloadLedger:
         skipped: List[str] = []
         with self.connect(durable=True) as con:
             con.execute("BEGIN IMMEDIATE")          # the in-hand check and the inserts as one step
-            held, refs = self._chapters_in_hand(con, series_id)
-            elsewhere = self._chapters_elsewhere(con, series_id)
+            held, refs = self._chapters_in_hand(con, series_id, backend)
+            elsewhere = self._chapters_elsewhere(con, series_id, backend)
             for ch in chapters:
                 number = exact_number(ch.number) if ch.number and not ch.number.startswith("-") else None
                 if number is None:
@@ -291,12 +304,12 @@ class DownloadLedger:
                            "chapter_name": ch.name, "scanlator": ch.scanlator or "", "chapter_url": ch.real_url or ch.url,
                            "upload_date": ch.upload_date, "source_id": str(source.id),
                            "source_name": source.display_name, "manga_id": int(manga.id), "manga_title": manga.title,
-                           "batch": batch}
+                           "batch": batch, **(extra or {})}
                 cur = con.execute(
                     "INSERT INTO ledger (created_at, updated_at, series_id, request, tool, destination, status,"
-                    " external_ref) VALUES (?,?,?,?,?,?,?,?)",
+                    " external_ref, backend) VALUES (?,?,?,?,?,?,?,?,?)",
                     (now, now, int(series_id), json.dumps(request, ensure_ascii=False), TOOL_SUWAYOMI,
-                     str(target_dir), DownloadStatus.SENT, str(int(ch.id))))
+                     str(target_dir), DownloadStatus.SENT, str(int(ch.id)), backend))
                 made.append(int(cur.lastrowid))
                 held.add(number)
                 refs.add(str(ch.id))
@@ -305,16 +318,18 @@ class DownloadLedger:
     def chapters_in_hand(self, series_id: int) -> Set[str]:
         """The chapter numbers of *series_id* that a chapter download has in hand (sent, downloaded, filed - also
         removed: filed, Suwayomi's copy gone - while a filed file is still in the series folder), exact strings: not
-        sent again."""
+        sent again - whichever program downloads them."""
         with self.connect() as con:
-            return self._chapters_in_hand(con, series_id)[0]
+            return self._chapters_in_hand(con, series_id, CHAPTER_BACKEND_SUWAYOMI)[0]
 
     @staticmethod
-    def _chapters_in_hand(con, series_id: int) -> Tuple[Set[str], Set[str]]:
-        """The series' chapter numbers in hand and the Suwayomi chapter ids already used: on their way (queued, sent,
-        downloaded), or filed while a file it filed is still in the series folder. A filed chapter whose file was moved
-        away (to be replaced by another source's copy) can be sent again (owner, 2026-10-11: "skipped 9 ... already
-        sent" for chapters moved to the holding folder)."""
+    def _chapters_in_hand(con, series_id: int, backend: str) -> Tuple[Set[str], Set[str]]:
+        """The series' chapter numbers in hand (any program's) and the chapter ids of *backend* already used: on their
+        way (queued, sent, downloaded), or filed while a file it filed is still in the series folder. A filed chapter
+        whose file was moved away (to be replaced by another source's copy) can be sent again (owner, 2026-10-11:
+        "skipped 9 ... already sent" for chapters moved to the holding folder). The ids are compared within one program
+        only: Suwayomi's and the extension host's both start at 1 (transition audit B2); a record of unknown program (an
+        older build's) counts for both."""
         filed = (DownloadStatus.FILED, DownloadStatus.REMOVED)
         keep = (*TRACKED, DownloadStatus.REMOVED)
         row = con.execute("SELECT r.path AS root, s.rel_path AS rel FROM series s JOIN roots r ON r.id = s.root_id"
@@ -328,25 +343,27 @@ class DownloadLedger:
 
         numbers: Set[str] = set()
         refs: Set[str] = set()
-        for r in con.execute(f"SELECT request, status, filed_files, external_ref FROM ledger WHERE tool = ? AND"
-                             f" series_id = ? AND status IN ({','.join('?' * len(keep))})",
+        for r in con.execute(f"SELECT request, status, filed_files, external_ref, backend FROM ledger WHERE tool = ?"
+                             f" AND series_id = ? AND status IN ({','.join('?' * len(keep))})",
                              (TOOL_SUWAYOMI, int(series_id), *keep)):
             if r["status"] in filed and not still_there(_loads(r["filed_files"], [])):
                 continue
             numbers.update(str(c) for c in _loads(r["request"], {}).get("wanted_chapters") or ())
-            refs.add(r["external_ref"])
+            if r["backend"] in (None, backend):
+                refs.add(r["external_ref"])
         return numbers, refs
 
     @staticmethod
-    def _chapters_elsewhere(con, series_id: int) -> Set[str]:
-        """The Suwayomi chapter ids another series has in hand (queued, sent, downloaded, or filed while Suwayomi still
-        has its copy). Suwayomi keeps ONE copy of a chapter: the same series in two folders (owner, 2026-10-18,
-        "Kanojo Shoukan Shimashita!" in two libraries) sent chapters 19-25 twice; the first send filed them and
-        Suwayomi deleted its copy, so the second failed ("the chapter's CBZ is not in Suwayomi's download folder").
-        The other folder can have the chapter once this download is done."""
+    def _chapters_elsewhere(con, series_id: int, backend: str) -> Set[str]:
+        """The chapter ids of *backend* another series has in hand (queued, sent, downloaded, or filed while the
+        program still has its copy). Suwayomi keeps ONE copy of a chapter: the same series in two folders (owner,
+        2026-10-18, "Kanojo Shoukan Shimashita!" in two libraries) sent chapters 19-25 twice; the first send filed them
+        and Suwayomi deleted its copy, so the second failed ("the chapter's CBZ is not in Suwayomi's download folder").
+        The other folder can have the chapter once this download is done. Another program's ids are other chapters."""
         return {r[0] for r in con.execute(
-            f"SELECT external_ref FROM ledger WHERE tool = ? AND series_id != ? AND status IN ({','.join('?' * len(TRACKED))})",
-            (TOOL_SUWAYOMI, int(series_id), *TRACKED)) if r[0]}
+            f"SELECT external_ref FROM ledger WHERE tool = ? AND series_id != ? AND (backend IS NULL OR backend = ?)"
+            f" AND status IN ({','.join('?' * len(TRACKED))})",
+            (TOOL_SUWAYOMI, int(series_id), backend, *TRACKED)) if r[0]}
 
     def get(self, record_id: int) -> Optional[DownloadRecord]:
         with self.connect() as con:
@@ -430,12 +447,38 @@ class DownloadLedger:
             con.execute("BEGIN IMMEDIATE")
             return self._set_request(con, record_id, in_client=bool(in_client))
 
-    def active(self) -> Sequence[DownloadRecord]:
-        """Every record not yet REMOVED / FAILED / CANCELLED, oldest first."""
+    def active(self, backends: Optional[Sequence[str]] = None) -> Sequence[DownloadRecord]:
+        """Every record not yet REMOVED / FAILED / CANCELLED, oldest first. *backends*: only the chapter records of
+        these programs (``''`` in it: also the records of unknown program, an older build's)."""
         with self.connect() as con:
             rows = con.execute(f"SELECT * FROM ledger WHERE {self._where()} AND status IN ({','.join('?' * len(ACTIVE))})"
                                " ORDER BY id", (*self._args(), *ACTIVE)).fetchall()
-        return [_record(r) for r in rows]
+        out = [_record(r) for r in rows]
+        return out if backends is None else [r for r in out if r.backend in tuple(backends)]
+
+    def set_stuck(self, record_id: int, stuck: bool) -> bool:
+        """Remember whether a SENT chapter download is one its program gave up on (the arrivals pass saw the chapter in
+        the ``ERROR`` state): the In progress list offers Retry for it - whatever the note says (transition audit B1).
+        True when it changed. ``updated_at`` is left alone."""
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            if stuck:
+                return self._set_request(con, record_id, stuck=True)
+            return self._drop_request_key(con, record_id, "stuck")
+
+    def _request_of(self, con, record_id: int) -> Optional[Dict[str, Any]]:
+        r = con.execute(f"SELECT request FROM ledger WHERE id = ? AND {self._where()}",
+                        (record_id, *self._args())).fetchone()
+        return None if r is None else _loads(r["request"], {})
+
+    def _drop_request_key(self, con, record_id: int, key: str) -> bool:
+        req = self._request_of(con, record_id)
+        if req is None or key not in req:
+            return False
+        req.pop(key)
+        con.execute(f"UPDATE ledger SET request = ? WHERE id = ? AND {self._where()}",
+                    (json.dumps(req, ensure_ascii=False), record_id, *self._args()))
+        return True
 
     def active_for_hash(self, info_hash: str) -> Optional[DownloadRecord]:
         """The record that has this torrent in hand - queued, or in qBittorrent (None: it may be sent)."""
@@ -645,6 +688,9 @@ SETTING_CHAPTER_BACKEND = "downloads.chapter_backend"      # 'suwayomi' (default
 SETTING_EXTENSION_HOST = "downloads.extension_host"        # {url, download_dir, downloads_path, repos, ...}
 SETTING_EXTENSION_AUTO_UPDATE = "downloads.extension_auto_update"   # bool: the update job installs what it finds
 META_EXTENSIONS_SERIES = "extensions.series."              # + the series id: the per-series choices on the host
+#: The id of the extension host's database the stored host ids belong to (transition audit B4; mangalist.downloads.
+#: host_identity): learned from the host's /compat/about.
+META_HOST_INSTANCE = "extensions.host_instance"
 DEFAULT_EXTENSION_HOST_URL = "http://127.0.0.1:4570"
 #: keiyoushi's repository (the one MangaList's Suwayomi uses; the host's own default too).
 DEFAULT_EXTENSION_REPO = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json"
@@ -758,6 +804,15 @@ class SuwayomiSettings:
                                       backend=CHAPTER_BACKEND_EXTENSIONS)
         return self.suwayomi_connection()
 
+    def connection_for(self, backend: str) -> Optional[SuwayomiConnection]:
+        """The connection of *backend* whichever is chosen: a record or a choice of the other program is finished with
+        its own program (transition audit B2 / C2)."""
+        if backend == CHAPTER_BACKEND_EXTENSIONS:
+            host = self.extension_host()
+            return SuwayomiConnection(base_url=host.url, download_dir=host.files_from,
+                                      backend=CHAPTER_BACKEND_EXTENSIONS)
+        return self.suwayomi_connection()
+
     def suwayomi_connection(self) -> Optional[SuwayomiConnection]:
         """Suwayomi's own stored connection, whichever backend is chosen."""
         data = _loads(self.store.get_meta(META_SUWAYOMI_CONNECTION), {})
@@ -801,15 +856,17 @@ class SuwayomiSettings:
 
     # --- per series ------------------------------------------------------------------------------------------
 
-    def _series_key(self, series_id: int) -> str:
-        return f"{META_EXTENSIONS_SERIES if self.builtin else META_SUWAYOMI_SERIES}{int(series_id)}"
+    def _series_key(self, series_id: int, backend: Optional[str] = None) -> str:
+        builtin = self.builtin if backend is None else backend == CHAPTER_BACKEND_EXTENSIONS
+        return f"{META_EXTENSIONS_SERIES if builtin else META_SUWAYOMI_SERIES}{int(series_id)}"
 
-    def series_choice(self, series_id: int) -> Dict[str, Any]:
-        """``{"source_id", "manga_id", "manga_title", "how", "group"}`` as far as known ({} when nothing is stored).
-        ``how``: ``mangadex-id`` (found by the MangaDex id MangaPixer links) or ``confirmed`` (a title match the owner
-        confirmed). The chosen backend's (see the class docstring)."""
-        data = _loads(self.store.get_meta(self._series_key(series_id)), {})
-        if self.builtin and "group" not in data and "group_cleared" not in data:
+    def series_choice(self, series_id: int, backend: Optional[str] = None) -> Dict[str, Any]:
+        """``{"source_id", "manga_id", "manga_title", "manga_url", "how", "group"}`` as far as known ({} when nothing
+        is stored). ``how``: ``mangadex-id`` (found by the MangaDex id MangaPixer links) or ``confirmed`` (a title match
+        the owner confirmed). *backend*: whose (None: the chosen backend's; see the class docstring)."""
+        builtin = self.builtin if backend is None else backend == CHAPTER_BACKEND_EXTENSIONS
+        data = _loads(self.store.get_meta(self._series_key(series_id, backend)), {})
+        if builtin and "group" not in data and "group_cleared" not in data:
             group = _loads(self.store.get_meta(f"{META_SUWAYOMI_SERIES}{int(series_id)}"), {}).get("group")
             if group:
                 data["group"] = group
@@ -856,18 +913,35 @@ class SuwayomiSettings:
                 "ELSE json_extract(meta.value, '$.manga_id') IS NULL END", (key, value))
             return cur.rowcount > 0
 
-    def set_series_choice(self, series_id: int, **changes: Any) -> Dict[str, Any]:
-        """Merge *changes* into the series' choices (a value of None forgets that key); the stored result."""
-        key = self._series_key(series_id)
+    def set_series_choice(self, series_id: int, *, backend: Optional[str] = None, **changes: Any) -> Dict[str, Any]:
+        """Merge *changes* into the series' choices (a value of None forgets that key); the stored result. *backend*:
+        whose choice - the program that answered the lookup (``chapter_backend.backend_of(client)``), so a switch made
+        while a pass or a dialog held the old program's client never files its manga id under the new program's key
+        (transition audit B5); None: the chosen backend's. A choice on the extension host is stamped with the host's
+        database id MangaList knows (``host_instance``, transition audit B4)."""
+        builtin = self.builtin if backend is None else backend == CHAPTER_BACKEND_EXTENSIONS
+        key = self._series_key(series_id, backend)
         data = _loads(self.store.get_meta(key), {})
         for name, value in changes.items():
             if value is None:
                 data.pop(name, None)
-                if name == "group" and self.builtin:
+                if name == "group" and builtin:
                     data["group_cleared"] = True        # the owner cleared it here: Suwayomi's no longer carries over
             else:
                 data[name] = value
                 if name == "group":
                     data.pop("group_cleared", None)
+        if "manga_id" in changes:
+            # chosen here now: no longer the other program's choice carried over / back (the carry-back - audit B8 -
+            # takes only what was decided in the program it carries from)
+            for mark in ("carried_from", "carried_back"):
+                if mark not in changes:
+                    data.pop(mark, None)
+        if builtin and "manga_id" in changes:
+            instance = self.store.get_meta(META_HOST_INSTANCE)
+            if changes["manga_id"] is not None and instance:
+                data["host_instance"] = instance
+            elif changes["manga_id"] is None:
+                data.pop("host_instance", None)
         self.store.set_meta(key, json.dumps(data, ensure_ascii=False) if data else None)
-        return self.series_choice(series_id)
+        return self.series_choice(series_id, CHAPTER_BACKEND_EXTENSIONS if builtin else CHAPTER_BACKEND_SUWAYOMI)

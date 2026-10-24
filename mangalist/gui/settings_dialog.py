@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from .automation_rules import has_automation
+from .chapter_words import label_of
 from .download_style import apply_style, set_prop
 from .download_widgets import button, label
 from .downloads_backend import DownloadsBackend
@@ -49,7 +50,7 @@ from .shell import (
 NAV = (
     (SECTION_LIBRARY, "Library", "Roots, file naming"),
     (SECTION_SERVICES, "Connected services", "MangaPixer, qBittorrent, Suwayomi"),
-    (SECTION_SOURCES, "Download sources", "nyaa, Suwayomi sources"),
+    (SECTION_SOURCES, "Download sources", "nyaa, chapter sources"),
     (SECTION_MATCHING, "Matching", "MangaUpdates"),
     (SECTION_AUTOMATION, "Automation", "Remove Completed, default modes"),
     (SECTION_TASKS, "Scheduled tasks", "What runs on its own, and when"),
@@ -198,6 +199,7 @@ class SettingsDialog(QDialog):
         body.addWidget(self.stack, 1)
         outer.addLayout(body, 1)
         apply_style(self)
+        self._refresh_nav()
         self.show_section(section if section in DIALOG_SECTIONS or section == SECTION_EXTENSIONS else SECTION_LIBRARY)
 
     def _attach_page(self, key: str, page: SectionPage) -> None:
@@ -209,6 +211,23 @@ class SettingsDialog(QDialog):
         page.mangapixer_changed.connect(lambda: self._flag("mangapixer"))
         page.downloads_changed.connect(lambda: self._flag("downloads"))
         page.section_requested.connect(self.show_section)
+        switched = getattr(page, "backend_switched", None)
+        if switched is not None:                    # the chapter backend was chosen on this page: the other one follows
+            switched.connect(lambda key, source=page: self._backend_switched(source, key))
+
+    def _backend_switched(self, source: SectionPage, key: str) -> None:
+        """One setting, two places (Connected services' chooser and Download sources' card): the page that did not make
+        the choice follows it, and the hint of Connected services names the program."""
+        for page in self.pages.built():
+            follow = getattr(page, "note_backend_switched", None)
+            if page is not source and callable(follow):
+                follow(key)
+        self._refresh_nav()
+
+    def _refresh_nav(self) -> None:
+        """The hint of Connected services names the chapter program in use (the entry's text is the default)."""
+        hint = self._nav[SECTION_SERVICES].hint
+        hint.setText(f"MangaPixer, qBittorrent, {label_of(self._backend)}")
 
     def _flag(self, name: str) -> None:
         self._flags[name] = True

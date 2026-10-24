@@ -96,6 +96,7 @@ from .automation_rules import (
     total_text,
 )
 from .background import BackgroundCall, describe_error, start_call
+from .chapter_words import is_builtin, reword_for
 from .colors import hex_color, qcolor
 from .download_style import set_tone
 from .download_widgets import button, card, chip_colors, hbox, label
@@ -162,6 +163,7 @@ class FoundLine:
     queue_pos: int = 0                  # its place in the queue (1 = next)
     passing: bool = False               # a find pass runs: every action waits for it
     menu: bool = False                  # "⋯" is offered (the host opens the series' menu)
+    builtin: bool = False               # chapters come through the built-in extensions (the texts name that program)
 
     @property
     def is_series(self) -> bool:
@@ -179,11 +181,11 @@ class FoundLine:
 
     @property
     def release(self) -> str:
-        return release_text(self.finding)
+        return reword_for(self.builtin, release_text(self.finding))
 
     @property
     def reason(self) -> str:
-        return reason_text(self.finding)
+        return reword_for(self.builtin, reason_text(self.finding))
 
     @property
     def needs_source(self) -> bool:
@@ -709,10 +711,10 @@ class FoundDelegate(QStyledItemDelegate):
             return f"{line.name}: {line.count}\n" + ("Click to show its findings" if line.folded else
                                                       "Click to fold its findings")
         for name, tip in ((PART_ACTION if line.action_enabled else "_action",
-                           SOURCE_TIP if line.needs_source else SEND_TIP),
+                           reword_for(line.builtin, SOURCE_TIP if line.needs_source else SEND_TIP)),
                           (PART_SKIP if line.skip_enabled else "_skip", SKIP_TIP),
                           ("_more", MORE_TIP),
-                          (PART_REASON, f"Waits because {line.finding.reason}" if line.finding.reason else
+                          (PART_REASON, f"Waits because {line.reason}" if line.finding.reason else
                            "Waits for you"),
                           (PART_STATUS, STATUS_TIPS.get(line.status[0], "Sent one after another, in this order")),
                           (PART_RELEASE, line.release)):
@@ -1126,19 +1128,21 @@ class FoundView(QWidget):
         modes = self._mode_chips(list(groups))
         passing = bool(self._busy_text)
         out: List[FoundLine] = []
+        builtin = is_builtin(self._backend)
         for sid, items in groups.items():
             name = self.name_of(sid)
             folded = sid in self._folded
             mode, mode_tip = modes.get(sid, ("", ""))
-            out.append(FoundLine(("series", sid), sid, name, count=total_text(items), summary=series_line(items),
-                                 folded=folded, mode=mode, mode_tip=mode_tip))
+            out.append(FoundLine(("series", sid), sid, name, count=total_text(items),
+                                 summary=reword_for(builtin, series_line(items)), folded=folded, mode=mode,
+                                 mode_tip=mode_tip, builtin=builtin))
             if folded:
                 continue
             for f in items:
                 state = "sending" if f.id == self._sending else "queued" if f.id in self._queue else ""
                 pos = self._queue.index(f.id) + 1 if state == "queued" else 0
                 out.append(FoundLine(("finding", f.id), sid, name, f, state=state, queue_pos=pos, passing=passing,
-                                     menu=self._series_menu))
+                                     menu=self._series_menu, builtin=builtin))
         return out
 
     def _mode_chips(self, series_ids: Sequence[int]) -> Dict[int, Tuple[str, str]]:
@@ -1374,6 +1378,7 @@ class FoundView(QWidget):
         if not shown or self.busy():
             return False
         title, text = send_all_question(shown)
+        text = reword_for(is_builtin(self._backend), text)
         if not self._confirm(title, text):
             return False
         backend = self._backend

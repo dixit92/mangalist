@@ -130,17 +130,27 @@ parts do not start at `.1` (`38` with `38.2`: the whole stands in for the missin
 chapters gets the whole chapter, never its parts. A part that turns up later (`38.1` after `38.2` was filed) is fetched
 too. The chapters panel shows the other form unticked, with the reason.
 
-**Chapters without Suwayomi: the built-in extensions (prototype branch `prototype/mihon-mangalist`).** Chapter
-downloads can also go through MangaList's own extension host instead of Suwayomi: a small Java program shipped in the
-image (`extension-host/`, about 210 MB with its Java 21 runtime) that runs the same Mihon / Tachiyomi extensions -
-MangaDex, Weeb Central, MangaFire, ... - and answers MangaList the way Suwayomi does, so the chapters panel, Check for new
-chapters, the find pass, filing and Retry / Cancel work unchanged. To use it:
+**Chapters without Suwayomi: the built-in extensions (since 2026.10.56).** Chapter downloads go through Suwayomi by
+default; you can choose MangaList's own extension host instead: a small Java program shipped in the image
+(`extension-host/`, about 210 MB with its Java 21 runtime) that runs the same Mihon / Tachiyomi extensions - MangaDex,
+Weeb Central, MangaFire, ... - and answers MangaList the way Suwayomi does, so the chapters panel, Check for new
+chapters, the find pass, filing and Retry / Cancel work unchanged. Every screen names the program in use (Suwayomi, or
+"the extension host"). To use it:
 
-- **Settings > Connected services > Chapter downloads through: Built-in extensions** (Suwayomi stays the default).
-  Switching is refused while chapter downloads are still in progress with the other program. In the container the host
-  starts by itself within a minute of choosing it (the `extension-host` service; its data - the installed extensions,
-  the id database, the download queue and the WebView's Chromium bundle - lives in `/config/extension-host`) and stops
-  when you switch back. `MANGALIST_EXTENSION_HOST=1` keeps it always running, `0` turns the service off.
+- **Choose it in Settings**, in either of two places - they are one setting: **Connected services > Chapter downloads
+  through** or **Download sources > Chapter sources** (the card that lists the sources chapters come from, with the same
+  chooser). Suwayomi stays the default. Switching is refused while chapter downloads are still in progress with the
+  other program. In the container the host starts by itself within a minute of choosing it (the `extension-host`
+  service; its data - the installed extensions, the id database, the download queue and the WebView's Chromium bundle -
+  lives in `/config/extension-host`) and stops when you switch back; the card says "Starting..." until it answers.
+  `MANGALIST_EXTENSION_HOST=1` keeps it always running, `0` turns the service off.
+- **Going back to Suwayomi** is the same chooser: Suwayomi's connection and its per-series choices were never touched,
+  so nothing has to be set up again (what you picked on the host in the meantime is not copied back). The list of
+  allowed sources is shared by both programs; editing it while one program is chosen keeps the sources only the other
+  has installed.
+- **The chapter download queue**: **Chapter queue...** under the In progress list shows the chosen program's queue - each
+  chapter's state, progress and tries - with Retry and Cancel for the chapters it gave up on (what Suwayomi's web page
+  showed; the host has no page of its own).
 - **Extensions** (on the Built-in extensions card): every repository's extensions (keiyoushi's by default) with a
   **Repository** column and filter, **Install**, **Update** (and Update all) and **Uninstall** buttons for the selected
   one, and **Source settings** for a source's own settings (languages, image quality, ...). Install MangaDex first;

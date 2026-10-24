@@ -131,7 +131,7 @@ def wanted_series(*, folder: str, title: str, english_title: Optional[str], stat
                   volumes: Optional[Availability]) -> List[WantedSeries]:
     """What one series adds to the Download tab's "To get" list: one entry per kind of gap it has - missing
     volumes and volumes that would upgrade chapters (both searchable when *volumes*, the nyaa rule's answer, says so)
-    and missing chapters (Suwayomi, later). Nothing for a series without gaps."""
+    and missing chapters (a chapter source, later). Nothing for a series without gaps."""
     if state is None or not state.gaps:
         return []
     if knowledge is not None:
@@ -165,7 +165,7 @@ def wanted_series(*, folder: str, title: str, english_title: Optional[str], stat
 
 #: The row menu's Unbundled Chapters entry (a tick; also on a selection) and its help.
 UNBUNDLED_MENU = "Unbundled chapters (volumes + the chapters after the last volume)"
-UNBUNDLED_HELP = ("Also get the chapters after the last volume - Missing chapters from the series' Suwayomi source, "
+UNBUNDLED_HELP = ("Also get the chapters after the last volume - Missing chapters from the series' chapter source, "
                   "Automatic downloads included - before the next volume is out; when it is, it replaces them as an "
                   "upgrade. Where MangaPixer's volume list does not say where the last volume ends, it asks once for "
                   "the first chapter to get.")

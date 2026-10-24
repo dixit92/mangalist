@@ -195,10 +195,13 @@ downloaded through `/compat` (search -> chapters -> enqueue -> CBZ), in a 2 GB /
 | Comix (EN), WebView | 19 s the first time (Chromium downloaded 6.5 s, unpacked 10.4 s, started 0.8 s), then 1-3 s | **fails**: "Could not find the site's chapters API" | - | - |
 
 Comix: the WebView works (Comix's search runs in it: Chromium navigation, request interception, the JavaScript bridge),
-but its chapter list and pages fail - **the same error in Suwayomi v2.4.2366** (checked in a throwaway Suwayomi
-container). The cause is the site, not the browser: comix.to's current build (`35595e3de3c99889c1aa70`) wraps its API
-client in a `Proxy` that hides its keys and binds its functions, so the extension's script cannot find the method it
-looks for (read with `/webview/debug-eval`). Comix 1.6.54 needs an update from keiyoushi.
+but its chapter list and pages failed on 2026-10-22 - with the same error in a throwaway Suwayomi v2.4.2366 container
+that day. The cause looked like the site, not the browser: comix.to's build of that day (`35595e3de3c99889c1aa70`)
+wrapped its API client in a `Proxy` that hides its keys and binds its functions, so the extension's script could not
+find the method it looks for (read with `/webview/debug-eval`). **Correction (2026-10-24, MangaList's transition
+audit E1):** the owner's own Suwayomi filed Comix chapters on 2026-10-23, so "it fails the same way in Suwayomi" does
+not hold in general; on the host Comix 1.6.56 failed with `RuntimeException: Stub!` from the KCEF WebView provider
+(`insertVisualStateCallback`) - a host-side gap, not the site. Comix is left as it is for now (owner's choice).
 
 Memory (`docker stats`, the same container): idle with no WebView 117 MiB (174 MiB after a download), downloading
 187 MiB at most; with the WebView started (Chromium's processes) 353-413 MiB, idle 409 MiB, downloading 414 MiB.

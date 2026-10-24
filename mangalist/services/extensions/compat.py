@@ -187,6 +187,7 @@ class ExtensionsChapterClient:
                  timeout: float = DEFAULT_TIMEOUT):
         self.base_url = normalize_host_url(base_url if base_url is not None else (conn.base_url if conn else ""))
         self._timeout = timeout
+        self._about_cache: Optional[Mapping[str, Any]] = None
         if session is None:
             import requests
 
@@ -247,7 +248,25 @@ class ExtensionsChapterClient:
 
     def version(self) -> str:
         """The host's version: the connection test."""
-        return _text(self._object(self.call("GET", "/about"), "about").get("version")) or "?"
+        return _text(self._about().get("version")) or "?"
+
+    def _about(self) -> Mapping[str, Any]:
+        if self._about_cache is None:
+            self._about_cache = self._object(self.call("GET", "/about"), "about")
+        return self._about_cache
+
+    def instance(self) -> str:
+        """The id of the host's database (made with it; another id = the database was replaced: transition audit B4).
+        '' from a host too old to say. Asked once per client."""
+        return _text(self._about().get("instance"))
+
+    def manga_by_url(self, source_id: str, url: str, title: str = "") -> SuwayomiManga:
+        """The host's manga for a source's manga *url* (``POST /compat/manga``: made now when the host never saw it - its
+        own bookkeeping, no request to the source). How a stored choice finds its manga again after the host's database
+        was replaced (B4) and how a choice moves between the two programs (the manga's url is the same in both)."""
+        got = self._object(self.call("POST", "/manga", {"sourceId": str(source_id), "url": url, "title": title or ""}),
+                           "manga")
+        return manga_of({"sourceId": str(source_id), "url": url, "title": title, **got})
 
     def server_settings(self) -> Dict[str, Any]:
         """As :meth:`SuwayomiClient.server_settings`: ``version``, ``download_as_cbz``, ``downloads_path``, ``auth_mode``

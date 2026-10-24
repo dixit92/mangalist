@@ -204,7 +204,8 @@ def test_a_source_behind_cloudflare(db, tmp_path, live_host):
 
 @pytest.mark.skipif(not WEBVIEW, reason="opt-in: MANGALIST_E2E_WEBVIEW=1 (the host's WebView: KCEF Chromium)")
 def test_comix_search_runs_in_the_webview(db, tmp_path, live_host):
-    """Comix's chapters and pages fail upstream (also in Suwayomi, 2026-10-22); its search runs in the WebView."""
+    """Comix's search runs in the WebView. Its chapters and pages failed on the host (2026-10-22 and 2026-10-24); the
+    owner's Suwayomi filed Comix chapters on 2026-10-23, so this is not simply the site's fault (transition audit E1)."""
     name, lang, query = COMIX
     backend = Backend(db)
     choose_builtin(backend, live_host["url"], live_host["download_dir"])

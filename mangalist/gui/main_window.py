@@ -72,7 +72,7 @@ from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
 from .volumes_target import search_titles
 from .links import open_folder, open_link
 from .background import describe_error, release_on_ui_thread
-from .series_actions import SeriesMenu, SeriesRef
+from .series_actions import CHECK_NEW_TIP, SeriesMenu, SeriesRef
 
 
 # ---------------------------------------------------------------------------
@@ -2482,8 +2482,7 @@ class MainWindow(QMainWindow):
                 act_get.setToolTip("Open this series in the Download tab" if groups else
                                    "Nothing missing: no gaps to download")
                 act_new = menu.addAction("Check for new chapters…")
-                act_new.setToolTip("Ask the series' Suwayomi source for chapters newer than the newest one you have - "
-                                   "also before MangaUpdates lists them")
+                act_new.setToolTip(CHECK_NEW_TIP)
                 menu.setToolTipsVisible(True)
             act_aside = menu.addAction("Set aside chapters its volumes hold…")
             act_aside.setToolTip("Chapter files inside volumes this series holds, by MangaPixer's estimated volume ranges: "

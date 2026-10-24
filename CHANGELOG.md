@@ -7,6 +7,23 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.57] - 2026-10-24
+
+The fifty-sixth MangaList release (testing build): fixes from an audit of the switch to the built-in extensions - stuck chapters, switching back and forth, and texts that name the program in use.
+
+- **Chapters with non-ASCII names download through the built-in extensions.** The extension host ran without a UTF-8 locale, so a chapter whose series or group name had a letter like "ï" failed to save. The host now always starts in `C.UTF-8`, warns in its log when file names are not UTF-8, and its log is written to `/config/logs/extension-host.log` and shown in the log viewer.
+- **Retry and Cancel for the extension host's stuck chapters.** A chapter the built-in extension host gave up on now offers **Retry** and **Cancel…** in In progress, as Suwayomi's do, and a chapter still on its way can be cancelled even when its program is stopped. A new host version gives failed chapters fresh tries, and "an extra try" replaces "try 4 of 3".
+- **Switching back and forth keeps working.** Each chapter download remembers which program it belongs to (database schema 10; existing downloads are sorted out by themselves), so the two programs' chapter numbers never mix. A filed chapter no longer blocks a switch; a waiting finding made before a switch is looked up again in the program chosen now; switching is refused only while a download, find pass or chapter check is running.
+- **Carry back to Suwayomi.** The carry-over panel can turn around: what you decided on the built-in extensions (matches, Change source, groups) is carried back to Suwayomi.
+- **The extension host on demand.** With Suwayomi chosen, the Extensions page, Test connection and the carry-over start the host by themselves (in the container) and stop it again 30 minutes later.
+- **A replaced extension host database is noticed.** When the host's database has been reset or restored, each series finds its manga again by itself, and downloads in flight are marked failed instead of fetching the wrong manga. MangaList's database and the host's are backed up together when a new version starts (`python -m mangalist.store.backups <label>` by hand).
+- **Hard links for host chapters.** The container's host downloads into `/data/appdata/mangalist/extension-host-downloads`, so finished chapters are hard-linked into the library instead of copied when both are on the same disk.
+- **Chapter sources.** Settings' Download sources card is now **Chapter sources**: it names the program in use and has the same "Chapter downloads through" chooser as Connected services. The chapters panel, the Download tab, Found, Add a series and the List's row menu name the program in use (or just "chapter source"), and change with a switch.
+- **An honest status.** The chip says Connected only after the program answered and Not reachable when it did not; a host chosen a moment ago shows "Starting..." and is checked again instead of a red Not connected.
+- **Editing the allowed sources keeps the other program's choices**, and the list is read again after a switch.
+- **Chapter queue.** **Chapter queue…** under In progress shows the chosen program's download queue (state, progress, tries) with Retry and Cancel for failed chapters.
+- Smaller fixes: **Remove the browser files** frees the WebView's Chromium files when the WebView is off; ComicInfo `Web` is never empty; chapter file names that Windows reserves are handled; the README describes the built-in extensions as released.
+
 ## [2026.10.56] - 2026-10-24
 
 The fifty-fifth MangaList release (testing build): chapters without Suwayomi - MangaList's own extension host, an alternative chosen in Settings (Suwayomi stays the default).

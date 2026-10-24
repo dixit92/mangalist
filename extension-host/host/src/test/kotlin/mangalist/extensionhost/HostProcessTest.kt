@@ -75,12 +75,16 @@ class HostProcessTest {
                 val c1 = store.insertChapter(ChapterRow(0, manga.id, "/c/1", "Chapter 1", 1f, null, "https://x/c/1", 1, 1))
                 val c2 = store.insertChapter(ChapterRow(0, manga.id, "/c/2", "Chapter 2", 2f, "Team", "https://x/c/2", 2, 2))
                 store.saveQueue(listOf(QueueRow(c1, Downloader.ERROR, 3)))
+                store.startedWith(HOST_VERSION) // made by this version (a new version would retry the ERROR: audit E3)
                 listOf(c1, c2)
             }
+        val instance = Store(data.resolve("host.db")).use { it.instance() }
 
         val first = start()
         try {
-            assertEquals("MangaList extension host", first.call("GET", "/compat/about").jsonObject["name"]!!.jsonPrimitive.content)
+            val about = first.call("GET", "/compat/about").jsonObject
+            assertEquals("MangaList extension host", about["name"]!!.jsonPrimitive.content)
+            assertEquals(instance, about["instance"]!!.jsonPrimitive.content) // the database's id, kept
             val settings = first.call("GET", "/compat/settings").jsonObject
             assertEquals(downloads.toString(), settings["downloadsPath"]!!.jsonPrimitive.content)
             assertEquals("off", settings["webView"]!!.jsonPrimitive.content)

@@ -244,3 +244,22 @@ def test_installed_extensions_and_repositories(session):
     assert [r["name"] for r in session.requests] == ["MangaListInstalledExtensions", "MangaListExtensionStores"]
     assert all(r["query"].startswith("query ") for r in session.requests)
     assert all(sc.OPERATIONS[k].startswith("query ") for k in ("mangas", "extensions", "extensionStores"))
+
+
+def test_a_manga_by_its_url_known_or_found_by_a_search(session):
+    """The carry-back to Suwayomi (transition audit B8): the manga Suwayomi knows by its url; a server that does not
+    take that query is asked by a search (MangaDex by the id in the url), and only the same url is taken."""
+    md = "/manga/00000000-0000-4000-8000-0000000c0000"
+    session.answers["MangaListMangaByUrl"] = {"data": {"mangas": {"nodes": [
+        {"id": 31, "title": "Known", "url": md, "sourceId": "2499283573021220255", "inLibrary": False}]}}}
+    got = make(session).manga_by_url("2499283573021220255", md, "Known")
+    assert got.id == 31 and session.requests[-1]["variables"] == {"url": md}
+    session.answers["MangaListMangaByUrl"] = {"data": None, "errors": [{"message": "Unknown argument condition.url"}]}
+    session.answers["MangaListSearch"] = lambda v: {"data": {"fetchSourceManga": {"hasNextPage": False, "mangas": [
+        {"id": 40, "title": "Other", "url": "/manga/other", "sourceId": v["source"]},
+        {"id": 41, "title": "Found", "url": md, "sourceId": v["source"]}]}}}
+    got = make(session).manga_by_url("2499283573021220255", md, "Found")
+    assert got.id == 41
+    assert session.requests[-1]["variables"]["query"] == "id:00000000-0000-4000-8000-0000000c0000"
+    session.answers["MangaListSearch"] = lambda v: {"data": {"fetchSourceManga": {"hasNextPage": False, "mangas": []}}}
+    assert make(session).manga_by_url("1", "/series/x", "X") is None
