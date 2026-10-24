@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QHBoxLayout, QLineEdit, QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
 )
@@ -36,6 +36,8 @@ from .downloads_backend import BackendError, DownloadsBackend, SuwayomiSettingsV
 from .mangapixer_dialog import ClientFactory, MangaPixerPanel
 from .qbittorrent_dialog import QbittorrentPanel
 from .settings_common import SectionPage, ServiceCard, back_link, clear_layout
+from . import start_window
+from .start_window import StartWindow
 
 LEAD = "Programs MangaList talks to. Each needs an address and a login; download sources need them."
 MANGAPIXER_WHAT = ("Series links, volume lists and Completion for the folders MangaPixer knows; library scans after "
@@ -61,7 +63,8 @@ EXT_WHAT = ("MangaList's own extension host: runs Mihon / Tachiyomi extensions a
 EXT_INFO = ("The built-in extensions are MangaList's own alternative to Suwayomi for chapter downloads: a small program "
             "(the extension host) runs the same Mihon / Tachiyomi extensions Suwayomi uses - MangaDex, Weeb Central, "
             "MangaFire, ... - and downloads the chapters you send, as CBZ archives MangaList files into the series "
-            "folder. Choose it under \"Chapter downloads\"; install the extensions under Extensions.")
+            "folder. Choose it under \"Chapter downloads through\" here or under Download sources > Chapter sources; install "
+            "the extensions under Extensions.")
 CHOOSER_LEAD = "Chapter downloads through:"
 BACKENDS = (("suwayomi", "Suwayomi"), ("extensions", "Built-in extensions"))
 NOT_IN_USE = "Not in use"
@@ -106,6 +109,9 @@ def scan_forbidden(cache: MangaPixerCache) -> bool:
 
 
 class ServicesPage(SectionPage):
+    #: The owner chose another chapter backend here (the key): the dialog tells Download sources, which has the same chooser.
+    backend_switched = Signal(str)
+
     def __init__(self, db, backend: Optional[DownloadsBackend], cache: Optional[MangaPixerCache],
                  parent: Optional[QWidget] = None, client_factory: Optional[ClientFactory] = None,
                  info: Optional[Callable[[QWidget, str, str], None]] = None, carry_runner=None):
@@ -126,6 +132,10 @@ class ServicesPage(SectionPage):
         self.extensions_panel = None            # ExtensionsPanel while Extensions is open
         self.carry_panel = None                 # CarryOverPanel while "Carry over from Suwayomi" is open
         self._ext_tested = False
+        self._start = StartWindow()             # the host was just chosen: a failed check is "starting" for a while
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self._retry_extension_host)
 
         self.stack = QStackedWidget()
         self.body.addWidget(self.stack)
@@ -135,8 +145,8 @@ class ServicesPage(SectionPage):
         cv.setSpacing(14)
         self.mp_card = ServiceCard("MangaPixer", MANGAPIXER_WHAT, "Matching, Automation")
         self.qbt_card = ServiceCard("qBittorrent", QBT_WHAT, "nyaa")
-        self.suwayomi_card = ServiceCard("Suwayomi", SUWAYOMI_WHAT, "Suwayomi sources (chapters)")
-        self.ext_card = ServiceCard("Built-in extensions", EXT_WHAT, "Suwayomi sources (chapters), when chosen")
+        self.suwayomi_card = ServiceCard("Suwayomi", SUWAYOMI_WHAT, "Chapter sources (Download sources)")
+        self.ext_card = ServiceCard("Built-in extensions", EXT_WHAT, "Chapter sources (Download sources), when chosen")
         self.backend_combo = QComboBox()
         self.backend_combo.setObjectName("chapterBackend")
         for key, text in BACKENDS:
@@ -365,12 +375,25 @@ class ServicesPage(SectionPage):
             return False
         self.backend_note.setText("")
         self.downloads_changed.emit()
+        self.note_backend_switched(key)
+        self.backend_switched.emit(key)
+        return True
+
+    def note_backend_switched(self, key: str) -> None:
+        """The chapter backend is *key* now (chosen here or on Download sources): the cards follow it and the program in
+        use is checked - the host with a minute's grace, since it is only starting."""
+        self._retry_timer.stop()
         self.refresh()
         if key == "extensions":
+            self._start.open()
             self.test_extension_host()
         else:
+            self._start.close()
             self.test_suwayomi()
-        return True
+
+    def _retry_extension_host(self) -> None:
+        if self.builtin():
+            self.test_extension_host()
 
     def choose_backend(self, key: str) -> bool:
         """Pick a chapter backend as the owner would (tests)."""
@@ -383,8 +406,9 @@ class ServicesPage(SectionPage):
         backend = self._backend
         card = self.ext_card
         card.btn_secondary.setEnabled(False)
-        card.set_status("Checking...", "muted")
-        card.set_note("")
+        if not (self.builtin() and self._start.active() and card.badge.text() == "Starting..."):
+            card.set_status("Checking...", "muted")      # while it starts, "Starting..." stays instead of flickering
+            card.set_note("")
         self._spawn(lambda: backend.test_extension_host(), self._ext_ok, self._ext_failed)
         return True
 
@@ -397,12 +421,20 @@ class ServicesPage(SectionPage):
         card.set_note(detail + (". " + " ".join(notes) if notes else ""), "warn" if notes else "muted")
         config = self._backend.load_extension_host()
         card.detail_label.setText(f"{config.url} · download folder {check.files_from or '?'}")
+        self._start.close()
         if not self.builtin():
             card.set_status(NOT_IN_USE, "muted")
 
     def _ext_failed(self, message: str) -> None:
         card = self.ext_card
         card.btn_secondary.setEnabled(True)
+        if self.builtin() and self._start.active():
+            # chosen a moment ago: the supervisor starts the host within 15 s and the JVM needs a few more
+            card.set_status("Starting...", "muted")
+            card.set_note("The extension host starts by itself within a minute of choosing it; MangaList keeps "
+                          "checking.", "muted")
+            self._retry_timer.start(start_window.RETRY_MS)
+            return
         card.set_status("Not connected" if self.builtin() else NOT_IN_USE, "bad" if self.builtin() else "muted")
         card.set_note(message + (" In the container the host starts by itself within a minute of choosing it; on a "
                                  "desktop, start it and check its address (Edit).") if self.builtin() else message,
@@ -752,6 +784,7 @@ class ServicesPage(SectionPage):
         clear_layout(self.editor_layout)
 
     def stop(self) -> None:
+        self._retry_timer.stop()
         for call in list(self._calls):
             call.abandon()
         self._calls.clear()
