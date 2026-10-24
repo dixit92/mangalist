@@ -184,6 +184,20 @@ def _open_settings(data_dir: Path):
     return settings
 
 
+#: The locale the host runs in. The image's ``LANG=en_US.UTF-8`` (jlesage's base) names a locale the image does not have,
+#: so the C library falls back to ASCII and Java with it: a chapter file named after a group like "Les Poroïniens" could
+#: not be written ("InvalidPathException: Malformed input or input contains unmappable characters", owner's container,
+#: 2026-10-24). ``C.UTF-8`` is built into glibc.
+HOST_LOCALE = "C.UTF-8"
+
+
+def host_env(env: Optional[Mapping[str, str]] = None) -> dict:
+    """The environment the host process starts with: *env* (default this process's) in a UTF-8 locale."""
+    out = dict(os.environ if env is None else env)
+    out.update(LANG=HOST_LOCALE, LC_ALL=HOST_LOCALE)
+    return out
+
+
 class Supervisor:
     """One host process, kept as :func:`wanted` says. *spawn* / *clock* / *settings* are for tests."""
 
@@ -236,7 +250,7 @@ class Supervisor:
         Path(want.downloads).mkdir(parents=True, exist_ok=True)
         _log.info("Extension host: starting %s", " ".join(want.command))
         try:
-            self.process = self._spawn(list(want.command))
+            self.process = self._spawn(list(want.command), env=host_env(self._env))
         except OSError as exc:
             _log.error("Extension host: could not start %s (%s)", want.command[0], exc)
             self.failures += 1

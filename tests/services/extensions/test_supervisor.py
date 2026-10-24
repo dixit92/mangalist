@@ -18,8 +18,9 @@ BIN = "/opt/mangalist/extension-host/bin/mangalist-extension-host"
 
 
 class FakeProcess:
-    def __init__(self, args):
+    def __init__(self, args, env=None):
         self.args = args
+        self.env = env
         self.returncode = None
         self.terminated = False
 
@@ -54,8 +55,8 @@ def settings(tmp_path) -> SuwayomiSettings:
 def make(tmp_path, settings, env=None):
     spawned = []
 
-    def spawn(args):
-        spawned.append(FakeProcess(args))
+    def spawn(args, env=None):
+        spawned.append(FakeProcess(args, env))
         return spawned[-1]
 
     clock = Clock()
@@ -153,7 +154,7 @@ def test_no_database_yet_means_not_running(tmp_path, monkeypatch):
 def test_a_binary_that_cannot_start_waits(tmp_path, settings):
     settings.set_backend(CHAPTER_BACKEND_EXTENSIONS)
 
-    def spawn(args):
+    def spawn(args, env=None):
         raise FileNotFoundError(args[0])
 
     clock = Clock()
@@ -215,3 +216,19 @@ def test_a_changed_repository_list_alone_does_not_restart_the_host(tmp_path, set
     sup.tick()
     assert spawned[0].terminated and len(spawned) == 2
     assert spawned[1].args[spawned[1].args.index("--repo") + 1] == "https://a.example/index.json"
+
+
+def test_the_host_starts_in_a_utf8_locale(tmp_path):
+    """The image's LANG names a locale it does not have, so the host's Java fell back to ASCII file names and a chapter
+    by "Les Poroïniens" could not be written (owner's container, 2026-10-24)."""
+    env = {"LANG": "en_US.UTF-8", "PATH": "/usr/bin", "MANGALIST_FLARESOLVERR_URL": "http://192.168.2.50:8191"}
+    out = sv.host_env(env)
+    assert out["LANG"] == out["LC_ALL"] == "C.UTF-8" and out["PATH"] == "/usr/bin"
+    assert out["MANGALIST_FLARESOLVERR_URL"] == "http://192.168.2.50:8191" and env["LANG"] == "en_US.UTF-8"
+
+
+def test_the_supervisor_spawns_the_host_with_the_utf8_environment(tmp_path, settings):
+    settings.set_backend(CHAPTER_BACKEND_EXTENSIONS)
+    sup, spawned, _clock = make(tmp_path, settings, env={"LANG": "en_US.UTF-8"})
+    sup.tick()
+    assert len(spawned) == 1 and spawned[0].env["LC_ALL"] == spawned[0].env["LANG"] == "C.UTF-8"
