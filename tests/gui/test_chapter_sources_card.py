@@ -239,7 +239,7 @@ def test_a_host_down_long_after_the_switch_is_not_reachable_at_once(qapp, dialog
 
 
 def test_a_host_chosen_a_moment_ago_is_starting_and_is_tried_again(qapp, dialogs, db, monkeypatch):
-    monkeypatch.setattr(start_window, "RETRY_MS", 30)
+    monkeypatch.setattr(start_window, "RETRY_MS", 60_000)     # long: no retry can run while "Starting..." is checked
     up = {"yes": False}
 
     def host_rows():
@@ -258,6 +258,7 @@ def test_a_host_chosen_a_moment_ago_is_starting_and_is_tried_again(qapp, dialogs
     assert page.suwayomi_badge.text() == "Starting..." and page.suwayomi_badge.property("badge") == "muted"
     assert "starting" in page.sources_note.text() and page._retry_timer.isActive()
     up["yes"] = True                                                         # the JVM came up
+    page._retry_timer.start(10)                                              # the retry, now
     wait_until(qapp, lambda: page.suwayomi_badge.text() == "Connected")
     assert rows(page) == [("MangaDex (EN)", True)] and not page._retry_timer.isActive()
     # once the window has passed, a failure is a failure
@@ -270,7 +271,7 @@ def test_a_host_chosen_a_moment_ago_is_starting_and_is_tried_again(qapp, dialogs
 
 def test_the_services_card_says_starting_not_a_red_failure_right_after_the_switch(qapp, dialogs, db, backend, host,
                                                                                     monkeypatch):
-    monkeypatch.setattr(start_window, "RETRY_MS", 30)
+    monkeypatch.setattr(start_window, "RETRY_MS", 60_000)     # long: no retry can run while "Starting..." is checked
     backend.save_extension_host(ExtensionHostConfig(url="http://127.0.0.1:9"))        # nothing listens yet
     dlg = open_dialog(qapp, dialogs, db, backend, section=SECTION_SERVICES)
     services = dlg.pages[SECTION_SERVICES]
@@ -280,6 +281,7 @@ def test_the_services_card_says_starting_not_a_red_failure_right_after_the_switc
     assert services.ext_card.badge.text() == "Starting..." and services.ext_card.badge.property("badge") == "muted"
     assert "keeps checking" in services.ext_card.note_label.text()
     backend.save_extension_host(ExtensionHostConfig(url=host.url))                 # the host is up
+    services._retry_timer.start(10)                                                 # the retry, now
     wait_until(qapp, lambda: services.ext_card.badge.text().startswith("Connected"))
     assert services.ext_card.badge.property("badge") == "ok" and not services._retry_timer.isActive()
     # a later failure (the window is closed) is red at once, as before

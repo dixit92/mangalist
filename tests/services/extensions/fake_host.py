@@ -233,7 +233,7 @@ class FakeHost:
                 for page in range(1, ch.pages + 1):
                     zf.writestr(f"{page:03d}.png", PNG)
                 zf.writestr("ComicInfo.xml", comicinfo(ch, manga["title"], number_text(ch.number)))
-            os.replace(tmp, path)
+            _replace(tmp, path)
             with self.lock:
                 self.downloaded[cid] = path
                 self.queue = [q for q in self.queue if q["chapterId"] != cid]
@@ -500,3 +500,15 @@ def wait_for(predicate, timeout: float = 10.0, step: float = 0.05) -> bool:
             return True
         time.sleep(step)
     return bool(predicate())
+
+
+def _replace(tmp: Path, path: Path) -> None:
+    """``os.replace``, tried again for a moment on Windows, where a file another thread still has open cannot be
+    replaced (a test reading the previous copy of the chapter)."""
+    for _ in range(50):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.1)
+    os.replace(tmp, path)
