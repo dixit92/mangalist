@@ -55,7 +55,7 @@ def settings(tmp_path) -> SuwayomiSettings:
 def make(tmp_path, settings, env=None):
     spawned = []
 
-    def spawn(args, env=None):
+    def spawn(args, env=None, **_streams):
         spawned.append(FakeProcess(args, env))
         return spawned[-1]
 
@@ -154,7 +154,7 @@ def test_no_database_yet_means_not_running(tmp_path, monkeypatch):
 def test_a_binary_that_cannot_start_waits(tmp_path, settings):
     settings.set_backend(CHAPTER_BACKEND_EXTENSIONS)
 
-    def spawn(args, env=None):
+    def spawn(args, env=None, **_streams):
         raise FileNotFoundError(args[0])
 
     clock = Clock()
