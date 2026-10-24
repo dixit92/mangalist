@@ -155,9 +155,17 @@ class Kept:
         return self.latest is not _UNKNOWN
 
 
-def load(db, series_id: int) -> Optional[Kept]:
+def _key(series_id: int, backend: Optional[str] = None) -> str:
+    """The kept state's key: one per program (transition audit B9 - the manga id it names is the program's own, so a
+    switch back and forth keeps each program's state instead of fetching every MangaDex series again)."""
+    if backend == "extensions":
+        return f"{META_PREFIX}extensions.{int(series_id)}"
+    return f"{META_PREFIX}{int(series_id)}"
+
+
+def load(db, series_id: int, backend: Optional[str] = None) -> Optional[Kept]:
     try:
-        data = json.loads(db.get_meta(f"{META_PREFIX}{int(series_id)}") or "null")
+        data = json.loads(db.get_meta(_key(series_id, backend)) or "null")
     except (TypeError, ValueError):
         return None
     if not isinstance(data, Mapping) or not isinstance(data.get("suwayomi_manga"), int) \
@@ -169,17 +177,17 @@ def load(db, series_id: int) -> Optional[Kept]:
                 parse_time(data.get("at")))
 
 
-def save(db, series_id: int, kept: Kept) -> None:
+def save(db, series_id: int, kept: Kept, backend: Optional[str] = None) -> None:
     data: Dict[str, Any] = {"suwayomi_manga": kept.suwayomi_manga, "mangadex": kept.mangadex_id,
                             "local": kept.local, "at": _iso(kept.at) if kept.at else None}
     if kept.known:
         data["latest"] = kept.latest
-    db.set_meta(f"{META_PREFIX}{int(series_id)}", json.dumps(data, sort_keys=True, separators=(",", ":")))
+    db.set_meta(_key(series_id, backend), json.dumps(data, sort_keys=True, separators=(",", ":")))
 
 
-def forget(db, series_id: int) -> None:
-    if db.get_meta(f"{META_PREFIX}{int(series_id)}") is not None:
-        db.set_meta(f"{META_PREFIX}{int(series_id)}", None)
+def forget(db, series_id: int, backend: Optional[str] = None) -> None:
+    if db.get_meta(_key(series_id, backend)) is not None:
+        db.set_meta(_key(series_id, backend), None)
 
 
 def local_state(db, backend: Any, store: Any, series_id: int) -> str:
@@ -250,6 +258,7 @@ class Gate:
         fresh_after = gate.now - (interval or DEFAULT_INTERVAL)
         by_id = {s.id: s for s in sources}
         suwayomi = SuwayomiSettings(db)
+        program = suwayomi.backend()
         signals: Dict[str, Signal] = {}
         swept: set = set()                  # MangaDex ids fresh only through their library's sweep time
         sweeps = mangapixer_sweeps(db)
@@ -261,7 +270,7 @@ class Gate:
                 source = by_id.get(str(choice.get("source_id") or ""))
                 if source is None or not source.is_mangadex:
                     continue                # another source (or none allowed): fetched every run
-                kept = load(db, sid)
+                kept = load(db, sid, program)
                 mangadex_id = kept.mangadex_id if kept is not None and kept.suwayomi_manga == choice["manga_id"] \
                     else None
             else:
@@ -309,7 +318,7 @@ class Gate:
         value = self.latest.get(mangadex_id) if mangadex_id else None
         if value is None or not match.source.is_mangadex:
             return None
-        kept = load(self.db, series_id)
+        kept = load(self.db, series_id, getattr(match, "backend", None))
         if kept is None or not kept.known or kept.suwayomi_manga != match.manga.id or kept.mangadex_id != mangadex_id:
             return None
         if kept.latest != value.chapter or kept.local != local:
@@ -323,16 +332,17 @@ class Gate:
         Suwayomi's answer names (only when it is the one asked about; otherwise the manga only, the value unknown)."""
         from .chapters import mangadex_id_in_url
 
+        program = getattr(match, "backend", None)
         if not match.source.is_mangadex:
-            forget(self.db, series_id)
+            forget(self.db, series_id, program)
             return
         answered = mangadex_id_in_url(manga_url) or mangadex_id_in_url(match.manga.url)
         if not answered:
-            forget(self.db, series_id)
+            forget(self.db, series_id, program)
             return
         value = self.latest.get(answered) if self.planned.get(int(series_id)) == answered else None
         save(self.db, series_id, Kept(int(match.manga.id), answered, value.chapter if value else _UNKNOWN, local,
-                                      self.now))
+                                      self.now), program)
 
 
 __all__ = ["DEFAULT_INTERVAL", "Gate", "Kept", "Latest", "REFETCH_AFTER", "Signal", "load", "local_state",
