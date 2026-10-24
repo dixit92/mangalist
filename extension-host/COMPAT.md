@@ -74,3 +74,9 @@ Agreed from the lanes' reports; MangaList's client relies on these.
 - `POST /extensions/update {pkg, repo?, waitSeconds?}`: while a source of that extension is downloading, the host holds
   that source's queue and waits up to `waitSeconds`, else answers `409` (MangaList's `extension-updates` job waits 60 s and
   otherwise tries again at its next run).
+
+## Registering a manga - 2026-10-24 (integrator, after merging lane C)
+
+- `POST /compat/manga {sourceId, url, title}` -> `{id, title, url, sourceId, inLibrary}`: get-or-create the host's manga id
+  for (sourceId, url) (`404` when the source is not installed, `400` without sourceId or url). Used once, by MangaList's
+  carry-over from Suwayomi (`mangalist/services/extensions/carry_over.py`), to give each series' chosen manga a host id.
