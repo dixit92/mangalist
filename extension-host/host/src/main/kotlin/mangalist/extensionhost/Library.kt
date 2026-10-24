@@ -99,6 +99,24 @@ class Library(
         return rows to found.hasNextPage
     }
 
+    /**
+     * The manga of [sourceId] at [url], made now when the host never saw it (MangaList's carry-over from Suwayomi: the
+     * same source, the same url, the host's own id). An existing manga is answered as it is; a new one keeps [title]
+     * until its details are fetched (at its first chapter list, as for a manga a search found). 404 when the source is
+     * not installed.
+     */
+    fun register(
+        sourceId: Long,
+        url: String,
+        title: String,
+    ): MangaRow {
+        source(sourceId)
+        return store.transaction {
+            mangaByUrl(sourceId, url)
+                ?: insertManga(MangaRow(id = 0, sourceId = sourceId, url = url, title = title))
+        }
+    }
+
     fun addToLibrary(mangaId: Int): MangaRow {
         manga(mangaId)
         store.setInLibrary(mangaId, true)

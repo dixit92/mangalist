@@ -149,6 +149,44 @@ class CompatHttpTest {
     }
 
     @Test
+    fun `register a manga by its source and url - the carry-over from Suwayomi`() {
+        val body = """{"sourceId": "${source.id}", "url": "/m/1", "title": "Fragrant Flower (Suwayomi)"}"""
+        val made = ok("POST", "/compat/manga", body).o
+        val mangaId = made["id"]!!.jsonPrimitive.int
+        assertEquals("/m/1", made.s("url"))
+        assertEquals(source.id.toString(), made.s("sourceId"))
+        assertEquals("Fragrant Flower (Suwayomi)", made.s("title"))
+        assertFalse(made["inLibrary"]!!.jsonPrimitive.boolean)
+        // get-or-create: the same (source, url) is the same manga, its stored title kept
+        val again = ok("POST", "/compat/manga", """{"sourceId": "${source.id}", "url": "/m/1", "title": "Other"}""").o
+        assertEquals(mangaId, again["id"]!!.jsonPrimitive.int)
+        assertEquals("Fragrant Flower (Suwayomi)", again.s("title"))
+        // a search finds the same manga under the same id
+        val found = ok("POST", "/compat/search", """{"sourceId": "${source.id}", "query": "fragrant"}""").o["mangas"]!!.jsonArray.single()
+        assertEquals(mangaId, found.o["id"]!!.jsonPrimitive.int)
+        // its chapters work, and its details are fetched at the first chapter list (it was never initialized)
+        val got = ok("POST", "/compat/manga/$mangaId/chapters").o
+        assertEquals(2, got["chapters"]!!.jsonArray.size)
+        assertEquals(1, source.detailCalls.get())
+        assertTrue(got["manga"]!!.o["initialized"]!!.jsonPrimitive.boolean)
+        // another url is another manga; no title is fine
+        val other = ok("POST", "/compat/manga", """{"sourceId": "${source.id}", "url": "/m/2"}""").o
+        assertTrue(other["id"]!!.jsonPrimitive.int != mangaId)
+        assertEquals("", other.s("title"))
+    }
+
+    @Test
+    fun `register refuses a source not installed, and a call without sourceId or url`() {
+        val (status, err) = call("POST", "/compat/manga", """{"sourceId": "1", "url": "/m/1", "title": "x"}""")
+        assertEquals(404, status)
+        assertTrue(err.s("error").contains("no installed source"))
+        assertEquals(400, call("POST", "/compat/manga", """{"url": "/m/1"}""").first)
+        assertEquals(400, call("POST", "/compat/manga", """{"sourceId": "${source.id}", "url": " "}""").first)
+        assertEquals(400, call("POST", "/compat/manga", "[1]").first)
+        assertEquals(emptyList(), store.chaptersOf(1))
+    }
+
+    @Test
     fun `errors are JSON with 400 and 404`() {
         val (s1, e1) = call("POST", "/compat/manga/424242/chapters")
         assertEquals(404, s1)

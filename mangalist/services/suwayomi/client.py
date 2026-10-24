@@ -16,7 +16,11 @@ recorded answers and the code cannot drift apart unnoticed:
   try, Suwayomi 2.4); :data:`M_DEQUEUE` ``dequeueChapterDownloads(ids)``; :data:`Q_QUEUE` ``downloadStatus`` (a finished chapter LEAVES the
   queue); :data:`Q_CHAPTERS_BY_ID` ``chapters(filter: {id: {in}})`` (``isDownloaded``);
 - :data:`M_DELETE` ``deleteDownloadedChapters(ids)`` - Suwayomi deletes its downloaded copy (and empty folders) and
-  marks the chapters not downloaded; it answers the same when the file is already gone.
+  marks the chapters not downloaded; it answers the same when the file is already gone;
+- read-only, for the carry-over to the built-in extensions (:mod:`mangalist.services.extensions.carry_over`):
+  :data:`Q_MANGAS_BY_ID` ``mangas(filter: {id: {in}})`` (each chosen manga's url / title / source),
+  :data:`Q_INSTALLED_EXTENSIONS` ``extensions(condition: {isInstalled: true})`` (package, repository) and
+  :data:`Q_EXTENSION_STORES` ``extensionStores`` (the repository list).
 
 Rules:
 
@@ -36,6 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
@@ -93,10 +98,46 @@ Q_CHAPTERS_BY_ID = ("query MangaListChaptersById($ids: [Int!]!) { chapters(filte
 M_DELETE = ("mutation MangaListDeleteDownloaded($ids: [Int!]!) { deleteDownloadedChapters(input: {ids: $ids}) "
             "{ chapters { id isDownloaded } } }")
 
+# --- read-only, for the carry-over to the built-in extensions (mangalist.services.extensions.carry_over) ---------
+#: Checked against v2.4.2366's schema by introspection on the owner's server (2026-10-23): ``mangas(filter: {id: {in}})``
+#: leaves unknown ids out (no error); ``extensions(condition: {isInstalled: true})`` with ``storeIndexUrl`` (the
+#: repository an extension came from); the repositories are ``extensionStores`` (``settings`` has no repository list).
+Q_MANGAS_BY_ID = ("query MangaListMangasById($ids: [Int!]!) { mangas(filter: {id: {in: $ids}}) { nodes { id title url "
+                  "sourceId inLibrary } } }")
+Q_INSTALLED_EXTENSIONS = ("query MangaListInstalledExtensions { extensions(condition: {isInstalled: true}) { nodes { "
+                          "pkgName name versionName lang isObsolete storeIndexUrl } } }")
+Q_EXTENSION_STORES = "query MangaListExtensionStores { extensionStores { nodes { indexUrl name signingKey } } }"
+
 OPERATIONS = {"aboutServer": Q_ABOUT, "settings": Q_SETTINGS, "sources": Q_SOURCES, "fetchSourceManga": M_SEARCH,
               "fetchMangaAndChapters": M_CHAPTERS, "updateManga": M_LIBRARY, "enqueueChapterDownloads": M_ENQUEUE,
               "dequeueChapterDownloads": M_DEQUEUE,
-              "downloadStatus": Q_QUEUE, "chapters": Q_CHAPTERS_BY_ID, "deleteDownloadedChapters": M_DELETE}
+              "downloadStatus": Q_QUEUE, "chapters": Q_CHAPTERS_BY_ID, "deleteDownloadedChapters": M_DELETE,
+              "mangas": Q_MANGAS_BY_ID, "extensions": Q_INSTALLED_EXTENSIONS, "extensionStores": Q_EXTENSION_STORES}
+
+
+@dataclass(frozen=True)
+class SuwayomiExtension:
+    """An extension installed in Suwayomi: its package, and the repository index it came from (``storeIndexUrl``)."""
+
+    pkg: str
+    name: str = ""
+    version: str = ""
+    lang: str = ""
+    obsolete: bool = False
+    repo: str = ""
+
+
+@dataclass(frozen=True)
+class SuwayomiRepo:
+    """One of Suwayomi's extension repositories (an ``extensionStore``)."""
+
+    url: str
+    name: str = ""
+    signing_key: str = ""
+
+
+#: Ids asked for in one ``mangas`` query (the carry-over asks for a couple of hundred: a few calls, not one per manga).
+MANGAS_PER_CALL = 50
 
 
 # --- errors ---------------------------------------------------------------------------------------------------
@@ -417,6 +458,43 @@ class SuwayomiClient:
         ids = [int(i) for i in chapter_ids]
         if ids:
             self.call(M_DELETE, {"ids": ids})
+
+
+    # --- read-only: what the carry-over to the built-in extensions needs ------------------------------------
+
+    def mangas_by_id(self, manga_ids: Sequence[int], *, pause: float = 0.0) -> Dict[int, SuwayomiManga]:
+        """Suwayomi's mangas by id (url, title, source); an id Suwayomi does not know is left out. Asked
+        :data:`MANGAS_PER_CALL` at a time, *pause* seconds between calls."""
+        import time
+
+        ids = sorted({int(i) for i in manga_ids})
+        out: Dict[int, SuwayomiManga] = {}
+        for start in range(0, len(ids), MANGAS_PER_CALL):
+            if start and pause:
+                time.sleep(pause)
+            chunk = ids[start:start + MANGAS_PER_CALL]
+            nodes = self._field(self.call(Q_MANGAS_BY_ID, {"ids": chunk}), "mangas").get("nodes") or ()
+            for n in nodes:
+                if isinstance(n, Mapping):
+                    manga = manga_of(n)
+                    if manga.id in chunk:
+                        out[manga.id] = manga
+        return out
+
+    def installed_extensions(self) -> List[SuwayomiExtension]:
+        """The extensions installed in Suwayomi, each with the repository it came from."""
+        nodes = self._field(self.call(Q_INSTALLED_EXTENSIONS), "extensions").get("nodes") or ()
+        return [SuwayomiExtension(pkg=_text(n.get("pkgName")), name=_text(n.get("name")),
+                                  version=_text(n.get("versionName")), lang=_text(n.get("lang")),
+                                  obsolete=n.get("isObsolete") is True, repo=_text(n.get("storeIndexUrl")))
+                for n in nodes if isinstance(n, Mapping) and _text(n.get("pkgName"))]
+
+    def extension_repos(self) -> List[SuwayomiRepo]:
+        """Suwayomi's extension repositories (index URLs), in its order."""
+        nodes = self._field(self.call(Q_EXTENSION_STORES), "extensionStores").get("nodes") or ()
+        return [SuwayomiRepo(url=_text(n.get("indexUrl")), name=_text(n.get("name")),
+                             signing_key=_text(n.get("signingKey")))
+                for n in nodes if isinstance(n, Mapping) and _text(n.get("indexUrl"))]
 
 
 def client_from_connection(conn: SuwayomiConnection, **kwargs) -> SuwayomiClient:

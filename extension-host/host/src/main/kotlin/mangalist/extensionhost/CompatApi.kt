@@ -209,6 +209,17 @@ class CompatApi(
                     val (mangas, hasNext) = library.search(sourceId, query, page)
                     json.encodeToJsonElement(CompatSearch(mangas.map { manga(it) }, hasNext))
                 }
+                method == "POST" && parts == listOf("manga") -> {
+                    val req = obj(body())
+                    val sourceId =
+                        (req["sourceId"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                            ?: throw HttpError(400, "give sourceId (the source's id, a string)")
+                    val url =
+                        (req["url"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                            ?: throw HttpError(400, "give url (the source's own path for the manga)")
+                    val title = (req["title"] as? JsonPrimitive)?.contentOrNull ?: ""
+                    json.encodeToJsonElement(manga(library.register(sourceId, url, title)))
+                }
                 method == "POST" && parts.size == 3 && parts[0] == "manga" && parts[2] == "chapters" -> {
                     val fetchDetails = (obj(body())["fetchDetails"] as? JsonPrimitive)?.booleanOrNull ?: false
                     val got = library.chapters(id(parts[1]), fetchDetails)

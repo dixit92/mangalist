@@ -22,7 +22,10 @@ def recorded(name: str) -> str:
 ANSWERS = {"MangaListAbout": "about.json", "MangaListSettings": "settings.json", "MangaListSources": "sources_all.json",
            "MangaListSearch": "search_id.json", "MangaListChapters": "fetch_manga_and_chapters.json",
            "MangaListAddToLibrary": None, "MangaListEnqueue": "enqueue.json", "MangaListQueue": "status_running.json",
-           "MangaListChaptersById": "downloaded.json", "MangaListDeleteDownloaded": "delete.json"}
+           "MangaListChaptersById": "downloaded.json", "MangaListDeleteDownloaded": "delete.json",
+           # the carry-over's read-only queries (recorded 2026-10-23 from the owner's v2.4.2366, names replaced)
+           "MangaListMangasById": "mangas_by_id.json", "MangaListInstalledExtensions": "installed_extensions.json",
+           "MangaListExtensionStores": "extension_stores.json"}
 
 
 class Response:

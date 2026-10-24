@@ -170,6 +170,17 @@ chapters, the find pass, filing and Retry / Cancel work unchanged. To use it:
 Each series' match on the host is kept apart from its Suwayomi match (the host numbers its manga itself); the scanlation
 group you picked carries over.
 
+- **Carry over from Suwayomi** (on the Built-in extensions card, while Suwayomi is set up and series have a source
+  picked there): carries those picks over once, so no series needs its source picked again. It first checks and shows
+  what it will do - the extensions to install in the host (from its repositories, each signature-checked as usual),
+  Suwayomi's repositories the host lacks, how many series it will carry and which it cannot (the source's extension is
+  not available, or Suwayomi no longer has the manga) - and does it on **Carry over**, with a progress bar and a report.
+  Each series gets the same manga on the host (by its source and address), with the same kind of match (MangaDex id or
+  confirmed). Suwayomi is only read and its own picks stay, so switching back still works; a series already set up on
+  the host is never changed, and running it again carries only what is still missing. In the container:
+  `python -m mangalist.services.extensions carry-over [--dry-run]` does the same with the stored connections and prints
+  the report.
+
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 
 > **Local use only - do not expose it to the internet.** MangaList is a personal, single-user desktop
