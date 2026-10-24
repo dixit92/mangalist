@@ -14,7 +14,7 @@ folder), like Suwayomi's.
 
 | Call | Answer | Suwayomi equivalent |
 | --- | --- | --- |
-| `GET /compat/about` | `{name: "MangaList extension host", version}` | `aboutServer` |
+| `GET /compat/about` | `{name: "MangaList extension host", version, instance}` - `instance`: the id of the host's database (see the end) | `aboutServer` |
 | `GET /compat/settings` | `{version, downloadAsCbz: true, downloadsPath, flareSolverr: bool, flareSolverrUrl}` | `settings` |
 | `GET /compat/sources` | `[{id, name, displayName, lang, extension}]` - `displayName` exactly as Suwayomi forms it (`MangaDex (EN)`) | `sources` |
 | `POST /compat/search {sourceId, query, page}` | `{mangas: [{id, title, url, sourceId, inLibrary}], hasNextPage}` - a manga id is created on first sight of (sourceId, url) | `fetchSourceManga(type: SEARCH)` |
@@ -32,8 +32,9 @@ folder), like Suwayomi's.
   scanlator: `<chapter name>.cbz`), each path part cleaned exactly as MangaList's `chapter_arrivals.suwayomi_name` expects
   (Mihon's `DiskUtil.buildValidFilename`: invalid characters, 240-byte cut). Pages `001.<ext>`, `002.<ext>`, ... in order.
 - The CBZ holds a `ComicInfo.xml` with at least `Title` (chapter name), `Series` (manga title), `Number` (the chapter
-  number as MangaList reads it), `Translator` (scanlator), `Web` (the chapter's URL) - what `chapter_arrivals.read_comicinfo`
-  reads.
+  number as MangaList reads it), `Translator` (scanlator), `Web` (the chapter's real URL, else its URL on the source: never empty) - what
+  `chapter_arrivals.read_comicinfo` reads. On Windows a reserved device name (`CON`, `NUL`, `COM1`, ...) in a path part
+  gets a leading `_` (MangaList's `suwayomi_name(..., windows=True)` does the same).
 - The file is written to a temporary name and renamed when complete: a CBZ that exists is whole.
 - A finished chapter **leaves the queue** and reads `downloaded: true`. A failing chapter is retried up to 3 times, then
   stays in the queue as `ERROR` with its `tries`; enqueueing an `ERROR` chapter again gives it another try (MangaList's
@@ -59,7 +60,9 @@ Agreed from the lanes' reports; MangaList's client relies on these.
 - A manga whose source lists no chapters answers `200` with `chapters: []` (not an error).
 - `chapterNumber` is written in its shortest float form (`1.1`).
 - Difference from Suwayomi, deliberate: an `ERROR` chapter stays `ERROR` across a host restart (Suwayomi gives it 3 fresh
-  tries); MangaList's chapter_retry re-enqueues it on its schedule.
+  tries); MangaList's chapter_retry re-enqueues it on its schedule. Except on the host's first start on a new version
+  (2026-10-24, MangaList's transition audit E3): then every `ERROR` chapter gets fresh tries - the failure may be what the
+  new version fixes. A try past the limit is logged as "extra try N (after 3 tries)".
 
 ## Repositories and updates - 2026-10-22 (integrator, after merging lane U)
 
@@ -80,3 +83,15 @@ Agreed from the lanes' reports; MangaList's client relies on these.
 - `POST /compat/manga {sourceId, url, title}` -> `{id, title, url, sourceId, inLibrary}`: get-or-create the host's manga id
   for (sourceId, url) (`404` when the source is not installed, `400` without sourceId or url). Used once, by MangaList's
   carry-over from Suwayomi (`mangalist/services/extensions/carry_over.py`), to give each series' chosen manga a host id.
+
+## The database's id, a manga by id, logs - 2026-10-24 (lane F, MangaList's transition audit)
+
+- `GET /compat/about` -> `instance`: a random id of `host.db`, made with it (schema `user_version` 2: the `host_info`
+  table) and never changed. MangaList remembers it and compares it before it uses the host ids it stored
+  (`mangalist/downloads/host_identity.py`): another id means the database was reset or restored, and those ids name other
+  mangas and chapters now.
+- `GET /compat/manga/{id}` -> `{id, title, url, sourceId, inLibrary, initialized, thumbnailUrl}` as stored (no request to
+  the source; `404` for an unknown id): MangaList's carry-back to Suwayomi reads a host manga's url with it.
+- At its start the host logs an ERROR when file names are not UTF-8 (`sun.jnu.encoding`; an ASCII locale fails every
+  non-ASCII chapter, group or manga name), and its log lines are `yyyy-MM-dd HH:mm:ss  LEVEL  logger  [thread] text`
+  (MangaList's own format, `WARN` written `WARNING`).
