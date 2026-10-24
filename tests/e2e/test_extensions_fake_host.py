@@ -99,6 +99,10 @@ def test_a_download_the_host_gives_up_on_waits_and_retry_puts_it_back(db, tmp_pa
     said = backend.check_now()
     rec = backend.chapter_ledger.get(rid)
     assert rec.status == DownloadStatus.SENT and "waiting" in said
+    # In progress offers Retry for it: stuck by its state, whatever the note's words (transition audit B1)
+    from mangalist.downloads.chapter_retry import is_stuck
+
+    assert is_stuck(rec) and rec.error.startswith("The extension host could not download it")
     # Switching backends now is refused: a chapter download is still with the host.
     with pytest.raises(BackendError, match="still in progress with the extension host"):
         backend.set_chapter_backend(CHAPTER_BACKEND_SUWAYOMI)
