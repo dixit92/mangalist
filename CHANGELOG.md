@@ -7,7 +7,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
-Fixes from an audit of the switch to the built-in extensions: stuck chapters, switching back and forth, and texts that name the program in use.
+## [2026.10.57] - 2026-10-24
+
+The fifty-sixth MangaList release (testing build): fixes from an audit of the switch to the built-in extensions - stuck chapters, switching back and forth, and texts that name the program in use.
 
 - **Chapters with non-ASCII names download through the built-in extensions.** The extension host ran without a UTF-8 locale, so a chapter whose series or group name had a letter like "ï" failed to save. The host now always starts in `C.UTF-8`, warns in its log when file names are not UTF-8, and its log is written to `/config/logs/extension-host.log` and shown in the log viewer.
 - **Retry and Cancel for the extension host's stuck chapters.** A chapter the built-in extension host gave up on now offers **Retry** and **Cancel…** in In progress, as Suwayomi's do, and a chapter still on its way can be cancelled even when its program is stopped. A new host version gives failed chapters fresh tries, and "an extra try" replaces "try 4 of 3".
