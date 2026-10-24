@@ -248,7 +248,7 @@ class ChaptersPanel(QWidget):
 
     def _apply_wording(self) -> None:
         """The panel's fixed texts (column header, footer, tooltips, the Send button) for the backend in force."""
-        self.cand_table.setHorizontalHeaderLabels([CAND_COLUMNS[0], self._w(CAND_COLUMNS[1])])
+        self.cand_table.setHorizontalHeaderLabels([c.upper() for c in (CAND_COLUMNS[0], self._w(CAND_COLUMNS[1]))])
         self.note_label.setText(self._w(FOOTER_NOTE))
         self.btn_again.setToolTip(self._w(AGAIN_TIP))
         self.btn_other.setToolTip(self._w(OTHER_TIP))

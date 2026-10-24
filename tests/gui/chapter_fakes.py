@@ -169,3 +169,38 @@ def chapter_record(id, series_id, number, *, status=DownloadStatus.SENT, group="
                           wanted_volumes=(), target_dir=FOLDER, status=status,
                           created_at="2026-10-10T10:00:00+00:00", updated_at="2026-10-10T10:05:00+00:00", error=error,
                           tool=TOOL_SUWAYOMI, wanted_chapters=(number,), batch=batch, source=source, group=group)
+
+
+class SwitchableChapterBackend(FakeChapterBackend):
+    """The fake with the chapter backend choice (``chapter_backend`` / ``set_chapter_backend``, refused with ``refuse``)
+    and the program's download queue (``queue_items``; transition fixes, 2026-10-24)."""
+
+    def __init__(self, key: str = "suwayomi", **kw):
+        super().__init__(**kw)
+        self.key = key
+        self.refuse: Optional[str] = None
+        self.queue_items: list = []
+        self.queue_error: Optional[str] = None
+        self.sources_for: dict = {}             # backend key -> the (source, allowed) rows that program answers
+        self.source_calls: List[str] = []
+
+    def chapter_backend(self):
+        return self.key
+
+    def set_chapter_backend(self, key):
+        if self.refuse:
+            raise BackendError(self.refuse)
+        self.key = key
+
+    def suwayomi_sources(self):
+        self.source_calls.append(self.key)
+        if self.key in self.sources_for:
+            rows = self.sources_for[self.key]
+            return list(rows() if callable(rows) else rows)
+        return super().suwayomi_sources()
+
+    def chapter_queue(self):
+        self.threads.append(threading.get_ident())
+        if self.queue_error:
+            raise BackendError(self.queue_error)
+        return list(self.queue_items)
