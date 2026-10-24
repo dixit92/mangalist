@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 from ..downloads.chapters import HOW_MANGADEX, ChapterLookup, ChapterRow, MangaMatch, group_key
 from ..downloads.contracts import DownloadRecord, SuwayomiChapter
 from .background import BackgroundCall, start_call
+from .chapter_words import is_builtin, reword
 from .download_rules import download_chip
 from .download_style import set_tone
 from .download_widgets import button, flat_table, hbox, label
@@ -61,12 +62,16 @@ CAND_COLUMNS = ("Source", "Series in Suwayomi")
 PAGE_MESSAGE, PAGE_CANDIDATES, PAGE_CHAPTERS = 0, 1, 2
 FOOTER_NOTE = ("MangaList files each chapter into the series folder under its naming scheme once Suwayomi has it, then "
                "Suwayomi deletes its own copy. Chapter downloads are outside the download budget.")
+AGAIN_TIP = ("Ask Suwayomi again: the source's chapter list as it is now (or search again when the series has no "
+             "source yet)")
+OTHER_TIP = ("Pick where this series' chapters come from: MangaDex (by the id MangaPixer links) or your other chapter "
+             "sources (by title). Remembered for the series")
 NO_GROUP = "(no group named)"
 ROLE_CHAPTER = Qt.ItemDataRole.UserRole + 1
 
 
-def _default_confirm(parent: QWidget, text: str) -> bool:
-    return QMessageBox.question(parent, "Send to Suwayomi", text,
+def _default_confirm(parent: QWidget, text: str, title: str = "Send to Suwayomi") -> bool:
+    return QMessageBox.question(parent, title, text,
                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
 
 
@@ -94,7 +99,7 @@ class ChaptersPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("chaptersPanel")
         self._backend = backend
-        self._confirm = confirm or _default_confirm
+        self._confirm = confirm or (lambda parent, text: _default_confirm(parent, text, self._w("Send to Suwayomi")))
         self._downloads_for = downloads_for
         self._calls: List[BackgroundCall] = []
         self._series_id: Optional[int] = None
@@ -134,13 +139,9 @@ class ChaptersPanel(QWidget):
         self.progress.setFixedWidth(90)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
-        self.btn_again = button("Refresh from source",
-                                tip="Ask Suwayomi again: the source's chapter list as it is now (or search again when "
-                                    "the series has no source yet)")
+        self.btn_again = button("Refresh from source", tip=AGAIN_TIP)
         self.btn_again.clicked.connect(self.look_up_again)
-        self.btn_other = button("Change source…", link=True,
-                                tip="Pick where this series' chapters come from: MangaDex (by the id MangaPixer links) "
-                                    "or your other Suwayomi sources (by title). Remembered for the series")
+        self.btn_other = button("Change source…", link=True, tip=OTHER_TIP)
         self.btn_other.clicked.connect(self.other_sources)
         self.btn_other.setVisible(False)
         self._before_other: Optional[ChapterLookup] = None
@@ -223,6 +224,7 @@ class ChaptersPanel(QWidget):
         header.geometriesChanged.connect(self._place_check_all)
         pv.addWidget(self.table, 1)
         self.note_label = label(FOOTER_NOTE, "muted", wrap=True)
+        self.note_label.setObjectName("chaptersFooter")
         self.btn_send = button("Send to Suwayomi", primary=True)
         self.btn_send.setMinimumHeight(38)
         self.btn_send.clicked.connect(self.send_selected)
@@ -232,6 +234,25 @@ class ChaptersPanel(QWidget):
         self.status_label = label("", wrap=True, selectable=True)
         outer.addWidget(self.status_label)
         self.show_message("", "Select a series to see its chapters.")
+
+    # --- the program's name (transition fixes A2, 2026-10-24) -----------------------------------------------------
+
+    def _w(self, text: str) -> str:
+        """*text*, written for Suwayomi, in the words of the chapter backend in force ("the extension host" under Built-in
+        extensions). The owner can switch backends while this panel lives, so every text is worded when it is shown."""
+        return reword(self._backend, text) or ""
+
+    def _install_hint(self) -> str:
+        return ("install their extensions (Settings > Connected services > Built-in extensions > Extensions)."
+                if is_builtin(self._backend) else "install their extensions in Suwayomi.")
+
+    def _apply_wording(self) -> None:
+        """The panel's fixed texts (column header, footer, tooltips, the Send button) for the backend in force."""
+        self.cand_table.setHorizontalHeaderLabels([CAND_COLUMNS[0], self._w(CAND_COLUMNS[1])])
+        self.note_label.setText(self._w(FOOTER_NOTE))
+        self.btn_again.setToolTip(self._w(AGAIN_TIP))
+        self.btn_other.setToolTip(self._w(OTHER_TIP))
+        self._update_send()
 
     # --- what the panel shows ----------------------------------------------------------------------------
 
@@ -255,6 +276,7 @@ class ChaptersPanel(QWidget):
         *newer*: "Check for new chapters" - what the source has after the newest chapter held, whatever *missing*
         says."""
         self._series_id, self._title = series_id, title
+        self._apply_wording()
         self._missing, self._titles = tuple(missing), tuple(titles) or (title,)
         self._newer = newer
         self.status_label.setText("")
@@ -275,7 +297,7 @@ class ChaptersPanel(QWidget):
             self.show_message(self._title, "Asking the source for chapters newer than the ones you have...")
             self.subtitle_label.setText("New chapters on the source")
         else:
-            self.show_message(self._title, "Looking the series up in Suwayomi...")
+            self.show_message(self._title, self._w("Looking the series up in Suwayomi..."))
             self.subtitle_label.setText(self._wanted_text(missing))
         self._set_busy(True)
         backend = self._backend
@@ -328,7 +350,7 @@ class ChaptersPanel(QWidget):
     def _on_lookup_error(self, series_id: int, message: str) -> None:
         self.looked_up.emit(series_id, None)
         if series_id == self._series_id:
-            self.show_message(self._title, f"Suwayomi could not be asked: {message}")
+            self.show_message(self._title, self._w(f"Suwayomi could not be asked: {message}"))
             self.btn_again.setVisible(True)
             # a way out without a match: Change source looks the series up on every allowed source (owner, 2026-10-11:
             # "There's no option to do this" on a failed lookup)
@@ -338,6 +360,7 @@ class ChaptersPanel(QWidget):
 
     def show_lookup(self, lookup: ChapterLookup) -> None:
         self.lookup = lookup
+        self._apply_wording()
         self.title_label.setText(self._title)
         self.btn_again.setVisible(True)
         self._show_folder(lookup)
@@ -355,7 +378,8 @@ class ChaptersPanel(QWidget):
                                  f"{how_text(match)}" + (f" - {lookup.notes[-1]}" if lookup.source_empty and
                                                          lookup.notes else ""))
         queued = lookup.queued_in_suwayomi
-        self.queued_label.setText(f"Already in Suwayomi's download queue: ch {numbers_text(queued)}" if queued else "")
+        self.queued_label.setText(self._w(f"Already in Suwayomi's download queue: ch {numbers_text(queued)}") if queued
+                                  else "")
         self.queued_label.setVisible(bool(queued))
         if lookup.candidates:                               # MangaDex has none of them: the owner's other sources
             self._show_candidates(lookup, missing, keep_match=True)
@@ -386,10 +410,9 @@ class ChaptersPanel(QWidget):
             self.match_label.setText("; ".join(lookup.notes))
         if not lookup.candidates:
             note = "; ".join(lookup.notes)
-            self.show_message(self._title, "None of your Suwayomi sources has this series" +
+            self.show_message(self._title, "None of your chapter sources has this series" +
                               (f" ({note})." if note else ".") + " Allow more sources under Settings > Download "
-                              "sources > Suwayomi sources, or install their extensions in Suwayomi.", "Open Settings",
-                              SECTION_SOURCES)
+                              "sources > Chapter sources, or " + self._install_hint(), "Open Settings", SECTION_SOURCES)
             self.subtitle_label.setText(missing)
             self.btn_again.setVisible(True)
             return
@@ -572,7 +595,7 @@ class ChaptersPanel(QWidget):
 
     def send_blocker(self) -> Optional[str]:
         if self.lookup is None or self.lookup.match is None:
-            return "no series found in Suwayomi yet"
+            return self._w("no series found in Suwayomi yet")
         if self._busy:
             return "busy"
         if not self.chosen_target_dir():
@@ -588,7 +611,7 @@ class ChaptersPanel(QWidget):
         self.btn_send.setEnabled(blocker is None)
         self.btn_send.setToolTip(blocker or "")
         n = len(self.picks()) if self.lookup is not None else 0
-        self.btn_send.setText(f"Send {n} to Suwayomi" if n else "Send to Suwayomi")
+        self.btn_send.setText(self._w(f"Send {n} to Suwayomi" if n else "Send to Suwayomi"))
         self._sync_check_all()
         if self.lookup is not None and self.lookup.match is not None:
             self._update_subtitle()
@@ -666,8 +689,8 @@ class ChaptersPanel(QWidget):
         if series_id != self._series_id or self.lookup is not before:
             return
         if not found:
-            self.status_label.setText("None of your other Suwayomi sources has this series. Allow more under "
-                                      "Settings > Download sources > Suwayomi sources.")
+            self.status_label.setText("None of your other chapter sources has this series. Allow more under Settings > "
+                                      "Download sources > Chapter sources.")
             return
         self.status_label.setText("")
         self.lookup = replace(before, candidates=list(found))
@@ -693,11 +716,11 @@ class ChaptersPanel(QWidget):
         lookup = self.lookup
         assert lookup is not None and lookup.match is not None
         groups = sorted({_group_name(ch.scanlator) for ch in picks})
-        return (f"Send {len(picks)} chapter{'s' if len(picks) != 1 else ''} of \"{self._title}\" to Suwayomi?\n\n"
-                f"Chapters: {numbers_text([ch.number for ch in picks])}\n"
-                f"From: {lookup.source_name} ({', '.join(groups)})\n"
-                f"Filed into: {target_dir}\n\n"
-                "Suwayomi downloads them; MangaList files each one under its naming scheme at the next check.")
+        return self._w(f"Send {len(picks)} chapter{'s' if len(picks) != 1 else ''} of \"{self._title}\" to Suwayomi?\n\n"
+                       f"Chapters: {numbers_text([ch.number for ch in picks])}\n"
+                       f"From: {lookup.source_name} ({', '.join(groups)})\n"
+                       f"Filed into: {target_dir}\n\n"
+                       "Suwayomi downloads them; MangaList files each one under its naming scheme at the next check.")
 
     def send_selected(self) -> bool:
         if self.send_blocker() is not None:
@@ -709,7 +732,7 @@ class ChaptersPanel(QWidget):
         sid, backend, match = self._series_id, self._backend, lookup.match
         self._set_busy(True)
         set_tone(self.status_label, "")
-        self.status_label.setText("Sending to Suwayomi...")
+        self.status_label.setText(self._w("Sending to Suwayomi..."))
         self._spawn(lambda: backend.send_chapters(sid, match, picks, target, lookup.manga_title, lookup.source_name),
                     self._on_sent, self._show_error)
         return True
@@ -717,14 +740,14 @@ class ChaptersPanel(QWidget):
     def _on_sent(self, outcome) -> None:
         bad = bool(getattr(outcome, "error", None))
         set_tone(self.status_label, "bad" if bad else "ok")
-        self.status_label.setText(outcome.text() + ("" if bad else " - they show under In progress."))
+        self.status_label.setText(self._w(outcome.text()) + ("" if bad else " - they show under In progress."))
         self.sent.emit(list(outcome.records))
         if self._series_id is not None:
             self._look_up()
 
     def _show_error(self, message: str) -> None:
         set_tone(self.status_label, "bad")
-        self.status_label.setText(message)
+        self.status_label.setText(self._w(message))
 
     def stop(self) -> None:
         for call in list(self._calls):
