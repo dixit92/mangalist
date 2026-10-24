@@ -273,7 +273,7 @@ def test_the_row_menus_tooltips_name_the_program(qapp, tabs, key):
     tips = "\n".join(t for _a, t in seen[0])
     assert "Check for new chapters" in "\n".join(a for a, _t in seen[0])
     assert_names(tips, key)
-    assert ("Suwayomi" in tips) == (key == "suwayomi")
+    assert key == "suwayomi" or "Suwayomi" not in tips          # the source tips say "chapter source" under either
 
 
 @pytest.mark.parametrize("key", BOTH)

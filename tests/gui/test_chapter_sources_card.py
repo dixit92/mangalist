@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import QLabel  # noqa: E402
 
 from mangalist import store  # noqa: E402
 from mangalist.downloads.adapter import Backend  # noqa: E402
+from mangalist.downloads.contracts import DownloadStatus  # noqa: E402
 from mangalist.gui import settings_sections as ss  # noqa: E402
 from mangalist.gui import start_window  # noqa: E402
 from mangalist.gui.downloads_backend import BackendError, SuwayomiSettingsView  # noqa: E402
@@ -185,7 +187,8 @@ def test_the_chooser_on_the_card_has_the_same_guard(qapp, dialogs, db, backend, 
     page = dlg.pages[SECTION_SOURCES]
     dlg.show_section(SECTION_SOURCES)
     settled(qapp, dlg)
-    monkeypatch.setattr(backend.chapter_ledger, "active", lambda: [object()])
+    on_its_way = SimpleNamespace(status=DownloadStatus.SENT, backend="suwayomi")   # lane F's guard reads both
+    monkeypatch.setattr(backend.chapter_ledger, "active", lambda: [on_its_way])
     assert not page.choose_backend("extensions")
     assert "Not switched" in page.backend_note.text() and "still in progress with Suwayomi" in page.backend_note.text()
     assert page.backend_combo.currentData() == "suwayomi" and backend.chapter_backend() == "suwayomi"
