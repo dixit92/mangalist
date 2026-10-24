@@ -194,7 +194,16 @@ def chapter_status_tooltip(record: DownloadRecord) -> str:
         lines.append("Copied, not hard-linked: Suwayomi's download folder is on another filesystem.")
     if record.status == DownloadStatus.FAILED and record.error:
         lines.append(f"Error: {record.error}")
-    return "\n".join(lines)
+    return chapter_words(record, "\n".join(lines))
+
+
+def chapter_words(record: DownloadRecord, text: str) -> str:
+    """*text* (written for Suwayomi) worded for the program the chapter download belongs to - when it is shown, so a
+    stored note never has to match any wording (transition audit A3 / B1)."""
+    from ..downloads.chapter_backend import wording
+    from ..downloads.contracts import CHAPTER_BACKEND_EXTENSIONS
+
+    return wording(text, getattr(record, "backend", "") == CHAPTER_BACKEND_EXTENSIONS) or text
 
 
 def status_parts(record: DownloadRecord) -> Tuple[str, str]:
