@@ -164,8 +164,13 @@ def _key(series_id: int, backend: Optional[str] = None) -> str:
 
 
 def load(db, series_id: int, backend: Optional[str] = None) -> Optional[Kept]:
+    """The series' kept state for *backend*'s manga. The extension host's falls back to the state kept before there was
+    one per program (its manga id is compared with the match anyway, so another program's never counts)."""
+    raw = db.get_meta(_key(series_id, backend))
+    if raw is None and backend == "extensions":
+        raw = db.get_meta(_key(series_id))
     try:
-        data = json.loads(db.get_meta(_key(series_id, backend)) or "null")
+        data = json.loads(raw or "null")
     except (TypeError, ValueError):
         return None
     if not isinstance(data, Mapping) or not isinstance(data.get("suwayomi_manga"), int) \
