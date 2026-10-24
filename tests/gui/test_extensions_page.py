@@ -80,7 +80,10 @@ def test_the_chooser_switches_backends_and_the_cards_say_which_is_in_use(qapp, d
 
 def test_switching_is_refused_while_chapters_are_in_progress(qapp, db, backend, monkeypatch):
     page = page_for(backend, db)
-    monkeypatch.setattr(backend.chapter_ledger, "active", lambda: [object()])
+    from types import SimpleNamespace
+
+    on_way = SimpleNamespace(status="sent", backend="")          # a chapter download still with Suwayomi
+    monkeypatch.setattr(backend.chapter_ledger, "active", lambda: [on_way])
     assert not page.choose_backend("extensions")
     assert "Not switched" in page.backend_note.text() and "still in progress with Suwayomi" in page.backend_note.text()
     assert page.backend_combo.currentData() == "suwayomi" and backend.chapter_backend() == "suwayomi"
