@@ -79,10 +79,14 @@ class LazyNaming:
 
 # --- Suwayomi's download folder -----------------------------------------------------------------------------------
 
-def suwayomi_name(name: str) -> str:
+_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
+
+
+def suwayomi_name(name: str, windows: bool = False) -> str:
     """A name as Suwayomi writes it on disk (Mihon's ``DiskUtil.buildValidFilename``): dots and spaces trimmed from
     both ends, control characters and ``" * / : < > ? \\ |`` replaced by ``_``, cut to 240 bytes of UTF-8; ``(invalid)``
-    when nothing is left."""
+    when nothing is left. *windows*: MangaList's own extension host on Windows also puts a ``_`` before a reserved
+    device name (``CON``, ``NUL``, ``COM1``, ...; transition audit B10)."""
     text = (name or "").strip(". ")
     if not text:
         return "(invalid)"
@@ -90,19 +94,33 @@ def suwayomi_name(name: str) -> str:
     data = clean.encode("utf-8")
     if len(data) > MAX_NAME_BYTES:
         clean = data[:MAX_NAME_BYTES].decode("utf-8", errors="ignore")
+    if windows and clean.split(".", 1)[0].rstrip().upper() in _RESERVED:
+        clean = "_" + clean
     return clean
 
 
-def chapter_dir_name(chapter_name: str, scanlator: Optional[str]) -> str:
+def chapter_dir_name(chapter_name: str, scanlator: Optional[str], windows: bool = False) -> str:
     """Suwayomi's name for a chapter (``<scanlator>_<chapter name>``, or the chapter name alone without a group)."""
     group = (scanlator or "").strip()
-    return suwayomi_name(f"{group}_{chapter_name}" if group else chapter_name)
+    return suwayomi_name(f"{group}_{chapter_name}" if group else chapter_name, windows)
 
 
 def expected_path(download_dir: str, source_name: str, manga_title: str, chapter_name: str,
-                  scanlator: Optional[str]) -> str:
-    return os.path.join(download_dir, "mangas", suwayomi_name(source_name), suwayomi_name(manga_title),
-                        chapter_dir_name(chapter_name, scanlator) + ".cbz")
+                  scanlator: Optional[str], windows: bool = False) -> str:
+    return os.path.join(download_dir, "mangas", suwayomi_name(source_name, windows), suwayomi_name(manga_title, windows),
+                        chapter_dir_name(chapter_name, scanlator, windows) + ".cbz")
+
+
+def long_path(path: str, nt: Optional[bool] = None) -> str:
+    """*path* usable past Windows' 260-character limit (``\\\\?\\`` before an absolute path; transition audit
+    B10: two 240-byte names make a longer path, which ``os.path.isfile`` cannot see where long paths are not enabled);
+    unchanged elsewhere, or when short enough."""
+    nt = os.name == "nt" if nt is None else nt
+    if not nt or len(path) < 250 or path.startswith("\\\\?\\") or not os.path.isabs(path):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
 
 
 @dataclass(frozen=True)
@@ -140,14 +158,15 @@ def read_comicinfo(path: str) -> Optional[ComicInfo]:
                      web=text("Web"))
 
 
-def find_cbz(download_dir: str, request: Mapping[str, object]) -> Tuple[Optional[str], str]:
+def find_cbz(download_dir: str, request: Mapping[str, object], windows: bool = False) -> Tuple[Optional[str], str]:
     """(the chapter's CBZ, '') or (None, why not). The path rule first, then the chapter's URL in the ComicInfo of the
-    CBZs in the manga's folders (Suwayomi's manga title may have changed since the send)."""
+    CBZs in the manga's folders (Suwayomi's manga title may have changed since the send). *windows*: the extension
+    host's names on Windows (:func:`suwayomi_name`)."""
     name = str(request.get("chapter_name") or "")
     scanlator = str(request.get("scanlator") or "") or None
     source = str(request.get("source_name") or "")
     title = str(request.get("manga_title") or "")
-    path = expected_path(download_dir, source, title, name, scanlator)
+    path = long_path(expected_path(download_dir, source, title, name, scanlator, windows))
     if os.path.isfile(path):
         return path, ""
     if os.path.isdir(path[: -len(".cbz")]):
@@ -309,7 +328,7 @@ class _ChapterPass:
             self._note(rec, note)
             return None
         request = self.ledger.request(rec.id)
-        src, why = find_cbz(self.download_dir, request)
+        src, why = find_cbz(self.download_dir, request, windows=self.builtin and os.name == "nt")
         if src is None:
             return self._fail(rec, why + "; nothing filed")
         info = read_comicinfo(src)

@@ -243,6 +243,41 @@ class ExtensionsBackendMixin:
                                   flaresolverr=bool(info.get("flaresolverr")),
                                   flaresolverr_url=str(info.get("flaresolverr_url") or ""))
 
+    # --- the WebView's browser files (transition audit D3) ----------------------------------------------------------
+
+    def _webview_dirs(self) -> List[str]:
+        from .. import paths
+
+        host_dir = os.path.join(str(paths.data_dir()), "extension-host")
+        return [os.path.join(host_dir, "bin", "kcef"), os.path.join(host_dir, "cache", "kcef")]
+
+    def webview_files_size(self) -> int:
+        """The bytes the WebView's Chromium bundle and its cache take in the host's data folder (0: none there). Walks
+        the folders: call it off the UI thread."""
+        total = 0
+        for top in self._webview_dirs():
+            for root, _dirs, files in os.walk(top):
+                for name in files:
+                    try:
+                        total += os.lstat(os.path.join(root, name)).st_size
+                    except OSError:
+                        pass
+        return total
+
+    def remove_webview_files(self) -> int:
+        """Delete the WebView's Chromium bundle and its cache (about 660 MB on the owner's box) - only while the WebView
+        is off (a source that needs it then downloads the bundle again once the WebView is turned back on). Returns the
+        bytes freed."""
+        import shutil
+
+        if self.suwayomi.extension_host().webview:
+            raise BackendError("turn the WebView off (and save) first: the host uses these files while it is on")
+        freed = self.webview_files_size()
+        for top in self._webview_dirs():
+            shutil.rmtree(top, ignore_errors=True)
+        _log.info("Extensions: the WebView's browser files were removed (%.0f MB freed)", freed / 1e6)
+        return freed
+
     # --- the extensions -----------------------------------------------------------------------------------------
 
     def _host_call(self, what: str, fn: Callable[[Any], Any]) -> Any:

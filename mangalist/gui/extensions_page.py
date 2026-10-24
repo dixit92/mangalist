@@ -50,13 +50,17 @@ from .tables import cell, resizable_columns
 
 HOST_INTRO = ("MangaList's own extension host runs Mihon / Tachiyomi extensions (MangaDex, Weeb Central, MangaFire, ...) "
               "without Suwayomi and downloads chapters for MangaList. In the container it starts by itself while "
-              "\"Built-in extensions\" is chosen above; on a desktop, start the host yourself and enter its address.")
+              "\"Built-in extensions\" is chosen above - and, with Suwayomi chosen, whenever this page, Test "
+              "connection or a carry-over needs it (it stops again 30 minutes later); on a desktop, start the host "
+              "yourself and enter its address.")
 HOST_FOLDER_HELP = ("Where MangaList finds the host's downloads (the folder holding \"mangas\"), as MangaList sees it. "
                     "Empty: the host's own folder - right whenever the host runs next to MangaList, as in the container.")
 HOST_FLARESOLVERR_HELP = ("Sources behind Cloudflare need FlareSolverr: its address, e.g. http://<unraid-ip>:8191 (the "
                           "box's address, not localhost). Empty: MANGALIST_FLARESOLVERR_URL, else none.")
 HOST_WEBVIEW_HELP = ("Some sources (Comix, ...) need a browser engine: the host downloads a Chromium bundle into its data "
                      "folder the first time one is used.")
+HOST_BROWSER_HELP = ("Delete the Chromium bundle and its cache from the host's data folder (they are not used while the "
+                     "WebView is off). Turning the WebView on again downloads them when a source needs them.")
 HOST_AUTO_UPDATE_HELP = ("When on, the scheduled update check (Settings > Scheduled tasks, daily by default) installs the "
                          "updates it finds, each checked against its repository's signing key as for Update; one that "
                          "fails keeps the old version and is reported. An extension is never updated while one of its "
@@ -168,6 +172,18 @@ class ExtensionHostPanel(QWidget):
         form.addRow("FlareSolverr:", flare)
         self.webview_check = checkbox("WebView sources (Chromium)", True, tip=HOST_WEBVIEW_HELP)
         form.addRow("", self.webview_check)
+        # the browser files stay on disk with the WebView off (transition audit D3): a button frees them
+        self.btn_browser = button("Remove the browser files", tip=HOST_BROWSER_HELP)
+        self.btn_browser.clicked.connect(lambda: self.remove_browser_files())
+        self.browser_label = label("", "muted", wrap=True)
+        self.browser_row = QWidget()
+        bl = QVBoxLayout(self.browser_row)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.addLayout(hbox(self.btn_browser, None))
+        bl.addWidget(self.browser_label)
+        self.browser_row.setVisible(False)
+        self.browser_bytes = 0
+        form.addRow("", self.browser_row)
         self.auto_update_check = checkbox("Update extensions automatically", False, tip=HOST_AUTO_UPDATE_HELP)
         auto = QWidget()
         al = QVBoxLayout(auto)
@@ -197,6 +213,37 @@ class ExtensionHostPanel(QWidget):
         self.webview_check.setChecked(c.webview)
         getter = getattr(self._backend, "extension_auto_update", None)
         self.auto_update_check.setChecked(bool(getter()) if callable(getter) else False)
+        self._measure_browser_files(c.webview)
+
+    def _measure_browser_files(self, webview_on: bool) -> None:
+        """With the WebView off (as saved), offer to remove its Chromium files when there are any (measured off the UI
+        thread)."""
+        size = getattr(self._backend, "webview_files_size", None)
+        self.browser_row.setVisible(False)
+        if webview_on or not callable(size):
+            return
+        self._calls.start(size, self._browser_measured, lambda _m: None)
+
+    def _browser_measured(self, size: int) -> None:
+        self.browser_bytes = int(size or 0)
+        self.browser_row.setVisible(self.browser_bytes > 0)
+        self.browser_label.setText(f"The WebView is off, but its Chromium bundle and cache still take "
+                                   f"{self.browser_bytes / 1e6:.0f} MB in the host's data folder.")
+
+    def remove_browser_files(self) -> bool:
+        fn = getattr(self._backend, "remove_webview_files", None)
+        if not callable(fn) or self._calls.busy():
+            return False
+        self.btn_browser.setEnabled(False)
+
+        def done(freed: int) -> None:
+            self.browser_row.setVisible(False)
+            _say(self.status_label, f"The browser files were removed ({int(freed or 0) / 1e6:.0f} MB freed). Turning "
+                                    "the WebView on downloads them again when a source needs them.", "ok")
+
+        self._calls.start(fn, done, lambda message: _say(self.status_label, f"Not removed: {message}", "bad"),
+                          lambda: self.btn_browser.setEnabled(True))
+        return True
 
     def typed(self) -> ExtensionHostConfig:
         return ExtensionHostConfig(url=self.url_edit.text().strip(), download_dir=self.folder_edit.text().strip(),
