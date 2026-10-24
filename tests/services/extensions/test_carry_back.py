@@ -80,14 +80,14 @@ def test_what_was_decided_on_the_host_reaches_suwayomi(db, suwayomi, host):
     report = run(db, suwayomi, host)
     assert report.to_do() == 3
     two = raw_choice(db, 2, META_SUWAYOMI_SERIES)
-    assert two["manga_id"] == 101 and two["manga_url"] == "/series/weeb-new" and two["group"] == "New Team"
+    assert two["manga_id"] == 13 and two["manga_url"] == "/series/weeb-new" and two["group"] == "New Team"
     assert two["carried_back"]["host_manga_id"] == weeb_new
     three = raw_choice(db, 3, META_SUWAYOMI_SERIES)
     assert (three["source_id"], three["manga_id"], three["how"]) == (MANGADEX_EN, 11, "mangadex-id")
     assert "group" not in raw_choice(db, 4, META_SUWAYOMI_SERIES)
     assert raw_choice(db, 1, META_SUWAYOMI_SERIES)["manga_id"] == 11
     # Suwayomi's choices are what Suwayomi chosen reads
-    assert SuwayomiSettings(db).series_choice(2)["manga_id"] == 101
+    assert SuwayomiSettings(db).series_choice(2)["manga_id"] == 13
 
     again = run(db, suwayomi, host)
     assert again.to_do() == 0
