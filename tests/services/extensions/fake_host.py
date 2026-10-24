@@ -87,6 +87,7 @@ class FakeHost:
         self.data_dir = Path(data_dir)
         self.downloads_path = self.data_dir / "downloads"
         self.version = version
+        self.instance = "fake-host-db-1"                   # the database's id (/compat/about; MangaList's audit B4)
         self.auto_download = auto_download
         self.lock = threading.RLock()
         self.repo: List[RepoEntry] = [
@@ -130,6 +131,18 @@ class FakeHost:
         self._stop = threading.Event()
 
     # --- set-up helpers --------------------------------------------------------------------------------------------
+
+    def reset_database(self, instance: str = "fake-host-db-2") -> None:
+        """``host.db`` deleted (or restored from another day): a new database id, every manga / chapter id forgotten -
+        the next ones start at 1 again - and an empty queue (MangaList's transition audit B4)."""
+        with self.lock:
+            self.instance = instance
+            self.manga_ids.clear()
+            self.mangas.clear()
+            self.chapter_ids.clear()
+            self.chapters.clear()
+            self.downloaded.clear()
+            self.queue.clear()
 
     def add_manga(self, source_id: str, manga: FakeManga) -> FakeManga:
         self.catalog.setdefault(source_id, []).append(manga)
@@ -376,7 +389,7 @@ class FakeHost:
 
     def _compat(self, method, path, parts, body):
         if method == "GET" and path == "/about":
-            return 200, {"name": "MangaList extension host", "version": self.version}
+            return 200, {"name": "MangaList extension host", "version": self.version, "instance": self.instance}
         if method == "GET" and path == "/settings":
             return 200, {"version": self.version, "downloadAsCbz": True, "downloadsPath": str(self.downloads_path),
                          "flareSolverr": False, "flareSolverrUrl": ""}
@@ -411,6 +424,11 @@ class FakeHost:
                                                     "title": str(body.get("title") or ""), "inLibrary": False,
                                                     "fake": fake or FakeManga(key[1], str(body.get("title") or ""))}
             return 200, self._manga_json(self.manga_ids[key])
+        if method == "GET" and len(parts) == 2 and parts[0] == "manga":       # a manga as stored (the carry-back)
+            mid = int(parts[1])
+            if mid not in self.mangas:
+                raise HttpError(404, f"no manga {mid}")
+            return 200, self._manga_json(mid)
         if len(parts) == 3 and parts[0] == "manga" and parts[2] in ("chapters", "library"):
             mid = int(parts[1])
             if mid not in self.mangas:

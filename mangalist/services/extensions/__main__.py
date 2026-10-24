@@ -6,11 +6,13 @@
     python -m mangalist.services.extensions chapters "<source>" "<manga url>"
     python -m mangalist.services.extensions demo          # search -> chapters -> pages -> one image, per source
     python -m mangalist.services.extensions carry-over [--dry-run] [--no-install] [--db PATH] [--every-series]
+    python -m mangalist.services.extensions carry-back [--dry-run] [--db PATH] [--every-series]
 
 ``carry-over`` carries the owner's Suwayomi per-series choices over to the extension host
 (:mod:`.carry_over`), with the connections stored in MangaList's database (default: the data folder's, as the app
 uses it - in the container ``/config/mangalist.db``; ``--url`` overrides the host's stored address) and prints the
-report. Suwayomi is only read. ``--dry-run`` writes nothing anywhere.
+report. Suwayomi is only read. ``--dry-run`` writes nothing anywhere. ``carry-back`` is the reverse (before switching
+back to Suwayomi): what was decided on the host is written to Suwayomi's choices; the host is only read.
 """
 
 from __future__ import annotations
@@ -94,8 +96,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--no-install", action="store_true", help="do not install the extensions the host lacks")
     p.add_argument("--db", default=None, help="MangaList's database (default: the data folder's mangalist.db)")
     p.add_argument("--every-series", action="store_true", help="list the carried series too")
+    p = sub.add_parser("carry-back", help="carry what was decided on the extension host back to Suwayomi")
+    p.add_argument("--dry-run", action="store_true", help="report what would be done; write nothing")
+    p.add_argument("--db", default=None, help="MangaList's database (default: the data folder's mangalist.db)")
+    p.add_argument("--every-series", action="store_true", help="list the series carried back too")
     args = ap.parse_args(argv)
-    if args.cmd == "carry-over":
+    if args.cmd in ("carry-over", "carry-back"):
         return carry_over_main(args)
     client = ExtensionHostClient(args.url or DEFAULT_URL)
     try:
@@ -128,7 +134,7 @@ def carry_over_main(args) -> int:
     from pathlib import Path
 
     from ... import paths, store
-    from .carry_over import CarryOverError, run_from_store
+    from .carry_over import CarryOverError, run_back_from_store, run_from_store
 
     db_path = Path(args.db) if args.db else paths.db_file()
     if not db_path.is_file():
@@ -144,8 +150,11 @@ def carry_over_main(args) -> int:
             print(f"[{done}/{total}] {text}", file=sys.stderr, flush=True)
 
     try:
-        report = run_from_store(db, install=not args.no_install, dry_run=args.dry_run, progress=progress,
-                                host_url=args.url)
+        if args.cmd == "carry-back":
+            report = run_back_from_store(db, dry_run=args.dry_run, progress=progress, host_url=args.url)
+        else:
+            report = run_from_store(db, install=not args.no_install, dry_run=args.dry_run, progress=progress,
+                                    host_url=args.url)
     except CarryOverError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -1,4 +1,4 @@
-"""Carry the owner's Suwayomi setup over to MangaList's own extension host, once and safely. No Qt.
+"""Carry the owner's Suwayomi setup over to MangaList's own extension host, once and safely - and back. No Qt.
 
 Owner (2026-10-23): "bring the built-in suwayumi replacement into main. We will now proceed with only using the built in
 extensions and disabling suwayumi". Each series' chapter source was picked under Suwayomi (``suwayomi.series.<id>``:
@@ -19,6 +19,10 @@ is a manga's url on its source: that is what is carried.
    ``extensions.series.<id>`` is written with the same ``how``, title and source and the host's manga id. A series that
    already has a manga on the host is never overwritten; Suwayomi's choice is never touched (switching back stays
    possible).
+
+**Carry back** (:func:`carry_back`, transition audit B8, 2026-10-24): the reverse, for switching back to Suwayomi - what
+was decided on the host (title matches confirmed, Change source, series added, groups picked) is written to Suwayomi's
+choices by the manga's url on the same source.
 
 Each series ends as one of :data:`STATUSES` (carried, already there, source not installed, Suwayomi does not know the
 manga, failed). A second run carries nothing new. It is polite: one call at a time, a short pause between them, no
@@ -177,6 +181,13 @@ def carry_over(db, suwayomi_client, host_client, *, install: bool = True, dry_ru
     tell = progress or (lambda done, total, text: None)
     settings = SuwayomiSettings(db)
     report = CarryReport(dry_run=dry_run)
+    instance = ""
+    if not dry_run:
+        from ...downloads import host_identity
+        from ...downloads.chapter_backend import host_instance
+
+        host_identity.check(db, host_client)       # a replaced host database: its old ids are forgotten first (B4)
+        instance = host_instance(host_client)
     choices = {sid: c for sid, c in settings.suwayomi_series_choices().items() if _int(c.get("manga_id")) is not None}
     on_host = settings.extensions_series_choices()
 
@@ -355,7 +366,9 @@ def carry_over(db, suwayomi_client, host_client, *, install: bool = True, dry_ru
         row.host_manga_id = int(got["id"])
         carried = {"source_id": source, "manga_id": row.host_manga_id,
                    "manga_title": str(choice.get("manga_title") or manga.title), "how": row.how,
-                   "carried_from": {"suwayomi_manga_id": suw_id, "at": utcnow()}}
+                   "manga_url": manga.url, "carried_from": {"suwayomi_manga_id": suw_id, "at": utcnow()}}
+        if instance:
+            carried["host_instance"] = instance
         if settings.carry_series_choice(sid, carried):
             row.status = CARRIED
         else:                                   # chosen on the host meanwhile: that one is kept
@@ -387,6 +400,15 @@ def clients_from_store(db, *, host_url: Optional[str] = None, timeout: float = 1
     return SuwayomiClient(conn), ExtensionHostClient(host_url or settings.extension_host().url, timeout=timeout)
 
 
+def _host_up(db, host_url: Optional[str]) -> None:
+    from .on_demand import HostNotRunning, ensure_running
+
+    try:
+        ensure_running(db, host_url or SuwayomiSettings(db).extension_host().url)
+    except HostNotRunning as exc:
+        raise CarryOverError(str(exc)) from None
+
+
 def has_suwayomi_choices(db) -> int:
     """How many series have a Suwayomi choice (with a manga) - quick, for showing the Carry over button."""
     return sum(1 for c in SuwayomiSettings(db).suwayomi_series_choices().values() if _int(c.get("manga_id")) is not None)
@@ -402,7 +424,9 @@ def not_yet_carried(db) -> int:
 
 def run_from_store(db, *, install: bool = True, dry_run: bool = False, progress: Optional[Progress] = None,
                    host_url: Optional[str] = None, pause: float = DEFAULT_PAUSE) -> CarryReport:
-    """:func:`carry_over` with the clients of the stored connections (closed afterwards)."""
+    """:func:`carry_over` with the clients of the stored connections (closed afterwards). With Suwayomi chosen the host is
+    asked for on demand first (:mod:`.on_demand`)."""
+    _host_up(db, host_url)
     suwayomi, host = clients_from_store(db, host_url=host_url)
     try:
         return carry_over(db, suwayomi, host, install=install, dry_run=dry_run, progress=progress, pause=pause)
@@ -413,6 +437,183 @@ def run_from_store(db, *, install: bool = True, dry_run: bool = False, progress:
                 close()
 
 
-__all__ = ["ALREADY", "CARRIED", "FAILED", "NO_SOURCE", "STATUSES", "UNKNOWN", "CarryOverError", "CarryReport",
-           "ExtensionNeed", "SeriesCarry", "carry_over", "clients_from_store", "has_suwayomi_choices",
-           "not_yet_carried", "run_from_store"]
+# --- the carry-back: from the extension host to Suwayomi (transition audit B8) ---------------------------------------
+
+BACK_CARRIED = "carried back"
+BACK_SAME = "already the same"
+BACK_GROUP = "group carried back"
+BACK_NO_SOURCE = "source not in Suwayomi"
+BACK_UNKNOWN = "Suwayomi does not find the manga"
+BACK_STATUSES = (BACK_CARRIED, BACK_GROUP, BACK_SAME, BACK_NO_SOURCE, BACK_UNKNOWN, FAILED)
+
+
+@dataclass
+class SeriesBack:
+    """One series' carry-back result."""
+
+    series_id: int
+    status: str
+    title: str = ""
+    source_id: str = ""
+    source_name: str = ""
+    host_manga_id: Optional[int] = None
+    suwayomi_manga_id: Optional[int] = None
+    group: Optional[str] = None             # the group carried back ('' : cleared), None: not changed
+    message: str = ""
+
+
+@dataclass
+class CarryBackReport:
+    dry_run: bool = False
+    series: List[SeriesBack] = field(default_factory=list)
+    seconds: float = 0.0
+
+    def counts(self) -> Dict[str, int]:
+        out = {s: 0 for s in BACK_STATUSES}
+        for r in self.series:
+            out[r.status] = out.get(r.status, 0) + 1
+        return out
+
+    def to_do(self) -> int:
+        counts = self.counts()
+        return counts[BACK_CARRIED] + counts[BACK_GROUP]
+
+    def summary(self) -> str:
+        counts = self.counts()
+        parts = [f"{'would carry back' if self.dry_run else 'carried back'} {counts[BACK_CARRIED]}"]
+        parts += [f"{s} {counts[s]}" for s in BACK_STATUSES[1:] if counts[s]]
+        text = ", ".join(parts)
+        return text[:1].upper() + text[1:]
+
+    def lines(self, *, every_series: bool = False) -> List[str]:
+        verb = "Would" if self.dry_run else "Did"
+        out = [f"{verb} carry back to Suwayomi: {self.summary()} (of {len(self.series)} series chosen on the host)"]
+        for r in self.series:
+            if r.status in (BACK_CARRIED, BACK_SAME) and not every_series:
+                continue
+            target = f" -> Suwayomi manga {r.suwayomi_manga_id}" if r.suwayomi_manga_id is not None else ""
+            group = f", group {r.group or '(none)'}" if r.group is not None else ""
+            out.append(f"  series {r.series_id} {r.title!r} ({r.source_name or r.source_id or '?'}, host manga "
+                       f"{r.host_manga_id}{target}{group}): {r.status}" + (f" - {r.message}" if r.message else ""))
+        return out
+
+
+def carry_back(db, suwayomi_client, host_client, *, dry_run: bool = False, progress: Optional[Progress] = None,
+               pause: float = DEFAULT_PAUSE) -> CarryBackReport:
+    """Carry what was decided on the extension host back to Suwayomi, so switching back keeps it (the reverse of
+    :func:`carry_over`): every series whose host choice was made ON THE HOST (not carried over from Suwayomi - a title
+    match confirmed, Change source, a series added, a manga found by its MangaDex id) gets the same manga in Suwayomi -
+    found by its url on the same source (both programs run the same extension, so the url is the same): one Suwayomi
+    already knows, else by a search on the source (MangaDex by its id) - and the scanlation group picked on the host is
+    carried too. A Suwayomi choice that already names the same manga is left alone; one carried back keeps a mark
+    (``carried_back``), so a second run changes nothing. The host is only read. ``dry_run`` writes nothing."""
+    started = time.monotonic()
+    tell = progress or (lambda done, total, text: None)
+    settings = SuwayomiSettings(db)
+    report = CarryBackReport(dry_run=dry_run)
+    host = settings.extensions_series_choices()
+    suw = settings.suwayomi_series_choices()
+    tell(0, len(host), "Asking Suwayomi for its sources and the series' mangas...")
+    try:
+        suw_sources = {s.id: s for s in suwayomi_client.sources()}
+        known = sorted({int(c["manga_id"]) for c in suw.values() if _int(c.get("manga_id")) is not None})
+        suw_mangas = suwayomi_client.mangas_by_id(known, pause=pause) if known else {}
+    except SuwayomiError as exc:
+        raise CarryOverError(f"Suwayomi could not be asked: {exc}") from None
+    first = True
+    total = len(host)
+    for done, sid in enumerate(sorted(host), start=1):
+        hc, sc = host[sid], suw.get(sid) or {}
+        mid = _int(hc.get("manga_id"))
+        source = str(hc.get("source_id") or "")
+        row = SeriesBack(series_id=sid, status=BACK_SAME, title=str(hc.get("manga_title") or ""), source_id=source,
+                         source_name=getattr(suw_sources.get(source), "display_name", ""), host_manga_id=mid,
+                         suwayomi_manga_id=_int(sc.get("manga_id")))
+        changes: Dict[str, Any] = {}
+        if "group" in hc and hc.get("group") != sc.get("group"):
+            changes["group"], row.group = hc.get("group"), str(hc.get("group") or "")
+        elif hc.get("group_cleared") and sc.get("group"):
+            changes["group"], row.group = None, ""
+        decided_on_host = mid is not None and not hc.get("carried_from")
+        already = (sc.get("carried_back") or {}).get("host_manga_id") == mid
+        if decided_on_host and not already:
+            try:
+                got = _back_one(row, hc, sc, suw_sources, suw_mangas, suwayomi_client, host_client, pause, first)
+                first = False
+            except SuwayomiError as exc:
+                row.status, row.message = FAILED, f"Suwayomi: {exc}"
+                got = None
+            except ExtensionHostError as exc:
+                row.status, row.message = FAILED, f"the extension host: {exc}"
+                got = None
+            if got is not None:
+                changes.update(got)
+                row.status = BACK_CARRIED
+        if row.status == BACK_SAME and "group" in changes:
+            row.status = BACK_GROUP
+        if row.status in (BACK_CARRIED, BACK_GROUP):
+            tell(done - 1, total, f"Carrying back {row.title or sid}...")
+            if not dry_run:
+                settings.set_series_choice(sid, backend="suwayomi", **changes)
+        report.series.append(row)
+    tell(total, total, "Done")
+    report.seconds = time.monotonic() - started
+    _log.info("Carry-back to Suwayomi%s: %s", " (dry run)" if dry_run else "", report.summary())
+    return report
+
+
+def _back_one(row: SeriesBack, hc: Mapping[str, Any], sc: Mapping[str, Any], suw_sources, suw_mangas, suwayomi_client,
+              host_client, pause: float, first: bool) -> Optional[Dict[str, Any]]:
+    """The Suwayomi choice for one host choice decided on the host: the changes to write, or None (the row says why)."""
+    if row.source_id not in suw_sources:
+        row.status, row.message = BACK_NO_SOURCE, "install its extension in Suwayomi, then carry back again"
+        return None
+    url = str(hc.get("manga_url") or "")
+    if not url:
+        _sleep(pause, first)
+        got = host_client.manga_by_id(int(row.host_manga_id))
+        url, row.title = str(got.get("url") or ""), row.title or str(got.get("title") or "")
+    current = suw_mangas.get(_int(sc.get("manga_id")) or -1)
+    if (current is not None and str(sc.get("source_id") or "") == row.source_id
+            and current.url.rstrip("/") == url.rstrip("/")):
+        row.status = BACK_SAME                     # Suwayomi's choice is that manga already
+        return None
+    _sleep(pause, False)
+    manga = suwayomi_client.manga_by_url(row.source_id, url, row.title)
+    if manga is None:
+        row.status = BACK_UNKNOWN
+        row.message = "pick the source in the series' chapters panel after switching"
+        return None
+    row.suwayomi_manga_id = int(manga.id)
+    return {"source_id": row.source_id, "manga_id": int(manga.id), "manga_title": row.title or manga.title,
+            "manga_url": url, "how": str(hc.get("how") or "confirmed"),
+            "carried_back": {"host_manga_id": row.host_manga_id, "at": utcnow()}}
+
+
+def run_back_from_store(db, *, dry_run: bool = False, progress: Optional[Progress] = None,
+                        host_url: Optional[str] = None, pause: float = DEFAULT_PAUSE) -> CarryBackReport:
+    """:func:`carry_back` with the clients of the stored connections (closed afterwards); the host on demand."""
+    _host_up(db, host_url)
+    suwayomi, host = clients_from_store(db, host_url=host_url)
+    try:
+        return carry_back(db, suwayomi, host, dry_run=dry_run, progress=progress, pause=pause)
+    finally:
+        for c in (suwayomi, host):
+            close = getattr(c, "close", None)
+            if callable(close):
+                close()
+
+
+def not_yet_carried_back(db) -> int:
+    """How many host choices were decided on the host and not carried back yet - quick, for the button."""
+    settings = SuwayomiSettings(db)
+    suw = settings.suwayomi_series_choices()
+    return sum(1 for sid, c in settings.extensions_series_choices().items()
+               if _int(c.get("manga_id")) is not None and not c.get("carried_from")
+               and ((suw.get(sid) or {}).get("carried_back") or {}).get("host_manga_id") != c.get("manga_id"))
+
+
+__all__ = ["ALREADY", "BACK_CARRIED", "BACK_GROUP", "BACK_NO_SOURCE", "BACK_SAME", "BACK_STATUSES", "BACK_UNKNOWN",
+           "CARRIED", "FAILED", "NO_SOURCE", "STATUSES", "UNKNOWN", "CarryBackReport", "CarryOverError", "CarryReport",
+           "ExtensionNeed", "SeriesBack", "SeriesCarry", "carry_back", "carry_over", "clients_from_store",
+           "has_suwayomi_choices", "not_yet_carried", "not_yet_carried_back", "run_back_from_store", "run_from_store"]

@@ -248,9 +248,12 @@ class ExtensionHostClient:
     """The host's API. *session*: anything with ``request(method, url, data=, headers=, timeout=)`` returning an
     object with ``status_code``, ``content`` and ``headers`` (tests pass a fake; default ``requests.Session``)."""
 
+    backend = "extensions"              # the program it asks (mangalist.downloads.chapter_backend.backend_of)
+
     def __init__(self, base_url: str = DEFAULT_URL, *, session=None, timeout: float = DEFAULT_TIMEOUT):
         self.base_url = (base_url or DEFAULT_URL).rstrip("/")
         self._timeout = timeout
+        self._instance: Optional[str] = None
         if session is None:
             import requests
 
@@ -301,6 +304,21 @@ class ExtensionHostClient:
 
     def health(self) -> Dict[str, Any]:
         return self._call("GET", "/health")
+
+    def instance(self) -> str:
+        """The id of the host's database (``/compat/about``; '' from a host too old to say). Asked once per client."""
+        if self._instance is None:
+            got = self._call("GET", "/compat/about")
+            self._instance = str(got.get("instance") or "") if isinstance(got, Mapping) else ""
+        return self._instance
+
+    def manga_by_id(self, manga_id: int) -> Dict[str, Any]:
+        """``GET /compat/manga/<id>``: the host's manga as stored - ``{id, title, url, sourceId, ...}`` (no request to
+        the source). :class:`NotFound` for an id the host does not have."""
+        got = self._call("GET", f"/compat/manga/{int(manga_id)}")
+        if not isinstance(got, Mapping) or not got.get("url"):
+            raise ExtensionHostError(f"the extension host's answer for manga {manga_id} has no url")
+        return dict(got)
 
     def repo(self, index_url: Optional[str] = None) -> List[RepoExtension]:
         """Every listed repository's extensions (each names its repository); *index_url*: that repository's only."""

@@ -79,10 +79,14 @@ class LazyNaming:
 
 # --- Suwayomi's download folder -----------------------------------------------------------------------------------
 
-def suwayomi_name(name: str) -> str:
+_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
+
+
+def suwayomi_name(name: str, windows: bool = False) -> str:
     """A name as Suwayomi writes it on disk (Mihon's ``DiskUtil.buildValidFilename``): dots and spaces trimmed from
     both ends, control characters and ``" * / : < > ? \\ |`` replaced by ``_``, cut to 240 bytes of UTF-8; ``(invalid)``
-    when nothing is left."""
+    when nothing is left. *windows*: MangaList's own extension host on Windows also puts a ``_`` before a reserved
+    device name (``CON``, ``NUL``, ``COM1``, ...; transition audit B10)."""
     text = (name or "").strip(". ")
     if not text:
         return "(invalid)"
@@ -90,19 +94,33 @@ def suwayomi_name(name: str) -> str:
     data = clean.encode("utf-8")
     if len(data) > MAX_NAME_BYTES:
         clean = data[:MAX_NAME_BYTES].decode("utf-8", errors="ignore")
+    if windows and clean.split(".", 1)[0].rstrip().upper() in _RESERVED:
+        clean = "_" + clean
     return clean
 
 
-def chapter_dir_name(chapter_name: str, scanlator: Optional[str]) -> str:
+def chapter_dir_name(chapter_name: str, scanlator: Optional[str], windows: bool = False) -> str:
     """Suwayomi's name for a chapter (``<scanlator>_<chapter name>``, or the chapter name alone without a group)."""
     group = (scanlator or "").strip()
-    return suwayomi_name(f"{group}_{chapter_name}" if group else chapter_name)
+    return suwayomi_name(f"{group}_{chapter_name}" if group else chapter_name, windows)
 
 
 def expected_path(download_dir: str, source_name: str, manga_title: str, chapter_name: str,
-                  scanlator: Optional[str]) -> str:
-    return os.path.join(download_dir, "mangas", suwayomi_name(source_name), suwayomi_name(manga_title),
-                        chapter_dir_name(chapter_name, scanlator) + ".cbz")
+                  scanlator: Optional[str], windows: bool = False) -> str:
+    return os.path.join(download_dir, "mangas", suwayomi_name(source_name, windows), suwayomi_name(manga_title, windows),
+                        chapter_dir_name(chapter_name, scanlator, windows) + ".cbz")
+
+
+def long_path(path: str, nt: Optional[bool] = None) -> str:
+    """*path* usable past Windows' 260-character limit (``\\\\?\\`` before an absolute path; transition audit
+    B10: two 240-byte names make a longer path, which ``os.path.isfile`` cannot see where long paths are not enabled);
+    unchanged elsewhere, or when short enough."""
+    nt = os.name == "nt" if nt is None else nt
+    if not nt or len(path) < 250 or path.startswith("\\\\?\\") or not os.path.isabs(path):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
 
 
 @dataclass(frozen=True)
@@ -140,14 +158,15 @@ def read_comicinfo(path: str) -> Optional[ComicInfo]:
                      web=text("Web"))
 
 
-def find_cbz(download_dir: str, request: Mapping[str, object]) -> Tuple[Optional[str], str]:
+def find_cbz(download_dir: str, request: Mapping[str, object], windows: bool = False) -> Tuple[Optional[str], str]:
     """(the chapter's CBZ, '') or (None, why not). The path rule first, then the chapter's URL in the ComicInfo of the
-    CBZs in the manga's folders (Suwayomi's manga title may have changed since the send)."""
+    CBZs in the manga's folders (Suwayomi's manga title may have changed since the send). *windows*: the extension
+    host's names on Windows (:func:`suwayomi_name`)."""
     name = str(request.get("chapter_name") or "")
     scanlator = str(request.get("scanlator") or "") or None
     source = str(request.get("source_name") or "")
     title = str(request.get("manga_title") or "")
-    path = expected_path(download_dir, source, title, name, scanlator)
+    path = long_path(expected_path(download_dir, source, title, name, scanlator, windows))
     if os.path.isfile(path):
         return path, ""
     if os.path.isdir(path[: -len(".cbz")]):
@@ -190,13 +209,18 @@ def find_cbz(download_dir: str, request: Mapping[str, object]) -> Tuple[Optional
 # --- the pass ------------------------------------------------------------------------------------------------------
 
 def run_chapter_arrivals(client: ChapterClient, ledger: DownloadLedger, *, download_dir: str, journal=None,
-                         namer=None, should_stop: Callable[[], bool] = lambda: False) -> ArrivalsReport:
-    """One chapter arrivals pass over every active chapter record (see the module docstring)."""
-    return _ChapterPass(client, ledger, download_dir, journal, namer, should_stop).run()
+                         namer=None, should_stop: Callable[[], bool] = lambda: False,
+                         unknown_too: bool = True) -> ArrivalsReport:
+    """One chapter arrivals pass over the active chapter records of *client*'s program (see the module docstring).
+    *unknown_too*: also the records of unknown program (an older build's) - the chosen program's pass takes them. A
+    record of the other program is never asked about here: its chapter id names another chapter in this program
+    (transition audit B2)."""
+    return _ChapterPass(client, ledger, download_dir, journal, namer, should_stop, unknown_too).run()
 
 
 class _ChapterPass:
-    def __init__(self, client: ChapterClient, ledger: DownloadLedger, download_dir: str, journal, namer, should_stop):
+    def __init__(self, client: ChapterClient, ledger: DownloadLedger, download_dir: str, journal, namer, should_stop,
+                 unknown_too: bool = True):
         from ..store.journal import Journal
 
         self.client = client
@@ -208,12 +232,15 @@ class _ChapterPass:
         self.should_stop = should_stop
         self.report = ArrivalsReport()
         self._volumes: Dict[int, Callable[[Decimal], Optional[Decimal]]] = {}
-        from .chapter_backend import is_builtin
+        from .chapter_backend import backend_of, is_builtin, name_of_backend
 
         self.builtin = is_builtin(client)       # the built-in extension host: its messages name it, not Suwayomi
+        self.backend = backend_of(client)
+        self.name = name_of_backend(self.backend)
+        self.backends = (self.backend, "") if unknown_too else (self.backend,)
 
     def run(self) -> ArrivalsReport:
-        records = list(self.ledger.active())
+        records = list(self.ledger.active(self.backends))
         if not records:
             return self.report
         ids = [int(r.info_hash) for r in records if r.info_hash.isdigit()]
@@ -249,24 +276,31 @@ class _ChapterPass:
                 if queued is None:
                     self._fail(rec, "no longer in Suwayomi's download queue and not downloaded (removed there?)")
                 elif queued.state == chapter_retry.ERROR_STATE:
+                    before = getattr(chapter_retry.load(self.db, rec.id), "auto", 0)
                     try:
                         note = chapter_retry.auto_retry(self.db, self.client, rec, queued.tries)
                     except Exception as exc:  # noqa: BLE001 - Suwayomi not answering: the next pass tries again
                         _log.info("Chapter arrivals: download %d (%s) not retried: %s: %s", rec.id, rec.title,
                                   type(exc).__name__, exc)
                         note = chapter_retry.stuck_note(queued.tries, getattr(chapter_retry.load(self.db, rec.id),
-                                                                             "auto", 0))
+                                                                             "auto", 0), self.builtin)
+                    # stuck by its STATE: the list offers Retry / Cancel whatever the note says (audit B1); an
+                    # automatic retry just put it back in the queue, so it is not stuck until the next pass sees ERROR
+                    retried = getattr(chapter_retry.load(self.db, rec.id), "auto", 0) > before
+                    self.ledger.set_stuck(rec.id, not retried)
                     self._wait(rec, note)
                     self._note(rec, note)
                 else:
                     chapter_retry.forget(self.db, rec.id)
+                    self.ledger.set_stuck(rec.id, False)
                     self._wait(rec, f"{queued.state.lower() or 'queued'} in Suwayomi ({queued.progress:.0%})")
                     self._note(rec, None)
                 return
             chapter_retry.forget(self.db, rec.id)
+            self.ledger.set_stuck(rec.id, False)
             rec = self.ledger.set_status(rec.id, DownloadStatus.DOWNLOADED, expect=(DownloadStatus.SENT,), error=None)
             self.report.downloaded.append(rec.id)
-            _log.info("Chapter arrivals: download %d (%s) finished in Suwayomi", rec.id, rec.title)
+            _log.info("Chapter arrivals: download %d (%s) finished in %s", rec.id, rec.title, self.name)
         if rec.status == DownloadStatus.DOWNLOADED:
             rec = self._file(rec)
             if rec is None or rec.status != DownloadStatus.FILED:
@@ -294,7 +328,7 @@ class _ChapterPass:
             self._note(rec, note)
             return None
         request = self.ledger.request(rec.id)
-        src, why = find_cbz(self.download_dir, request)
+        src, why = find_cbz(self.download_dir, request, windows=self.builtin and os.name == "nt")
         if src is None:
             return self._fail(rec, why + "; nothing filed")
         info = read_comicinfo(src)
@@ -432,7 +466,7 @@ class _ChapterPass:
             if copied:
                 self.report.copied.append(rec.id)
             _log.info("Chapter arrivals: download %d (%s) filed%s: %s", rec.id, rec.title,
-                      " by copy (Suwayomi's folder is on another filesystem)" if copied else "", ", ".join(filed))
+                      f" by copy ({self.name}'s folder is on another filesystem)" if copied else "", ", ".join(filed))
             return rec
         failed = next((s for s in plan.steps if s.state == "failed"), None)
         why = (f"filing stopped at {posixpath.basename(failed.dst.replace(os.sep, '/'))}: {failed.error}"
@@ -450,7 +484,7 @@ class _ChapterPass:
         if problem:
             self._wait(rec, f"Suwayomi's copy not deleted: {problem}")
             self._note(rec, f"Suwayomi's copy kept: {problem}")
-            _log.warning("Chapter arrivals: download %d (%s): Suwayomi's copy kept: %s", rec.id, rec.title, problem)
+            _log.warning("Chapter arrivals: download %d (%s): %s's copy kept: %s", rec.id, rec.title, self.name, problem)
             return
         try:
             self.client.delete_downloaded([int(rec.info_hash)])
@@ -461,8 +495,8 @@ class _ChapterPass:
             return
         self.ledger.set_status(rec.id, DownloadStatus.REMOVED, expect=(DownloadStatus.FILED,), error=None)
         self.report.removed.append(rec.id)
-        _log.info("Chapter arrivals: download %d (%s): Suwayomi deleted its downloaded copy; the library file stays",
-                  rec.id, rec.title)
+        _log.info("Chapter arrivals: download %d (%s): %s deleted its downloaded copy; the library file stays",
+                  rec.id, rec.title, self.name)
 
     def _library_problem(self, rec: DownloadRecord) -> Optional[str]:
         plan_id = self.ledger.plan_id(rec.id)

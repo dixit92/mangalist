@@ -18,6 +18,23 @@ import kotlin.test.assertTrue
 /** Unit: the download layout MangaList's chapter_arrivals expects (values checked against its `suwayomi_name`). */
 class ChapterFilesTest {
     @Test
+    fun `on Windows a reserved device name gets a leading underscore, elsewhere not (audit B10)`() {
+        val before = DownloadsLayout.windows
+        try {
+            DownloadsLayout.windows = true
+            assertEquals("_CON", DownloadsLayout.validName("CON"))
+            assertEquals("_nul.txt", DownloadsLayout.validName("nul.txt"))
+            assertEquals("_COM1", DownloadsLayout.validName("COM1"))
+            assertEquals("CONAN", DownloadsLayout.validName("CONAN"))
+            assertEquals("Les Poroïniens & Fap It_Ch.58", DownloadsLayout.chapterFileName("Ch.58", "Les Poroïniens & Fap It"))
+            DownloadsLayout.windows = false
+            assertEquals("CON", DownloadsLayout.validName("CON"))
+        } finally {
+            DownloadsLayout.windows = before
+        }
+    }
+
+    @Test
     fun `names are cleaned as MangaList's suwayomi_name expects`() {
         assertEquals("Vol.1 Ch.2_ The _End__", DownloadsLayout.validName("  ..Vol.1 Ch.2: The *End*?  "))
         assertEquals("a_b_c_d_e_f_g_h", DownloadsLayout.validName("a\u0001b\u007fc\"d<e>f|g\\h"))
@@ -75,6 +92,9 @@ class ChapterFilesTest {
         val unknown = ChapterArchive.comicInfoXml(manga, chapter(-1f, scanlator = null))
         assertFalse("<Number>" in unknown, unknown)
         assertFalse("<Translator>" in unknown, unknown)
+        // no real url from the source: the chapter's own url, so MangaList finds a renamed CBZ by it (audit B10)
+        val bare = ChapterArchive.comicInfoXml(manga, chapter(1f).copy(realUrl = null))
+        assertTrue("<Web>/c/1</Web>" in bare, bare)
     }
 
     @Test

@@ -32,7 +32,7 @@ class CompatHttpTest {
     private val store = Store(dir.resolve("host.db"))
     private val library = Library(store, { registry.sources[it] }, DownloadsLayout(dir.resolve("downloads")))
     private val downloader = Downloader(store, library, dir.resolve("cache"), retryDelayMs = 0)
-    private val server = ApiServer("127.0.0.1", 0, registry, Repo(OkHttpClient()), CompatApi(library, downloader, registry))
+    private val server = ApiServer("127.0.0.1", 0, registry, Repo(OkHttpClient()), CompatApi(library, downloader, registry, { "off" }, { store.instance() }))
     private val http = HttpClient.newHttpClient()
 
     init {
@@ -173,6 +173,20 @@ class CompatHttpTest {
         val other = ok("POST", "/compat/manga", """{"sourceId": "${source.id}", "url": "/m/2"}""").o
         assertTrue(other["id"]!!.jsonPrimitive.int != mangaId)
         assertEquals("", other.s("title"))
+    }
+
+    @Test
+    fun `about names the database, a manga is read back by its id (MangaList's audit B4 and B8)`() {
+        val instance = ok("GET", "/compat/about").s("instance")
+        assertEquals(store.instance(), instance)
+        assertTrue(Regex("[0-9a-f-]{36}").matches(instance), instance)
+        val made = ok("POST", "/compat/manga", """{"sourceId": "${source.id}", "url": "/m/1", "title": "Fragrant Flower"}""").o
+        val id = made["id"]!!.jsonPrimitive.int
+        val back = ok("GET", "/compat/manga/$id").o
+        assertEquals("/m/1", back.s("url"))
+        assertEquals(source.id.toString(), back.s("sourceId"))
+        assertEquals(404, call("GET", "/compat/manga/424242").first)
+        assertEquals(0, source.detailCalls.get()) // nothing asked of the source
     }
 
     @Test

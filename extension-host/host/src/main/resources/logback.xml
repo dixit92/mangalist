@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The host's log lines, on standard output, in MangaList's own log format ("2026-10-24 11:20:00  INFO      <logger>  <text>",
+  with WARNING for logback's WARN), so the in-app log viewer reads them as records with a level and an area. In the
+  container the supervisor writes them into /config/logs/extension-host.log (rotated) and to docker logs (MangaList's
+  transition audit D2: the lines had no date and reached only docker logs). The level stays DEBUG, as before.
+-->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss}  %-8(%replace(%level){'^WARN$','WARNING'})  %logger  [%thread] %msg%n</pattern>
+        </encoder>
+    </appender>
+    <root level="DEBUG">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

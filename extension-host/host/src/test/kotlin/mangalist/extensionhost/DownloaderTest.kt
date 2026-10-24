@@ -134,6 +134,39 @@ class DownloaderTest {
     }
 
     @Test
+    fun `a new host version gives ERROR chapters fresh tries, the same version keeps them (audit E3)`() {
+        val c1 = chapters().getValue("/c/1")
+        images.failures.set(3)
+        downloader.enqueue(listOf(c1.id))
+        waitFor(what = "ERROR") { downloader.status().queue.singleOrNull()?.state == Downloader.ERROR }
+        assertTrue(store.startedWith("1.0")) // a database from before the version was kept: an upgrade
+        assertFalse(store.startedWith("1.0"))
+        downloader.close()
+        downloader = Downloader(store, library, dir.resolve("cache"), parallel = 2, retryDelayMs = 0)
+        downloader.restore(retryErrors = store.startedWith("1.0"))
+        assertEquals(Downloader.ERROR, downloader.status().queue.single().state) // same version: stays
+        downloader.close()
+        downloader = Downloader(store, library, dir.resolve("cache"), parallel = 2, retryDelayMs = 0)
+        downloader.restore(retryErrors = store.startedWith("1.1"))
+        waitFor(what = "the download") { downloader.status().queue.isEmpty() }
+        assertTrue(store.chapter(c1.id)!!.downloaded)
+    }
+
+    @Test
+    fun `tries past the limit read as extra tries (audit D5)`() {
+        assertEquals("try 3 of 3", downloader.tryText(3))
+        assertEquals("extra try 1 (after 3 tries)", downloader.tryText(4))
+    }
+
+    @Test
+    fun `the database keeps its id across a restart`() {
+        val first = store.instance()
+        restart()
+        assertEquals(first, store.instance())
+        assertTrue(Store(createTempDirectory("other").resolve("host.db")).use { it.instance() } != first)
+    }
+
+    @Test
     fun `dequeue stops a running download`() {
         val c2 = chapters().getValue("/c/2")
         val gate = CompletableDeferred<Unit>()

@@ -311,11 +311,35 @@ def test_a_stuck_chapter_row_offers_retry_and_cancel_in_its_menu(qapp):
     dlg = DownloadsList(backend, confirm_cancel=lambda rows: True)
     wait_until(qapp, lambda: dlg.table.rowCount() == 2)
     stuck_row = next(r for r in range(2) if "50" in dlg.table.item(r, 1).text())
-    assert _menu_on(dlg, 1 - stuck_row) is None                       # downloading normally: no menu, as before
+    # downloading normally: Cancel only (transition audit B1: every chapter on its way can be cancelled)
+    assert _menu_on(dlg, 1 - stuck_row) == {"Retry in Suwayomi": False, "Cancel download…": True}
     assert _menu_on(dlg, stuck_row, pick="Retry in Suwayomi") == {"Retry in Suwayomi": True, "Cancel download…": True}
     wait_until(qapp, lambda: dlg._call is None and not dlg.stuck_bar.isVisibleTo(dlg))
     assert sorted(backend.retried[0]) == [1, 2] and threading.get_ident() not in backend.threads
     assert dlg.status_label.text().startswith("Retried: Series #7")
+
+
+def test_a_chapter_the_extension_host_gave_up_on_is_offered_in_its_words(qapp):
+    """Transition audit B1 / A3: the host's stuck chapters (marked by state, the note in the host's words) offer Retry
+    and Cancel, and every text names the extension host."""
+    from dataclasses import replace
+
+    from mangalist.downloads.chapter_retry import stuck_note
+
+    from .chapter_fakes import chapter_record
+
+    stuck = [replace(chapter_record(i, 7, str(49 + i), error=stuck_note(4, 1, True)), backend="extensions",
+                     stuck=True) for i in (1, 2)]
+    backend = FakeBackend(records=stuck)
+    dlg = DownloadsList(backend, confirm_cancel=lambda rows: True)
+    wait_until(qapp, lambda: dlg.table.rowCount() == 1)
+    assert dlg.stuck_bar.isVisibleTo(dlg)
+    assert dlg.stuck_label.text().startswith("The extension host gave up on a chapter download")
+    assert _menu_on(dlg, 0) == {"Retry in the extension host": True, "Cancel download…": True}
+    assert "Suwayomi" not in dlg.table.item(0, 0).toolTip()
+    dlg.btn_retry.click()
+    wait_until(qapp, lambda: dlg._call is None)
+    assert sorted(backend.retried[0]) == [1, 2]
 
 
 def test_the_line_under_the_list_retries_every_stuck_row_by_tap(qapp):

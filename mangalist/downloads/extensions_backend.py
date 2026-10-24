@@ -141,15 +141,28 @@ class ExtensionsBackendMixin:
         return self.suwayomi.backend()
 
     def set_chapter_backend(self, backend: str) -> None:
+        """Switch the program that downloads chapters. Refused while a chapter download of the current program is still
+        on its way (sent, downloaded: its program must finish it - Cancel is offered for every such row, transition audit
+        B1), and while a find pass or a chapter check runs (it holds the current program's client: B5). A filed record
+        does not hold a switch: its program deletes its copy whichever is chosen (C2)."""
+        from . import chapter_backend
+        from .contracts import DownloadStatus
+
         if backend not in CHAPTER_BACKENDS:
             raise BackendError(f"unknown chapter backend {backend!r}")
-        if backend == self.suwayomi.backend():
+        current = self.suwayomi.backend()
+        if backend == current:
             return
-        busy = [r for r in self.chapter_ledger.active()]
+        now = chapter_backend.name_of_backend(current)
+        busy = [r for r in self.chapter_ledger.active() if r.status in (DownloadStatus.SENT, DownloadStatus.DOWNLOADED)
+                and r.backend in (current, "")]
         if busy:
-            now = "the extension host" if self.suwayomi.builtin else "Suwayomi"
             raise BackendError(f"{len(busy)} chapter download(s) are still in progress with {now}: switch once they "
-                               "are filed (or cancel them in the Download tab's In progress list)")
+                               "are filed, or cancel them (Download tab > In progress: right-click the row > Cancel "
+                               "download...)")
+        running = passes_running(self.suwayomi.store)
+        if running:
+            raise BackendError(f"{running} is running with {now}: switch when it has finished")
         self.suwayomi.set_backend(backend)
         _log.info("Chapter downloads: now through %s", "the built-in extensions" if backend == CHAPTER_BACKEND_EXTENSIONS
                   else "Suwayomi")
@@ -177,6 +190,23 @@ class ExtensionsBackendMixin:
                 raise BackendError(f"the {name} address must start with http:// or https://")
         return replace(config, url=url)
 
+    #: Tests: the host's liveness probe for :meth:`_host_up` (None: a real ``GET /health``).
+    _host_probe: Optional[Callable[[], Any]] = None
+
+    def _host_up(self, config: Optional[ExtensionHostConfig] = None) -> None:
+        """Before a call to the host: with Suwayomi chosen, ask for the host on demand and wait for it (transition audit
+        C1: the Extensions page, Test connection and the carry-over work before switching); a host that cannot run here
+        is a :class:`BackendError` saying why."""
+        from ..services.extensions.on_demand import HostNotRunning, ensure_running
+
+        if self.suwayomi.builtin or (self._host_client_factory is not None and self._host_probe is None):
+            return
+        try:
+            ensure_running(self.suwayomi.store, (config or self.suwayomi.extension_host()).url, probe=self._host_probe)
+        except HostNotRunning as exc:
+            text = str(exc)
+            raise BackendError(text[:1].upper() + text[1:]) from None
+
     def _host(self, config: Optional[ExtensionHostConfig] = None):
         url = (config or self.suwayomi.extension_host()).url
         factory = self._host_client_factory
@@ -187,12 +217,16 @@ class ExtensionsBackendMixin:
         from . import chapter_backend
 
         config = self._checked_host(config or self.suwayomi.extension_host())
+        self._host_up(config)
         conn = SuwayomiConnection(base_url=config.url, backend=CHAPTER_BACKEND_EXTENSIONS)
         compat = (self._chapter_client_factory or chapter_backend.client_from_connection)(conn)
         host = self._host(config)
         try:
             info = compat.server_settings()
             installed = host.extensions()
+            from . import host_identity
+
+            host_identity.check(self.suwayomi.store, compat)
         except (SuwayomiError, ExtensionHostError) as exc:
             raise BackendError(str(exc)) from None
         finally:
@@ -209,9 +243,45 @@ class ExtensionsBackendMixin:
                                   flaresolverr=bool(info.get("flaresolverr")),
                                   flaresolverr_url=str(info.get("flaresolverr_url") or ""))
 
+    # --- the WebView's browser files (transition audit D3) ----------------------------------------------------------
+
+    def _webview_dirs(self) -> List[str]:
+        from .. import paths
+
+        host_dir = os.path.join(str(paths.data_dir()), "extension-host")
+        return [os.path.join(host_dir, "bin", "kcef"), os.path.join(host_dir, "cache", "kcef")]
+
+    def webview_files_size(self) -> int:
+        """The bytes the WebView's Chromium bundle and its cache take in the host's data folder (0: none there). Walks
+        the folders: call it off the UI thread."""
+        total = 0
+        for top in self._webview_dirs():
+            for root, _dirs, files in os.walk(top):
+                for name in files:
+                    try:
+                        total += os.lstat(os.path.join(root, name)).st_size
+                    except OSError:
+                        pass
+        return total
+
+    def remove_webview_files(self) -> int:
+        """Delete the WebView's Chromium bundle and its cache (about 660 MB on the owner's box) - only while the WebView
+        is off (a source that needs it then downloads the bundle again once the WebView is turned back on). Returns the
+        bytes freed."""
+        import shutil
+
+        if self.suwayomi.extension_host().webview:
+            raise BackendError("turn the WebView off (and save) first: the host uses these files while it is on")
+        freed = self.webview_files_size()
+        for top in self._webview_dirs():
+            shutil.rmtree(top, ignore_errors=True)
+        _log.info("Extensions: the WebView's browser files were removed (%.0f MB freed)", freed / 1e6)
+        return freed
+
     # --- the extensions -----------------------------------------------------------------------------------------
 
     def _host_call(self, what: str, fn: Callable[[Any], Any]) -> Any:
+        self._host_up()
         host = self._host()
         try:
             return fn(host)
@@ -337,6 +407,36 @@ class ExtensionsBackendMixin:
                               lambda h: h.set_preference(source_id, pref, value))
         _log.info("Extensions: source %s: %s set", source_id, pref.key)
         return out
+
+
+#: A chapter check the headless runner started longer ago than this is not counted as running (a crashed runner).
+CHECK_STALE_HOURS = 2
+
+
+def passes_running(db) -> str:
+    """What holds a chapter program's client now - "a find pass" or "a chapter check" (in this process, or the
+    container's runner: its find run not finished, its state file's running job) - else ''."""
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    from . import chapter_check, finder
+    from ..store.findings import FindingStore
+
+    if finder._PASS.locked() or finder._busy_elsewhere(FindingStore(db)):
+        return "a find pass"
+    if chapter_check._CHECK.locked():
+        return "a chapter check"
+    try:
+        from .. import paths
+        from ..headless.chapter_check_job import JOB_NAME
+        from ..headless.state import STATE_NAME
+
+        data = json.loads((paths.data_dir() / STATE_NAME).read_text(encoding="utf-8"))
+        since = datetime.fromisoformat(str(data["jobs"][JOB_NAME]["running_since"]).replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    since = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+    return "a chapter check" if datetime.now(timezone.utc) - since < timedelta(hours=CHECK_STALE_HOURS) else ""
 
 
 def _close(client) -> None:

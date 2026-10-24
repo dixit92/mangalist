@@ -1,7 +1,8 @@
 """Reading MangaList's log files for the log viewer (Qt-free, so it is tested without a display).
 
-The files are the ones :mod:`mangalist.log_config` writes into ``paths.log_dir()``: ``mangalist.log`` (the app) and
-``headless.log`` (the container's scheduled jobs), each with rotated copies beside it (``.1`` newest ... ``.N``).
+The files are the ones :mod:`mangalist.log_config` writes into ``paths.log_dir()``: ``mangalist.log`` (the app),
+``headless.log`` (the container's scheduled jobs) and ``extension-host.log`` (the container's extension host and its
+supervisor), each with rotated copies beside it (``.1`` newest ... ``.N``).
 
 - **Read-only, never locking.** Every read opens the file, reads, and closes it again; nothing here writes, truncates
   or renames a log. (Keeping a file open would stop the logging's rotation on Windows.)
@@ -35,6 +36,8 @@ _log = logging.getLogger(__name__)
 LOGS: Tuple[Tuple[str, str, str], ...] = (
     ("app", "App", "mangalist.log"),
     ("jobs", "Scheduled jobs", "headless.log"),
+    # the container's extension host: its supervisor and everything the host (a JVM) prints (transition audit D2)
+    ("host", "Extension host", "extension-host.log"),
 )
 LOG_FILE = {key: name for key, _label, name in LOGS}
 
@@ -65,6 +68,20 @@ _SHORT = {"scan": "Scanning", "matching": "Matching", "mangapixer": "MangaPixer"
 #: Further areas (logger-name prefix, label); the longest matching prefix wins.
 _EXTRA: Tuple[Tuple[str, str], ...] = (
     ("mangalist.services.suwayomi", "Suwayomi"),
+    # the built-in extensions (transition audit A5 / D2): MangaList's side, the supervisor, and the host's own loggers
+    ("mangalist.services.extensions", "Extensions"),
+    ("mangalist.downloads.extensions_backend", "Extensions"),
+    ("mangalist.downloads.extension_updates", "Extensions"),
+    ("mangalist.downloads.host_identity", "Extensions"),
+    ("mangalist.headless.extension_updates_job", "Extensions"),
+    ("mangalist.gui.extensions_page", "Extensions"),
+    ("mangalist.gui.carry_over_panel", "Extensions"),
+    ("mangalist.extension_host", "Extensions"),
+    ("mangalist.extensionhost", "Extensions"),
+    ("suwayomi", "Extensions"),
+    ("eu.kanade", "Extensions"),
+    ("xyz.nulldev", "Extensions"),
+    ("okhttp3", "Extensions"),
     ("mangalist.headless.mangapixer_job", "MangaPixer"),
     ("mangalist.mu_progress", "Matching"),
     ("mangalist.gui.download_tab", "Downloads"),
@@ -97,7 +114,7 @@ _AREA_RULES = _area_rules()
 #: The order of the area filter (areas found in a log are listed in this order; any other at the end).
 AREA_ORDER: Tuple[str, ...] = tuple(dict.fromkeys(
     [_SHORT.get(key, label) for key, label, _p in log_config.AREAS]
-    + ["Suwayomi", "Renamer", "Library database", "Scheduled jobs", "Window", "Logging", OTHER_AREA]))
+    + ["Suwayomi", "Extensions", "Renamer", "Library database", "Scheduled jobs", "Window", "Logging", OTHER_AREA]))
 
 
 @functools.lru_cache(maxsize=1024)

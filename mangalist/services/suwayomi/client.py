@@ -104,6 +104,10 @@ M_DELETE = ("mutation MangaListDeleteDownloaded($ids: [Int!]!) { deleteDownloade
 #: repository an extension came from); the repositories are ``extensionStores`` (``settings`` has no repository list).
 Q_MANGAS_BY_ID = ("query MangaListMangasById($ids: [Int!]!) { mangas(filter: {id: {in: $ids}}) { nodes { id title url "
                   "sourceId inLibrary } } }")
+#: A manga Suwayomi already knows, by its url on its source (the carry-back from the built-in extensions). Not checked
+#: by introspection: a server that refuses it is asked by a search instead (:meth:`SuwayomiClient.manga_by_url`).
+Q_MANGA_BY_URL = ("query MangaListMangaByUrl($url: String!) { mangas(condition: {url: $url}) { nodes { id title url "
+                  "sourceId inLibrary } } }")
 Q_INSTALLED_EXTENSIONS = ("query MangaListInstalledExtensions { extensions(condition: {isInstalled: true}) { nodes { "
                           "pkgName name versionName lang isObsolete storeIndexUrl } } }")
 Q_EXTENSION_STORES = "query MangaListExtensionStores { extensionStores { nodes { indexUrl name signingKey } } }"
@@ -480,6 +484,32 @@ class SuwayomiClient:
                     if manga.id in chunk:
                         out[manga.id] = manga
         return out
+
+    def manga_by_url(self, source_id: str, url: str, title: str = "") -> Optional[SuwayomiManga]:
+        """Suwayomi's manga for a source's manga *url* (the same url the extension host keeps: both run the same
+        extension): the one Suwayomi already knows, else found by a search on the source - MangaDex by its id
+        (``id:<uuid>``), any other by *title* - and taken only when its url is the same. None when not found."""
+        def same(m: SuwayomiManga) -> bool:
+            return m.url.rstrip("/") == url.rstrip("/") and (not m.source_id or m.source_id == str(source_id))
+
+        try:
+            nodes = self._field(self.call(Q_MANGA_BY_URL, {"url": url}), "mangas").get("nodes") or ()
+            known = [manga_of(n) for n in nodes if isinstance(n, Mapping)]
+            hit = next((m for m in known if same(m)), None)
+            if hit is not None:
+                return hit
+        except GraphQLError:
+            pass                                    # this server does not take the query: the search below
+        import re
+
+        uuid = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", url.lower())
+        queries = [f"id:{uuid.group(0)}"] if uuid else []
+        queries += [title] if title else []
+        for query in queries:
+            hit = next((m for m in self.search(str(source_id), query) if same(m)), None)
+            if hit is not None:
+                return hit
+        return None
 
     def installed_extensions(self) -> List[SuwayomiExtension]:
         """The extensions installed in Suwayomi, each with the repository it came from."""

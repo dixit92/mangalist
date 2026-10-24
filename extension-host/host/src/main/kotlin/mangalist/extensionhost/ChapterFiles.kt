@@ -62,7 +62,19 @@ class DownloadsLayout(
     ): Path = mangaDir(sourceDisplayName, mangaTitle).resolve(chapterFileName(chapterName, scanlator))
 
     companion object {
-        fun validName(name: String): String = SafePath.buildValidFilename(name)
+        /** On Windows a few names are devices, not files (`CON`, `NUL`, `COM1`, ... - also with an extension). */
+        private val RESERVED = setOf("CON", "PRN", "AUX", "NUL") + (1..9).flatMap { listOf("COM$it", "LPT$it") }
+
+        /** Whether names are cleaned for Windows too (the host runs there: a desktop). */
+        var windows: Boolean = System.getProperty("os.name").orEmpty().startsWith("Windows")
+
+        /**
+         * Suwayomi's rule (`SafePath.buildValidFilename`), and on Windows a reserved device name gets a leading `_`
+         * (MangaList's `chapter_arrivals.suwayomi_name` does the same there; transition audit B10).
+         */
+        fun validName(name: String): String = SafePath.buildValidFilename(name).let { if (windows) windowsSafe(it) else it }
+
+        fun windowsSafe(name: String): String = if (name.substringBefore('.').trimEnd().uppercase() in RESERVED) "_$name" else name
 
         /** Suwayomi's `getChapterDir`: `<scanlator>_<name>` or the name alone, cleaned as one file name. */
         fun chapterFileName(
@@ -154,7 +166,8 @@ object ChapterArchive {
                 chapter.chapterNumber.takeIf { it >= 0 }?.let {
                     if (it.rem(1) == 0.0f) ComicInfo.Number(it.toInt().toString()) else ComicInfo.Number(it.toString())
                 },
-            web = ComicInfo.Web(chapter.realUrl.orEmpty()),
+            // the chapter's url when the source gives no real one: MangaList finds a renamed CBZ by it (audit B10)
+            web = ComicInfo.Web(chapter.realUrl?.takeIf { it.isNotBlank() } ?: chapter.url),
             summary = manga.description?.let { ComicInfo.Summary(it) },
             writer = manga.author?.let { ComicInfo.Writer(it) },
             penciller = manga.artist?.let { ComicInfo.Penciller(it) },

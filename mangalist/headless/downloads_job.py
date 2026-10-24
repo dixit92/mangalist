@@ -194,36 +194,78 @@ class _Merged:
 
 def chapters_pass(ctx: JobContext, ledger, chapter_client_factory=None, namer=None):
     """One chapter arrivals pass when chapter downloads are in progress: ``(report, note)``; ``(None, None)`` when there
-    is nothing to do (or *ledger* keeps no chapter records). *note* says why the pass could not run (no Suwayomi set up)."""
-    from ..downloads.contracts import TOOL_SUWAYOMI
+    is nothing to do (or *ledger* keeps no chapter records). *note* says why the pass could not run (no Suwayomi set up).
+
+    Each record is finished by the program it was sent to (transition audit B2 / C2): the chosen program's records (and
+    those of unknown program, an older build's) first, then the other program's - e.g. a chapter Suwayomi downloaded and
+    MangaList filed just before a switch still has Suwayomi delete its copy. The other program not answering is not an
+    error of the job (it may be stopped on purpose): its records wait, and say so."""
+    from ..downloads.contracts import CHAPTER_BACKEND_EXTENSIONS, CHAPTER_BACKEND_SUWAYOMI, TOOL_SUWAYOMI
 
     for_tool = getattr(ledger, "for_tool", None)
     if not callable(for_tool):
         return None, None
     chapters = for_tool(TOOL_SUWAYOMI)
-    if not chapters.active():
+    active = list(chapters.active())
+    if not active:
         return None, None
+    from ..downloads import chapter_backend
+    from ..downloads.arrivals import ArrivalsReport
+    from ..downloads.chapter_arrivals import run_chapter_arrivals
     from ..store.downloads import SuwayomiSettings
 
-    conn = SuwayomiSettings(ledger.store).connection()
-    if conn is None:
-        _log.info("Downloads: chapter downloads are in progress but no Suwayomi connection is set up; skipped")
-        return None, "chapters: no Suwayomi connection set up"
-    client = (chapter_client_factory or _default_chapter_client_factory)(conn)
-    if client is None:
-        return None, "chapters: no Suwayomi client available"
-    from ..downloads.chapter_arrivals import run_chapter_arrivals
+    settings = SuwayomiSettings(ledger.store)
+    chosen = settings.backend()
+    other = CHAPTER_BACKEND_SUWAYOMI if chosen == CHAPTER_BACKEND_EXTENSIONS else CHAPTER_BACKEND_EXTENSIONS
+    merged, notes, ran = ArrivalsReport(), [], False
+    for backend, unknown_too in ((chosen, True), (other, False)):
+        mine = [r for r in active if r.backend == backend or (unknown_too and not r.backend)]
+        if not mine:
+            continue
+        name = chapter_backend.name_of_backend(backend)
+        conn = settings.connection_for(backend)
+        if conn is None or not conn.base_url:
+            _log.info("Downloads: %d chapter download(s) of %s are in progress but it is not set up; skipped",
+                      len(mine), name)
+            notes.append(f"chapters: no {name} connection set up" if backend == chosen
+                         else f"{len(mine)} chapter download(s) of {name} wait: it is not set up")
+            continue
+        client = (chapter_client_factory or _default_chapter_client_factory)(conn)
+        if client is None:
+            notes.append(f"chapters: no {name} client available")
+            continue
+        try:
+            if backend == CHAPTER_BACKEND_EXTENSIONS:
+                from ..downloads import host_identity
 
-    try:
-        report = run_chapter_arrivals(client, chapters, download_dir=conn.download_dir, namer=namer,
-                                      should_stop=lambda: ctx.stop_requested)
-    finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
-    if ctx.stop_requested:
-        raise Cancelled()
-    return report, None
+                host_identity.check(ledger.store, client)
+            report = run_chapter_arrivals(client, chapters, download_dir=conn.download_dir, namer=namer,
+                                          should_stop=lambda: ctx.stop_requested, unknown_too=unknown_too)
+        finally:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+        ran = True
+        if report.error and backend != chosen:      # e.g. Suwayomi stopped after the switch: its records just wait
+            _log.info("Downloads: %d chapter download(s) of %s wait: %s", len(mine), name, report.error)
+            report.waiting.extend((r.id, report.error) for r in mine)
+            report.checked += len(mine)
+            report.error = None
+        _merge(merged, report)
+        if ctx.stop_requested:
+            raise Cancelled()
+    if not ran:
+        return None, "; ".join(notes) or None
+    return merged, None
+
+
+def _merge(into, report) -> None:
+    """Add one program's arrivals report to the job's."""
+    into.checked += report.checked
+    for name in ("downloaded", "filed", "copied", "removed", "failed", "waiting", "errors"):
+        getattr(into, name).extend(getattr(report, name))
+    if report.error:
+        into.error = f"{into.error}; {report.error}" if into.error else report.error
 
 
 def chapters_text(report, note: Optional[str]) -> Optional[str]:
