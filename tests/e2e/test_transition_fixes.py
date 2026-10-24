@@ -133,3 +133,41 @@ def test_a_match_found_before_a_switch_is_not_sent_to_the_other_program(db, host
 def test_the_backend_asks_for_the_hosts_queue(db, host, ready):
     backend, _sid = ready
     assert backend.chapter_queue() == []
+
+
+def _finding(db, sid, **payload):
+    from mangalist.downloads.finder import KIND_CHAPTERS, PAYLOAD_SUWAYOMI
+    from mangalist.store.findings import FindingStore, NewFinding
+
+    store = FindingStore(db)
+    base = {"type": PAYLOAD_SUWAYOMI, "source_id": MANGADEX_EN, "source_name": "MangaDex (EN)", "manga_id": 3860,
+            "manga_title": SERIES, "how": "confirmed", "chapter_ids": [13986], "group": "Alpha Scans"}
+    f, _new = store.offer(NewFinding(sid, KIND_CHAPTERS, "chapters:x:13986", "Ch. 2", ("2",), payload={**base, **payload}))
+    return store, f
+
+
+@pytest.mark.parametrize("said", ["suwayomi", None])        # None: a finding from before the payload named its program
+def test_a_finding_of_the_other_program_is_looked_up_again_not_retired(db, host, ready, said):
+    """Audit B3: found by Suwayomi before the switch (its manga 3860, chapter 13986); sent now through the host."""
+    from mangalist.downloads.finder import _send_chapter_finding
+
+    backend, sid = ready
+    store, f = _finding(db, sid, **({"backend": said} if said else {}))
+    text = _send_chapter_finding(db, store, backend, f, ("2",))
+    assert text.startswith("Sent ch 2 to the extension host"), text
+    rec = next(r for r in backend.chapter_ledger.for_series(sid) if r.wanted_chapters == ("2",))
+    assert rec.backend == EXT and rec.group == "Alpha Scans"
+    assert store.get(f.id).status == "sent"
+
+
+def test_a_finding_of_the_chosen_program_is_sent_as_it_is(db, host, ready):
+    from mangalist.downloads.finder import _send_chapter_finding
+
+    backend, sid = ready
+    lookup = backend.chapter_lookup(sid, ("2",), (SERIES,))
+    beta = next(c for c in lookup.rows[0].options if c.scanlator == "Beta Group")
+    store, f = _finding(db, sid, backend=EXT, manga_id=lookup.match.manga.id, chapter_ids=[beta.id],
+                        group="Beta Group")
+    text = _send_chapter_finding(db, store, backend, f, ("2",))
+    assert text.startswith("Sent ch 2"), text
+    assert next(r for r in backend.chapter_ledger.for_series(sid) if r.wanted_chapters == ("2",)).group == "Beta Group"
