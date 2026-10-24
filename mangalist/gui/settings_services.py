@@ -10,10 +10,13 @@ CBZ" or FlareSolverr is off in Suwayomi (FlareSolverr is set in Suwayomi itself,
 **Carry over from Suwayomi** (2026-10-23): while Suwayomi is set up and series have a source picked there, the Built-in
 extensions card offers to carry those choices over to the host once (:mod:`mangalist.gui.carry_over_panel`).
 
-**Chapter downloads** (prototype/mihon-mangalist): a chooser at the top - "Suwayomi" (the default) or "Built-in
-extensions", MangaList's own extension host - and the host's card (its status; Extensions, Test, Edit:
-:mod:`mangalist.gui.extensions_page`). The card of the program not chosen says it is not in use. Switching is refused
-while chapter downloads are still in progress with the other program (the backend says why).
+**Chapter downloads** (2026.10.56): a chooser at the top - "Suwayomi" (the default) or "Built-in extensions", MangaList's
+own extension host - and the host's card (its status; Extensions, Test, Edit: :mod:`mangalist.gui.extensions_page`). The
+card of the program not chosen says it is not in use. Switching is refused while chapter downloads are still in progress
+with the other program (the backend says why). The same chooser is on Download sources > Chapter sources: one setting, two
+places - the page that did not make the choice follows it (:attr:`ServicesPage.backend_switched`,
+:meth:`ServicesPage.note_backend_switched`). The host is tested at once after a switch to it, with a minute's grace
+(:mod:`.start_window`): "Starting..." and a new try every 5 seconds, not a red "Not connected" for a host that is starting.
 
 The status is checked live the first time the section is shown (off the UI thread, with the stored login) and by Test.
 Passwords and tokens stay write-only: the forms never show a stored one, the cards never mention one.
