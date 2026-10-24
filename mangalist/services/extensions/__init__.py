@@ -5,7 +5,8 @@ compatibility layer and Tachiyomi source API, vendored). :class:`ExtensionHostCl
 repository, installing / updating / removing extensions, the sources and their settings, search / chapters / pages);
 :class:`~.compat.ExtensionsChapterClient` (``compat.py``) is MangaList's chapter client over its Suwayomi-compatible
 ``/compat`` API - what the "Built-in extensions" chapter backend uses (:mod:`mangalist.downloads.chapter_backend`).
-:mod:`.supervisor` starts and watches the host in the container.
+:mod:`.supervisor` starts and watches the host in the container. :mod:`.carry_over` carries the owner's per-series Suwayomi
+choices over to the host once (Settings, or ``python -m mangalist.services.extensions carry-over``).
 """
 
 from __future__ import annotations
