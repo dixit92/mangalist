@@ -270,7 +270,7 @@ def test_runs_while_a_chapter_download_of_the_host_is_to_be_finished(tmp_path, s
 
 def test_the_downloads_folder_on_the_data_share_when_it_is_there(tmp_path, settings):
     """Audit B6: the image names a folder on /data (hard links into the library); used when it or its parent exists."""
-    share = tmp_path / "data" / "appdata" / "mangalist"
+    share = tmp_path / "share" / "appdata" / "mangalist"
     wanted = share / "extension-host-downloads"
     env = {sv.ENV_DOWNLOADS: str(wanted)}
     assert sv.downloads_folder(tmp_path / "config", env) == tmp_path / "config" / "extension-host" / "downloads"
@@ -291,13 +291,13 @@ def test_the_downloads_folder_moves_only_once_the_old_one_holds_no_chapter(tmp_p
     cbz.write_bytes(b"x")
     settings.set_backend(CHAPTER_BACKEND_EXTENSIONS)
     settings.learn_downloads_path(str(old))
-    (tmp_path / "data").mkdir()
-    env = {sv.ENV_DOWNLOADS: str(tmp_path / "data" / "dl")}
+    (tmp_path / "share").mkdir()
+    env = {sv.ENV_DOWNLOADS: str(tmp_path / "share" / "dl")}
     want = sv.wanted(tmp_path / "config", env=env, open_settings=lambda: settings)
     assert want.downloads == str(old) and "moves to" in want.why
     cbz.unlink()
     want = sv.wanted(tmp_path / "config", env=env, open_settings=lambda: settings)
-    assert want.downloads == str(tmp_path / "data" / "dl")
+    assert want.downloads == str(tmp_path / "share" / "dl")
 
 
 def test_the_hosts_output_goes_into_the_log_as_it_is(tmp_path, caplog):
