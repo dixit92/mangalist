@@ -156,6 +156,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         _log.info("MangaList %s headless runner; data folder %s; time zone %s; downloads %s; log level %s",
                   __version__, paths.data_dir(), getattr(settings.tz, "key", settings.tz),
                   "on" if settings.downloads_enabled else "off (opt-in)", current.level if current else "?")
+        if db is not None:
+            # a new version: MangaList's database and the extension host's, backed up together (audit D4)
+            try:
+                from ..store.backups import at_version_change
+
+                at_version_change(db, paths.data_dir(), __version__)
+            except Exception:  # noqa: BLE001 - a backup that fails never stops the runner
+                _log.warning("The backup at the version change failed", exc_info=True)
 
         def _on_signal(signum, _frame):
             _log.info("Received %s; stopping after the current step",
