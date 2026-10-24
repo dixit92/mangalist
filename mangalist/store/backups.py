@@ -65,11 +65,11 @@ def snapshot(data_dir: Path, label: str, *, db_file: Optional[Path] = None) -> L
 
 
 def _auto_labels(folder: Path) -> List[str]:
-    """The automatic backups' labels, oldest first (by the MangaList file's time)."""
+    """The automatic backups' labels, oldest first (by the time stamp that ends each label, then the file's time)."""
     found = {}
     for f in folder.glob(f"mangalist-{AUTO_PREFIX}*.db"):
         found[f.name[len("mangalist-"):-len(".db")]] = f.stat().st_mtime
-    return sorted(found, key=lambda k: found[k])
+    return sorted(found, key=lambda k: (k[-15:], found[k]))
 
 
 def prune_auto(data_dir: Path, keep: int = KEEP_AUTO) -> List[Path]:
