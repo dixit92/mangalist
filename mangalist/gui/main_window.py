@@ -557,6 +557,8 @@ class MainWindow(QMainWindow):
             tab = lanes.download_tab_class()(self._volumes_backend, self)
             tab.count_changed.connect(self._top.set_download_count)
             tab.show_in_list.connect(self.show_folder_in_list)
+            if hasattr(tab, "settings_requested"):      # "Open Settings" / "Open Extensions" in the tab
+                tab.settings_requested.connect(self._on_settings_at)
             if hasattr(tab, "library_changed"):         # Restore / Move / Delete of replaced chapters moved files
                 tab.library_changed.connect(self._on_replaced_chapters_moved)
             if hasattr(tab, "modes_changed"):           # a series' mode set in Found: the List's Auto chips follow
@@ -647,6 +649,19 @@ class MainWindow(QMainWindow):
             before = 0
         result = lanes.open_settings_function()(self, self._db, self._volumes_backend)
         self._apply_settings_result(result, before)
+
+    def _on_settings_at(self, section: str) -> None:
+        """The Settings dialog at *section* (a Download tab button: Connected services, or the Extensions page)."""
+        from ..identity.carry import last_carry_id
+
+        try:
+            before = last_carry_id(self._db)
+        except Exception:  # noqa: BLE001
+            before = 0
+        result = lanes.open_settings_function()(self, self._db, self._volumes_backend, section or None)
+        self._apply_settings_result(result, before)
+        if self._download_tab is not None and callable(getattr(self._download_tab, "refresh_extension_notice", None)):
+            self._download_tab.refresh_extension_notice()
 
     def _apply_settings_result(self, result, carry_before: int = 0) -> None:
         """After the Settings dialog: re-read the settings it may have written, then rescan / re-read MangaPixer /

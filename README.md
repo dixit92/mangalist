@@ -54,6 +54,7 @@ Then open `https://<host>:5800/`. The certificate is self-signed unless you put 
 
 The schedules (`MANGALIST_RESCAN_SCHEDULE`, `MANGALIST_MANGAPIXER_SYNC_SCHEDULE`, `MANGALIST_DOWNLOADS_SCHEDULE`,
 `MANGALIST_DISPATCH_SCHEDULE`, `MANGALIST_CHAPTER_CHECK_SCHEDULE` for the check for new chapters, default `every 6h`,
+`MANGALIST_EXTENSION_UPDATES_SCHEDULE` for the built-in extensions' update check, default `daily@05:15`,
 and `MANGALIST_CLEAN_RECORDS_SCHEDULE` for the clean-up of finished download records,
 default `weekly@sun 05:30`: records older than a week; `off` to stop) and the log level (`MANGALIST_LOG_LEVEL`: `error`, `warning`, `info` (default) or `debug`) are **first-run
 defaults**: you change them in **Settings > Scheduled tasks** (one list: each task with its time, last run, next run
@@ -128,6 +129,57 @@ the series holds: a series held in parts gets the parts, and the whole chapter o
 parts do not start at `.1` (`38` with `38.2`: the whole stands in for the missing `38.1`); a series held in whole
 chapters gets the whole chapter, never its parts. A part that turns up later (`38.1` after `38.2` was filed) is fetched
 too. The chapters panel shows the other form unticked, with the reason.
+
+**Chapters without Suwayomi: the built-in extensions (prototype branch `prototype/mihon-mangalist`).** Chapter
+downloads can also go through MangaList's own extension host instead of Suwayomi: a small Java program shipped in the
+image (`extension-host/`, about 210 MB with its Java 21 runtime) that runs the same Mihon / Tachiyomi extensions -
+MangaDex, Weeb Central, MangaFire, ... - and answers MangaList the way Suwayomi does, so the chapters panel, Check for new
+chapters, the find pass, filing and Retry / Cancel work unchanged. To use it:
+
+- **Settings > Connected services > Chapter downloads through: Built-in extensions** (Suwayomi stays the default).
+  Switching is refused while chapter downloads are still in progress with the other program. In the container the host
+  starts by itself within a minute of choosing it (the `extension-host` service; its data - the installed extensions,
+  the id database, the download queue and the WebView's Chromium bundle - lives in `/config/extension-host`) and stops
+  when you switch back. `MANGALIST_EXTENSION_HOST=1` keeps it always running, `0` turns the service off.
+- **Extensions** (on the Built-in extensions card): every repository's extensions (keiyoushi's by default) with a
+  **Repository** column and filter, **Install**, **Update** (and Update all) and **Uninstall** buttons for the selected
+  one, and **Source settings** for a source's own settings (languages, image quality, ...). Install MangaDex first;
+  which sources MangaList may use is set under Download sources, as before (source ids are the extensions' own, so the
+  choice made for Suwayomi carries over). The same extension in two repositories is listed twice; one installed from a
+  repository is updated only from that repository (to take it from the other one, uninstall it first).
+- **Edit** on the same card: the **extension repositories** (as Suwayomi's "extension repos"): **Add repository** takes
+  an `index.json` address - the host reads it first and refuses one that is not a Mihon extension repository or gives no
+  signing key - and **Remove** drops the selected one (the extensions installed from it stay installed and get no more
+  updates). Each repository's own signing key is enforced: an extension is installed or updated only when signed with
+  the key of the repository it comes from, and a repository whose index later names another key is not trusted until
+  removed and added again. Changes apply at once and are remembered for the host's next start
+  (`MANGALIST_EXTENSION_REPO` - one or more addresses - only seeds the list). Also there: **Update extensions
+  automatically** (off by default), FlareSolverr's address for sources behind Cloudflare (or
+  `MANGALIST_FLARESOLVERR_URL`), the WebView switch (sources such as Comix need a browser engine) and, on a desktop, the
+  address of a host you started yourself.
+- **Extension updates**: a scheduled task (**Check for extension updates**, daily at 05:15 by default;
+  `MANGALIST_EXTENSION_UPDATES_SCHEDULE`, or Settings > Scheduled tasks: weekly, daily, every 12 or 6 hours, or off)
+  asks the host which installed extensions have a newer version in their repository. The Built-in extensions card says
+  what it found ("1 extension update: Weeb Central 1.6.20 → 1.6.25", with **Check for updates**) and so does the Download
+  tab ("1 extension update" with **Open Extensions**); the window also checks once at start when the last check is older
+  than the schedule. With **Update extensions automatically** on, the task installs them one by one (each checked against
+  its repository's key, as for Update; one that fails keeps the old version and is reported) and the notices say what
+  was updated. An extension is never updated while one of its chapters is downloading: the host holds that source's
+  queue, waits up to a minute for the running chapter, and otherwise leaves the update for the next check.
+
+Each series' match on the host is kept apart from its Suwayomi match (the host numbers its manga itself); the scanlation
+group you picked carries over.
+
+- **Carry over from Suwayomi** (on the Built-in extensions card, while Suwayomi is set up and series have a source
+  picked there): carries those picks over once, so no series needs its source picked again. It first checks and shows
+  what it will do - the extensions to install in the host (from its repositories, each signature-checked as usual),
+  Suwayomi's repositories the host lacks, how many series it will carry and which it cannot (the source's extension is
+  not available, or Suwayomi no longer has the manga) - and does it on **Carry over**, with a progress bar and a report.
+  Each series gets the same manga on the host (by its source and address), with the same kind of match (MangaDex id or
+  confirmed). Suwayomi is only read and its own picks stay, so switching back still works; a series already set up on
+  the host is never changed, and running it again carries only what is still missing. In the container:
+  `python -m mangalist.services.extensions carry-over [--dry-run]` does the same with the stored connections and prints
+  the report.
 
 Downloads are an Unraid-container feature for now; the desktop builds do not offer them.
 

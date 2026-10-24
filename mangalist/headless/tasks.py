@@ -54,6 +54,10 @@ TASKS = (
              "Asks the saved source of each ongoing chapter series for chapters newer than the newest one you have, "
              "before MangaUpdates lists them; series on Auto get them sent, the rest waits under Found.",
              needs_downloads=True),
+    TaskInfo("extension-updates", "Check for extension updates",
+             "Asks the built-in extension host which installed extensions have a newer version in their repository; "
+             "the Download tab and Connected services say so, and with Auto-update on (Built-in extensions > Edit) "
+             "they are installed. Runs only while Built-in extensions is chosen."),
     TaskInfo("clean-records", "Clear finished download records",
              "Removes finished entries from the Download tab's Show finished list once they are older than the "
              "period. Nothing in progress, filed or failed is touched."),

@@ -758,13 +758,16 @@ def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMat
     try:
         client.enqueue([int(r.info_hash) for r in records])
     except Exception as exc:  # noqa: BLE001 - every record of this send says why
+        from .chapter_backend import is_builtin, wording
+
         why = str(exc) or type(exc).__name__
         out.error = why
         failed = []
         for rec in records:
             try:
                 failed.append(ledger.set_status(rec.id, DownloadStatus.FAILED, expect=(DownloadStatus.SENT,),
-                                                error=f"Suwayomi did not take the download: {why}"))
+                                                error=wording(f"Suwayomi did not take the download: {why}",
+                                                              is_builtin(client))))
             except StatusConflict:
                 failed.append(rec)
         out.records = failed

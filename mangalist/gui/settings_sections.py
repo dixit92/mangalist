@@ -174,6 +174,14 @@ class SourcesPage(SectionPage):
         except Exception:  # noqa: BLE001
             return False
 
+    def _builtin(self) -> bool:
+        """Chapter downloads go through the built-in extensions (prototype/mihon-mangalist)."""
+        chosen = getattr(self._backend, "chapter_backend", None) if self._backend is not None else None
+        try:
+            return callable(chosen) and chosen() == "extensions"
+        except Exception:  # noqa: BLE001
+            return False
+
     def _show_suwayomi_state(self) -> None:
         from .download_style import set_prop
 
@@ -191,7 +199,8 @@ class SourcesPage(SectionPage):
         loader = getattr(self._backend, "suwayomi_sources", None) if self._backend is not None else None
         if not callable(loader) or not self._suwayomi_ready() or self._sources_call is not None:
             return False
-        self.sources_note.setText("Reading the sources from Suwayomi...")
+        self.sources_note.setText("Reading the sources from the extension host..." if self._builtin()
+                                  else "Reading the sources from Suwayomi...")
 
         def done() -> None:
             self._sources_call = None
@@ -240,7 +249,9 @@ class SourcesPage(SectionPage):
         self._loading_sources = False
         n = sum(1 for _s, allowed in shown if allowed)
         self.sources_note.setText(f"{n} of {len(sources)} in use" if sources else
-                                  "Suwayomi has no sources yet: install extensions in Suwayomi (MangaDex first).")
+                                  ("The extension host has no sources yet: install extensions (Settings > Connected "
+                                   "services > Built-in extensions > Extensions; MangaDex first)." if self._builtin() else
+                                   "Suwayomi has no sources yet: install extensions in Suwayomi (MangaDex first)."))
 
     def reset_suwayomi_sources(self) -> bool:
         """Forget the ticks and the order: MangaDex alone in the nyaa languages, then read the list again."""

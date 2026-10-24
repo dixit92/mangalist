@@ -661,13 +661,16 @@ def find_mangadex_source(db, mangadex_id: str, *, client_factory: Optional[Calla
     own lookup). Never raises: no Suwayomi, no MangaDex source or no such manga is a note, and the chapters panel finds
     the series later as it does for any other."""
     from .downloads.chapters import allowed_sources, find_manga
-    from .services.suwayomi import SuwayomiError, client_from_connection
+    from .downloads.chapter_backend import client_from_connection
+    from .services.suwayomi import SuwayomiError
     from .store.downloads import SuwayomiSettings
 
     settings = SuwayomiSettings(db)
     conn = settings.connection()
+    who = "the extension host" if conn is not None and conn.builtin else "Suwayomi"     # the chosen chapter backend
+    who_cap = who[:1].upper() + who[1:]
     if conn is None or not conn.base_url:
-        return SourceLookup(note="Suwayomi is not set up: the chapters are found when you first open them.")
+        return SourceLookup(note=f"{who_cap} is not set up: the chapters are found when you first open them.")
     try:
         from .downloads.options import load_nyaa_options
 
@@ -678,20 +681,20 @@ def find_mangadex_source(db, mangadex_id: str, *, client_factory: Optional[Calla
     try:
         sources = allowed_sources(list(client.sources()), settings.sources(), languages)
         if not any(s.is_mangadex for s in sources):
-            return SourceLookup(note="No MangaDex source is allowed in Suwayomi: the chapters are found when you first "
+            return SourceLookup(note=f"No MangaDex source is allowed in {who}: the chapters are found when you first "
                                      "open them.")
         found = find_manga(client, sources, mangadex_id=mangadex_id, titles=(), title_search=False)
     except SuwayomiError as exc:
-        return SourceLookup(note=f"Suwayomi could not be asked ({exc}).")
+        return SourceLookup(note=f"{who_cap} could not be asked ({exc}).")
     except Exception as exc:  # noqa: BLE001
         _log.info("Add a series: Suwayomi lookup failed (%s)", type(exc).__name__)
-        return SourceLookup(note="Suwayomi could not be asked.")
+        return SourceLookup(note=f"{who_cap} could not be asked.")
     finally:
         close = getattr(client, "close", None)
         if callable(close):
             close()
     if found.match is None:
-        return SourceLookup(note="Suwayomi's MangaDex source has no such series: the chapters are found when you first "
+        return SourceLookup(note=f"{who_cap}'s MangaDex source has no such series: the chapters are found when you first "
                                  "open them.")
     m = found.match
     return SourceLookup(SourceChoice(m.source.id, m.source.display_name, int(m.manga.id), m.manga.title))

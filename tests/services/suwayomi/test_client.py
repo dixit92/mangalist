@@ -212,3 +212,35 @@ def test_details_that_cannot_be_fetched_leave_the_stored_title(session):
     session.answers["MangaListChapters"] = lambda variables: error if variables["fetchManga"] else stale
     fetched = make(session).chapters(1)
     assert len(session.requests) == 2 and fetched.manga.title == "Example Manga" and fetched.chapters
+
+
+# --- read-only queries of the carry-over to the built-in extensions (2026-10-23) -------------------------------------
+
+def test_mangas_by_id_asks_in_chunks_and_leaves_unknown_ids_out(session):
+    c = make(session)
+    got = c.mangas_by_id([197, 195, 4242, 195])
+    (req,) = session.requests
+    assert req["name"] == "MangaListMangasById" and req["variables"] == {"ids": [195, 197, 4242]}
+    assert "mangas(filter: {id: {in: $ids}})" in req["query"]
+    assert sorted(got) == [195, 197]
+    assert got[195].url == "/manga/00000000-0000-4000-8000-0000000c0000" and got[195].source_id == MANGADEX_EN
+    assert got[197].title == "Another Example Series" and got[197].in_library
+    session.requests.clear()
+    c.mangas_by_id(range(1, sc.MANGAS_PER_CALL * 2 + 2))
+    assert [len(r["variables"]["ids"]) for r in session.requests] == [sc.MANGAS_PER_CALL, sc.MANGAS_PER_CALL, 1]
+    assert c.mangas_by_id([]) == {}
+
+
+def test_installed_extensions_and_repositories(session):
+    c = make(session)
+    exts = c.installed_extensions()
+    assert [e.pkg for e in exts] == ["eu.kanade.tachiyomi.extension.all.mangadex",
+                                     "eu.kanade.tachiyomi.extension.all.mangafire"]
+    assert exts[1].version == "1.6.34" and exts[1].repo.endswith("keiyoushi/extensions/repo/index.json")
+    assert "extensions(condition: {isInstalled: true})" in session.requests[-1]["query"]
+    (repo,) = c.extension_repos()
+    assert repo.name == "Keiyoushi" and repo.url.endswith("/index.json") and len(repo.signing_key) == 64
+    # read-only: queries, never a mutation
+    assert [r["name"] for r in session.requests] == ["MangaListInstalledExtensions", "MangaListExtensionStores"]
+    assert all(r["query"].startswith("query ") for r in session.requests)
+    assert all(sc.OPERATIONS[k].startswith("query ") for k in ("mangas", "extensions", "extensionStores"))

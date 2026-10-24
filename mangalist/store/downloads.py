@@ -63,6 +63,9 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..downloads.budget import SIZE_RELEASE
 from ..downloads.contracts import (
+    CHAPTER_BACKEND_EXTENSIONS,
+    CHAPTER_BACKEND_SUWAYOMI,
+    CHAPTER_BACKENDS,
     TOOL_QBITTORRENT,
     TOOL_SUWAYOMI,
     TOOLS,
@@ -636,16 +639,127 @@ META_SUWAYOMI_SERIES = "suwayomi.series."          # + the series id
 SETTING_SUWAYOMI_SOURCES = "downloads.suwayomi_sources"     # the source ids MangaList may use, in order
 
 
+# The built-in extensions backend (prototype/mihon-mangalist): which program downloads chapters, and MangaList's own
+# extension host. Plain settings (no secret: the host has no login).
+SETTING_CHAPTER_BACKEND = "downloads.chapter_backend"      # 'suwayomi' (default) | 'extensions'
+SETTING_EXTENSION_HOST = "downloads.extension_host"        # {url, download_dir, downloads_path, repos, ...}
+SETTING_EXTENSION_AUTO_UPDATE = "downloads.extension_auto_update"   # bool: the update job installs what it finds
+META_EXTENSIONS_SERIES = "extensions.series."              # + the series id: the per-series choices on the host
+DEFAULT_EXTENSION_HOST_URL = "http://127.0.0.1:4570"
+#: keiyoushi's repository (the one MangaList's Suwayomi uses; the host's own default too).
+DEFAULT_EXTENSION_REPO = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json"
+
+
+@dataclass(frozen=True)
+class ExtensionHostConfig:
+    """MangaList's extension host as Settings edits it, and the options the container passes it when it starts it.
+
+    ``download_dir`` is the folder MangaList files finished chapters from, as MangaList sees it (empty: the host's own
+    ``downloadsPath`` - right whenever the host runs next to MangaList, as in the container); ``downloads_path`` is the
+    host's own answer, learned at the last connection test or host start. ``flaresolverr_url`` empty: the environment's
+    (``MANGALIST_FLARESOLVERR_URL``), else none.
+
+    ``repos``: the extension repositories as the owner last left the host's list (Settings > Built-in extensions; each
+    added one checked by the host first) - the container's host is started with them (``--repo`` each), so a new data
+    folder gets the same list. None: never edited - the single ``repo_url`` of an older version, else
+    ``MANGALIST_EXTENSION_REPO``, else the host's default (keiyoushi's)."""
+
+    url: str = DEFAULT_EXTENSION_HOST_URL
+    download_dir: str = ""
+    downloads_path: str = ""
+    repo_url: str = ""
+    flaresolverr_url: str = ""
+    webview: bool = True
+    repos: Optional[Tuple[str, ...]] = None
+
+    @property
+    def files_from(self) -> str:
+        """The folder the chapter arrivals pass reads (the one holding ``mangas/``)."""
+        return self.download_dir or self.downloads_path
+
+
 class SuwayomiSettings:
     """Suwayomi's connection (``meta``: the password stays out of ``settings``), the sources MangaList may use (a plain
     setting, like nyaa's switches) and each series' choices (``meta``): the Suwayomi manga it was matched to - by its
-    MangaDex id, or by a title search the owner confirmed - and the scanlation group the owner picked."""
+    MangaDex id, or by a title search the owner confirmed - and the scanlation group the owner picked.
+
+    **The chapter backend** (prototype/mihon-mangalist): with "Built-in extensions" chosen (:meth:`backend`) the
+    connection is MangaList's own extension host (:meth:`connection` then describes it, with ``backend='extensions'``),
+    and each series' choices are kept apart from Suwayomi's (``extensions.series.<id>``): the host's manga ids are its
+    own. The scanlation group the owner picked under Suwayomi carries over until one is picked on the host. The allowed
+    sources are shared: a source's id is the extension's, the same in both programs."""
 
     def __init__(self, store):
         self.store = store
 
+    # --- the backend ---------------------------------------------------------------------------------------------
+
+    def backend(self) -> str:
+        value = self.store.get_setting(SETTING_CHAPTER_BACKEND, None)
+        return CHAPTER_BACKEND_EXTENSIONS if value == CHAPTER_BACKEND_EXTENSIONS else CHAPTER_BACKEND_SUWAYOMI
+
+    def set_backend(self, backend: str) -> None:
+        if backend not in CHAPTER_BACKENDS:
+            raise ValueError(f"unknown chapter backend {backend!r}")
+        self.store.set_setting(SETTING_CHAPTER_BACKEND, backend)
+
+    @property
+    def builtin(self) -> bool:
+        return self.backend() == CHAPTER_BACKEND_EXTENSIONS
+
+    def extension_host(self) -> ExtensionHostConfig:
+        data = self.store.get_setting(SETTING_EXTENSION_HOST, None)
+        data = data if isinstance(data, dict) else {}
+
+        def text(key: str) -> str:
+            value = data.get(key)
+            return value.strip() if isinstance(value, str) else ""
+
+        webview = data.get("webview")
+        repos = data.get("repos")
+        return ExtensionHostConfig(url=text("url") or DEFAULT_EXTENSION_HOST_URL, download_dir=text("download_dir"),
+                                   downloads_path=text("downloads_path"), repo_url=text("repo_url"),
+                                   flaresolverr_url=text("flaresolverr_url"),
+                                   webview=webview if isinstance(webview, bool) else True,
+                                   repos=tuple(r.strip() for r in repos if isinstance(r, str) and r.strip())
+                                   if isinstance(repos, list) else None)
+
+    def save_extension_host(self, config: ExtensionHostConfig) -> None:
+        data = {
+            "url": (config.url or "").strip() or DEFAULT_EXTENSION_HOST_URL,
+            "download_dir": (config.download_dir or "").strip(), "downloads_path": (config.downloads_path or "").strip(),
+            "repo_url": (config.repo_url or "").strip(), "flaresolverr_url": (config.flaresolverr_url or "").strip(),
+            "webview": bool(config.webview)}
+        if config.repos is not None:
+            data["repos"] = [r.strip() for r in config.repos if r and r.strip()]
+        self.store.set_setting(SETTING_EXTENSION_HOST, data)
+
+    def extension_auto_update(self) -> bool:
+        """Whether the scheduled extension update check installs the updates it finds (off unless the owner turns it
+        on)."""
+        return self.store.get_setting(SETTING_EXTENSION_AUTO_UPDATE, False) is True
+
+    def set_extension_auto_update(self, on: bool) -> None:
+        self.store.set_setting(SETTING_EXTENSION_AUTO_UPDATE, bool(on))
+
+    def learn_downloads_path(self, path: str) -> None:
+        """Keep the host's own downloads folder (its ``/compat/settings`` answer, or what the container started it with)."""
+        path = (path or "").strip()
+        config = self.extension_host()
+        if path and path != config.downloads_path:
+            self.save_extension_host(replace(config, downloads_path=path))
+
     def connection(self) -> Optional[SuwayomiConnection]:
-        """The stored connection (with its password, for the client only), or None when none is set up."""
+        """The stored connection (with its password, for the client only), or None when none is set up. With the
+        built-in extensions backend: the extension host's (always set up: its default address)."""
+        if self.builtin:
+            host = self.extension_host()
+            return SuwayomiConnection(base_url=host.url, download_dir=host.files_from,
+                                      backend=CHAPTER_BACKEND_EXTENSIONS)
+        return self.suwayomi_connection()
+
+    def suwayomi_connection(self) -> Optional[SuwayomiConnection]:
+        """Suwayomi's own stored connection, whichever backend is chosen."""
         data = _loads(self.store.get_meta(META_SUWAYOMI_CONNECTION), {})
         url = str(data.get("base_url") or "").strip()
         if not url:
@@ -687,20 +801,73 @@ class SuwayomiSettings:
 
     # --- per series ------------------------------------------------------------------------------------------
 
+    def _series_key(self, series_id: int) -> str:
+        return f"{META_EXTENSIONS_SERIES if self.builtin else META_SUWAYOMI_SERIES}{int(series_id)}"
+
     def series_choice(self, series_id: int) -> Dict[str, Any]:
         """``{"source_id", "manga_id", "manga_title", "how", "group"}`` as far as known ({} when nothing is stored).
         ``how``: ``mangadex-id`` (found by the MangaDex id MangaPixer links) or ``confirmed`` (a title match the owner
-        confirmed)."""
-        return _loads(self.store.get_meta(f"{META_SUWAYOMI_SERIES}{int(series_id)}"), {})
+        confirmed). The chosen backend's (see the class docstring)."""
+        data = _loads(self.store.get_meta(self._series_key(series_id)), {})
+        if self.builtin and "group" not in data and "group_cleared" not in data:
+            group = _loads(self.store.get_meta(f"{META_SUWAYOMI_SERIES}{int(series_id)}"), {}).get("group")
+            if group:
+                data["group"] = group
+        data.pop("group_cleared", None)
+        return data
+
+    # --- the carry-over from Suwayomi to the built-in extensions (mangalist.services.extensions.carry_over) -------
+
+    def suwayomi_series_choices(self) -> Dict[int, Dict[str, Any]]:
+        """Every series' stored Suwayomi choice (``suwayomi.series.<id>``), whichever backend is chosen: series id ->
+        the stored dict (forgotten / empty ones left out)."""
+        return self._choices(META_SUWAYOMI_SERIES)
+
+    def extensions_series_choices(self) -> Dict[int, Dict[str, Any]]:
+        """Every series' stored choice on the extension host (``extensions.series.<id>``), as stored."""
+        return self._choices(META_EXTENSIONS_SERIES)
+
+    def _choices(self, prefix: str) -> Dict[int, Dict[str, Any]]:
+        out: Dict[int, Dict[str, Any]] = {}
+        with self.store.connect() as con:
+            rows = con.execute("SELECT key, value FROM meta WHERE substr(key, 1, ?) = ? AND value IS NOT NULL",
+                               (len(prefix), prefix)).fetchall()
+        for key, value in rows:
+            tail = key[len(prefix):]
+            data = _loads(value, {})
+            if tail.isdigit() and data:
+                out[int(tail)] = data
+        return out
+
+    def carry_series_choice(self, series_id: int, choice: Dict[str, Any]) -> bool:
+        """Write *choice* as the series' choice on the extension host - only when it has no manga there yet (never
+        overwrites: keys already stored, e.g. a scanlation group picked on the host, are kept). One statement, so a
+        choice made at the same moment elsewhere wins. True when written."""
+        key = f"{META_EXTENSIONS_SERIES}{int(series_id)}"
+        value = json.dumps(dict(choice), ensure_ascii=False)
+        with self.store.connect() as con:
+            cur = con.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = "
+                "CASE WHEN meta.value IS NULL OR NOT json_valid(meta.value) THEN excluded.value "
+                "WHEN json_type(meta.value) = 'object' THEN json_patch(excluded.value, meta.value) "
+                "ELSE excluded.value END "
+                "WHERE CASE WHEN meta.value IS NULL OR NOT json_valid(meta.value) THEN 1 "
+                "WHEN json_type(meta.value) != 'object' THEN 1 "
+                "ELSE json_extract(meta.value, '$.manga_id') IS NULL END", (key, value))
+            return cur.rowcount > 0
 
     def set_series_choice(self, series_id: int, **changes: Any) -> Dict[str, Any]:
         """Merge *changes* into the series' choices (a value of None forgets that key); the stored result."""
-        data = self.series_choice(series_id)
-        for key, value in changes.items():
+        key = self._series_key(series_id)
+        data = _loads(self.store.get_meta(key), {})
+        for name, value in changes.items():
             if value is None:
-                data.pop(key, None)
+                data.pop(name, None)
+                if name == "group" and self.builtin:
+                    data["group_cleared"] = True        # the owner cleared it here: Suwayomi's no longer carries over
             else:
-                data[key] = value
-        self.store.set_meta(f"{META_SUWAYOMI_SERIES}{int(series_id)}",
-                            json.dumps(data, ensure_ascii=False) if data else None)
-        return data
+                data[name] = value
+                if name == "group":
+                    data.pop("group_cleared", None)
+        self.store.set_meta(key, json.dumps(data, ensure_ascii=False) if data else None)
+        return self.series_choice(series_id)

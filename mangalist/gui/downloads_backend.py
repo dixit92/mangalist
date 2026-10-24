@@ -95,6 +95,25 @@ available:
 ``records()`` then returns every tool's records (chapter downloads have ``tool == 'suwayomi'``), and ``check_now()``
 files finished chapters too.
 
+**Built-in extensions** (prototype/mihon-mangalist; :mod:`mangalist.downloads.extensions_backend`), optional too: the
+chapter backend choice and MangaList's own extension host. With "Built-in extensions" chosen every chapter method above
+talks to the host instead of Suwayomi (``suwayomi_ready`` is then true: the host has a default address).
+
+========================================  =======================================================================
+``chapter_backend()``                     quick: ``'suwayomi'`` or ``'extensions'``.
+``set_chapter_backend(name)``             quick; :class:`BackendError` while chapter downloads are in progress with
+                                          the other program.
+``load_extension_host()`` /               quick: :class:`~mangalist.store.downloads.ExtensionHostConfig` (address,
+ ``save_extension_host(config)``          download folder, repository, FlareSolverr, WebView).
+``test_extension_host(config=None)``      the host's version, sources and folders (:class:`ExtensionHostCheck`).
+``extension_repo()``                      the repository's extensions with what is installed:
+                                          ``[ExtensionRow]`` (asks the host).
+``install_extension(pkg)`` /              install / update / remove one extension (asks the host; slow).
+ ``update_extension`` / ``uninstall_..``
+``source_preferences(source_id)`` /       a source's settings; change one (asks the host).
+ ``set_source_preference(id, pref, v)``
+========================================  =======================================================================
+
 Every method may block (network, database): the GUI calls them off the UI thread, except ``series_id_for`` and
 the settings getter / setter, which must be quick. A failure the owner should read raises :class:`BackendError`
 with a message that is safe to show (never a password, token or URL with credentials); anything else is shown
@@ -168,6 +187,32 @@ class SuwayomiCheck:
         if not self.flaresolverr:
             out.append("FlareSolverr is off in Suwayomi: sources behind Cloudflare may fail (set it in Suwayomi's "
                        "settings, e.g. http://<unraid-ip>:8191).")
+        return out
+
+
+@dataclass(frozen=True)
+class ExtensionHostCheck:
+    """What Test connection learned from MangaList's extension host (the "Built-in extensions" chapter backend)."""
+
+    version: str
+    sources: int = 0                    # sources of the installed extensions
+    extensions: int = 0
+    downloads_path: str = ""            # where the host writes its CBZs, as the host sees it
+    files_from: str = ""                # the folder MangaList files from (the host's, unless set otherwise)
+    folder_found: Optional[bool] = None     # MangaList can see that folder (None: not known)
+    flaresolverr: bool = False
+    flaresolverr_url: str = ""
+
+    def notes(self) -> list:
+        out = []
+        if not self.extensions:
+            out.append("No extension is installed yet: open Extensions and install MangaDex (and your other sources).")
+        if self.folder_found is False:
+            out.append(f"MangaList cannot see the host's download folder ({self.files_from or 'not known'}): set the "
+                       "download folder as MangaList sees it (Edit), or finished chapters cannot be filed.")
+        if not self.flaresolverr:
+            out.append("No FlareSolverr: sources behind Cloudflare may fail (set its address under Edit, e.g. "
+                       "http://<unraid-ip>:8191).")
         return out
 
 

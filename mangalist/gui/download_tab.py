@@ -115,6 +115,7 @@ from .series_actions import (
     SeriesRef,
 )
 from .replaced_chapters import ConfirmDeleteFn, ReplacedBar, ReplacedDialog
+from .extension_notice import SECTION_EXTENSIONS, ExtensionUpdatesBar
 from .shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, SECTION_SERVICES, WantedSeries
 from .volumes_target import VolumeTarget
 
@@ -283,10 +284,12 @@ class DownloadTab(QWidget):
         if self._group == GROUP_FOUND:                  # remembered from the last session
             self.panels.setCurrentIndex(PANEL_FOUND)
             self.footer.setVisible(False)
+        self._ext_check_call = None
         if autostart:
             self.downloads.refresh()
             self.refresh_replaced()
             self.reload_found()
+            self.check_extension_updates_if_due()
 
     # --- UI ------------------------------------------------------------------------------------------
 
@@ -436,6 +439,10 @@ class DownloadTab(QWidget):
         self.replaced_bar = ReplacedBar()
         self.replaced_bar.review_requested.connect(self.open_replaced)
         uv.addWidget(self.replaced_bar)
+        # the built-in extensions' update notice (owner, 2026-10-22): "2 extension updates" - Open Extensions
+        self.extensions_bar = ExtensionUpdatesBar()
+        self.extensions_bar.open_requested.connect(lambda: self.settings_requested.emit(SECTION_EXTENSIONS))
+        uv.addWidget(self.extensions_bar)
 
         # The In progress panel's height is the owner's too (owner, 2026-10-09: "should also be resizable").
         self.vsplitter = QSplitter(Qt.Orientation.Vertical)
@@ -1537,8 +1544,51 @@ class DownloadTab(QWidget):
 
     # --- replaced chapters ------------------------------------------------------------------------------
 
+    # --- the extension update notice ---
+
+    def refresh_extension_notice(self) -> None:
+        """The extension update line from the last stored check (a quick database read; while Built-in extensions is
+        chosen)."""
+        reader = getattr(self._backend, "extension_update_notice", None)
+        try:
+            check = reader() if callable(reader) else None
+        except Exception:  # noqa: BLE001 - a notice only
+            _log.debug("Extension update notice: not read", exc_info=True)
+            check = None
+        self.extensions_bar.set_check(check)
+
+    def check_extension_updates_if_due(self) -> bool:
+        """The window's check at start: when the stored result is older than the schedule (and Built-in extensions is
+        chosen), ask the host now - off the UI thread - then show the result. A host that is not up: nothing shown."""
+        backend = self._backend
+        due = getattr(backend, "extension_updates_due", None)
+        run = getattr(backend, "check_extension_updates", None)
+        if not callable(due) or not callable(run) or self._stopped or self._ext_check_call is not None:
+            return False
+
+        def check():
+            return run() if due() else None
+
+        made: list = []
+
+        def finished() -> None:
+            if made and made[0] in self._calls:
+                self._calls.remove(made[0])
+            self._ext_check_call = None
+            if not self._stopped:
+                self.refresh_extension_notice()
+
+        self._ext_check_call = start_call(check, lambda _r: None,
+                                          lambda message: _log.info("Extension updates: not checked at start: %s",
+                                                                    message), finished)
+        made.append(self._ext_check_call)
+        self._calls.append(self._ext_check_call)
+        return True
+
     def refresh_replaced(self) -> None:
-        """Reload the replaced-chapters line (off the UI thread; after every downloads reload)."""
+        """Reload the replaced-chapters line (off the UI thread; after every downloads reload) - and the extension
+        update line (a quick read)."""
+        self.refresh_extension_notice()
         service = self._replaced
         if service is None or self._stopped or self._replaced_call is not None:
             return

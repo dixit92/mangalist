@@ -208,6 +208,9 @@ class _ChapterPass:
         self.should_stop = should_stop
         self.report = ArrivalsReport()
         self._volumes: Dict[int, Callable[[Decimal], Optional[Decimal]]] = {}
+        from .chapter_backend import is_builtin
+
+        self.builtin = is_builtin(client)       # the built-in extension host: its messages name it, not Suwayomi
 
     def run(self) -> ArrivalsReport:
         records = list(self.ledger.active())
@@ -218,7 +221,8 @@ class _ChapterPass:
             queue = {q.chapter_id: q for q in self.client.queue()}      # first: see the module docstring
             chapters = {c.id: c for c in self.client.chapters_by_id(ids)}
         except Exception as exc:  # noqa: BLE001 - nothing changes while Suwayomi cannot be asked
-            self.report.error = f"Suwayomi could not be asked about its downloads: {type(exc).__name__}: {exc}"
+            self.report.error = self._words(f"Suwayomi could not be asked about its downloads: {type(exc).__name__}: "
+                                            f"{exc}")
             _log.warning("Chapter arrivals: %s; nothing changed", self.report.error)
             return self.report
         for rec in records:
@@ -489,8 +493,14 @@ class _ChapterPass:
 
     # --- outcomes ----------------------------------------------------------------------------------------------
 
+    def _words(self, text):
+        from .chapter_backend import wording
+
+        return wording(text, self.builtin)
+
     def _fail(self, rec: DownloadRecord, why: str, *, filed_files: Optional[Sequence[str]] = None,
               copied: Optional[bool] = None) -> DownloadRecord:
+        why = self._words(why)
         out = self.ledger.set_status(rec.id, DownloadStatus.FAILED, expect=(rec.status,), error=why,
                                      filed_files=filed_files, copied=copied)
         self.report.failed.append((rec.id, why))
@@ -498,10 +508,11 @@ class _ChapterPass:
         return out
 
     def _wait(self, rec: DownloadRecord, why: str) -> None:
-        self.report.waiting.append((rec.id, why))
+        self.report.waiting.append((rec.id, self._words(why)))
 
     def _note(self, rec: DownloadRecord, note: Optional[str]) -> None:
         """Keep why a record waits on it (None: nothing to say), for the downloads list."""
+        note = self._words(note)
         if (rec.error or None) == (note or None):
             return
         try:

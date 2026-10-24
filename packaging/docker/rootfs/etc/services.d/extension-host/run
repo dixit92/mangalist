@@ -1,0 +1,10 @@
+#!/bin/sh
+# MangaList's extension host (the "Built-in extensions" chapter backend; prototype/mihon-mangalist), next to the GUI.
+# The Python supervisor starts the JVM host while Settings > Connected services > Chapter downloads is "Built-in
+# extensions" (MANGALIST_EXTENSION_HOST=1: always; 0: this service is off), with its data in /config/extension-host,
+# and stops it again when the owner switches back to Suwayomi - no container restart needed.
+# Runs as USER_ID / GROUP_ID; respawned if it exits.
+set -u
+cd /config || exit 1
+export DISPLAY="${DISPLAY:-:0}"
+exec /opt/mangalist/venv/bin/python -m mangalist.services.extensions.supervisor

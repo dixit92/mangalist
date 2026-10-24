@@ -89,6 +89,7 @@ class ServiceCard(QFrame):
         self.note_label.setVisible(False)
         for w in (self.what_label, self.detail_label, self.used_label, self.note_label):
             col.addWidget(w)
+        self.column = col                       # more lines go here (the built-in extensions' update notice)
         row.addLayout(col, 1)
         self.buttons = QHBoxLayout()
         self.buttons.setSpacing(8)

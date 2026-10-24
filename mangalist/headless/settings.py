@@ -14,6 +14,9 @@ Variable                       Default             Meaning
 ``MANGALIST_CLEAN_RECORDS_SCHEDULE`` ``weekly@sun 05:30`` When to clear finished download records
                                                    (``daily@05:30``, ``weekly@sun 05:30``, ``monthly@1 05:30`` or
                                                    ``off``: the period is also how old a record must be to go).
+``MANGALIST_EXTENSION_UPDATES_SCHEDULE`` ``daily@05:15`` When the built-in extensions are checked for updates (the
+                                                   ``extension-updates`` job; only while Built-in extensions is
+                                                   chosen and the host is up).
 ``MANGALIST_CATCH_UP``         ``1``               After downtime, run a missed job once (never N times).
 ``MANGALIST_MANGAPIXER_SYNC_SCHEDULE`` ``daily@03:15`` When to sync the MangaPixer source (before the rescan;
                                                    skipped while no MangaPixer server is set up).
@@ -25,7 +28,7 @@ Schedules in the settings database (owner, 2026-10-09: "This should be configura
 --------------------------------------------------------------------------------------------------
 The schedules are editable in Settings > Scheduled tasks and stored in the library database's settings table
 (``schedule_rescan``, ``schedule_mangapixer_sync``, ``schedule_dispatch``, ``schedule_downloads``,
-``schedule_clean_records``, ``schedule_chapter_check``; the text forms of
+``schedule_clean_records``, ``schedule_chapter_check``, ``schedule_extension_updates``; the text forms of
 :mod:`.schedule`, ``off`` included). Order of precedence, per schedule:
 
 1. the stored value, once the owner has set one;
@@ -61,6 +64,7 @@ ENV_MANGAPIXER = "MANGALIST_MANGAPIXER_SYNC_SCHEDULE"
 ENV_DOWNLOADS_SCHEDULE = "MANGALIST_DOWNLOADS_SCHEDULE"
 ENV_CLEAN_RECORDS = "MANGALIST_CLEAN_RECORDS_SCHEDULE"
 ENV_CHAPTER_CHECK = "MANGALIST_CHAPTER_CHECK_SCHEDULE"
+ENV_EXTENSION_UPDATES = "MANGALIST_EXTENSION_UPDATES_SCHEDULE"
 
 DEFAULT_RESCAN = "daily@03:30"
 DEFAULT_DISPATCH = "daily@04:30"
@@ -71,6 +75,8 @@ DEFAULT_DOWNLOADS_SCHEDULE = "every 1h"
 DEFAULT_CLEAN_RECORDS = "weekly@sun 05:30"
 # owner, 2026-10-18: "Scheduled newer-chapter check - every 6-12 h"; every 6 hours until the owner changes it.
 DEFAULT_CHAPTER_CHECK = "every 6h"
+# owner, 2026-10-22: "Update notice" - daily by default, after the night's other jobs.
+DEFAULT_EXTENSION_UPDATES = "daily@05:15"
 
 
 class ScheduleSpec(NamedTuple):
@@ -95,6 +101,8 @@ SCHEDULES = (
                  DEFAULT_CLEAN_RECORDS),
     ScheduleSpec("chapter-check", "Check for new chapters", "schedule_chapter_check", ENV_CHAPTER_CHECK,
                  DEFAULT_CHAPTER_CHECK),
+    ScheduleSpec("extension-updates", "Check for extension updates", "schedule_extension_updates",
+                 ENV_EXTENSION_UPDATES, DEFAULT_EXTENSION_UPDATES),
 )
 SCHEDULE_BY_JOB = {spec.job: spec for spec in SCHEDULES}
 
@@ -220,6 +228,7 @@ class HeadlessSettings:
     downloads_schedule: Optional[Schedule] = None
     clean_records_schedule: Optional[Schedule] = None
     chapter_check_schedule: Optional[Schedule] = None
+    extension_updates_schedule: Optional[Schedule] = None
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None, db: Any = None) -> "HeadlessSettings":
@@ -237,4 +246,5 @@ class HeadlessSettings:
             downloads_schedule=schedules["downloads"],
             clean_records_schedule=schedules["clean-records"],
             chapter_check_schedule=schedules["chapter-check"],
+            extension_updates_schedule=schedules["extension-updates"],
         )
