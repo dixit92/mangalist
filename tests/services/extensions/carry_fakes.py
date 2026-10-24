@@ -34,6 +34,7 @@ class FakeSuwayomiCarry:
         self.mangas: Dict[int, SuwayomiManga] = {}
         self.calls: List[tuple] = []
         self.unreachable = False
+        self.searchable: Dict[tuple, str] = {}         # (source id, url) -> title: found by a search on the source
 
     def add(self, manga_id: int, source: SuwayomiSource, url: str, title: str) -> SuwayomiManga:
         self.mangas[manga_id] = SuwayomiManga(id=manga_id, title=title, url=url, source_id=source.id, in_library=True)
@@ -59,6 +60,16 @@ class FakeSuwayomiCarry:
     def mangas_by_id(self, ids: Sequence[int], *, pause: float = 0.0):
         self._call("mangas_by_id", tuple(ids))
         return {i: self.mangas[i] for i in ids if i in self.mangas}
+
+    def manga_by_url(self, source_id: str, url: str, title: str = ""):
+        """The carry-back's lookup: a manga Suwayomi knows by (source, url); else one its source's search finds (it
+        gets a new id then, as a search does in Suwayomi) when :attr:`searchable` has it."""
+        self._call("manga_by_url", source_id, url)
+        hit = next((m for m in self.mangas.values() if m.source_id == source_id and m.url == url), None)
+        if hit is None and (source_id, url) in self.searchable:
+            hit = self.add(max(self.mangas, default=100) + 1, next(s for s in self.sources_list if s.id == source_id),
+                           url, self.searchable[(source_id, url)])
+        return hit
 
     def close(self) -> None:
         pass
