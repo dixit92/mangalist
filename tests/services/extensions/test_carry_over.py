@@ -301,3 +301,24 @@ def test_over_the_real_suwayomi_client_only_queries_are_sent(db, host):
     assert all(r["query"].startswith("query ") for r in session.requests)
     assert {r["name"] for r in session.requests} == {"MangaListSources", "MangaListInstalledExtensions",
                                                      "MangaListExtensionStores", "MangaListMangasById"}
+
+
+def test_the_command_line_prints_the_report(db, suwayomi, host, monkeypatch, capsys, tmp_path):
+    from mangalist import paths
+    from mangalist.services.extensions.__main__ import main
+
+    choose(db)
+    monkeypatch.setattr(co, "clients_from_store",
+                        lambda _db, host_url=None, timeout=120.0: (suwayomi, ExtensionHostClient(host_url or host.url)))
+    assert main(["carry-over", "--dry-run", "--db", str(paths.db_file())]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Would carry over from Suwayomi: Would carry 2") and "Extensions to install" in out
+    assert host.installed == {} and raw_choice(db, 1) is None
+    assert main(["--url", host.url, "carry-over", "--every-series"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Did carry over from Suwayomi: Carried 2") and "-> host manga" in out
+    assert raw_choice(db, 1) is not None
+    assert main(["carry-over", "--db", str(tmp_path / "nothing.db")]) == 2
+    assert not (tmp_path / "nothing.db").exists()
+    monkeypatch.setattr(co, "clients_from_store", lambda *a, **k: (_ for _ in ()).throw(co.CarryOverError("no")))
+    assert main(["carry-over"]) == 1 and "error: no" in capsys.readouterr().err

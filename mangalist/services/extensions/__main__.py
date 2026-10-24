@@ -5,6 +5,12 @@
     python -m mangalist.services.extensions search "<source name>[/<lang>]" "<query>"
     python -m mangalist.services.extensions chapters "<source>" "<manga url>"
     python -m mangalist.services.extensions demo          # search -> chapters -> pages -> one image, per source
+    python -m mangalist.services.extensions carry-over [--dry-run] [--no-install] [--db PATH] [--every-series]
+
+``carry-over`` carries the owner's Suwayomi per-series choices over to the extension host
+(:mod:`.carry_over`), with the connections stored in MangaList's database (default: the data folder's, as the app
+uses it - in the container ``/config/mangalist.db``; ``--url`` overrides the host's stored address) and prints the
+report. Suwayomi is only read. ``--dry-run`` writes nothing anywhere.
 """
 
 from __future__ import annotations
@@ -70,7 +76,8 @@ def demo(client: ExtensionHostClient, rows=DEMO) -> List[Tuple[str, str]]:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m mangalist.services.extensions")
-    ap.add_argument("--url", default=DEFAULT_URL, help=f"the extension host (default {DEFAULT_URL})")
+    ap.add_argument("--url", default=None, help=f"the extension host (default {DEFAULT_URL}; carry-over: the stored "
+                                                "address)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("sources")
     p = sub.add_parser("install")
@@ -82,8 +89,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("source")
     p.add_argument("manga_url")
     sub.add_parser("demo")
+    p = sub.add_parser("carry-over", help="carry the Suwayomi per-series choices over to the extension host")
+    p.add_argument("--dry-run", action="store_true", help="report what would be done; write nothing")
+    p.add_argument("--no-install", action="store_true", help="do not install the extensions the host lacks")
+    p.add_argument("--db", default=None, help="MangaList's database (default: the data folder's mangalist.db)")
+    p.add_argument("--every-series", action="store_true", help="list the carried series too")
     args = ap.parse_args(argv)
-    client = ExtensionHostClient(args.url)
+    if args.cmd == "carry-over":
+        return carry_over_main(args)
+    client = ExtensionHostClient(args.url or DEFAULT_URL)
     try:
         if args.cmd == "sources":
             for s in client.sources():
@@ -107,6 +121,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     finally:
         client.close()
+    return 0
+
+
+def carry_over_main(args) -> int:
+    from pathlib import Path
+
+    from ... import paths, store
+    from .carry_over import CarryOverError, run_from_store
+
+    db_path = Path(args.db) if args.db else paths.db_file()
+    if not db_path.is_file():
+        print(f"error: no MangaList database at {db_path}", file=sys.stderr)
+        return 2
+    db = store.get_store(db_path)
+    last = [0.0]
+
+    def progress(done: int, total: int, text: str) -> None:
+        now = time.monotonic()
+        if now - last[0] >= 5 or done == total:
+            last[0] = now
+            print(f"[{done}/{total}] {text}", file=sys.stderr, flush=True)
+
+    try:
+        report = run_from_store(db, install=not args.no_install, dry_run=args.dry_run, progress=progress,
+                                host_url=args.url)
+    except CarryOverError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    for line in report.lines(every_series=args.every_series):
+        print(line)
+    print(f"({report.seconds:.1f} s)")
     return 0
 
 
