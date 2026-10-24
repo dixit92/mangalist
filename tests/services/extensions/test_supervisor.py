@@ -67,8 +67,9 @@ def test_the_command_line_from_the_settings_and_the_environment(tmp_path):
     config = ExtensionHostConfig(url="http://127.0.0.1:4571")
     env = {"MANGALIST_FLARESOLVERR_URL": "http://192.168.2.50:8191"}
     cmd = sv.host_command(config, Path("/config"), env=env)
-    assert cmd == (BIN, "--data", "/config/extension-host", "--bind", "127.0.0.1", "--port", "4571",
-                   "--downloads", "/config/extension-host/downloads", "--webview", "on",
+    data = Path("/config") / "extension-host"          # the platform's separators (CI runs this on Windows too)
+    assert cmd == (BIN, "--data", str(data), "--bind", "127.0.0.1", "--port", "4571",
+                   "--downloads", str(data / "downloads"), "--webview", "on",
                    "--flaresolverr", "http://192.168.2.50:8191")
     mine = ExtensionHostConfig(flaresolverr_url="http://flare:8191", repo_url="https://repo.example/index.json",
                                webview=False)
