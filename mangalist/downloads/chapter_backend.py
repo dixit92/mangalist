@@ -1,14 +1,18 @@
-"""Which program downloads chapters for MangaList, and the ONE place its client is built (prototype/mihon-mangalist).
-No Qt.
+"""Which program downloads chapters for MangaList, and the ONE place its client is built. No Qt.
 
-``main`` downloads chapters through Suwayomi-Server only. This branch adds a built-in alternative: MangaList's own
-extension host (``extension-host/``: Mihon / Tachiyomi extensions on a JVM, without Suwayomi), reached through its
-Suwayomi-compatible ``/compat`` API by :class:`mangalist.services.extensions.compat.ExtensionsChapterClient`. The owner
-chooses in Settings > Connected services ("Chapter downloads: Suwayomi | Built-in extensions"; default Suwayomi;
-:meth:`mangalist.store.downloads.SuwayomiSettings.backend`). The stored connection says which program it is
+Chapters are downloaded through one of two programs, chosen in Settings > Connected services ("Chapter downloads:
+Suwayomi | Built-in extensions"; default Suwayomi; :meth:`mangalist.store.downloads.SuwayomiSettings.backend`):
+Suwayomi-Server (its own server, reached over GraphQL), or MangaList's built-in extension host (``extension-host/``:
+Mihon / Tachiyomi extensions on a JVM, without Suwayomi), reached through its Suwayomi-compatible ``/compat`` API by
+:class:`mangalist.services.extensions.compat.ExtensionsChapterClient`. The stored connection says which program it is
 (:attr:`~mangalist.downloads.contracts.SuwayomiConnection.backend`) and :func:`client_from_connection` builds that
 program's client - the GUI's backend, the downloads job, the find pass, the chapter check and Add a series all build
 theirs here. Both clients answer the same dataclasses and raise the Suwayomi client's error types.
+
+The two programs number their mangas and chapters independently, so everything MangaList keeps from one of them says
+whose it is (the transition fixes, 2026-10-24): :func:`backend_of` names the program a client asks - a chapter record,
+a series choice or a finding is written for THAT program, never for whatever is chosen at the time of writing - and
+:func:`wording` / :func:`name_of_backend` word a message for it.
 """
 
 from __future__ import annotations
