@@ -1053,7 +1053,7 @@ class DownloadTab(QWidget):
             actions.add_fix_mu()
             menu.addSeparator()
             act_new = menu.addAction(CHECK_NEW_CHAPTERS)
-            act_new.setToolTip(self._w("Ask the series' Suwayomi source for chapters newer than the newest one you have "
+            act_new.setToolTip(self._w("Ask the series' chapter source for chapters newer than the newest one you have "
                                        "(for volumes: the last chapter of your newest volume)"))
             if self._chapters_entry(folder) is not None and callable(getattr(self._backend, "other_candidates", None)):
                 act_source = menu.addAction(CHANGE_SOURCE)

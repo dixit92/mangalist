@@ -61,7 +61,7 @@ REASON_NOTIFY = "the series is on Notify"
 REASON_BULK = "found by a bulk find"
 REASON_PACK_WHOLE = "a pack whose files cannot be narrowed to the missing volumes"
 REASON_UNCERTAIN = "the release may not hold a missing volume (its numbers cannot be compared)"
-REASON_NO_SOURCE = "no Suwayomi source is saved for the series yet"
+REASON_NO_SOURCE = "no chapter source is saved for the series yet"
 #: The saved source cannot give the missing chapters - one reason per case (owner, 2026-10-12: "make the 'not on ...'
 #: message say which case it is"). Each ends in "Change source?": the way on is another source.
 REASON_SOURCE_GONE = "{source} cannot open the series any more - Change source?"

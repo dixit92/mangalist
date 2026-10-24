@@ -76,9 +76,9 @@ OPEN_MANGAPIXER = "Open in MangaPixer"
 FIX_MU = "Fix MangaUpdates match…"
 CHECK_NEW_CHAPTERS = "Check for new chapters…"
 CHANGE_SOURCE = "Change source…"
-CHECK_NEW_TIP = ("Ask the series' Suwayomi source for chapters newer than the newest one you have - also before "
+CHECK_NEW_TIP = ("Ask the series' chapter source for chapters newer than the newest one you have - also before "
                  "MangaUpdates lists them")
-CHANGE_SOURCE_TIP = ("Open the series' chapters and pick where they come from: MangaDex or your other Suwayomi sources. "
+CHANGE_SOURCE_TIP = ("Open the series' chapters and pick where they come from: MangaDex or your other chapter sources. "
                      "Remembered for the series")
 BEHIND_DONE_TIP = ("Treat the series as up to date: the List shows it Up to date, it leaves To get, and find passes skip "
                    "it (Clear 'up to date' override in the List brings it back)")

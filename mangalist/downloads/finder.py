@@ -961,7 +961,7 @@ def send_finding(db, finding_id: int, *, backend: Any = None, wanted: Wanted = N
         return f"Not sent: it is {f.status} already."
     kind = f.payload.get("type")
     if kind == PAYLOAD_NO_SOURCE:
-        return ("Not sent: no Suwayomi source is saved for the series yet; open its chapters in the Download tab to "
+        return ("Not sent: no chapter source is saved for the series yet; open its chapters in the Download tab to "
                 "choose one.")
     if kind == PAYLOAD_DROPPED:
         why = (f.reason or "").removesuffix(CHANGE_SOURCE) or f"{f.payload.get('source_name') or 'its source'} " \

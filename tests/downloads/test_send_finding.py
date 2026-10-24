@@ -99,7 +99,7 @@ def test_a_release_sent_meanwhile_from_the_releases_panel_is_marked_sent(db, w):
 def test_findings_that_are_not_waiting_or_hold_no_pick_are_refused(db, w):
     w.entries = wanted(w.series_id, w.folder, chapters=["5"])
     f = found(db, w)                                                                 # no saved source
-    assert w.backend.send_finding(f.id).startswith("Not sent: no Suwayomi source is saved")
+    assert w.backend.send_finding(f.id).startswith("Not sent: no chapter source is saved")
     w.backend.skip_finding(f.id)
     assert w.backend.send_finding(f.id) == "Not sent: it is skipped already."
     assert w.backend.send_finding(98765) == "Not sent: this finding no longer exists."

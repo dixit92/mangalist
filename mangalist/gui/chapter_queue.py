@@ -114,29 +114,18 @@ def summary_text(rows: Sequence[QueueRow]) -> str:
 
 def queue_available(backend) -> bool:
     """The backend can read the program's queue (a fake without it hides the bar)."""
-    return callable(getattr(backend, "chapter_queue", None)) or callable(getattr(backend, "_chapter_client", None))
+    return callable(getattr(backend, "chapter_queue", None))
 
 
 def fetch_queue(backend) -> List[QueuedChapter]:
-    """The chosen program's download queue (blocking; a :class:`BackendError` with a readable reason). Uses
-    ``backend.chapter_queue()``; a backend that has none yet is asked through its chapter client."""
-    asker = getattr(backend, "chapter_queue", None)
-    if callable(asker):
-        return list(asker())
-    make = getattr(backend, "_chapter_client", None)
-    if not callable(make):
-        raise BackendError("This build cannot read the download queue.")
-    client = make()
+    """The chosen program's download queue (blocking; a :class:`BackendError` with a readable reason), through
+    ``backend.chapter_queue()``."""
     try:
-        return list(client.queue())
+        return list(backend.chapter_queue())
     except BackendError:
         raise
     except Exception as exc:  # noqa: BLE001 - the clients' own errors carry a readable reason and no secret
         raise BackendError(str(exc) or "the program did not answer") from None
-    finally:
-        closer = getattr(client, "close", None)
-        if callable(closer):
-            closer()
 
 
 class QueueView:
