@@ -552,6 +552,16 @@ class Backend(ExtensionsBackendMixin):
             host_identity.check(self.db, client)     # a replaced host database: its stored ids are found again (B4)
         return client
 
+    def chapter_queue(self) -> list:
+        """The chosen program's chapter download queue as it is now (``QueuedChapter`` items; asks the program)."""
+        client = self._chapter_client()
+        try:
+            return list(client.queue())
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
     def suwayomi_sources(self) -> List[tuple]:
         """``[(SuwayomiSource, allowed)]``: the allowed sources first, in the owner's order, then the other installed
         ones (English first). Asks Suwayomi."""
