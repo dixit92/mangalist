@@ -327,3 +327,15 @@ def test_the_log_file_is_the_viewers(tmp_path, monkeypatch):
         assert log_tail.area_of(logger) == "Extensions", logger
     line = "2026-10-24 11:20:00  WARNING   mangalist.extensionhost.Downloader  [w-1] Chapter 1 failed (try 1 of 3)"
     assert log_tail.HEADER.match(line)
+
+
+def test_the_downloads_folder_is_learned_once_the_database_exists(tmp_path, settings):
+    """The container's first start: the host runs before MangaList made its database; a later poll stores the folder."""
+    there = {"db": None}
+    sup = sv.Supervisor(tmp_path / "config", spawn=lambda args, env=None, **_s: FakeProcess(args, env), clock=Clock(),
+                        env={sv.ENV_SWITCH: "1"}, open_settings=lambda: there["db"])
+    sup.tick()
+    assert sup.process is not None and sup.learned == ""
+    there["db"] = settings
+    sup.tick()
+    assert settings.extension_host().downloads_path == str(tmp_path / "config" / "extension-host" / "downloads")

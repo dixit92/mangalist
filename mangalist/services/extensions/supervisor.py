@@ -319,6 +319,7 @@ class Supervisor:
         self.not_before = 0.0
         self.failures = 0
         self.last_why = ""
+        self.learned = ""                   # the downloads folder stored as MangaList's
 
     def tick(self) -> None:
         """Start, restart or stop the host as needed (called every poll)."""
@@ -348,6 +349,8 @@ class Supervisor:
                 self.stop()
         if self.process is None and self._clock() >= self.not_before:
             self._start(want)
+        elif self.process is not None:
+            self._learn(want)
 
     def _start(self, want: Wanted) -> None:
         Path(want.downloads).mkdir(parents=True, exist_ok=True)
@@ -365,12 +368,22 @@ class Supervisor:
             threading.Thread(target=pump, args=(stream,), name="extension-host-output", daemon=True).start()
         self.command = want.command
         self.started_at = self._clock()
+        self.learned = ""
+        self._learn(want)
+
+    def _learn(self, want: Wanted) -> None:
+        """Store the host's downloads folder as MangaList's (filing reads it) - at the start, and at a later poll when
+        MangaList's database did not exist yet at the start (the container's first start)."""
+        if self.learned == want.downloads:
+            return
         settings = self._open_settings() if self._open_settings is not None else _open_settings(self.data_dir)
-        if settings is not None:
-            try:
-                settings.learn_downloads_path(want.downloads)
-            except Exception:  # noqa: BLE001 - learned again at the next Test connection
-                _log.info("Extension host: the downloads folder could not be stored", exc_info=True)
+        if settings is None:
+            return
+        try:
+            settings.learn_downloads_path(want.downloads)
+            self.learned = want.downloads
+        except Exception:  # noqa: BLE001 - learned again at the next poll, or at Test connection
+            _log.info("Extension host: the downloads folder could not be stored", exc_info=True)
 
     def stop(self) -> None:
         process, self.process = self.process, None
