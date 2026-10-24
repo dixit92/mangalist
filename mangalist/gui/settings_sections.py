@@ -2,9 +2,13 @@
 
 **Download sources** - where releases come from. nyaa (volumes; needs qBittorrent) with the options the search already
 supports (English / raw, hide light novels, only trusted uploaders) and two shown fixed because that is how the search
-always works (Digital first, no 0-seeder releases); Suwayomi sources (chapters; needs Suwayomi): the sources Suwayomi has
-installed, read from Suwayomi when the section is shown - which MangaList may use (ticked) and in what order it tries them
-(MangaDex first by default); stored by Suwayomi's source id. **Matching** - where series information comes from.
+always works (Digital first, no 0-seeder releases); **Chapter sources** (chapters; Suwayomi or the built-in extensions,
+whichever is chosen - the chooser is on this card too, and is the same setting as Connected services'): the sources the
+chosen program has installed, read from it when the section is shown - which MangaList may use (ticked) and in what order it
+tries them (MangaDex first by default); stored by the source id. The list is shared by both programs: editing it keeps the
+ticked sources the other program has installed (:func:`merge_allowed`), and it is read again when the program is switched.
+The status chip says what was found when the sources were read (Connected / Starting / Not reachable), not that an address
+is stored. **Matching** - where series information comes from.
 **Automation** - Remove Completed, "ask MangaPixer to rescan after filing", the default automatic-download mode and
 replaced chapters (the schedules moved to Scheduled tasks, 2026-10-15). **Logging** - the level of the log files (and
 optionally of one area), their size, and the log folder.
@@ -17,6 +21,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Dict, Mapping, Optional
 
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -44,16 +49,19 @@ from ..downloads.options import (
 )
 from .automation_rules import MODE_HELP, MODE_LABELS, MODES, has_automation
 from .background import describe_error, start_call
+from .chapter_words import CARD_TITLE, backend_key, label_of, reword
 from .download_rules import (
     held_size_text,
 )
-from .download_style import set_prop
+from .download_style import set_prop, set_tone
 from .download_widgets import button, card, checkbox, hbox, label, pill
 from .spin_arrows import pad_spin
 from .downloads_backend import BackendError, DownloadsBackend
 from .links import open_folder as open_folder_default
 from .settings_common import SectionPage
-from .settings_services import SCAN_FORBIDDEN_NOTE, scan_forbidden
+from .settings_services import BACKENDS, CHOOSER_LEAD, SCAN_FORBIDDEN_NOTE, scan_forbidden
+from . import start_window
+from .start_window import StartWindow
 from .shell import SECTION_SERVICES
 
 SECTION_LOGGING = "logging"
@@ -66,6 +74,41 @@ SUWAYOMI_EXPLAIN = ("The sources installed in Suwayomi (from their extensions). 
                     "the order it tries them: MangaDex first - it is found by the MangaDex id MangaPixer links; the "
                     "others by title, and you confirm the match once per series. The scanlation group is chosen per "
                     "series in the Download tab.")
+BUILTIN_EXPLAIN = ("The sources of the extensions installed in MangaList's built-in extension host (install them under "
+                   "Connected services > Built-in extensions > Extensions). Tick the ones MangaList may use, in the "
+                   "order it tries them: MangaDex first - it is found by the MangaDex id MangaPixer links; the others "
+                   "by title, and you confirm the match once per series. The scanlation group is chosen per series in "
+                   "the Download tab.")
+SHARED_NOTE = ("The ticks and the order are shared by Suwayomi and the built-in extensions; a source only the other "
+               "program has installed keeps its place while you edit this list.")
+CHIP_NOT_CHECKED, CHIP_CHECKING = "Not checked", "Checking..."
+CHIP_CONNECTED, CHIP_STARTING, CHIP_UNREACHABLE = "Connected", "Starting...", "Not reachable"
+
+
+def merge_allowed(stored, listed_ids, ticked) -> list:
+    """The allowed source ids to store after the list shown (*listed_ids*: every row the chosen program installs, ticked
+    or not) was edited to *ticked* (in the list's order): the sources the program has NOT installed are in *stored* only,
+    and they stay - each right after the source that preceded it - so switching programs does not lose them (B7)."""
+    listed = set(listed_ids)
+    after: dict = {}
+    prev = None
+    for sid in stored or ():
+        if sid in listed:
+            prev = sid
+        else:
+            after.setdefault(prev, []).append(sid)
+    out: list = list(after.pop(None, []))
+    for sid in ticked:
+        out.append(sid)
+        out.extend(after.pop(sid, []))
+    for rest in after.values():
+        out.extend(rest)
+    seen: set = set()
+    return [sid for sid in out if not (sid in seen or seen.add(sid))]
+BUDGET_HELP = ("Counts every download MangaList has sent and not yet removed: downloading, waiting to be filed, and "
+               "seeding (a partial download counts only its selected files). A send that would go over it waits in a "
+               "queue and goes to qBittorrent by itself once Remove Completed has made room. Lowering it removes "
+               "nothing; new sends then wait. Chapter downloads (Suwayomi) do not count: they do not seed.")
 AUTOMATIC_DOWNLOADS_LEAD = ("Each series is Off, Notify or Auto - set per series wherever it shows (the List, the To get "
                             "list, Found: Automatic downloads), or for a whole library in Library > Edit. Series you "
                             "have not set follow their library's default, else this one.")
@@ -77,11 +120,18 @@ FIXED_SEEDERS = "Always on: releases nobody is seeding are never shown."
 
 
 class SourcesPage(SectionPage):
+    #: The owner chose another chapter backend on this card (the key): the dialog tells Connected services.
+    backend_switched = Signal(str)
+
     def __init__(self, db, backend: Optional[DownloadsBackend], parent: Optional[QWidget] = None):
         super().__init__("Download sources", SOURCES_LEAD, parent)
         self._db = db
         self._backend = backend
         self._loading = True
+        self._start = StartWindow()             # the host was just chosen: a failed read is "starting" for a while
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self._retry_sources)
 
         nyaa = card("true")
         nv = QVBoxLayout(nyaa)
@@ -139,10 +189,27 @@ class SourcesPage(SectionPage):
         self.btn_sources_reset = button("Reset to default", link=True,
                                         tip="Use MangaDex alone, in your nyaa languages (English unless Raw is ticked)")
         self.btn_sources_reset.clicked.connect(self.reset_suwayomi_sources)
-        sv.addLayout(hbox(label("Suwayomi sources", "name"), label("Chapters · needs Suwayomi", "muted"),
+        self.sources_program = label("", "muted")
+        sv.addLayout(hbox(label(CARD_TITLE, "name"), self.sources_program,
                           self.suwayomi_badge, None, self.btn_sources_reset, self.btn_sources_reload, self.btn_suwayomi,
                           spacing=10))
-        sv.addWidget(label(SUWAYOMI_EXPLAIN, "lead", wrap=True))
+        # the chooser of Connected services (owner, 2026-10-24: "there should be a switch to get chapters either using
+        # the Suwayomi method or the in-house method"): one setting, two places, the same guard
+        self.backend_combo = QComboBox()
+        self.backend_combo.setObjectName("chapterBackend")
+        for key, text in BACKENDS:
+            self.backend_combo.addItem(text, key)
+        self.backend_note = label("", "muted", wrap=True)
+        self.chooser = QWidget()
+        chooser = QVBoxLayout(self.chooser)
+        chooser.setContentsMargins(0, 0, 0, 0)
+        chooser.setSpacing(4)
+        chooser.addLayout(hbox(label(CHOOSER_LEAD), self.backend_combo, None, spacing=8))
+        chooser.addWidget(self.backend_note)
+        sv.addWidget(self.chooser)
+        self.backend_combo.activated.connect(self._backend_chosen)
+        self.sources_explain = label(SUWAYOMI_EXPLAIN, "lead", wrap=True)
+        sv.addWidget(self.sources_explain)
         self.sources_list = QListWidget()
         self.sources_list.setObjectName("suwayomiSources")
         self.sources_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -161,9 +228,11 @@ class SourcesPage(SectionPage):
         self._source_rows: list = []
         self.sources_note = label("", "muted", wrap=True)
         sv.addLayout(hbox(self.btn_up, self.btn_down, self.sources_note, None, spacing=8))
+        sv.addWidget(label(SHARED_NOTE, "muted", wrap=True))
         self.suwayomi_rows = suwayomi
         self._sources_call = None
         self._loading_sources = False
+        self._chip = CHIP_NOT_CHECKED
         self._show_suwayomi_state()
         return suwayomi
 
@@ -182,33 +251,136 @@ class SourcesPage(SectionPage):
         except Exception:  # noqa: BLE001
             return False
 
+    # --- the chosen program, its words and its status chip --------------------------------------------------------
+
+    def _w(self, text: str) -> str:
+        return reword(self._backend, text) or ""
+
+    def _chooser_available(self) -> bool:
+        return (self._backend is not None and callable(getattr(self._backend, "chapter_backend", None))
+                and callable(getattr(self._backend, "set_chapter_backend", None)))
+
+    def _set_chip(self, text: str, kind: str) -> None:
+        self._chip = text
+        self.suwayomi_badge.setText(text)
+        set_prop(self.suwayomi_badge, "badge", kind)
+
     def _show_suwayomi_state(self) -> None:
         from .download_style import set_prop
 
         ready = self._suwayomi_ready()
-        self.suwayomi_badge.setText("Ready" if ready else "Suwayomi not set up")
-        set_prop(self.suwayomi_badge, "badge", "ok" if ready else "warn")
+        builtin = self._builtin()
+        self.sources_program.setText(f"Chapters · {label_of(self._backend)}")
+        self.sources_explain.setText(BUILTIN_EXPLAIN if builtin else SUWAYOMI_EXPLAIN)
+        self.btn_sources_reload.setToolTip(self._w("Read the installed sources from Suwayomi again"))
+        self.chooser.setVisible(self._chooser_available())
+        self.backend_combo.setCurrentIndex(max(0, self.backend_combo.findData(backend_key(self._backend))))
+        if hasattr(self, "budget_help"):
+            self.budget_help.setText(self._w(BUDGET_HELP))
+        if not ready:
+            # "Ready" used to mean only "an address is stored"; without one there is nothing to check
+            self._set_chip("Not set up" if builtin else "Suwayomi not set up", "warn")
+        elif self._chip in ("Not set up", "Suwayomi not set up"):
+            self._set_chip(CHIP_NOT_CHECKED, "muted")
+        self.btn_suwayomi.setText(self._w("Set up Suwayomi"))
         self.btn_suwayomi.setVisible(not ready)
         for w in (self.sources_list, self.btn_up, self.btn_down, self.btn_sources_reload, self.btn_sources_reset):
             w.setEnabled(ready)
         if not ready:
-            self.sources_note.setText("Connect Suwayomi first (Settings > Connected services).")
+            self.sources_note.setText(self._w("Connect Suwayomi first (Settings > Connected services)."))
+
+    def _backend_chosen(self, _index: int = 0) -> bool:
+        """The chooser: the same setting and the same guard as Connected services' (the backend refuses while chapter
+        downloads are in progress with the other program)."""
+        key = self.backend_combo.currentData()
+        if not self._chooser_available() or key == backend_key(self._backend):
+            return False
+        try:
+            self._backend.set_chapter_backend(key)
+        except BackendError as exc:
+            self.backend_note.setText(f"Not switched: {exc}")
+            set_tone(self.backend_note, "bad")
+            self._show_suwayomi_state()
+            return False
+        self.backend_note.setText("")
+        set_tone(self.backend_note, "")
+        self.downloads_changed.emit()
+        self.note_backend_switched(key)
+        self.backend_switched.emit(key)
+        return True
+
+    def choose_backend(self, key: str) -> bool:
+        """Pick a chapter backend as the owner would (tests)."""
+        self.backend_combo.setCurrentIndex(self.backend_combo.findData(key))
+        return self._backend_chosen()
+
+    def note_backend_switched(self, key: str) -> None:
+        """The chapter backend is *key* now (chosen here or under Connected services): the list of the other program is
+        dropped at once and the chosen program's is read - the host with a minute's grace, since it is only starting (B7,
+        A6)."""
+        self._retry_timer.stop()
+        if self._sources_call is not None:
+            self._sources_call.abandon()
+            self._sources_call = None
+        self._source_rows = []
+        self._loading_sources = True
+        self.sources_list.clear()
+        self._loading_sources = False
+        self.all_langs_check.setVisible(False)
+        self.backend_note.setText("")
+        if key == "extensions":
+            self._start.open()
+        else:
+            self._start.close()
+        self._set_chip(CHIP_NOT_CHECKED, "muted")
+        self._show_suwayomi_state()
+        self.load_suwayomi_sources()
 
     def load_suwayomi_sources(self) -> bool:
-        """Read the installed sources from Suwayomi (off the UI thread)."""
+        """Read the installed sources from the chosen program (off the UI thread). That read is also the status check: the
+        chip says Connected only once the program answered."""
         loader = getattr(self._backend, "suwayomi_sources", None) if self._backend is not None else None
         if not callable(loader) or not self._suwayomi_ready() or self._sources_call is not None:
             return False
-        self.sources_note.setText("Reading the sources from the extension host..." if self._builtin()
-                                  else "Reading the sources from Suwayomi...")
+        key = backend_key(self._backend)
+        self._retry_timer.stop()
+        self.sources_note.setText(self._w("Reading the sources from Suwayomi..."))
+        if self._chip != CHIP_STARTING:
+            self._set_chip(CHIP_CHECKING, "muted")
+        holder: list = []
 
         def done() -> None:
-            self._sources_call = None
+            if holder and self._sources_call is holder[0]:
+                self._sources_call = None
 
-        self._sources_call = start_call(loader, self.show_sources,
-                                        lambda message: self.sources_note.setText(f"Could not read them: {message}"),
-                                        done)
+        call = start_call(loader, lambda sources: self._sources_read(key, sources),
+                          lambda message: self._sources_failed(key, message), done)
+        holder.append(call)
+        self._sources_call = call
         return True
+
+    def _sources_read(self, key: str, sources) -> None:
+        if key != backend_key(self._backend):          # the owner switched meanwhile: that answer is the other program's
+            return
+        self._start.close()
+        self._set_chip(CHIP_CONNECTED, "ok")
+        self.show_sources(sources)
+
+    def _sources_failed(self, key: str, message: str) -> None:
+        if key != backend_key(self._backend):
+            return
+        if self._builtin() and self._start.active():
+            self._set_chip(CHIP_STARTING, "muted")
+            self.sources_note.setText("The extension host is starting (it starts by itself within a minute of choosing "
+                                      "it); MangaList keeps trying.")
+            self._retry_timer.start(start_window.RETRY_MS)
+            return
+        self._set_chip(CHIP_UNREACHABLE, "bad")
+        self.sources_note.setText(f"Could not read them: {message}")
+
+    def _retry_sources(self) -> None:
+        if self._builtin():
+            self.load_suwayomi_sources()
 
     def show_sources(self, sources) -> None:
         """``[(SuwayomiSource, allowed)]`` in order (the backend's answer)."""
@@ -278,10 +450,21 @@ class SourcesPage(SectionPage):
             return
         setter = getattr(self._backend, "set_suwayomi_sources", None)
         if callable(setter):
-            setter(self.allowed_source_ids())           # quick: one setting
-            n, total = len(self.allowed_source_ids()), self.sources_list.count()
+            ticked = self.allowed_source_ids()
+            setter(merge_allowed(self._stored_sources(), {src.id for src, _a in self._source_rows}, ticked))   # quick
+            n, total = len(ticked), self.sources_list.count()
             self.sources_note.setText(f"{n} of {total} in use")
             self.downloads_changed.emit()
+
+    def _stored_sources(self) -> list:
+        """The allowed source ids as stored now - the setting both programs share (including the ones only the other
+        program has installed, which this list does not show)."""
+        from ..store.downloads import SuwayomiSettings
+
+        try:
+            return list(SuwayomiSettings(self._db).sources() or [])
+        except Exception:  # noqa: BLE001 - nothing stored that could be lost
+            return []
 
     def _move_source(self, step: int) -> None:
         row = self.sources_list.currentRow()
@@ -316,11 +499,8 @@ class SourcesPage(SectionPage):
         self.budget_spin.setMinimumWidth(120)
         self.budget_spin.setToolTip("0 = no limit. Default 50 GB.")
         bv.addLayout(hbox(label("Keep at most"), self.budget_spin, label("downloading or seeding"), None, spacing=8))
-        bv.addWidget(label("Counts every download MangaList has sent and not yet removed: downloading, waiting to be "
-                           "filed, and seeding (a partial download counts only its selected files). A send that would go "
-                           "over it waits in a queue and goes to qBittorrent by itself once Remove Completed has made "
-                           "room. Lowering it removes nothing; new sends then wait. Chapter downloads (Suwayomi) do not "
-                           "count: they do not seed.", "muted", wrap=True))
+        self.budget_help = label(self._w(BUDGET_HELP), "muted", wrap=True)
+        bv.addWidget(self.budget_help)
         return budget
 
     def _budget_cap(self) -> float:
@@ -415,6 +595,12 @@ class SourcesPage(SectionPage):
         self._show_suwayomi_state()
         if self.sources_list.count() == 0:
             self.load_suwayomi_sources()
+
+    def stop(self) -> None:
+        self._retry_timer.stop()
+        if self._sources_call is not None:
+            self._sources_call.abandon()
+            self._sources_call = None
 
 
 class MatchingPage(SectionPage):
