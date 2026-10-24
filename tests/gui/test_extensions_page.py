@@ -232,3 +232,29 @@ def test_source_settings_edit_every_kind(qapp, db, backend, host):
     assert panel.prefs_panel is None
     panel.stop()
 
+
+
+def test_the_browser_files_can_be_removed_while_the_webview_is_off(qapp, db, backend, tmp_path, monkeypatch):
+    """Transition audit D3: 664 MB of Chromium bundle and cache stayed in /config with the WebView off."""
+    from mangalist.gui.extensions_page import ExtensionHostPanel
+    from mangalist.store.downloads import ExtensionHostConfig
+
+    monkeypatch.setenv("MANGALIST_DATA_DIR", str(tmp_path / "cfg"))
+    bundle = tmp_path / "cfg" / "extension-host" / "bin" / "kcef" / "libcef.so"
+    cache = tmp_path / "cfg" / "extension-host" / "cache" / "kcef" / "Cookies"
+    keep = tmp_path / "cfg" / "extension-host" / "cache" / "downloads" / "7" / "001.png"
+    for f, size in ((bundle, 3000), (cache, 1000), (keep, 10)):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x" * size)
+    panel = ExtensionHostPanel(backend)
+    wait_until(qapp, lambda: not panel._calls.busy())
+    assert not panel.browser_row.isVisibleTo(panel)                       # the WebView is on: they are in use
+    backend.save_extension_host(ExtensionHostConfig(url=backend.load_extension_host().url, webview=False))
+    panel._load()
+    wait_until(qapp, lambda: not panel._calls.busy())
+    assert panel.browser_row.isVisibleTo(panel) and panel.browser_bytes == 4000
+    assert panel.remove_browser_files()
+    wait_until(qapp, lambda: not panel._calls.busy())
+    assert not bundle.exists() and not cache.exists() and keep.exists()
+    assert "removed" in panel.status_label.text()
+    panel.stop()

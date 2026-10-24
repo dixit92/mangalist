@@ -150,3 +150,38 @@ def test_the_default_runner_turns_a_missing_suwayomi_into_a_message(qapp, db, ba
 
     with pytest.raises(BackendError, match="Suwayomi is not set up"):
         default_runner(db)(True, lambda *a: None)
+
+
+def test_the_panel_carries_back_to_suwayomi(qapp, db, suwayomi, host):
+    """Transition audit B8: "Carry back to Suwayomi…" turns the panel around - check, confirm, carry back, report."""
+    import json
+
+    from mangalist.gui.carry_over_panel import CarryOverPanel
+    from mangalist.store.downloads import META_EXTENSIONS_SERIES, META_SUWAYOMI_SERIES
+
+    host.installed[MANGADEX_PKG] = "1.4.200"
+    mid = ExtensionHostClient(host.url).register_manga(MANGADEX_EN, "/manga/md-1", "Example Manga")["id"]
+    db.set_meta(f"{META_EXTENSIONS_SERIES}5", json.dumps({"source_id": MANGADEX_EN, "manga_id": mid,
+                                                          "manga_url": "/manga/md-1", "how": "confirmed"}))
+
+    def back(dry_run, progress):
+        client = ExtensionHostClient(host.url, timeout=10)
+        try:
+            return co.carry_back(db, suwayomi, client, dry_run=dry_run, progress=progress, pause=0)
+        finally:
+            client.close()
+
+    panel = CarryOverPanel(db, runner=lambda dry_run, progress: co.CarryReport(dry_run=dry_run), back_runner=back)
+    wait_until(qapp, lambda: not panel.busy())
+    assert panel.btn_mode.text() == "Carry back to Suwayomi…"
+    assert panel.toggle_mode()
+    wait_until(qapp, lambda: not panel.busy())
+    assert "give 1 series the manga chosen on the host" in panel.status.text()
+    assert panel.btn_carry.isEnabled() and panel.btn_carry.text() == "Carry back 1 series"
+    assert db.get_meta(f"{META_SUWAYOMI_SERIES}5") is None                      # the check wrote nothing
+    assert panel.carry()
+    wait_until(qapp, lambda: not panel.busy())
+    assert panel.status.text().startswith("Done. Carried back 1")
+    assert json.loads(db.get_meta(f"{META_SUWAYOMI_SERIES}5"))["manga_id"] == 11
+    assert panel.btn_mode.text() == "Carry over from Suwayomi…"
+    panel.stop()
