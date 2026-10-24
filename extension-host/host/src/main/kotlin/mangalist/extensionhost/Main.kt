@@ -150,7 +150,10 @@ fun boot(
 
 fun main(args: Array<String>) {
     val options = Options.parse(args)
-    logger.info { "MangaList extension host $HOST_VERSION; data folder ${options.dataDir}" }
+    logger.info { "MangaList extension host $HOST_VERSION; data folder ${options.dataDir}; downloads ${options.downloadsDir}" }
+    // loudly, at once: an ASCII locale fails every non-ASCII chapter, group or manga name later (MangaList's audit D1)
+    val names = FileNames.problem(options.downloadsDir)
+    if (names != null) logger.error { names } else logger.info { "File names: ${FileNames.encoding()}" }
     serverConfig.set(options.flareSolverrUrl, options.flareSolverrTimeout, options.flareSolverrSession, options.flareSolverrSessionTtl)
     logger.info {
         if (options.flareSolverrUrl != null) {

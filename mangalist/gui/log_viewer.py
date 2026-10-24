@@ -62,6 +62,9 @@ EMPTY_TEXT = {
     "app": "Nothing has been written to mangalist.log yet.",
     "jobs": ("Nothing has been written to headless.log yet. It is written by the container's background runner "
              "(the scheduled jobs); the desktop app on its own runs none."),
+    "host": ("Nothing has been written to extension-host.log yet. It is written in the container while MangaList's "
+             "extension host runs (Built-in extensions chosen, or on demand); on a desktop the host logs where you "
+             "started it."),
 }
 NO_MATCH_TEXT = "No lines match. Change the filters or the search."
 
