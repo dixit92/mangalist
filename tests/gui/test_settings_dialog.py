@@ -130,7 +130,7 @@ def test_eight_sections_in_the_mockups_order_with_their_hints(qapp, db, cache):
     assert tuple(SECTIONS) == sd.DIALOG_SECTIONS[:5], "the shell's five are unchanged; Scheduled tasks, Appearance and Logging follow"
     assert [(t, h) for _k, t, h in sd.NAV] == [
         ("Library", "Roots, file naming"), ("Connected services", "MangaPixer, qBittorrent, Suwayomi"),
-        ("Download sources", "nyaa, Suwayomi sources"), ("Matching", "MangaUpdates"),
+        ("Download sources", "nyaa, chapter sources"), ("Matching", "MangaUpdates"),
         ("Automation", "Remove Completed, default modes"), ("Scheduled tasks", "What runs on its own, and when"),
         ("Appearance", "Light, Dark or the system's"),
         ("Logging", "Level, log files and folder")]
@@ -312,7 +312,7 @@ def test_services_cards_before_anything_is_set_up(qapp, db, cache):
     assert not page.mp_card.btn_secondary.isEnabled() and not page.qbt_card.btn_secondary.isEnabled()
     assert page.mp_card.used_label.text() == "Used by: Matching, Automation"
     assert page.qbt_card.used_label.text() == "Used by: nyaa"
-    assert page.suwayomi_card.used_label.text() == "Used by: Suwayomi sources (chapters)"
+    assert page.suwayomi_card.used_label.text() == "Used by: Chapter sources (Download sources)"
     assert not page.suwayomi_card.btn_primary.isEnabled()                       # this backend cannot talk to Suwayomi
 
 
@@ -540,7 +540,8 @@ def test_nyaa_needs_qbittorrent(qapp, db, cache):
 def test_suwayomi_sources_wait_for_suwayomi_and_point_to_the_services(qapp, db, cache):
     dlg, _ = make(qapp, db, cache, section=SECTION_SOURCES)
     page = dlg.pages[SECTION_SOURCES]
-    assert "needs Suwayomi" in all_text(page) and "Suwayomi not set up" in all_text(page)
+    assert "Chapters · Suwayomi" in all_text(page) and "Suwayomi not set up" in all_text(page)
+    assert "needs Suwayomi" not in all_text(page)
     page.btn_suwayomi.click()
     assert dlg.current == SECTION_SERVICES
     assert not page.sources_list.isEnabled() and not page.load_suwayomi_sources()
@@ -561,7 +562,7 @@ def test_suwayomi_sources_are_read_from_suwayomi_ticked_and_ordered(qapp, db, ca
     page = dlg.pages[SECTION_SOURCES]
     dlg.show_section(SECTION_SOURCES)
     wait_until(qapp, lambda: page._sources_call is None)
-    assert page.suwayomi_badge.text() == "Ready" and page.btn_suwayomi.isHidden()
+    assert page.suwayomi_badge.text() == "Connected" and page.btn_suwayomi.isHidden()   # it answered: not just "an address"
     assert sources(page) == [("MangaDex (EN)", True), ("Weeb Example", False)]      # MangaDex first by default
     assert page.sources_note.text() == "1 of 2 in use"
     assert threading.get_ident() not in backend.threads
