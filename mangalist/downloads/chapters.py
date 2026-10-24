@@ -636,6 +636,7 @@ class ChapterLookup:
     source_empty: bool = False                      # the matched manga lists no chapters at all on its source
     newer: bool = False                             # "Check for new chapters": *missing* is what the source lists
     newer_than: Optional[str] = None                # ... after this chapter, the newest held (None: none held)
+    backend: str = ""                               # the program that answered (its words in the texts)
 
     @property
     def available(self) -> List[ChapterRow]:
@@ -669,12 +670,16 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
                                if q.chapter_id in ids and to_decimal(ids[q.chapter_id].number) in wanted},
                               key=lambda n: to_decimal(n) or Decimal(0)))
     except Exception:  # noqa: BLE001 - the queue is a courtesy note
-        _log.info("Chapters: Suwayomi's download queue could not be read", exc_info=True)
+        from .chapter_backend import name_of_backend
+
+        _log.info("Chapters: %s's download queue could not be read", name_of_backend(getattr(match, "backend", "")),
+                  exc_info=True)
     return ChapterLookup(series_id=series_id, missing=tuple(missing), match=match,
                          manga_title=fetched.manga.title or match.manga.title,
                          manga_url=fetched.manga.url or match.manga.url,
                          source_name=fetched.source_name or match.source.display_name, rows=rows, group=choice,
-                         groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters)
+                         groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters,
+                         backend=getattr(match, "backend", ""))
 
 
 def newer_lookup(client: ChapterClient, db, *, series_id: int, match: MangaMatch,
@@ -739,7 +744,11 @@ def newer_text(lookup: ChapterLookup) -> str:
     if others:
         text += "; not taken: " + ", ".join(others)
     if lookup.queued_in_suwayomi:
-        text += f"; in Suwayomi's queue: ch {numbers_text(list(lookup.queued_in_suwayomi))}"
+        from .chapter_backend import wording
+        from .contracts import CHAPTER_BACKEND_EXTENSIONS
+
+        text += wording(f"; in Suwayomi's queue: ch {numbers_text(list(lookup.queued_in_suwayomi))}",
+                        lookup.backend == CHAPTER_BACKEND_EXTENSIONS)
     return text
 
 
