@@ -15,7 +15,7 @@ from mangalist.services.extensions.client import ExtensionHostClient
 from mangalist.store.downloads import META_EXTENSIONS_SERIES, META_SUWAYOMI_SERIES, SuwayomiSettings
 
 from .carry_fakes import LOST_ID, MANGADEX, WEEB, FakeSuwayomiCarry, raw_choice, set_suwayomi_choice
-from .fake_host import MANGADEX_EN, WEEB_ID, FakeHost
+from .fake_host import MANGADEX_EN, MANGADEX_PKG, WEEB_ID, WEEB_PKG, FakeHost
 
 MD_URL = "/manga/00000000-0000-4000-8000-0000000c0000"
 
@@ -29,6 +29,7 @@ def db():
 @pytest.fixture
 def host(tmp_path):
     h = FakeHost(tmp_path / "host", auto_download=False).start()
+    h.installed.update({MANGADEX_PKG: "1.4.200", WEEB_PKG: "1.4.3"})
     yield h
     h.stop()
 
