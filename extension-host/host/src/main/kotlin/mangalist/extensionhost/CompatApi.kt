@@ -89,6 +89,8 @@ data class CompatQueue(
 data class CompatAbout(
     val name: String,
     val version: String,
+    /** The id of the host's database (`host.db`; MangaList notices a replaced database by it). */
+    val instance: String = "",
 )
 
 @Serializable
@@ -121,6 +123,7 @@ class CompatApi(
     private val downloader: Downloader,
     private val registry: ExtensionRegistry,
     private val webView: () -> String = { "off" },
+    private val instance: () -> String = { "" },
 ) {
     private val json =
         Json {
@@ -186,7 +189,7 @@ class CompatApi(
     ): JsonElement? =
         runBlocking {
             when {
-                method == "GET" && parts == listOf("about") -> json.encodeToJsonElement(CompatAbout("MangaList extension host", HOST_VERSION))
+                method == "GET" && parts == listOf("about") -> json.encodeToJsonElement(CompatAbout("MangaList extension host", HOST_VERSION, instance()))
                 method == "GET" && parts == listOf("settings") ->
                     json.encodeToJsonElement(
                         CompatSettings(

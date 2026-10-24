@@ -87,6 +87,7 @@ class FakeHost:
         self.data_dir = Path(data_dir)
         self.downloads_path = self.data_dir / "downloads"
         self.version = version
+        self.instance = "fake-host-db-1"                   # the database's id (/compat/about; MangaList's audit B4)
         self.auto_download = auto_download
         self.lock = threading.RLock()
         self.repo: List[RepoEntry] = [
@@ -376,7 +377,7 @@ class FakeHost:
 
     def _compat(self, method, path, parts, body):
         if method == "GET" and path == "/about":
-            return 200, {"name": "MangaList extension host", "version": self.version}
+            return 200, {"name": "MangaList extension host", "version": self.version, "instance": self.instance}
         if method == "GET" and path == "/settings":
             return 200, {"version": self.version, "downloadAsCbz": True, "downloadsPath": str(self.downloads_path),
                          "flareSolverr": False, "flareSolverrUrl": ""}

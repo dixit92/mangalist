@@ -36,7 +36,7 @@ import kotlin.io.path.createDirectories
  * request fails ("Cloudflare bypass currently disabled").
  */
 
-const val HOST_VERSION = "0.2.0-prototype"
+const val HOST_VERSION = "0.3.0-prototype"
 
 private val logger = KotlinLogging.logger {}
 
@@ -177,8 +177,11 @@ fun main(args: Array<String>) {
     val store = Store(options.dataDir.resolve("host.db"))
     val library = Library(store, { registry.sources[it] }, DownloadsLayout(options.downloadsDir))
     val downloader = Downloader(store, library, options.dataDir.resolve("cache").resolve("downloads"), options.downloadParallel)
-    downloader.restore()
-    val compat = CompatApi(library, downloader, registry) { WebViewSetup.state() }
+    // a new version gives the chapters that failed under the old one fresh tries (as Suwayomi does at every start): the
+    // failure may be what the new version fixes (2026-10-24: chapter 5809, failed by the ASCII locale)
+    downloader.restore(retryErrors = store.startedWith(HOST_VERSION))
+    logger.info { "Database ${store.instance()}" }
+    val compat = CompatApi(library, downloader, registry, { WebViewSetup.state() }, { store.instance() })
     val preferences = SourcePreferences({ Injekt.get<xyz.nulldev.androidcompat.androidimpl.CustomContext>() })
     val repo = Repo(network.client)
     val repos = RepoList(options.dataDir.resolve("repos.json"), repo, options.repos)

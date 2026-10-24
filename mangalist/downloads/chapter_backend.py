@@ -43,6 +43,38 @@ def is_builtin(client) -> bool:
     return getattr(client, "backend", "") == CHAPTER_BACKEND_EXTENSIONS
 
 
+def backend_of(client) -> str:
+    """The program *client* asks (:data:`CHAPTER_BACKEND_EXTENSIONS` for the host's, else Suwayomi's): what a record or a
+    choice made from its answers belongs to - never the setting at the time of writing, which a switch may have changed
+    meanwhile (transition audit B5)."""
+    return CHAPTER_BACKEND_EXTENSIONS if is_builtin(client) else CHAPTER_BACKEND_SUWAYOMI
+
+
+def name_of_backend(backend: Optional[str]) -> str:
+    """"Suwayomi" / "the extension host" for a record's or a choice's program ('' / unknown: Suwayomi)."""
+    return NAMES.get(backend or CHAPTER_BACKEND_SUWAYOMI, "Suwayomi")
+
+
+def record_extra(client) -> dict:
+    """What a chapter record keeps about the program's database besides its ids: the extension host's database id
+    (``host_instance``, transition audit B4) when the host reports one."""
+    instance = host_instance(client)
+    return {"host_instance": instance} if instance else {}
+
+
+def host_instance(client) -> str:
+    """The id of the extension host's database *client* talks to ('' for Suwayomi, or a host too old to report one)."""
+    if not is_builtin(client):
+        return ""
+    fn = getattr(client, "instance", None)
+    if not callable(fn):
+        return ""
+    try:
+        return str(fn() or "")
+    except Exception:  # noqa: BLE001 - asked again at the next call; nothing is compared without it
+        return ""
+
+
 _WORDING = (("Settings > Connected services > Suwayomi", "Settings > Connected services > Built-in extensions"),
             ("Suwayomi's settings", "the extension host's settings"), ("Suwayomi's", "the extension host's"),
             ("Suwayomi", "the extension host"))

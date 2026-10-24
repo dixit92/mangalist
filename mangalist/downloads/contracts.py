@@ -237,6 +237,10 @@ class DownloadRecord:
     batch: str = ""                     # a chapter download: the Send it came from (the GUI shows a batch as one row)
     source: str = ""                    # a chapter download: the Suwayomi source's name (e.g. 'MangaDex (EN)')
     group: str = ""                     # a chapter download: the scanlation group ('' when the source names none)
+    # Which program a chapter download belongs to (transition audit B2: both number their chapters from 1):
+    # CHAPTER_BACKEND_SUWAYOMI | CHAPTER_BACKEND_EXTENSIONS; '' for a torrent, or a record an older build wrote.
+    backend: str = ""
+    stuck: bool = False                 # a chapter download its program gave up on (the last arrivals pass saw ERROR)
 
     @property
     def is_chapters(self) -> bool:

@@ -456,6 +456,38 @@ CREATE TABLE IF NOT EXISTS english_titles (
 );
 """
 
+# Which program a chapter download belongs to (transition audit B2, 2026-10-24): Suwayomi and MangaList's built-in
+# extension host both number their chapters from 1, so a chapter id alone (``external_ref``) does not say whose it is -
+# 1,616 host ids equalled old Suwayomi ids on the owner's box. NULL: a torrent, or a chapter record an older build wrote
+# (read as "either program"). The existing chapter records are classified by the evidence they carry: the record's manga
+# id is the series' choice in one program and not in the other (``extensions.series.<id>`` / ``suwayomi.series.<id>``);
+# a record without such evidence follows the records around it (the host's after the last Suwayomi one and the first
+# host one), else Suwayomi's - every chapter record before the built-in extensions existed is Suwayomi's.
+_V10_LEDGER_BACKEND = """
+ALTER TABLE ledger ADD COLUMN backend TEXT;              -- a chapter download's program: suwayomi | extensions
+UPDATE ledger SET backend = CASE
+    WHEN NOT json_valid(request) OR json_extract(request, '$.manga_id') IS NULL THEN NULL
+    WHEN json_extract(request, '$.manga_id') IS (
+            SELECT CASE WHEN json_valid(m.value) THEN json_extract(m.value, '$.manga_id') END
+            FROM meta m WHERE m.key = 'extensions.series.' || ledger.series_id)
+         AND json_extract(request, '$.manga_id') IS NOT (
+            SELECT CASE WHEN json_valid(m.value) THEN json_extract(m.value, '$.manga_id') END
+            FROM meta m WHERE m.key = 'suwayomi.series.' || ledger.series_id) THEN 'extensions'
+    WHEN json_extract(request, '$.manga_id') IS (
+            SELECT CASE WHEN json_valid(m.value) THEN json_extract(m.value, '$.manga_id') END
+            FROM meta m WHERE m.key = 'suwayomi.series.' || ledger.series_id)
+         AND json_extract(request, '$.manga_id') IS NOT (
+            SELECT CASE WHEN json_valid(m.value) THEN json_extract(m.value, '$.manga_id') END
+            FROM meta m WHERE m.key = 'extensions.series.' || ledger.series_id) THEN 'suwayomi'
+    END
+WHERE tool = 'suwayomi';
+UPDATE ledger SET backend = CASE
+    WHEN id > COALESCE((SELECT MAX(id) FROM ledger WHERE tool = 'suwayomi' AND backend = 'suwayomi'), 0)
+         AND id > COALESCE((SELECT MIN(id) FROM ledger WHERE tool = 'suwayomi' AND backend = 'extensions'), id)
+    THEN 'extensions' ELSE 'suwayomi' END
+WHERE tool = 'suwayomi' AND backend IS NULL;
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
@@ -467,6 +499,7 @@ MIGRATIONS: List[Tuple[int, str]] = [
     (7, _V7_FINDINGS),
     (8, _V8_ROOT_AUTO_MODE),
     (9, _V9_ENGLISH_TITLES),
+    (10, _V10_LEDGER_BACKEND),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

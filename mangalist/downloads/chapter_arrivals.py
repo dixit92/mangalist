@@ -190,13 +190,18 @@ def find_cbz(download_dir: str, request: Mapping[str, object]) -> Tuple[Optional
 # --- the pass ------------------------------------------------------------------------------------------------------
 
 def run_chapter_arrivals(client: ChapterClient, ledger: DownloadLedger, *, download_dir: str, journal=None,
-                         namer=None, should_stop: Callable[[], bool] = lambda: False) -> ArrivalsReport:
-    """One chapter arrivals pass over every active chapter record (see the module docstring)."""
-    return _ChapterPass(client, ledger, download_dir, journal, namer, should_stop).run()
+                         namer=None, should_stop: Callable[[], bool] = lambda: False,
+                         unknown_too: bool = True) -> ArrivalsReport:
+    """One chapter arrivals pass over the active chapter records of *client*'s program (see the module docstring).
+    *unknown_too*: also the records of unknown program (an older build's) - the chosen program's pass takes them. A
+    record of the other program is never asked about here: its chapter id names another chapter in this program
+    (transition audit B2)."""
+    return _ChapterPass(client, ledger, download_dir, journal, namer, should_stop, unknown_too).run()
 
 
 class _ChapterPass:
-    def __init__(self, client: ChapterClient, ledger: DownloadLedger, download_dir: str, journal, namer, should_stop):
+    def __init__(self, client: ChapterClient, ledger: DownloadLedger, download_dir: str, journal, namer, should_stop,
+                 unknown_too: bool = True):
         from ..store.journal import Journal
 
         self.client = client
@@ -208,12 +213,15 @@ class _ChapterPass:
         self.should_stop = should_stop
         self.report = ArrivalsReport()
         self._volumes: Dict[int, Callable[[Decimal], Optional[Decimal]]] = {}
-        from .chapter_backend import is_builtin
+        from .chapter_backend import backend_of, is_builtin, name_of_backend
 
         self.builtin = is_builtin(client)       # the built-in extension host: its messages name it, not Suwayomi
+        self.backend = backend_of(client)
+        self.name = name_of_backend(self.backend)
+        self.backends = (self.backend, "") if unknown_too else (self.backend,)
 
     def run(self) -> ArrivalsReport:
-        records = list(self.ledger.active())
+        records = list(self.ledger.active(self.backends))
         if not records:
             return self.report
         ids = [int(r.info_hash) for r in records if r.info_hash.isdigit()]
@@ -249,24 +257,31 @@ class _ChapterPass:
                 if queued is None:
                     self._fail(rec, "no longer in Suwayomi's download queue and not downloaded (removed there?)")
                 elif queued.state == chapter_retry.ERROR_STATE:
+                    before = getattr(chapter_retry.load(self.db, rec.id), "auto", 0)
                     try:
                         note = chapter_retry.auto_retry(self.db, self.client, rec, queued.tries)
                     except Exception as exc:  # noqa: BLE001 - Suwayomi not answering: the next pass tries again
                         _log.info("Chapter arrivals: download %d (%s) not retried: %s: %s", rec.id, rec.title,
                                   type(exc).__name__, exc)
                         note = chapter_retry.stuck_note(queued.tries, getattr(chapter_retry.load(self.db, rec.id),
-                                                                             "auto", 0))
+                                                                             "auto", 0), self.builtin)
+                    # stuck by its STATE: the list offers Retry / Cancel whatever the note says (audit B1); an
+                    # automatic retry just put it back in the queue, so it is not stuck until the next pass sees ERROR
+                    retried = getattr(chapter_retry.load(self.db, rec.id), "auto", 0) > before
+                    self.ledger.set_stuck(rec.id, not retried)
                     self._wait(rec, note)
                     self._note(rec, note)
                 else:
                     chapter_retry.forget(self.db, rec.id)
+                    self.ledger.set_stuck(rec.id, False)
                     self._wait(rec, f"{queued.state.lower() or 'queued'} in Suwayomi ({queued.progress:.0%})")
                     self._note(rec, None)
                 return
             chapter_retry.forget(self.db, rec.id)
+            self.ledger.set_stuck(rec.id, False)
             rec = self.ledger.set_status(rec.id, DownloadStatus.DOWNLOADED, expect=(DownloadStatus.SENT,), error=None)
             self.report.downloaded.append(rec.id)
-            _log.info("Chapter arrivals: download %d (%s) finished in Suwayomi", rec.id, rec.title)
+            _log.info("Chapter arrivals: download %d (%s) finished in %s", rec.id, rec.title, self.name)
         if rec.status == DownloadStatus.DOWNLOADED:
             rec = self._file(rec)
             if rec is None or rec.status != DownloadStatus.FILED:
@@ -432,7 +447,7 @@ class _ChapterPass:
             if copied:
                 self.report.copied.append(rec.id)
             _log.info("Chapter arrivals: download %d (%s) filed%s: %s", rec.id, rec.title,
-                      " by copy (Suwayomi's folder is on another filesystem)" if copied else "", ", ".join(filed))
+                      f" by copy ({self.name}'s folder is on another filesystem)" if copied else "", ", ".join(filed))
             return rec
         failed = next((s for s in plan.steps if s.state == "failed"), None)
         why = (f"filing stopped at {posixpath.basename(failed.dst.replace(os.sep, '/'))}: {failed.error}"
@@ -450,7 +465,7 @@ class _ChapterPass:
         if problem:
             self._wait(rec, f"Suwayomi's copy not deleted: {problem}")
             self._note(rec, f"Suwayomi's copy kept: {problem}")
-            _log.warning("Chapter arrivals: download %d (%s): Suwayomi's copy kept: %s", rec.id, rec.title, problem)
+            _log.warning("Chapter arrivals: download %d (%s): %s's copy kept: %s", rec.id, rec.title, self.name, problem)
             return
         try:
             self.client.delete_downloaded([int(rec.info_hash)])
@@ -461,8 +476,8 @@ class _ChapterPass:
             return
         self.ledger.set_status(rec.id, DownloadStatus.REMOVED, expect=(DownloadStatus.FILED,), error=None)
         self.report.removed.append(rec.id)
-        _log.info("Chapter arrivals: download %d (%s): Suwayomi deleted its downloaded copy; the library file stays",
-                  rec.id, rec.title)
+        _log.info("Chapter arrivals: download %d (%s): %s deleted its downloaded copy; the library file stays",
+                  rec.id, rec.title, self.name)
 
     def _library_problem(self, rec: DownloadRecord) -> Optional[str]:
         plan_id = self.ledger.plan_id(rec.id)

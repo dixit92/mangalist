@@ -714,9 +714,12 @@ class ChapterSendOutcome:
     records: List[DownloadRecord] = field(default_factory=list)     # SENT (or FAILED when the enqueue failed)
     skipped: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    backend: str = ""                   # the program it was sent to (the words name it)
 
     def text(self) -> str:
         from ..gui.volumes_target import numbers_text
+        from .chapter_backend import wording
+        from .contracts import CHAPTER_BACKEND_EXTENSIONS
 
         sent = [c for r in self.records if r.status == DownloadStatus.SENT for c in r.wanted_chapters]
         parts = []
@@ -726,7 +729,7 @@ class ChapterSendOutcome:
             parts.append(f"Suwayomi refused the download: {self.error}")
         if self.skipped:
             parts.append(f"skipped {len(self.skipped)} ({'; '.join(self.skipped[:3])})")
-        return "; ".join(parts) or "Nothing was sent."
+        return wording("; ".join(parts), self.backend == CHAPTER_BACKEND_EXTENSIONS) or "Nothing was sent."
 
 
 def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMatch, picks: Sequence[SuwayomiChapter],
@@ -749,10 +752,13 @@ def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMat
                             extension=match.source.extension)
     manga = SuwayomiManga(id=match.manga.id, title=manga_title or match.manga.title, url=match.manga.url,
                           source_id=match.source.id)
+    from .chapter_backend import backend_of, name_of_backend, record_extra
+
     batch = uuid.uuid4().hex[:12]
+    backend = backend_of(client)            # the program whose chapter ids these are (never the setting: B2 / B5)
     records, skipped = ledger.create_chapters(series_id, picks, source=source, manga=manga, target_dir=target_dir,
-                                              batch=batch)
-    out = ChapterSendOutcome(records=list(records), skipped=list(skipped))
+                                              batch=batch, backend=backend, extra=record_extra(client))
+    out = ChapterSendOutcome(records=list(records), skipped=list(skipped), backend=backend)
     if not records:
         return out
     try:
@@ -771,8 +777,9 @@ def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMat
             except StatusConflict:
                 failed.append(rec)
         out.records = failed
-        _log.warning("Chapters: series %s: Suwayomi did not take %d chapter(s): %s", series_id, len(records), why)
+        _log.warning("Chapters: series %s: %s did not take %d chapter(s): %s", series_id, name_of_backend(backend),
+                     len(records), why)
         return out
-    _log.info("Chapters: series %s: sent %d chapter(s) from %s to Suwayomi (batch %s)%s", series_id, len(records),
-              source.display_name, batch, f"; skipped {len(skipped)}" if skipped else "")
+    _log.info("Chapters: series %s: sent %d chapter(s) from %s to %s (batch %s)%s", series_id, len(records),
+              source.display_name, name_of_backend(backend), batch, f"; skipped {len(skipped)}" if skipped else "")
     return out
