@@ -308,6 +308,7 @@ def test_the_command_line_prints_the_report(db, suwayomi, host, monkeypatch, cap
     from mangalist.services.extensions.__main__ import main
 
     choose(db)
+    monkeypatch.setattr(co, "_host_up", lambda _db, _url: None)        # the host on demand: tests/.../test_on_demand.py
     monkeypatch.setattr(co, "clients_from_store",
                         lambda _db, host_url=None, timeout=120.0: (suwayomi, ExtensionHostClient(host_url or host.url)))
     assert main(["carry-over", "--dry-run", "--db", str(paths.db_file())]) == 0

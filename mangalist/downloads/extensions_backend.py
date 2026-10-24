@@ -157,7 +157,7 @@ class ExtensionsBackendMixin:
         busy = [r for r in self.chapter_ledger.active() if r.status in (DownloadStatus.SENT, DownloadStatus.DOWNLOADED)
                 and r.backend in (current, "")]
         if busy:
-            raise BackendError(f"{len(busy)} chapter download(s) are still on their way with {now}: switch once they "
+            raise BackendError(f"{len(busy)} chapter download(s) are still in progress with {now}: switch once they "
                                "are filed, or cancel them (Download tab > In progress: right-click the row > Cancel "
                                "download...)")
         running = passes_running(self.suwayomi.store)
