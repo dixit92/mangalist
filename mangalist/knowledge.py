@@ -613,7 +613,10 @@ def from_mangapixer_item(item: Mapping[str, Any], *, english_title: Optional[str
 
 def _creators_from_mangapixer(raw: Any) -> Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]]:
     """``record.creators`` (``[{name, role, muAuthorId, otherNames}]``, MangaPixer's export since the creators field):
-    ``(name, other names)`` for each creator; None when the field is absent (an older MangaPixer), () when it is empty."""
+    ``(name, other names)`` for each creator; None when the field is absent, () when it is empty. MangaPixer 1.47.0 leaves
+    the field out when a record has no creators (its page says ``recordFields: ["creators"]``; an older MangaPixer has
+    no such marker); MangaList treats both the same - a series MangaPixer knows gets its creators only from the export,
+    never from MangaUpdates (owner, 2026-10-22) - so the marker needs no reading."""
     if not isinstance(raw, (list, tuple)):
         return None
     out = []
