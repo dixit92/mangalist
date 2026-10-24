@@ -91,13 +91,15 @@ def test_exdev_falls_back_to_a_verified_copy(db, lib, torrent, caplog):
     journal = Journal(db, link=_exdev)
     src = torrent / "Series A v03 (Digital).cbz"
     dst = lib / "Series A" / src.name
-    with caplog.at_level(logging.WARNING, logger="mangalist.store.journal"):
+    with caplog.at_level(logging.INFO, logger="mangalist.store.journal"):
         plan = journal.apply(journal.plan_links("arrival", [(src, dst)], root_path=lib).id)
     step = plan.steps[0]
     assert plan.status == "applied" and step.how == "copy"
     assert dst.read_bytes() == src.read_bytes() and not os.path.samefile(src, dst)
     assert os.stat(dst).st_mtime_ns == os.stat(src).st_mtime_ns     # the mtime a link would share
     assert "COPIED" in caplog.text
+    # another filesystem is expected (the download folder lives elsewhere): INFO, not a WARNING per file (audit B6)
+    assert [r.levelname for r in caplog.records if "COPIED" in r.getMessage()] == ["INFO"]
     assert sorted(p.name for p in dst.parent.iterdir()) == ["Series A v01.cbz", src.name]   # no temp left
 
 
