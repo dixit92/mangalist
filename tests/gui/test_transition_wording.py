@@ -9,13 +9,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPoint, Qt  # noqa: E402
-from PySide6.QtWidgets import QAbstractButton, QLabel, QMenu  # noqa: E402
+from PySide6.QtWidgets import QAbstractButton, QLabel, QTableWidget  # noqa: E402
 
 from dataclasses import replace  # noqa: E402
 
 from mangalist.downloads import chapters as chm  # noqa: E402
-from mangalist.downloads.contracts import Placement  # noqa: E402
 from mangalist.gui import chapter_words as cw  # noqa: E402
 from mangalist.gui import chapters_panel as cp  # noqa: E402
 from mangalist.gui import download_tab as dt  # noqa: E402
@@ -42,8 +40,6 @@ def shown_texts(widget) -> str:
         out += [w.text(), w.toolTip()]
     for w in widget.findChildren(QAbstractButton):
         out += [w.text(), w.toolTip()]
-    from PySide6.QtWidgets import QTableWidget
-
     for t in widget.findChildren(QTableWidget):
         out += [t.horizontalHeaderItem(c).text() for c in range(t.columnCount()) if t.horizontalHeaderItem(c)]
         out += [t.item(r, c).text() for r in range(t.rowCount()) for c in range(t.columnCount()) if t.item(r, c)]

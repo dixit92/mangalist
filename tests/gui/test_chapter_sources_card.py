@@ -17,6 +17,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtWidgets import QLabel  # noqa: E402
 
 from mangalist import store  # noqa: E402
 from mangalist.downloads.adapter import Backend  # noqa: E402
@@ -134,10 +135,10 @@ def test_the_card_is_chapter_sources_and_names_the_program(qapp, dialogs, db, ba
     label = "Suwayomi" if key == "suwayomi" else "Built-in extensions"
     assert page.sources_program.text() == f"Chapters · {label}"
     assert page.title_label.text() == "Download sources"
-    texts = "\n".join(w.text() for w in page.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel))
+    texts = "\n".join(w.text() for w in page.findChildren(QLabel))
     assert "Chapter sources" in texts and "needs Suwayomi" not in texts and "Suwayomi sources" not in texts
     if key == "extensions":
-        assert "extension host" in page.sources_explain.text() and "Installed in Suwayomi" not in page.sources_explain.text()
+        assert "extension host" in page.sources_explain.text()
         assert "Suwayomi" not in page.sources_explain.text() and "Suwayomi" not in page.btn_sources_reload.toolTip()
         assert "the extension host" in page.budget_help.text() and "(Suwayomi)" not in page.budget_help.text()
     else:
@@ -202,11 +203,6 @@ def test_without_a_chapter_backend_choice_there_is_no_chooser(qapp, dialogs, db)
 
 
 # --- A6: the chip ---------------------------------------------------------------------------------------------------
-
-def fake_with_sources(key="suwayomi"):
-    backend = SwitchableChapterBackend(key)
-    return backend
-
 
 def test_the_chip_is_not_set_up_checking_connected_or_not_reachable(qapp, dialogs, db):
     backend = SwitchableChapterBackend(connected=False)
