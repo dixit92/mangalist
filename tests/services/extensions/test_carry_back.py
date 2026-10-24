@@ -14,7 +14,7 @@ from mangalist.services.extensions import carry_over as co
 from mangalist.services.extensions.client import ExtensionHostClient
 from mangalist.store.downloads import META_EXTENSIONS_SERIES, META_SUWAYOMI_SERIES, SuwayomiSettings
 
-from .carry_fakes import LOST_ID, MANGADEX, WEEB, FakeSuwayomiCarry, raw_choice, set_suwayomi_choice
+from .carry_fakes import MANGADEX, WEEB, FakeSuwayomiCarry, raw_choice, set_suwayomi_choice
 from .fake_host import MANGADEX_EN, MANGADEX_PKG, WEEB_ID, WEEB_PKG, FakeHost
 
 MD_URL = "/manga/00000000-0000-4000-8000-0000000c0000"
@@ -70,7 +70,7 @@ def test_what_was_decided_on_the_host_reaches_suwayomi(db, suwayomi, host):
                 how="mangadex-id")
     set_suwayomi_choice(db, 4, 11, MANGADEX_EN, "Example Manga", group="Alpha")
     host_choice(db, 4, group_cleared=True)
-    host_choice(db, 5, source_id=LOST_ID, manga_id=99, manga_url="/lost/1", how="confirmed")
+    host_choice(db, 5, source_id="4000000000000000004", manga_id=99, manga_url="/gone/1", how="confirmed")
 
     plan = run(db, suwayomi, host, dry_run=True)
     assert {r.series_id: r.status for r in plan.series} == {1: co.BACK_SAME, 2: co.BACK_CARRIED, 3: co.BACK_CARRIED,
@@ -91,7 +91,7 @@ def test_what_was_decided_on_the_host_reaches_suwayomi(db, suwayomi, host):
 
     again = run(db, suwayomi, host)
     assert again.to_do() == 0
-    assert co.not_yet_carried_back(db) == 1                                      # the lost source's one
+    assert co.not_yet_carried_back(db) == 1                                      # the one Suwayomi lacks the source of
 
 
 def test_a_series_suwayomi_cannot_find_is_reported(db, suwayomi, host):
