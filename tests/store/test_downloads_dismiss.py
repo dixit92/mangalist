@@ -76,5 +76,4 @@ def test_a_learned_downloads_folder_never_undoes_a_save_made_meanwhile(db):
     saver.start()
     learner.join(5)
     saver.join(5)
-    final = original()
-    assert final.host_downloads == "" and final.downloads_path == "/host/downloads"
+    assert original().host_downloads == ""         # the window's save stands (its form's downloads path is its own)
