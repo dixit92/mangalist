@@ -183,7 +183,8 @@ def replaced_bar_text(batches: Sequence) -> Tuple[str, str]:
         n = sum(len(b.files) for b in pending)
         series = len({b.series_dir for b in pending})
         waiting = [b for b in pending if b.mode == "holding" and b.error]
-        text = f"Replace {_files(n)} of {series} series with the volumes filed?"
+        text = (f"Replace {_files(n, 'file')} of {series} series with the volumes filed?" if _replaced_volumes(pending)
+                else f"Replace {_files(n)} of {series} series with the volumes filed?")
         if waiting:
             text += f" ({len(waiting)} could not be moved yet)"
         return text, "warn"

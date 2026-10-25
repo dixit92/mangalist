@@ -6,6 +6,8 @@ One pass (:func:`run_arrivals`) is idempotent and safe to run hourly. For each a
 
 - **Missing** from the category (removed, or moved to another category) -> FAILED with the reason; nothing else.
 - **SENT** + complete -> DOWNLOADED (and on to filing in the same pass).
+- **DOWNLOADED**, a replacement (``replace_volumes``: an other release sent to replace the owner's copies, 2026-10-24)
+  -> the owner's copies it covers to the holding folder first, then filed as below (:mod:`.replacing`).
 - **DOWNLOADED** -> filing: the torrent's archive files (``scanner.ARCHIVE_EXTS``) whose parsed volume is one of
   the record's ``wanted_volumes`` AND is not held by the series right now (its stored units AND a fresh look at
   its folder) are linked into the record's ``target_dir`` through ONE journal plan - under their own names, or

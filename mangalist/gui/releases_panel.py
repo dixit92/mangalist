@@ -728,6 +728,8 @@ class ReleasesPanel(QWidget):
         self.btn_retry.setEnabled(False)
         self.progress.setVisible(True)
         self.search_label.setText("Searching nyaa...")
+        if self._others_open:                       # Search again keeps the Other releases section as it was
+            self._open_others_next = target.series_id
         backend = self._backend
         self._spawn(lambda: search_releases(backend, target), self._on_results, self._on_search_error)
 

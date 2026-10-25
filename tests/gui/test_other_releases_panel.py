@@ -278,3 +278,16 @@ def test_a_replacements_old_copies_are_worded_as_replaced_files():
 
     assert replaced_bar_text([batch([old])])[0] == "1000 B of replaced files in the holding folder (1 file, 1 series)"
     assert "of replaced chapters" in replaced_bar_text([batch([chapter])])[0]
+
+
+def test_search_again_keeps_the_section_as_it_was(qapp):
+    backend = OtherBackend(results=[USABLE, COLLECTION])
+    panel = open_panel(qapp, backend)
+    panel.set_others_open(True)
+    panel.btn_retry.click()
+    wait_until(qapp, lambda: len(backend.all_searched) == 2 and panel._search_state == "done")
+    assert panel.others_open()
+    panel.set_others_open(False)
+    panel.btn_retry.click()
+    wait_until(qapp, lambda: len(backend.all_searched) == 3 and panel._search_state == "done")
+    assert not panel.others_open()

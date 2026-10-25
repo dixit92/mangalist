@@ -82,7 +82,7 @@ def test_a_series_with_nothing_missing_opens_with_its_other_releases(qapp):
     assert "Nothing missing" in panel.subtitle_label.text()
     panel.btn_retry.click()                             # Search again: the same search, not a To get one
     wait_until(qapp, lambda: len(backend.all_searched) == 2 and panel._search_state == "done")
-    assert backend.all_searched[-1][1] == ()
+    assert backend.all_searched[-1][1] == () and panel.others_open()          # still open after Search again
 
 
 def test_a_to_get_series_opens_with_other_releases_open_and_its_chip_says_no_releases(qapp):

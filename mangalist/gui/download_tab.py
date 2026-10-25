@@ -37,6 +37,11 @@ a Found card's "⋯" has Show in To get, Show in List, Open folder, Automatic do
 (:meth:`DownloadTab.set_series_host`); a mode set here fires :attr:`DownloadTab.modes_changed`, and the List's own
 changes come back through :meth:`DownloadTab.refresh_modes` and :meth:`DownloadTab.set_wanted`.
 
+**Other releases** (owner, 2026-10-24): the releases card lists the releases that fill no gap under a collapsed "Other
+releases (N)" section (a row whose search found only those says "No releases"); **Search releases…** - a To get row's
+menu and the List's row menu (through the window) - opens the series' card with that section open, also for a series with
+nothing missing (:meth:`DownloadTab.search_releases`; not in To get: its own search, Search again repeats it).
+
 Every backend call runs off the UI thread (:mod:`.background`) - the findings, the modes and the last pass are quick
 reads (the contract) and run on it; the search queue runs one series at a time.
 """
@@ -1323,6 +1328,7 @@ class DownloadTab(QWidget):
         folder = self._current
         browsing = self._browsing
         if browsing is not None and folder == browsing.folder:
+            self.releases.open_others_next(browsing.series_id)
             self.releases.open_target(browsing)              # "Search releases..." of a series not in To get
             return
         if folder is None or self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
