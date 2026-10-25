@@ -93,6 +93,7 @@ from .options import (
     set_budget_gb,
     set_flag,
 )
+from .chapter_failures import FailuresBackendMixin
 from .extensions_backend import ExtensionsBackendMixin
 from .partial import PackOutcome, PackSelection, choose_files, hint_for, log_selection
 from .placement import placement_for
@@ -122,7 +123,7 @@ class _UploadsKnownTorrents:
         return getattr(self._client, name)
 
 
-class Backend(ExtensionsBackendMixin):
+class Backend(ExtensionsBackendMixin, FailuresBackendMixin):
     def __init__(self, db, *, search: Optional[NyaaSearch] = None, nyaa_client: Optional[NyaaClient] = None,
                  client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection,
                  chapter_client_factory: Optional[Callable[[SuwayomiConnection], ChapterClient]] = None,
@@ -720,12 +721,14 @@ class Backend(ExtensionsBackendMixin):
         self.suwayomi.set_series_choice(series_id, backend=match.backend or None, source_id=match.source.id,
                                         manga_id=int(match.manga.id), manga_title=match.manga.title,
                                         manga_url=match.manga.url or None, how=HOW_CONFIRMED, stale_manga_id=None)
+        self.forget_chapter_check_failures(series_id)       # another source: the failures in a row start again
         _log.info("Chapters: series %s matched to %s manga %s by the owner", series_id, match.source.display_name,
                   match.manga.id)
 
     def forget_match(self, series_id: int) -> None:
         self.suwayomi.set_series_choice(series_id, source_id=None, manga_id=None, manga_title=None, manga_url=None,
                                         how=None, stale_manga_id=None)
+        self.forget_chapter_check_failures(series_id)
 
     def set_series_group(self, series_id: int, group: Optional[str]) -> None:
         self.suwayomi.set_series_choice(series_id, group=group or None)

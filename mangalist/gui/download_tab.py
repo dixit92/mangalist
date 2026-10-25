@@ -126,6 +126,7 @@ ROLE_HEADER = Qt.ItemDataRole.UserRole + 11       # a group header's text
 ROLE_NOTE_TONE = Qt.ItemDataRole.UserRole + 12
 ROLE_GROUP = Qt.ItemDataRole.UserRole + 13         # a series row's group (its chips: torrents or chapter downloads)
 ROLE_FOUND = Qt.ItemDataRole.UserRole + 14         # a Found row's series id
+CHECK_FAILING_CHIP = "Source not readable"      # a Missing chapters row the scheduled check keeps failing on
 PANEL_RELEASES, PANEL_CHAPTERS, PANEL_FOUND = 0, 1, 2
 GROUP_FOUND = "found"           # the Found chip (automatic downloads): not a "To get" group
 
@@ -259,6 +260,7 @@ class DownloadTab(QWidget):
         self._seen_status: Optional[Dict[int, str]] = None     # record id -> status at the last reload (None: none yet)
         self._chapter_lookups: Dict[str, object] = {}           # folder -> the chapters panel's last lookup
         self._chapter_states: Dict[str, str] = {}               # folder -> SEARCH_* of its chapter lookup
+        self._check_warnings: Dict[int, str] = {}               # series id -> the scheduled check keeps failing on it
         self._items: Dict[str, QTreeWidgetItem] = {}
         self._rows: Dict[str, List[QTreeWidgetItem]] = {}
         self._header_items: Dict[str, QTreeWidgetItem] = {}
@@ -660,6 +662,8 @@ class DownloadTab(QWidget):
                 if row.data(0, ROLE_GROUP) == GROUP_CHAPTERS:
                     chips = row_chips([r for r in records if r.is_chapters], self._chapter_states.get(folder),
                                       CHAPTER_CHIPS)
+                    if sid in self._check_warnings:         # the scheduled check could not read its source (3+ times)
+                        chips = list(chips) + [(CHECK_FAILING_CHIP, "warn")]
                 else:
                     chips = row_chips([r for r in records if not r.is_chapters], self._states.get(folder))
                 row.setData(0, ROLE_CHIPS, chips)
@@ -958,6 +962,7 @@ class DownloadTab(QWidget):
             self._show_unavailable(series, reason)
             return
         self.panels.setCurrentIndex(PANEL_CHAPTERS)
+        self.chapters.set_warning(self._check_warnings.get(sid, ""))
         cached = self._chapter_lookups.get(series.folder)
         if cached is None:
             self._chapter_states[series.folder] = SEARCH_RUNNING
@@ -1450,6 +1455,7 @@ class DownloadTab(QWidget):
         except Exception as exc:  # noqa: BLE001 - shown in the view; the old list stays
             self.found.say(f"Could not read what was found: {describe_error(exc)}", "bad")
             return
+        self._reload_check_warnings()
         new = findings != self._findings
         self._findings, self._last_run = findings, last_run
         names = self.found_names() if new else self._found_names     # (names of the series not in To get: a read)
@@ -1459,6 +1465,29 @@ class DownloadTab(QWidget):
         if changed:                                     # the chips' counts, the Found list on the left
             self._rebuild()
         self.count_changed.emit(self.badge_count())
+
+    def _reload_check_warnings(self) -> None:
+        """The series the scheduled chapter check could not read several times in a row (a quick read, with the
+        findings): a chip on their Missing chapters row and a line in their chapters panel."""
+        read = getattr(self._backend, "chapter_check_warnings", None)
+        if not callable(read):
+            return
+        try:
+            warnings = dict(read())
+        except Exception:  # noqa: BLE001 - a warning is a courtesy; the old ones stay
+            _log.debug("Reading the chapter check's warnings failed", exc_info=True)
+            return
+        if warnings == self._check_warnings:
+            return
+        self._check_warnings = warnings
+        self._refresh_statuses()
+        sid = self._series_ids.get(self._current) if self._current else None
+        if sid is not None and self.chapters.series_id == sid:
+            self.chapters.set_warning(warnings.get(sid, ""))
+
+    def check_warning_of(self, folder: str) -> str:
+        """The scheduled check's warning for a series (its folder), "" when it reads fine."""
+        return self._check_warnings.get(self._series_ids.get(folder), "")
 
     def findings(self) -> list:
         return list(self._findings)
