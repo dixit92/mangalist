@@ -222,6 +222,12 @@ def _stat(path: str) -> Optional[Tuple[int, int]]:
     return int(st.st_size), int(st.st_mtime_ns)
 
 
+# Signatures computed here for files the backfill has not signed yet, by (path, size, mtime): the verdicts are re-read
+# after every batch of page hashes, and a file must not be read again for that.
+_SIGNED: Dict[Tuple[str, int, int], str] = {}
+_SIGNED_MAX = 5000
+
+
 class _Signer:
     """Content signatures of files: the stored one when the archive row still describes the file, else computed now
     (128 KiB read; the background backfill writes the row, not this)."""
@@ -250,7 +256,14 @@ class _Signer:
         if row is not None and (row.size, row.mtime_ns) == stamp and is_usable(row.signature, row.size):
             sig = row.signature
         if sig is None:
-            sig = signature_if_unchanged(path, *stamp)
+            seen = (os.path.normpath(path), *stamp)
+            sig = _SIGNED.get(seen)
+            if sig is None:
+                sig = signature_if_unchanged(path, *stamp)
+                if sig is not None:
+                    if len(_SIGNED) >= _SIGNED_MAX:
+                        _SIGNED.clear()
+                    _SIGNED[seen] = sig
         return FileRef(str(path), number, stamp[0], stamp[1], sig)
 
 
