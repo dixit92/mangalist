@@ -17,8 +17,14 @@ Two sections, styled after the approved mockup (UI cycle, 2026-10-08):
 - **Whole chapters with parts** (owner, 2026-10-18: "Duplicates: flag overlaps", then "Own section, own count";
   :func:`mangalist.duplicates.find_whole_and_parts`) - a whole chapter held next to its parts in one folder, in a section
   of its own with its own count (never in the duplicate numbers above nor in the Duplicates chip, :attr:`groups_found`):
-  per chapter a line saying whether the whole stands in for a missing part (keep both) or may be redundant; its files
-  all default to Keep, so nothing of it is deleted unless the owner discards a file and applies.
+  per chapter a line saying why it is listed; its files default to Keep, so nothing of it is deleted unless the owner
+  discards a file and applies. **Content verdicts** (owner, 2026-10-24; :mod:`mangalist.duplicate_verdicts`): the pages
+  of the candidates are hashed in the background (the subprocess pool, a batch of archives at a time, cached by content
+  signature) and each card says what they showed - the same pages (one form can go), a copy, the wrong chapter - with a
+  line of evidence and the matching Discard preselected; different chapters are hidden, and so are the plain splits
+  (``N`` + ``N.2``: the file ``N`` is part 1) unless their pages overlap. **Dismiss** ("this is fine") hides an item
+  until one of its files changes; "Show hidden" lists what is hidden, with Restore for a dismissed one. The section's
+  count is what it shows.
 
 The scan of the duplicates, the deletion and a merge run off the UI thread. Deleting goes through
 :func:`mangalist.duplicates.discard_duplicates` only; a merge deletes nothing (moves only).
@@ -28,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import replace
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -65,9 +72,25 @@ from ..duplicates import (
     newest,
 )
 from .. import series_merge
+from ..duplicate_verdicts import (
+    VERDICT_COPY,
+    VERDICT_DISTINCT,
+    VERDICT_PARTS,
+    VERDICT_WRONG,
+    NOT_CHECKED,
+    FileRef,
+    Judgement,
+    Verdict,
+    dismiss as dismiss_overlap,
+    hash_job,
+    item_key,
+    judge,
+    restore as restore_overlap,
+    split_shown,
+)
 from ..same_series import FranchiseSplit, SamePair, SameSeriesReport, SeriesCopy, find_same_series
 from . import theme
-from .background import BackgroundCall, start_call
+from .background import BackgroundCall, start_call, start_process_call
 from .links import open_folder as open_folder_default, open_link
 from .palette import Palette, current
 from .shell import DuplicateFile, DuplicateGroup, DuplicateSeries
@@ -335,6 +358,16 @@ class DuplicatesView(QWidget):
         self._root_ids: Optional[List[int]] = None          # the List's Library picker (None: every library)
         self._overlaps: List[DuplicateGroup] = []           # whole chapters with parts: their own section and count
         self._overlaps_error = ""
+        # content verdicts (owner, 2026-10-24): per item, from the cached page hashes; hashing runs a batch at a time
+        self._verdicts: Dict[Tuple[str, str], Verdict] = {}
+        self._pillow = True
+        self._touched: set = set()                          # overlap files the owner set Keep / Discard on himself
+        self._hash_tried: set = set()                       # signatures sent for hashing in this view's life
+        self._hash_queue: List[FileRef] = []
+        self._hash_total = 0
+        self._hash_done = 0
+        self._hashing = False
+        self._show_hidden = False
         self._card_apply: Dict[Tuple[Optional[int], str], List[QPushButton]] = {}   # a series' card in each section
         # series cards ticked for "Apply to selected" (owner, 2026-10-09: "select some series cards and do it on a subset")
         self._picked: set = set()
@@ -380,6 +413,20 @@ class DuplicatesView(QWidget):
         self.parts_note.setWordWrap(True)
         self.parts_box = QVBoxLayout()
         self.parts_box.setSpacing(10)
+        self.checking_note = _label("", "muted")             # "Reading the pages: 40 of 233 archives..."
+        self.checking_note.setWordWrap(True)
+        self.checking_note.hide()
+        self.hidden_line = QHBoxLayout()
+        self.hidden_note = _label("", "muted")
+        self.hidden_note.setWordWrap(True)
+        self.show_hidden_button = _button("Show hidden", "link")
+        self.show_hidden_button.setToolTip("List the chapters hidden here: checked as different chapters, plain "
+                                           "splits, or dismissed by you")
+        self.show_hidden_button.clicked.connect(lambda: self.set_show_hidden(not self._show_hidden))
+        self.hidden_line.addWidget(self.hidden_note, 1)
+        self.hidden_line.addWidget(self.show_hidden_button)
+        self.hidden_box = QVBoxLayout()
+        self.hidden_box.setSpacing(10)
         series_head = QHBoxLayout()
         series_head.addWidget(self.series_heading, 1)
         series_head.addWidget(self.undo_merge_button)
@@ -398,7 +445,10 @@ class DuplicatesView(QWidget):
         self._body_layout.addSpacing(14)
         self._body_layout.addWidget(self.parts_heading)
         self._body_layout.addWidget(self.parts_note)
+        self._body_layout.addWidget(self.checking_note)
         self._body_layout.addLayout(self.parts_box)
+        self._body_layout.addLayout(self.hidden_line)
+        self._body_layout.addLayout(self.hidden_box)
         self._body_layout.addStretch(1)
 
         bar = _frame("bar")
@@ -653,8 +703,22 @@ class DuplicatesView(QWidget):
 
     @property
     def whole_and_parts(self) -> List[DuplicateGroup]:
-        """The whole chapters held with their parts the last scan found (their own section and count)."""
-        return list(self._overlaps)
+        """The whole chapters held with their parts the section lists (their own section and count): what the content
+        verdicts do not hide."""
+        return split_shown(self._overlaps, self._verdicts)[0]
+
+    @property
+    def hidden_whole_and_parts(self) -> List[DuplicateGroup]:
+        """... and the ones they hide (different chapters, plain splits, dismissed)."""
+        return split_shown(self._overlaps, self._verdicts)[1]
+
+    def verdict_of(self, group: DuplicateGroup) -> Optional[Verdict]:
+        return self._verdicts.get(item_key(group))
+
+    @property
+    def checking_pages(self) -> bool:
+        """Whether page hashes are being read for the content verdicts."""
+        return self._hashing
 
     def refresh(self) -> None:
         """Re-read the duplicate files (off the UI thread)."""
@@ -673,7 +737,7 @@ class DuplicatesView(QWidget):
 
     def _scanned(self, generation: int, groups: List[DuplicateGroup], same: Optional[SameSeriesReport] = None,
                  last_merge=None, same_error: str = "", overlaps: Optional[List[DuplicateGroup]] = None,
-                 overlaps_error: str = "") -> None:
+                 overlaps_error: str = "", judgement: Optional[Judgement] = None) -> None:
         if generation != self._generation:
             return                                          # a newer scan is on its way
         self._scanning = False
@@ -681,12 +745,14 @@ class DuplicatesView(QWidget):
             self._after_apply = False
         self._groups = list(groups)
         self._overlaps, self._overlaps_error = list(overlaps or ()), overlaps_error
+        self._take_judgement(judgement)
         if same is not None or same_error:
             self._same, self._last_merge, self._same_error = same or SameSeriesReport(), last_merge, same_error
         self._render_series()
         self._render_files()
         self._update_summary()
         self.groups_found.emit(len(self._groups))
+        self._queue_hashing(judgement)
 
     def _scan_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
@@ -723,8 +789,9 @@ class DuplicatesView(QWidget):
                      else "This series has no duplicate files.")
             self.files_box.addWidget(_label(empty, "muted"))
         self._render_cards(groups, self.files_box)
-        # whole chapters with parts: their own section and count (owner, 2026-10-18: "Own section, own count")
-        overlaps = self._shown_groups(self._overlaps)
+        # whole chapters with parts: their own section and count (owner, 2026-10-18: "Own section, own count"), and of
+        # them only what the content verdicts do not hide (owner, 2026-10-24: "Content verdicts")
+        overlaps, hidden = split_shown(self._shown_groups(self._overlaps), self._verdicts)
         n_over = len(overlaps)
         n_over_series = len({(g.series_id, g.folder) for g in overlaps})
         self.parts_heading.setText("WHOLE CHAPTERS WITH PARTS" + (
@@ -735,8 +802,14 @@ class DuplicatesView(QWidget):
                      else f"Could not look for whole chapters with parts: {self._overlaps_error}" if self._overlaps_error
                      else "No whole chapter is held next to its parts." if self._focus is None
                      else "This series holds no whole chapter next to its parts.")
+            if hidden and not self._scanning and not self._overlaps_error:
+                empty = ("Nothing to review: every whole chapter held next to its parts is hidden below." if self._focus
+                         is None else "Nothing to review in this series: its whole chapters with parts are hidden below.")
             self.parts_box.addWidget(_label(empty, "muted"))
         self._render_cards(overlaps, self.parts_box)
+        _clear(self.hidden_box)
+        self._render_hidden(hidden)
+        self._render_checking()
 
     def _render_cards(self, groups: Sequence[DuplicateGroup], box: QVBoxLayout) -> None:
         """One card per series of *groups* in *box* (a series can have a card in each section)."""
@@ -789,12 +862,41 @@ class DuplicatesView(QWidget):
         what = "whole and parts" if overlap else f"{len(group.files)} files"
         title = _label(f"{word} {group.number}  ·  {what}{where}", "heading")
         title.setContentsMargins(0, 10, 0, 4)
-        block.addWidget(title)
+        verdict = self._verdicts.get(item_key(group)) if overlap else None
         if overlap:
-            note = _label(group.note, "muted")
+            line = QHBoxLayout()
+            line.addWidget(title, 1)
+            pill = _VERDICT_PILL.get(verdict.kind if verdict else "", "undecided")
+            if verdict is None or verdict.evidence == NOT_CHECKED:
+                pill = "not checked"
+            elif verdict.hidden:
+                pill = verdict.hidden_why
+            line.addWidget(_label(pill, "pill"), 0, Qt.AlignVCenter)
+            if verdict is not None and verdict.dismissed:
+                button = _button("Restore", "link")
+                button.setToolTip("List this chapter again")
+                button.clicked.connect(lambda _=False, g=group: self.restore(g))
+            else:
+                button = _button("Dismiss", "link")
+                button.setToolTip("This is fine: hide this chapter until one of its files changes")
+                button.clicked.connect(lambda _=False, g=group: self.dismiss(g))
+                if verdict is None or not verdict.dismiss_key:
+                    button.setEnabled(False)
+                    button.setToolTip("Cannot be dismissed now: a file of it cannot be read")
+            line.addWidget(button, 0, Qt.AlignVCenter)
+            block.addLayout(line)
+            note = _label((verdict.headline if verdict and verdict.headline else "") or group.note, "muted")
             note.setWordWrap(True)
-            note.setContentsMargins(0, 0, 0, 4)
+            note.setContentsMargins(0, 0, 0, 2 if verdict and verdict.evidence else 4)
             block.addWidget(note)
+            if verdict is not None and verdict.evidence:
+                evidence = _label(f"Pages: {verdict.evidence}.", "muted")
+                evidence.setWordWrap(True)
+                evidence.setContentsMargins(0, 0, 0, 4)
+                block.addWidget(evidence)
+        else:
+            block.addWidget(title)
+        preselect = set(verdict.discard) if verdict is not None and not verdict.hidden else set()
         keep = default_keep(group)
         known = all(f.path in self._choice for f in group.files)
         remembered = known and not all(self._choice[f.path] for f in group.files)
@@ -807,8 +909,12 @@ class DuplicatesView(QWidget):
                 tags = [t for t, best in (("newest", newest(group)), ("largest", largest(group))) if best is f]
             if group.usual_group and (f.group or "").strip().casefold() == group.usual_group.strip().casefold():
                 tags.insert(0, "series' group")
-            # an overlap keeps every file by default: nothing of it is discarded unless the owner says so
-            discard = self._choice[f.path] if remembered else (False if overlap else f.path != keep.path)
+            # an overlap keeps every file by default - or what its pages say can go (a copy, the wrong chapter, the
+            # form the series does not hold): nothing of it is deleted unless the owner applies and confirms
+            if overlap:
+                discard = self._choice[f.path] if f.path in self._touched else f.path in preselect
+            else:
+                discard = self._choice[f.path] if remembered else f.path != keep.path
             row = _FileRow(f, os.path.relpath(f.path, group.folder), tags, discard)
             row.chosen.connect(lambda path, discard, g=group: self._chose(g, path, discard))
             block.addWidget(row)
@@ -825,6 +931,8 @@ class DuplicatesView(QWidget):
             self.status.setText("Keep at least one copy of each number.")
             return
         self._choice[path] = discard
+        if getattr(group, "overlap", ""):
+            self._touched.add(path)
         self._update_summary()
 
     # --- choices ------------------------------------------------------------------------------------------
@@ -901,6 +1009,137 @@ class DuplicatesView(QWidget):
                                 "Nothing is deleted until you apply and confirm.")
         else:
             self.status.setText("")
+
+    # --- content verdicts -------------------------------------------------------------------------------------
+
+    def _take_judgement(self, judgement: Optional[Judgement]) -> None:
+        if judgement is None:
+            return
+        self._verdicts = dict(judgement.verdicts)
+        self._pillow = judgement.pillow
+
+    def _queue_hashing(self, judgement: Optional[Judgement]) -> None:
+        """Hash the archives the verdicts still wait for, a batch at a time in the subprocess pool (never twice in
+        this view's life: a file that cannot be hashed now stays undecided)."""
+        if judgement is None:
+            return
+        fresh = [f for f in judgement.pending if f.signature not in self._hash_tried]
+        if not fresh:
+            return
+        self._hash_tried.update(f.signature for f in fresh)
+        self._hash_queue.extend(fresh)
+        self._hash_total += len(fresh)
+        if not self._hashing:
+            self._next_batch()
+
+    def _next_batch(self) -> None:
+        if not self._hash_queue:
+            self._hashing = False
+            self._hash_total = self._hash_done = 0
+            self._render_checking()
+            return
+        batch, self._hash_queue = self._hash_queue[:HASH_BATCH], self._hash_queue[HASH_BATCH:]
+        self._hashing = True
+        self._render_checking()
+        db_path = str(self._db.path)
+        self._start_process(hash_job, (db_path, batch), lambda _report, n=len(batch): self._batch_done(n),
+                            lambda message, n=len(batch): self._batch_failed(n, message))
+
+    def _batch_done(self, n: int) -> None:
+        self._hash_done += n
+        self._rejudge()
+        self._next_batch()
+
+    def _batch_failed(self, n: int, message: str) -> None:
+        _log.warning("Duplicates: reading page hashes failed: %s", message)
+        self._hash_done += n
+        self._next_batch()
+
+    def _rejudge(self) -> None:
+        """The verdicts again from the cache (off the UI thread), after a batch of page hashes was stored."""
+        db, overlaps, generation = self._db, list(self._overlaps), self._generation
+        self._start(lambda: judge(db, overlaps), lambda j: self._rejudged(generation, j),
+                    lambda message: _log.warning("Duplicates: the content verdicts could not be read: %s", message))
+
+    def _rejudged(self, generation: int, judgement: Judgement) -> None:
+        if generation != self._generation or self._applying or self._merging:
+            return
+        self._take_judgement(judgement)
+        self._render_files()
+        self._update_summary()
+
+    def _render_checking(self) -> None:
+        if self._hashing and self._hash_total:
+            self.checking_note.setText(f"Reading the pages to check them: {self._hash_done} of {self._hash_total} "
+                                       f"archive{'s' if self._hash_total != 1 else ''} read...")
+            self.checking_note.show()
+        elif not self._pillow and self._overlaps:
+            self.checking_note.setText("The pages cannot be read here (Pillow is not installed): each chapter is "
+                                       "listed by its numbers only.")
+            self.checking_note.show()
+        else:
+            self.checking_note.hide()
+
+    def _render_hidden(self, hidden: Sequence[DuplicateGroup]) -> None:
+        reasons: Dict[str, int] = {}
+        for g in hidden:
+            v = self._verdicts.get(item_key(g))
+            why = v.hidden_why if v is not None else "split chapter"
+            reasons[why] = reasons.get(why, 0) + 1
+        words = {"different chapters": "checked as different chapters",
+                 "split chapter": "plain split{s} (the whole is part 1)", "dismissed": "dismissed by you"}
+        parts = [f"{n} " + words.get(why, why).replace("{s}", "s" if n != 1 else "")
+                 for why, n in sorted(reasons.items(), key=lambda kv: list(words).index(kv[0]) if kv[0] in words else 9)]
+        self.hidden_note.setText(f"Hidden: {', '.join(parts)}." if parts else "")
+        self.hidden_note.setVisible(bool(parts))
+        self.show_hidden_button.setVisible(bool(parts))
+        self.show_hidden_button.setText("Hide them" if self._show_hidden else f"Show hidden ({len(hidden)})")
+        if self._show_hidden and hidden:
+            self._render_cards(hidden, self.hidden_box)
+
+    def set_show_hidden(self, on: bool) -> None:
+        """List the hidden whole chapters with parts below the section (with Restore for a dismissed one), or not."""
+        self._show_hidden = bool(on)
+        self._render_files()
+        self._update_summary()
+
+    def dismiss(self, group: DuplicateGroup) -> bool:
+        """The owner says this whole chapter with parts is fine: hidden until one of its files changes."""
+        verdict = self._verdicts.get(item_key(group))
+        if verdict is None:
+            return False
+        try:
+            done = dismiss_overlap(self._db, group, verdict)
+        except Exception as exc:  # noqa: BLE001 - said in the bar; nothing else changes
+            _log.warning("Duplicates: dismissing chapter %s failed", group.number, exc_info=True)
+            self._show_report([f"Could not dismiss chapter {group.number}: {exc}"], error=True)
+            return False
+        if not done:
+            self._show_report([f"Chapter {group.number} cannot be dismissed now: a file of it cannot be read."],
+                              error=True)
+            return False
+        self._verdicts[item_key(group)] = replace(verdict, dismissed=True)
+        self._render_files()
+        self._update_summary()
+        self.status.setText(f"Chapter {group.number} of {group.title} dismissed: it is shown again when one of its "
+                            "files changes.")
+        return True
+
+    def restore(self, group: DuplicateGroup) -> bool:
+        """Undo a Dismiss: the chapter is listed again."""
+        verdict = self._verdicts.get(item_key(group))
+        if verdict is None or not verdict.dismissed:
+            return False
+        try:
+            restore_overlap(self._db, verdict)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("Duplicates: restoring chapter %s failed", group.number, exc_info=True)
+            self._show_report([f"Could not restore chapter {group.number}: {exc}"], error=True)
+            return False
+        self._verdicts[item_key(group)] = replace(verdict, dismissed=False)
+        self._render_files()
+        self._update_summary()
+        return True
 
     # --- one series, a chosen few, MangaPixer links -----------------------------------------------------------
 
@@ -1026,25 +1265,55 @@ class DuplicatesView(QWidget):
         self._calls.append(call)
         call.finished.connect(lambda c=call: self._calls.remove(c) if c in self._calls else None)
 
+    def _start_process(self, fn, args, on_done, on_error) -> None:
+        """*fn(*args)* in the subprocess pool (CPU-bound work: the page decode must not share the window's
+        interpreter lock)."""
+        holder: list = []
+
+        def finished() -> None:
+            if holder and holder[0] in self._calls:
+                self._calls.remove(holder[0])
+
+        call = start_process_call(fn, args, on_done, on_error, finished)     # delivered later, on this thread
+        holder.append(call)
+        self._calls.append(call)
+
     def stop(self) -> None:
         """On close: let go of calls in flight (their results are dropped)."""
         for call in list(self._calls):
             call.abandon()
         self._calls.clear()
+        self._hash_queue.clear()
+        self._hashing = False
 
     def closeEvent(self, event) -> None:
         self.stop()
         super().closeEvent(event)
 
 
-def _whole_and_parts_of(db, root_ids) -> Tuple[List[DuplicateGroup], str]:
-    """The whole chapters held with their parts, and why they could not be read ("" when they could): their section
-    says so, the duplicate numbers above it are shown either way."""
+HASH_BATCH = 12                     # archives per subprocess job: the verdicts are updated after each
+
+
+_VERDICT_PILL = {VERDICT_PARTS: "same pages", VERDICT_COPY: "copy", VERDICT_WRONG: "wrong chapter",
+                 VERDICT_DISTINCT: "different chapters", "": "not checked"}
+
+
+def _whole_and_parts_of(db, root_ids) -> Tuple[List[DuplicateGroup], str, Optional[Judgement]]:
+    """The whole chapters held with their parts (the plain splits too, for the content verdicts), why they could not
+    be read ("" when they could), and the verdicts from the cached page hashes: their section says so, the duplicate
+    numbers above it are shown either way. A failure of the verdicts leaves every item undecided (listed by the rule,
+    the plain splits hidden)."""
     try:
-        return find_whole_and_parts(db, root_ids=root_ids), ""
+        overlaps = find_whole_and_parts(db, root_ids=root_ids, stand_ins=True)
     except Exception as exc:  # noqa: BLE001 - shown in the section
         _log.warning("Looking for whole chapters with parts failed: %s: %s", type(exc).__name__, exc)
-        return [], str(exc) or type(exc).__name__
+        return [], str(exc) or type(exc).__name__, None
+    try:
+        judgement = judge(db, overlaps)
+    except Exception:  # noqa: BLE001 - the names-only listing stays
+        _log.warning("Duplicates: the content verdicts could not be read", exc_info=True)
+        judgement = Judgement(pillow=False)
+    return overlaps, "", judgement
 
 
 def _same_series_of(db) -> Tuple[Optional[SameSeriesReport], Optional[series_merge.MergeRecord], str]:

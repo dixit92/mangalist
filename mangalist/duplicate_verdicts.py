@@ -69,6 +69,7 @@ DISTINCT_SHARE = 0.15       # at most this much either way: separate chapters
 MIN_PAGES = 3               # fewer comparable pages in the whole than this: undecided
 
 Key = Tuple[str, str]       # (the folder holding the whole file, the chapter number)
+NOT_CHECKED = "the pages are not checked yet"
 
 
 @dataclass(frozen=True)
@@ -380,8 +381,9 @@ def _verdict(db, it: Item, cached: Dict[str, ArchivePages], pillow: bool, pendin
             continue
         if not _readable_kind(f.path):
             if f in it.files:
-                kind = os.path.splitext(f.path)[1].lower().lstrip(".") or "this kind of file"
-                bad.append(f"ch {f.number} is a {kind} archive, which is not read")
+                kind = os.path.splitext(f.path)[1].lower().lstrip(".")
+                bad.append(f"ch {f.number} cannot be read (not a zip archive)" if kind in ("cbz", "zip", "")
+                           else f"ch {f.number} is a {kind} archive, which is not read")
             continue
         if not pillow:
             if f in it.files:
@@ -392,7 +394,7 @@ def _verdict(db, it: Item, cached: Dict[str, ArchivePages], pillow: bool, pendin
     if bad:
         return Verdict(VERDICT_UNDECIDED, "", "; ".join(dict.fromkeys(bad)))
     if missing:
-        return Verdict(VERDICT_UNDECIDED, "", "the pages are not checked yet")
+        return Verdict(VERDICT_UNDECIDED, "", NOT_CHECKED)
     controls = [(c.number, cached[c.signature]) for c in it.controls
                 if c.signature in cached and cached[c.signature].ok]
     decision = decide(it.group.number, cached[it.whole.signature],
@@ -509,6 +511,6 @@ def restore(db, verdict: Verdict) -> bool:
     return bool(verdict.dismiss_key) and page_hashes.undismiss(db, verdict.dismiss_key)
 
 
-__all__ = ["VERDICT_PARTS", "VERDICT_COPY", "VERDICT_WRONG", "VERDICT_DISTINCT", "VERDICT_UNDECIDED", "Decision",
+__all__ = ["NOT_CHECKED", "VERDICT_PARTS", "VERDICT_COPY", "VERDICT_WRONG", "VERDICT_DISTINCT", "VERDICT_UNDECIDED", "Decision",
            "FileRef", "HashReport", "Item", "Judgement", "Verdict", "build_items", "decide", "dismiss", "hash_files",
            "hash_job", "item_key", "judge", "restore", "split_shown"]
