@@ -114,3 +114,36 @@ def test_a_held_lock_makes_the_second_opener_wait_then_see_the_finished_schema(t
         order.append("first done")
     t.join(30)
     assert order == ["first done", "second opened"]
+
+
+def test_an_up_to_date_database_opens_without_the_init_lock(tmp_path, monkeypatch):
+    """Only creating / migrating takes the lock: an ordinary open of a current database (every subprocess-pool job
+    opens its own store) does not touch it - on Windows CI such jobs met the lock (2026-10-25)."""
+    path = tmp_path / "mangalist.db"
+    store.Store(path, import_legacy=False).ensure_initialized()          # created and migrated: the locked path
+
+    def no_lock(*a, **k):
+        raise AssertionError("the init lock was taken for a current database")
+
+    monkeypatch.setattr(db_mod, "init_file_lock", no_lock)
+    again = store.Store(path, import_legacy=False)
+    again.ensure_initialized()
+    assert again.schema_version() == SCHEMA_VERSION
+
+
+def test_an_older_database_still_migrates_under_the_lock(tmp_path, monkeypatch):
+    import sqlite3
+
+    path = tmp_path / "mangalist.db"
+    store.Store(path, import_legacy=False).ensure_initialized()
+    con = sqlite3.connect(path)
+    con.execute(f"PRAGMA user_version={SCHEMA_VERSION - 1}")
+    con.commit()
+    con.close()
+    taken = []
+    original = db_mod.init_file_lock
+    monkeypatch.setattr(db_mod, "init_file_lock", lambda p, *a, **k: taken.append(p) or original(p, *a, **k))
+    monkeypatch.setattr(db_mod.StoreBase, "_migrate", staticmethod(lambda con: con.execute(
+        f"PRAGMA user_version={SCHEMA_VERSION}")))
+    store.Store(path, import_legacy=False).ensure_initialized()
+    assert taken == [path]

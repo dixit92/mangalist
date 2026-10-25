@@ -62,6 +62,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -85,6 +86,10 @@ from ..downloads.contracts import (
 )
 from .db import utcnow
 from .units import exact_number
+
+#: One read-modify-write of the extension host setting at a time in this process (a background host check learns
+#: its downloads folder while the window saves the form).
+_HOST_SETTING_LOCK = threading.RLock()
 
 #: The tool of the volumes MVP's records (kept: other modules import it).
 TOOL = TOOL_QBITTORRENT
@@ -790,6 +795,10 @@ class SuwayomiSettings:
                                    if isinstance(repos, list) else None)
 
     def save_extension_host(self, config: ExtensionHostConfig) -> None:
+        with _HOST_SETTING_LOCK:
+            self._save_extension_host(config)
+
+    def _save_extension_host(self, config: ExtensionHostConfig) -> None:
         data = {
             "url": (config.url or "").strip() or DEFAULT_EXTENSION_HOST_URL,
             "download_dir": (config.download_dir or "").strip(), "downloads_path": (config.downloads_path or "").strip(),
@@ -812,9 +821,10 @@ class SuwayomiSettings:
     def learn_downloads_path(self, path: str) -> None:
         """Keep the host's own downloads folder (its ``/compat/settings`` answer, or what the container started it with)."""
         path = (path or "").strip()
-        config = self.extension_host()
-        if path and path != config.downloads_path:
-            self.save_extension_host(replace(config, downloads_path=path))
+        with _HOST_SETTING_LOCK:            # read and write as one: a save from the window in between was lost (CI)
+            config = self.extension_host()
+            if path and path != config.downloads_path:
+                self._save_extension_host(replace(config, downloads_path=path))
 
     def connection(self) -> Optional[SuwayomiConnection]:
         """The stored connection (with its password, for the client only), or None when none is set up. With the

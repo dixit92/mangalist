@@ -136,17 +136,36 @@ class StoreBase:
             self._initializing = True
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                with init_file_lock(self.path):     # one process creates / migrates; the others wait, then see it done
-                    con = self._raw_connect()
-                    try:
-                        con.execute("PRAGMA journal_mode=WAL")
-                        self._migrate(con)
-                    finally:
-                        con.close()
+                if self._schema_is_current():
+                    # Nothing to create or migrate: no lock. Every ordinary open takes this path - the subprocess
+                    # pool's jobs too, which on Windows otherwise met the lock of another process (CI, 2026-10-25).
                     self._after_init()
+                else:
+                    with init_file_lock(self.path):     # one process creates / migrates; the others wait, then see it
+                        con = self._raw_connect()
+                        try:
+                            con.execute("PRAGMA journal_mode=WAL")
+                            self._migrate(con)
+                        finally:
+                            con.close()
+                        self._after_init()
                 self._ready = True
             finally:
                 self._initializing = False
+
+    def _schema_is_current(self) -> bool:
+        """True when the file exists and its schema is this build's (or newer): opening it then needs no migration and
+        so no init lock. Any doubt (missing, unreadable, older) takes the locked path."""
+        if not self.path.exists():
+            return False
+        try:
+            con = self._raw_connect()
+            try:
+                return int(con.execute("PRAGMA user_version").fetchone()[0]) >= SCHEMA_VERSION
+            finally:
+                con.close()
+        except sqlite3.Error:
+            return False
 
     def _after_init(self) -> None:
         """Hook run once after the schema is current (imports of older files)."""

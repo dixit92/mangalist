@@ -43,3 +43,38 @@ def test_the_backend_dismisses_failed_records_of_every_tool_and_leaves_the_rest(
     assert Backend(db).dismiss_downloads([torrent, chapter, running]) == 2
     ledger = DownloadLedger(db, tool=None)
     assert [ledger.get(i).status for i in (torrent, chapter, running)] == [S.CANCELLED, S.CANCELLED, S.SENT]
+
+
+def test_a_learned_downloads_folder_never_undoes_a_save_made_meanwhile(db):
+    """The host check learns the host's downloads folder (read, change one field, write) while the window may save
+    the form: the two are one at a time, so the window's save is never written over (Windows CI, 2026-10-25)."""
+    import threading
+
+    from dataclasses import replace
+
+    from mangalist.store.downloads import SuwayomiSettings
+
+    settings = SuwayomiSettings(db)
+
+    settings.save_extension_host(replace(settings.extension_host(), host_downloads="/data/old"))
+    original = settings.extension_host
+    reading, saved = threading.Event(), threading.Event()
+
+    def slow_read():
+        config = original()
+        if threading.current_thread().name == "learner":
+            reading.set()
+            saved.wait(0.5)                 # the window's save tries to land between the read and the write
+        return config
+
+    settings.extension_host = slow_read
+    learner = threading.Thread(target=lambda: settings.learn_downloads_path("/host/downloads"), name="learner")
+    learner.start()
+    reading.wait(5)
+    saver = threading.Thread(target=lambda: (settings.save_extension_host(
+        replace(original(), host_downloads="")), saved.set()))
+    saver.start()
+    learner.join(5)
+    saver.join(5)
+    final = original()
+    assert final.host_downloads == "" and final.downloads_path == "/host/downloads"
