@@ -972,7 +972,8 @@ class ReleasesPanel(QWidget):
         self._packs.pop(key, None)
         self._pack_failed.pop(key, None)
         self._refill(key)
-        if self.selected_candidate() is not None and self.selected_candidate().info_hash == key and self._can_inspect():
+        if (self._chosen[key] and self.selected_candidate() is not None and self.selected_candidate().info_hash == key
+                and self._can_inspect()):
             self._pack_timer.start(PACK_DELAY_MS)
         self._show_pack()
         self._update_other_line()
@@ -1134,10 +1135,12 @@ class ReleasesPanel(QWidget):
         if existing is not None:
             where = "queued" if existing.status == DownloadStatus.QUEUED else "in qBittorrent"
             return f"This release is already {where} ({download_chip(existing)[0]}); it is not added twice."
+        if self.is_other(candidate) and not self.chosen_volumes(candidate):
+            return "Choose at least one volume of this release to download."
         if self._partial_on and self.pack_state() in ("waiting", "reading"):
             return "Reading the release's file list... (or untick the box to send the whole pack)"
         if self.is_other(candidate):
-            return None if self.chosen_volumes(candidate) else "Choose at least one volume of this release to download."
+            return None
         if not wanted_volumes_for(candidate, self.target.missing):
             if candidate.vol_from is None:
                 return "The title does not say which volumes this release holds, and the missing volumes are not known."
@@ -1187,6 +1190,8 @@ class ReleasesPanel(QWidget):
         candidate = self.selected_candidate()
         if candidate is None or self.target is None or not self._can_inspect():
             return "none"
+        if self.is_other(candidate) and not self.chosen_volumes(candidate):
+            return "none"                                   # nothing chosen: no file list to read
         sel = self._packs.get(candidate.info_hash)
         if sel is None:
             if candidate.info_hash in self._pack_failed:
