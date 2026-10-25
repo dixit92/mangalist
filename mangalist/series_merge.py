@@ -79,6 +79,7 @@ from .library_move import (
     _under,
 )
 from .duplicates import DiscardRefused, delete_checked, file_as_listed, human_size, other_numbers, stated_unit
+from .store.discards import record_discard
 from .store.journal import ACROSS_FILESYSTEMS, Journal, PlanStateError, StepRefused
 from .store.lock import LOCK_NAME, LockError
 from .store.names import windows_name_problem
@@ -367,30 +368,37 @@ def _match_refusal(db, merged_id: int, kept_id: int) -> Optional[str]:
     return merge_refusal([sides[0][1], sides[1][1]])
 
 
-def confirm_text(check: MergeCheck) -> Tuple[str, str, str]:
-    """(window title, text, the Merge button's label) of the confirmation."""
+@dataclass(frozen=True)
+class ConfirmParts:
+    """The confirmation in two parts: *summary* is short and its length does not depend on how many files there are
+    (counts, the deletion, what happens to the folders); *details* lists every file and may be long, so the window
+    shows it in a scrollable area."""
+
+    title: str
+    summary: str
+    details: str
+    label: str                          # the Merge button's label
+
+
+def confirm_parts(check: MergeCheck) -> ConfirmParts:
+    """The confirmation of the merge: a short summary that always fits a screen (the deletions are stated in it) and
+    the full lists of files for a scroll box (owner, 2026-10-24: with 27 files the dialog grew taller than the screen
+    and its buttons were off-screen)."""
     n, d = len(check.moves), len(check.identical)
     renamed = dict((new, old) for old, new in check.suffixed)
     plain = [src for src, dst in check.moves if os.path.basename(dst) not in renamed]
     lines = [f"Merge {check.merged_where}", f"into {check.kept_where}?", ""]
     if plain:
-        lines.append(f"Moved in under their own names ({_items(len(plain))}):")
-        lines += [f"    {os.path.basename(src)}" for src in plain[:12]]
-        if len(plain) > 12:
-            lines.append(f"    ... and {len(plain) - 12} more")
+        lines.append(f"{_items(len(plain))} move in under their own names.")
     if check.suffixed:
-        lines += ["", f"Moved in under a new name - the folder kept has a different file of that name; the duplicate "
-                      f"review then lists both ({_items(len(check.suffixed))}):"]
-        lines += [f"    {old}  ->  {new}" for old, new in check.suffixed[:12]]
-        if len(check.suffixed) > 12:
-            lines.append(f"    ... and {len(check.suffixed) - 12} more")
+        lines.append(f"{_items(len(check.suffixed))} move in under a new name - the folder kept has a different file of "
+                     "that name; the duplicate review then lists both.")
     if d:
-        lines += ["", f"{d} identical cop{'y' if d == 1 else 'ies'} will be DELETED - byte for byte the same as the "
-                      "file of that name in the folder kept. Deleted for good: Undo cannot bring "
-                      f"{'it' if d == 1 else 'them'} back."]
-        lines += [f"    {c.name}  ({human_size(c.size)})" for c in check.identical[:12]]
-        if d > 12:
-            lines.append(f"    ... and {d - 12} more")
+        lines.append(f"{d} identical cop{'y' if d == 1 else 'ies'} will be DELETED - byte for byte the same as the "
+                     "file of that name in the folder kept. Deleted for good: Undo cannot bring "
+                     f"{'it' if d == 1 else 'them'} back.")
+    if check.left:
+        lines.append(f"{_items(len(check.left))} stay where they are.")
     lines += ["", "Nothing is copied or replaced. The folder kept keeps its MangaUpdates link, settings and download "
                   "history; once the other folder is empty it is removed and its series joins the one kept. Then the "
                   "duplicate files of the kept folder are listed for you to review."
@@ -398,15 +406,31 @@ def confirm_text(check: MergeCheck) -> Tuple[str, str, str]:
     if check.across and n:
         lines += ["", "The two folders are in different library folders: if the system refuses to move files between "
                       "them, MangaList says so and you move them by hand."]
+    sections: List[List[str]] = []
+    if plain:
+        sections.append([f"Moved in under their own names ({_items(len(plain))}):"]
+                        + [f"    {os.path.basename(src)}" for src in plain])
+    if check.suffixed:
+        sections.append([f"Moved in under a new name ({_items(len(check.suffixed))}):"]
+                        + [f"    {old}  ->  {new}" for old, new in check.suffixed])
+    if d:
+        sections.append([f"Identical copies that will be DELETED, for good ({d}):"]
+                        + [f"    {c.name}  ({human_size(c.size)})" for c in check.identical])
     if check.left:
-        lines += ["", "Left where they are:"] + [f"    {name} - {why}" for name, why in check.left[:12]]
-        if len(check.left) > 12:
-            lines.append(f"    ... and {len(check.left) - 12} more")
+        sections.append([f"Left where they are ({_items(len(check.left))}):"]
+                        + [f"    {name} - {why}" for name, why in check.left])
     if n:
         label = f"Merge {_items(n)}" + (f" and delete {d}" if d else "")
     else:
         label = f"Delete {d} identical cop{'y' if d == 1 else 'ies'}"
-    return "Merge into this folder?", "\n".join(lines), label
+    details = "\n\n".join("\n".join(sec) for sec in sections)
+    return ConfirmParts("Merge into this folder?", "\n".join(lines), details, label)
+
+
+def confirm_text(check: MergeCheck) -> Tuple[str, str, str]:
+    """(window title, the whole text, the Merge button's label) of the confirmation - summary and details in one."""
+    parts = confirm_parts(check)
+    return parts.title, parts.summary + (f"\n\n{parts.details}" if parts.details else ""), parts.label
 
 
 # --- merging -----------------------------------------------------------------------------------------------------
@@ -473,7 +497,7 @@ def merge_folders(db, check: MergeCheck, *, journal: Optional[Journal] = None,
                     res.moved = [(s.src, s.dst) for s in plan.steps if s.state == "done"]
                 identity = None
                 if plan is None or plan.status == "applied":
-                    _delete_identical(check, [r.path for r in roots.values()], res)
+                    _delete_identical(check, [r.path for r in roots.values()], res, db)
                     res.removed = _remove_if_empty(check.merged_folder)
                     if res.removed:
                         identity = _fold_series(db, check.merged_series_id, check.kept_series_id)
@@ -517,7 +541,7 @@ def merge_folders(db, check: MergeCheck, *, journal: Optional[Journal] = None,
     return res
 
 
-def _delete_identical(check: MergeCheck, root_dirs: List[str], res: MergeResult) -> None:
+def _delete_identical(check: MergeCheck, root_dirs: List[str], res: MergeResult, db=None) -> None:
     """Delete the byte-identical copies the owner confirmed - each through :func:`delete_checked` (as listed), and only
     while the kept copy is still there as compared. The caller holds the roots' locks."""
     for c in check.identical:
@@ -531,6 +555,8 @@ def _delete_identical(check: MergeCheck, root_dirs: List[str], res: MergeResult)
             _log.warning("Merge: identical copy not deleted: %s (%s)", c.path, exc)
             continue
         res.deleted.append(c.name)
+        if db is not None:
+            record_discard(db, c.path)      # the owner confirmed it: a torrent that filed it is not kept for it
         _log.info("Merge: deleted %s (%d bytes, modified %s) - byte-identical to %s", c.path, c.size, c.modified,
                   c.kept_path)
 
@@ -743,4 +769,5 @@ def undo_merge(db, plan_id: int, *, journal: Optional[Journal] = None, scan_wait
 
 
 __all__ = ["MERGE_REASON", "UNDO_HINT", "EXDEV_TEXT", "REFUSED_TEXT", "Identical", "MergeCheck", "MergeResult",
-           "MergeRecord", "same_content", "suffixed_name", "check_merge", "confirm_text", "merge_folders", "last_merge", "undo_merge", "refusal_text"]
+           "MergeRecord", "ConfirmParts", "same_content", "suffixed_name", "check_merge", "confirm_parts", "confirm_text",
+           "merge_folders", "last_merge", "undo_merge", "refusal_text"]

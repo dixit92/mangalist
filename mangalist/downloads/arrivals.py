@@ -167,6 +167,7 @@ class _Pass:
         self.journal = journal if journal is not None else Journal(self.db)
         self.remove = ledger.remove_completed() if remove_completed is None else bool(remove_completed)
         self._moves = None                  # the journal's applied moves, read once per pass (see _current_path)
+        self._discards = None               # the deliberate deletions, read once per pass (see _discarded)
         self.should_stop = should_stop
         self.report = ArrivalsReport()
 
@@ -553,6 +554,8 @@ class _Pass:
             if size is None:
                 if self._held(s.dst, plan_id):
                     continue        # an upgrade replaced it (the owner's choice): the torrent's copy is not needed
+                if self._discarded(s.dst, plan_id):
+                    continue        # the owner discarded it in Duplicates (or the merge's identical copy): same
                 return f"{name} is no longer in the library"
             if size != s.src_size:
                 return f"{name} in the library is not the filed size"
@@ -568,6 +571,15 @@ class _Pass:
     def _held(self, path: str, after_plan: int) -> bool:
         """Whether the file filed at *path* was later replaced by an upgrade (held, perhaps since emptied)."""
         return self._follower().held(path, after_plan)
+
+    def _discarded(self, path: str, after_plan: int) -> bool:
+        """Whether the file filed at *path* was deleted on purpose by the owner (Duplicates > Discard, a merge's
+        identical copy) - recorded in :mod:`mangalist.store.discards`, since a delete is not a journal step."""
+        if self._discards is None:
+            from ..store.discards import list_discards
+
+            self._discards = list_discards(self.db)
+        return bool(self._discards) and self._follower().discarded(path, after_plan, self._discards)
 
     def _follower(self):
         if self._moves is None:

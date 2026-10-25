@@ -68,6 +68,7 @@ from .. import series_merge
 from ..same_series import FranchiseSplit, SamePair, SameSeriesReport, SeriesCopy, find_same_series
 from . import theme
 from .background import BackgroundCall, start_call
+from .confirm_details import ask_with_details
 from .links import open_folder as open_folder_default, open_link
 from .palette import Palette, current
 from .shell import DuplicateFile, DuplicateGroup, DuplicateSeries
@@ -1058,8 +1059,8 @@ def _same_series_of(db) -> Tuple[Optional[SameSeriesReport], Optional[series_mer
 
 
 def _ask_merge(parent: QWidget, check: series_merge.MergeCheck) -> bool:
-    title, text, label = series_merge.confirm_text(check)
-    return _ask(parent, title, text, label)
+    parts = series_merge.confirm_parts(check)
+    return ask_with_details(parent, parts.title, parts.summary, parts.details, parts.label)
 
 
 def _ask_undo(parent: QWidget, record: series_merge.MergeRecord) -> bool:

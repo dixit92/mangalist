@@ -1118,6 +1118,18 @@ class MoveFollower:
         """*path* followed through the moves applied by plans after *after_plan*, each once, in plan and step order."""
         return self._follow(path, after_plan)[0]
 
+    def discarded(self, path: str, after_plan: int, discards) -> bool:
+        """Whether the file filed at *path* was deleted on purpose (a Duplicates discard, a merge's identical copy; see
+        :mod:`mangalist.store.discards`): *path* followed through the moves after *after_plan* **up to the plan current
+        when a discard was noted** is that discard's path. Moves made after the discard (a folder renamed since) are
+        not followed - the file was gone by then."""
+        for d in discards:
+            if d.plan < after_plan:
+                continue            # deleted before this filing existed: not this file
+            if _key(self._follow(path, after_plan, until_plan=d.plan)[0]) == _key(d.path):
+                return True
+        return False
+
     def held(self, path: str, after_plan: int) -> bool:
         """Whether the file at *path* (followed through the moves after *after_plan*) was then taken out of the library
         into a holding folder by a ``hold`` step: an upgrade replaced it with a better copy - the owner's choice - and
@@ -1125,7 +1137,7 @@ class MoveFollower:
         that way was never removed from qBittorrent)."""
         return self._follow(path, after_plan)[2]
 
-    def _follow(self, path: str, after_plan: int) -> Tuple[str, Tuple[int, float], bool]:
+    def _follow(self, path: str, after_plan: int, until_plan: Optional[int] = None) -> Tuple[str, Tuple[int, float], bool]:
         """(where *path* is now, the place of the last move that took it there, whether a hold then took it out of the
         library). A hold ends the trail: a folder renamed after it no longer carries the file (owner's Alya volume 3:
         held on 10-13, its series folder renamed to the scheme on 10-17)."""
@@ -1135,11 +1147,14 @@ class MoveFollower:
         while (_key(current), since) not in seen:
             seen.add((_key(current), since))
             key = _key(current)
-            later = [(place, dst) for place, dst in moves.get(key, ()) if place > since]
+            def usable(place) -> bool:
+                return place > since and (until_plan is None or place[0] <= until_plan)
+
+            later = [(place, dst) for place, dst in moves.get(key, ()) if usable(place)]
             later += [(place, dst + _norm(current)[len(src):]) for place, src, dst in self._folders
-                      if place > since and key.startswith(src.rstrip(os.sep) + os.sep)
+                      if usable(place) and key.startswith(src.rstrip(os.sep) + os.sep)
                       and len(_norm(current)) == len(key)]
-            hold = min((place for place in self._holds.get(key, ()) if place > since), default=None)
+            hold = min((place for place in self._holds.get(key, ()) if usable(place)), default=None)
             if hold is not None and (not later or hold < min(later)[0]):
                 return current, hold, True
             if not later:

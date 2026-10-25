@@ -153,6 +153,12 @@ class ChaptersPanel(QWidget):
         self.btn_series.setVisible(False)
         head.addWidget(self.btn_series)
         outer.addLayout(head)
+        # the scheduled chapter check could not read this series' source for several checks in a row (2026-10-24)
+        self.check_warning = label("", wrap=True, selectable=True)
+        self.check_warning.setObjectName("chapterCheckWarning")
+        set_tone(self.check_warning, "warn")
+        self.check_warning.setVisible(False)
+        outer.addWidget(self.check_warning)
 
         self.folder_row = QWidget()
         fr = QVBoxLayout(self.folder_row)
@@ -285,6 +291,11 @@ class ChaptersPanel(QWidget):
             self.show_lookup(cached)
             return
         self._look_up()
+
+    def set_warning(self, text: str) -> None:
+        """The line under the header saying the scheduled check keeps failing to read this series ("" hides it)."""
+        self.check_warning.setText(text or "")
+        self.check_warning.setVisible(bool(text))
 
     def look_up_again(self) -> None:
         if self._series_id is not None and not self._busy:

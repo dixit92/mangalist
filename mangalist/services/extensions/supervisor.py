@@ -30,7 +30,8 @@ The MangaList transition fixes (2026-10-24):
   Test connection, Carry over / back: :mod:`.on_demand`, until 30 minutes after the last use) and while a chapter
   download of the host is still on its way or filed with its copy not yet deleted (audit C2: it is finished with the
   host whichever program is chosen).
-- **The downloads folder** (audit B6): ``MANGALIST_EXTENSION_DOWNLOADS`` names it (the image: a folder on the ``/data``
+- **The downloads folder** (audit B6; Settings field 2026-10-24): Settings > Built-in extensions > Edit > **Host
+  downloads folder** wins when set; else ``MANGALIST_EXTENSION_DOWNLOADS`` names it (the image: a folder on the ``/data``
   share, next to Suwayomi's old one, so a finished chapter is hard-linked into the library instead of copied across
   filesystems); it is used when it or its parent folder exists (MangaList never makes a share-level folder), else
   ``<data>/extension-host/downloads``. A move waits until the old folder holds no chapter (one still to be filed, or
@@ -86,18 +87,27 @@ def switch(env: Optional[Mapping[str, str]] = None) -> str:
     return "on" if value in _TRUE else "off" if value in _FALSE else "auto"
 
 
-def downloads_folder(data_dir: Path, env: Optional[Mapping[str, str]] = None) -> Path:
-    """Where the host should download chapters: ``MANGALIST_EXTENSION_DOWNLOADS`` when that folder or its parent exists
-    (the image names one on the ``/data`` share: hard links into the library work from there - audit B6), else
-    ``<data>/extension-host/downloads``."""
+def usable_folder(text: str) -> Optional[Path]:
+    """*text* as the downloads folder when it or its parent folder exists (MangaList never makes a share-level folder),
+    else None."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    return path if path.is_dir() or path.parent.is_dir() else None
+
+
+def downloads_folder(data_dir: Path, env: Optional[Mapping[str, str]] = None, configured: str = "") -> Path:
+    """Where the host should download chapters. In this order (owner-approved 2026-10-24):
+
+    1. *configured* - Settings > Built-in extensions > Edit > Host downloads folder - when that folder or its parent
+       exists;
+    2. ``MANGALIST_EXTENSION_DOWNLOADS`` (the image names one on the ``/data`` share: hard links into the library work
+       from there - audit B6), on the same condition;
+    3. ``<data>/extension-host/downloads``."""
     env = os.environ if env is None else env
-    default = Path(data_dir) / DATA_NAME / "downloads"
-    wanted = (env.get(ENV_DOWNLOADS) or "").strip()
-    if wanted:
-        path = Path(wanted)
-        if path.is_dir() or path.parent.is_dir():
-            return path
-    return default
+    return (usable_folder(configured) or usable_folder(env.get(ENV_DOWNLOADS) or "")
+            or Path(data_dir) / DATA_NAME / "downloads")
 
 
 def has_chapters(folder: Optional[str]) -> bool:
@@ -121,7 +131,7 @@ def host_command(config, data_dir: Path, *, env: Optional[Mapping[str, str]] = N
     host_dir = Path(data_dir) / DATA_NAME
     port = urlsplit(config.url).port or 4570
     webview = config.webview and env.get(ENV_WEBVIEW, "1").strip().lower() not in _FALSE
-    downloads = downloads if downloads is not None else downloads_folder(data_dir, env)
+    downloads = downloads if downloads is not None else downloads_folder(data_dir, env, config.host_downloads)
     cmd: List[str] = [binary or env.get(ENV_BIN, DEFAULT_BIN), "--data", str(host_dir), "--bind", "127.0.0.1",
                       "--port", str(port), "--downloads", str(downloads),
                       "--webview", "on" if webview else "off"]
@@ -171,7 +181,10 @@ def wanted(data_dir: Path, *, env: Optional[Mapping[str, str]] = None, open_sett
             why = f"Suwayomi is chosen, but {on_way} chapter download(s) of the host are still to be finished"
         else:
             return Wanted(False, why="chapter downloads go through Suwayomi")
-    downloads = downloads_folder(data_dir, env)
+    downloads = downloads_folder(data_dir, env, config.host_downloads)
+    if config.host_downloads and usable_folder(config.host_downloads) is None:
+        why += (f"; the Host downloads folder in Settings ({config.host_downloads}) and its parent folder do not exist - "
+                f"using {downloads}")
     old = config.downloads_path
     if old and Path(old) != downloads and has_chapters(old):
         why += f"; the downloads folder moves to {downloads} once the chapters in {old} are filed"

@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, replace
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
 
 from ..gui.downloads_backend import BackendError, ExtensionHostCheck
@@ -185,6 +186,9 @@ class ExtensionsBackendMixin:
             url = normalize_host_url(config.url)
         except ValueError as exc:
             raise BackendError(str(exc)) from None
+        folder = (config.host_downloads or "").strip()
+        if folder and not (PurePosixPath(folder).is_absolute() or PureWindowsPath(folder).is_absolute()):
+            raise BackendError("the Host downloads folder must be a full path (it starts with / or a drive letter)")
         for name, value in (("FlareSolverr", config.flaresolverr_url),):
             if value and not re.match(r"^https?://", value.strip(), re.I):
                 raise BackendError(f"the {name} address must start with http:// or https://")

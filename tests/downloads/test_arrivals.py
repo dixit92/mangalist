@@ -545,3 +545,73 @@ def test_a_held_volume_whose_series_folder_was_renamed_later_still_lets_the_torr
     report = run_arrivals(qbt, ledger)
     assert report.removed == [sent.id] and status(ledger, sent) == S.REMOVED
     assert (folder / "Series A v02 (Digital).cbz").read_bytes() == PACK["Series A v02 (Digital).cbz"]
+
+
+# --- a filed volume the owner discarded in Duplicates (owner, 2026-10-24, backlog bug: the delete is not a journal
+# step, so the removal check took the discard for a lost file and kept the torrent, logging "... is no longer in the
+# library" every hour) ------------------------------------------------------------------------------------------------
+
+def _discard(ledger, sdir, name="Series A v03 (Digital).cbz"):
+    """Discard *name* in Duplicates' way: a second copy of the same number is kept, the filed one is deleted."""
+    from mangalist.duplicates import discard_duplicates, file_as_listed
+    from mangalist.gui.shell import DuplicateFile, DuplicateGroup
+
+    other = sdir / "Series A v03 (Better).cbz"
+    other.write_bytes(data("better v03", 9500))
+    files = []
+    for path in (sdir / name, other):
+        size, modified = file_as_listed(str(path))
+        files.append(DuplicateFile(str(path), size, modified))
+    group = DuplicateGroup(None, str(sdir), "Series A", "volume", "3", tuple(files))
+    out = discard_duplicates(ledger.store, [(group, [str(sdir / name)])])
+    assert [o.deleted for o in out] == [True] and not (sdir / name).exists()
+
+
+def test_a_filed_volume_discarded_in_duplicates_lets_the_torrent_go(ledger, sent, qbt, series):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.FILED
+    _discard(ledger, sdir)
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [sent.id] and status(ledger, sent) == S.REMOVED
+    assert (sdir / "Series A v02 (Digital).cbz").read_bytes() == PACK["Series A v02 (Digital).cbz"]   # the rest stays
+    assert (sdir / "Series A v03 (Better).cbz").exists()
+
+
+def test_a_discard_followed_by_a_folder_rename_still_lets_the_torrent_go(ledger, sent, qbt, series):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    _discard(ledger, sdir)
+    journal = Journal(ledger.store)
+    folder = sdir.parent / "Series A [Renamed]"
+    plan = journal.plan("rename to the scheme", [(str(sdir), str(folder))], root_path=str(sdir.parent))
+    journal.apply(plan.id)
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [sent.id] and status(ledger, sent) == S.REMOVED
+
+
+def test_a_discard_of_another_file_does_not_excuse_a_file_that_is_really_gone(ledger, sent, qbt, series):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    _discard(ledger, sdir, "Series A v02 (Digital).cbz")            # v02 was discarded on purpose ...
+    (sdir / "Series A v03 (Digital).cbz").unlink()                  # ... v03 simply vanished
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [] and status(ledger, sent) == S.FILED and qbt.deleted == []
+    assert "Series A v03 (Digital).cbz is no longer in the library" in ledger.get(sent.id).error
+
+
+def test_a_file_replaced_after_a_discard_is_checked_again(ledger, sent, qbt, series):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    run_arrivals(qbt, ledger)
+    _discard(ledger, sdir)
+    (sdir / "Series A v03 (Digital).cbz").write_bytes(b"something else")   # a different file at the same place
+    qbt.set(HASH, state="stoppedUP")
+    report = run_arrivals(qbt, ledger)
+    assert report.removed == [] and "not the filed size" in ledger.get(sent.id).error
