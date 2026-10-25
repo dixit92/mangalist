@@ -128,7 +128,8 @@ parts (`38` and `38.1`, `38.2`), and the source lists both, the checks and the f
 the series holds: a series held in parts gets the parts, and the whole chapter only as a stand-in when the source's
 parts do not start at `.1` (`38` with `38.2`: the whole stands in for the missing `38.1`); a series held in whole
 chapters gets the whole chapter, never its parts. A part that turns up later (`38.1` after `38.2` was filed) is fetched
-too. The chapters panel shows the other form unticked, with the reason.
+too - but never `38.1` while the files `38` and `38.2` are held: the file `38` is part 1 there. The chapters panel shows
+the other form unticked, with the reason.
 
 **Chapters without Suwayomi: the built-in extensions (since 2026.10.56).** Chapter downloads go through Suwayomi by
 default; you can choose MangaList's own extension host instead: a small Java program shipped in the image
@@ -274,8 +275,13 @@ soon as it has been read. Settings > Library shows which MangaPixer library each
 The List tab's **Duplicates** chip shows series held in more than one folder (to look at; nothing changes) and
 duplicate files: the same chapter or volume number in two files of one folder, by MangaPixer's rule. A section of
 its own, **Whole chapters with parts**, with its own count (not in the Duplicates chip), lists a whole chapter held next
-to its parts (`38` with `38.2`: the whole stands in for the missing `38.1`, keep both; `38` with `38.1`, `38.2`: the
-whole may be redundant); its files are all kept unless you discard one. Mark each
+to its parts (`38` with `38.1`, `38.2`: the whole may be redundant; `38` with only `38.2` is a plain split - the file
+`38` is part 1 - and is not listed). MangaList reads the pages of these files in the background (once per file; an
+unchanged file is never read again) and says on each card what they show, with the evidence: the same pages (one form
+can go - the form the series does not hold is marked Discard), a copy (`38.1` is `38` again), or the wrong chapter (the
+file `14` holds chapter 13's pages). Different chapters that only look like parts (a side story numbered `81.1`,
+`81.2`) are hidden, and **Dismiss** hides a card you judged fine until one of its files changes; **Show hidden** lists
+them, with **Restore**. RAR / 7z archives are not read: their cards stay as before. Mark each
 file **Keep** or **Discard** (by default the newest is kept), then **Apply**: MangaList lists every file it is
 about to delete and deletes them only after you confirm. There is no holding folder - the files are gone - and at
 least one copy of each number always stays. Each series also has its own **Apply for this series**, and right-clicking

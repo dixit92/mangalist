@@ -40,7 +40,8 @@ def test_a_schema_7_database_upgrades_and_keeps_everything_else(tmp_path):
     assert st.schema_version() == schema.SCHEMA_VERSION >= 8
     with st.connect() as c:
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert tables - {"english_titles"} == tables_before      # schema 9 adds the English titles cache only
+        # schema 9 adds the English titles cache, schema 11 the page-hash cache and the dismissed overlaps
+        assert tables - {"english_titles", "page_hashes", "overlap_dismissals"} == tables_before
         assert _columns(c, "roots") == roots_before | {"auto_mode"}
         assert c.execute("SELECT auto_mode FROM roots").fetchone()[0] is None      # existing libraries: the default
     root = st.list_roots()[0]

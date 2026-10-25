@@ -122,8 +122,10 @@ def test_the_last_copy_of_a_number_cannot_be_discarded(views, pair):
 
 def test_a_whole_chapter_with_its_parts_has_its_own_section_count_and_everything_kept(views, lib):
     # owner, 2026-10-18: "Duplicates: flag overlaps", then "Own section, own count" - nothing of it is discarded unless
-    # the owner says so, and the Duplicates chip (groups_found) still counts numbers held twice only
-    paths = [lib.add(S, f"Series c{n}.cbz", mtime_ns=T0 + i) for i, n in enumerate(("037.1", "037.2", "038", "038.2"))]
+    # the owner says so, and the Duplicates chip (groups_found) still counts numbers held twice only; owner,
+    # 2026-10-24: "Rule fixes" - the plain split 40 + 40.2 (the file 40 is part 1) is not listed, only counted as hidden
+    names = ("037.1", "037.2", "038", "038.1", "038.2", "040", "040.2")
+    paths = [lib.add(S, f"Series c{n}.cbz", mtime_ns=T0 + i) for i, n in enumerate(names)]
     lib.add(S, "Series c001.cbz")
     lib.add(S, "Series c001 [2].cbz")
     lib.scan()
@@ -132,12 +134,16 @@ def test_a_whole_chapter_with_its_parts_has_its_own_section_count_and_everything
     view.groups_found.connect(seen.append)
     view.refresh()
     wait_until(views.qapp, lambda: seen)
-    assert seen == [1] and len(view.file_groups) == 1 and len(view.whole_and_parts) == 1
+    assert seen == [1] and len(view.file_groups) == 1 and [g.number for g in view.whole_and_parts] == ["38"]
+    assert [g.number for g in view.hidden_whole_and_parts] == ["40"]
     assert "DUPLICATE FILES WITHIN A SERIES  ·  1 number in 1 series" in texts(view)
     assert "WHOLE CHAPTERS WITH PARTS  ·  1 chapter in 1 series" in texts(view)
     shown = " ".join(texts(view))
     assert "Chapter 38  ·  whole and parts" in shown and "whole chapter" in shown
-    assert "the whole chapter 38 stands in for the missing part 38.1 - keep both" in shown
+    assert "part 38.1 is held too, so the whole chapter 38 may be redundant" in shown
+    assert "Hidden: 1 plain split (the whole is part 1)." in shown and "Chapter 40" not in shown
+    # the files are no zip archives: the pages cannot be compared, so the rule's note stays and says why
+    assert "Pages: ch 38 cannot be read (not a zip archive); ch 38.1 cannot be read (not a zip archive)" in shown
     assert str(paths[2]) not in view.discarded_paths() and len(view.discarded_paths()) == 1    # only the c001 copy
     assert view.set_discard(str(paths[2]), True) is True                 # the owner may still discard one
     assert str(paths[2]) in view.discarded_paths()

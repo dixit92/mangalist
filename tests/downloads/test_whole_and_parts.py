@@ -146,20 +146,32 @@ def test_never_a_whole_n_together_with_n_1():
 
 # --- late parts ------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("stand_in", [True, False])
-def test_a_late_part_is_offered_after_the_later_chapters_are_held(db, tmp_path, stand_in):
-    held = PARTS_HELD + (("38",) if stand_in else ()) + ("38.2", "39.1")
-    w = make_series(db, tmp_path, held)
+def test_a_late_part_is_offered_after_the_later_chapters_are_held(db, tmp_path):
+    w = make_series(db, tmp_path, PARTS_HELD + ("38.2", "39.1"))
     w.suwayomi.chapter_list = listing(*OWNER_SOURCE, "38.1")
     lookup = newer(w)
     assert lookup.newer_than == "39.1" and lookup.missing == ("38.1",)
     (row,) = lookup.rows
-    held_text = "38, 38.2" if stand_in else "38.2"
-    assert row.note == f"a late part of ch 38 (held: {held_text})" and not row.extra
+    assert row.note == "a late part of ch 38 (held: 38.2)" and not row.extra
+
+
+def test_no_first_part_is_fetched_next_to_a_held_whole_and_its_second_part(db, tmp_path):
+    # owner, 2026-10-24: "Rule fixes" - with the files 38 and 38.2 held, the file 38 IS part 1 (the split model); both
+    # times the late-part rule fetched 38.1 there, it was the group's own re-post of 38 (research lane D)
+    held = PARTS_HELD + ("38", "38.2", "39.1")
+    w = make_series(db, tmp_path, held)
+    w.suwayomi.chapter_list = listing(*OWNER_SOURCE, "38.1")
+    assert newer(w).missing == ()
+    assert late_parts(D("38", "38.1", "38.2"), D(*held), Decimal("39.1")) == {}
+    assert not is_late_part(Decimal("38.1"), D(*held))
+    # a later part is still late next to the whole and 38.2 (38.3 posted after 38.2)
+    assert late_parts(D("38.3"), D(*held), Decimal("39.1")) == {Decimal("38.3"): "a late part of ch 38 (held: 38, 38.2)"}
+    check(db, w, "notify")
+    assert FindingStore(db).list("waiting") == [] and enqueued(w) == []
 
 
 def test_the_scheduled_check_sends_a_late_part_and_keeps_its_finding_until_it_is_held(db, tmp_path):
-    w = make_series(db, tmp_path, PARTS_HELD + ("38", "38.2", "39.1"))
+    w = make_series(db, tmp_path, PARTS_HELD + ("38.2", "39.1"))
     w.suwayomi.chapter_list = listing(*OWNER_SOURCE, "38.1")
     report = check(db, w, "notify")
     (f,) = FindingStore(db).list("waiting")
@@ -170,6 +182,16 @@ def test_the_scheduled_check_sends_a_late_part_and_keeps_its_finding_until_it_is
     scan(db)
     assert cc.still_new(db, w.series_id, f.fills) == ()
     assert retire_filled(db, wanted=[]) == 1
+
+
+def test_a_waiting_first_part_is_no_longer_new_once_the_whole_is_held(db, tmp_path):
+    w = make_series(db, tmp_path, PARTS_HELD + ("38.2", "39.1"))
+    w.suwayomi.chapter_list = listing(*OWNER_SOURCE, "38.1")
+    check(db, w, "notify")
+    (f,) = FindingStore(db).list("waiting")
+    chapter_file(w.folder, "38")                    # the whole 38 filed meanwhile: it is part 1 next to 38.2
+    scan(db)
+    assert cc.still_new(db, w.series_id, f.fills) == ()
 
 
 def test_no_older_whole_chapter_and_no_part_of_an_old_chapter_is_offered(db, tmp_path):
