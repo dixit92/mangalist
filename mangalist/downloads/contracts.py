@@ -77,6 +77,9 @@ class NyaaCandidate:
     covers_held: Tuple[str, ...] = ()     # volumes the owner already holds (labelled, still allowed)
     rank: float = 0.0                     # higher is better
     reasons: Tuple[str, ...] = ()         # short human-readable ranking reasons
+    # An "other release" (owner, 2026-10-24): it fills none of the missing volumes - it holds only volumes already
+    # held (or numbers beyond the series'); listed apart, and sent as a replacement of the owner's copies.
+    other: bool = False
 
     @property
     def magnet(self) -> str:

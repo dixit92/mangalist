@@ -5,6 +5,12 @@ alternatives only while nothing usable has been found (at most ``max_queries`` r
 releases that really are the series (see :mod:`.ranking`), drop 0-seeder results, hide light novels / EPUBs (unless
 asked), drop chapter releases and releases that certainly fill none of the missing volumes (with no missing list:
 that hold only volumes already held), dedupe by info hash, rank best first.
+
+**Other releases** (owner, 2026-10-24: "optionally show downloads even if you don't have missing chapters ... like
+upgrade, where you can replace a collection downloaded over time with an updated collection"): with ``others=True``
+the releases that fill nothing are not dropped but returned AFTER the usable ones, each marked ``other=True`` and
+ranked among themselves. They never count as "usable": the further names are still asked while nothing usable has
+been found, and no request is made for them beyond ``max_queries`` - they are what the same requests returned.
 """
 
 from __future__ import annotations
@@ -12,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from dataclasses import replace
 from typing import Dict, List, Optional, Sequence
 
 from ...downloads.contracts import NyaaCandidate
@@ -48,12 +55,15 @@ class NyaaSearch:
         self.keep_no_coverage = keep_no_coverage
         self.max_queries = max(1, int(max_queries))
 
-    def search(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> List[NyaaCandidate]:
+    def search(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str], *,
+               others: bool = False) -> List[NyaaCandidate]:
+        """The usable releases, best first; with *others*, then the releases that fill nothing (``other=True``)."""
         names = [t for t in titles if t and t.strip()]
         if not names:
             return []
         forms = series_forms(names)
         found: Dict[str, NyaaCandidate] = {}
+        rest: Dict[str, NyaaCandidate] = {}         # the other releases: kept, never "usable"
         asked = set()
         for name in names:
             query = query_text(name)
@@ -64,7 +74,7 @@ class NyaaSearch:
                 break
             asked.add(key)
             for item in self.client.rss(query, self.category):
-                if item.info_hash in found:
+                if item.info_hash in found or item.info_hash in rest:
                     continue
                 parsed = parse_title(item.title)
                 if parsed.chapters_only or item.seeders <= 0 or not matches_series(parsed, forms):
@@ -73,14 +83,17 @@ class NyaaSearch:
                     continue
                 candidate = build_candidate(item, parsed, missing, held)
                 if not self.keep_no_coverage and fills_nothing(candidate, parsed, missing):
+                    if others:
+                        rest[item.info_hash] = replace(candidate, other=True)
                     continue
                 found[item.info_hash] = candidate
             if found and len(asked) >= ALWAYS_ASKED:
                 break
             _log.info("nyaa: nothing usable for %r; trying the next title", query)
-        _log.info("nyaa: %d usable release%s for %d title%s asked", len(found), "" if len(found) == 1 else "s",
-                  len(asked), "" if len(asked) == 1 else "s")
-        return order(found.values())
+        _log.info("nyaa: %d usable release%s for %d title%s asked%s", len(found), "" if len(found) == 1 else "s",
+                  len(asked), "" if len(asked) == 1 else "s",
+                  f"; {len(rest)} other release{'' if len(rest) == 1 else 's'} (fill nothing)" if others else "")
+        return order(found.values()) + (order(rest.values()) if others else [])
 
 
 __all__ = ["DEFAULT_MAX_QUERIES", "NyaaSearch", "query_text"]

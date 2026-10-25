@@ -34,6 +34,7 @@ sends one finding later; the modes, the findings and the last run are quick read
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -102,6 +103,14 @@ from .service import PackSetupError, SendRefused
 _log = logging.getLogger(__name__)
 
 
+def _takes_others(search) -> bool:
+    """Whether *search* can return the other releases (an injected test search may not)."""
+    try:
+        return "others" in inspect.signature(search.search).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 class _UploadsKnownTorrents:
     """A TorrentClient whose ``add`` of a ``.torrent`` link uploads the file instead when the backend has read and
     checked it already (:meth:`Backend.inspect_pack`): qBittorrent then knows the torrent at once, where by link it
@@ -164,6 +173,16 @@ class Backend(ExtensionsBackendMixin):
     # --- nyaa ------------------------------------------------------------------------------------------
 
     def search(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> Sequence[NyaaCandidate]:
+        """The usable releases (the find pass's and the find-volumes dialog's search)."""
+        return self._search_nyaa(titles, missing, held, others=False)
+
+    def search_all(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> Sequence[NyaaCandidate]:
+        """The usable releases, then the other releases (``other=True``: they fill none of the missing volumes) - the
+        releases card's search (owner, 2026-10-24). The same requests as :meth:`search`."""
+        return self._search_nyaa(titles, missing, held, others=True)
+
+    def _search_nyaa(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str], *,
+                     others: bool) -> Sequence[NyaaCandidate]:
         options = load_nyaa_options(self.db)
         if not options.enabled:
             raise BackendError("nyaa is switched off (Settings > Download sources)")
@@ -172,12 +191,18 @@ class Backend(ExtensionsBackendMixin):
             searches = self._searches_for(options)
             try:
                 for search in searches:
-                    for candidate in search.search(titles, missing, held):
-                        found.setdefault(candidate.info_hash, candidate)
+                    got = search.search(titles, missing, held, others=True) if others and _takes_others(search) \
+                        else search.search(titles, missing, held)
+                    for candidate in got:
+                        known = found.get(candidate.info_hash)
+                        if known is None or (known.other and not candidate.other):     # usable in another category
+                            found[candidate.info_hash] = candidate
             except NyaaError as exc:
                 raise BackendError(f"nyaa: {exc}") from None
         results = [c for c in found.values() if c.trusted or not options.trusted_only]
-        return order(results) if len(searches) > 1 else results      # one search is ranked already
+        if len(searches) <= 1:
+            return results                                          # one search is ranked already
+        return order([c for c in results if not c.other]) + order([c for c in results if c.other])
 
     def _searches_for(self, options: NyaaOptions) -> List[NyaaSearch]:
         """The searches to run: the injected one, else one per category the options ask for, sharing one client (so
