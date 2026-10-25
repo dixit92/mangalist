@@ -37,6 +37,11 @@ a Found card's "⋯" has Show in To get, Show in List, Open folder, Automatic do
 (:meth:`DownloadTab.set_series_host`); a mode set here fires :attr:`DownloadTab.modes_changed`, and the List's own
 changes come back through :meth:`DownloadTab.refresh_modes` and :meth:`DownloadTab.set_wanted`.
 
+**Other releases** (owner, 2026-10-24): the releases card lists the releases that fill no gap under a collapsed "Other
+releases (N)" section (a row whose search found only those says "No releases"); **Search releases…** - a To get row's
+menu and the List's row menu (through the window) - opens the series' card with that section open, also for a series with
+nothing missing (:meth:`DownloadTab.search_releases`; not in To get: its own search, Search again repeats it).
+
 Every backend call runs off the UI thread (:mod:`.background`) - the findings, the modes and the last pass are quick
 reads (the contract) and run on it; the search queue runs one series at a time.
 """
@@ -45,6 +50,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional, Sequence
 
@@ -107,11 +113,14 @@ from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList
 from .found_view import FoundView
 from .palette import current
-from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
+from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome, search_releases
 from .series_actions import (
     CHANGE_SOURCE,
     CHANGE_SOURCE_TIP,
     CHECK_NEW_CHAPTERS,
+    NOT_SCANNED,
+    SEARCH_RELEASES,
+    SEARCH_RELEASES_TIP,
     SHOW_IN_TO_GET,
     SeriesMenu,
     SeriesRef,
@@ -168,7 +177,7 @@ def run_lookup(backend: DownloadsBackend, target: VolumeTarget) -> SearchOutcome
     except Exception as exc:  # noqa: BLE001 - shown to the owner
         outcome.placement_error = describe_error(exc)
     try:
-        outcome.candidates = list(backend.search(target.titles, target.missing, target.held))
+        outcome.candidates = search_releases(backend, target)        # the usable releases, then the other ones
     except Exception as exc:  # noqa: BLE001
         outcome.error = describe_error(exc)
     return outcome
@@ -241,6 +250,7 @@ class DownloadTab(QWidget):
         self._series_ids: Dict[str, Optional[int]] = {}
         self._checked: set = set()
         self._by_hand: set = set()          # folders the owner asked to search by hand (a declared edition's volumes)
+        self._browsing: Optional[VolumeTarget] = None   # "Search releases..." of a series not in To get (no gaps)
         # One group at a time, picked with the chips above the list (owner, 2026-10-09: "I shouldn't need to scroll down
         # to get to 'upgrades'"); remembered, like the panel's width.
         cfg = config.load()                 # read once: the group, the sort and the panels' sizes (_build_ui)
@@ -914,6 +924,7 @@ class DownloadTab(QWidget):
         series = self._by_folder.get(folder)
         if series is None:
             return
+        self._browsing = None
         chapters = self._chapters_entry(folder)
         if chapters is not None and (self._group == GROUP_CHAPTERS or series.group == GROUP_CHAPTERS):
             self._current = folder
@@ -1055,6 +1066,12 @@ class DownloadTab(QWidget):
             act_new = menu.addAction(CHECK_NEW_CHAPTERS)
             act_new.setToolTip(self._w("Ask the series' chapter source for chapters newer than the newest one you have "
                                        "(for volumes: the last chapter of your newest volume)"))
+            if series.group in (GROUP_VOLUMES, GROUP_UPGRADES):       # its releases with Other releases open
+                target = self._target_for(series)
+                actions.add_action(SEARCH_RELEASES, lambda t=target: self._search_releases_line(t),
+                                   SEARCH_RELEASES_TIP if target is not None and not self._reason(series)
+                                   else "Not available: " + (self._reason(series) or NOT_SCANNED),
+                                   target is not None and not self._reason(series))
             if self._chapters_entry(folder) is not None and callable(getattr(self._backend, "other_candidates", None)):
                 act_source = menu.addAction(CHANGE_SOURCE)
                 act_source.setToolTip(self._w(CHANGE_SOURCE_TIP))
@@ -1186,6 +1203,35 @@ class DownloadTab(QWidget):
         self._sync_series_buttons()
         return True
 
+    def _search_releases_line(self, target: Optional[VolumeTarget]) -> str:
+        if target is not None:
+            self.search_releases(target)
+        return ""
+
+    def search_releases(self, target: VolumeTarget) -> bool:
+        """"Search releases..." (the List's row menu, a To get row; owner, 2026-10-24: "optionally show downloads even
+        if you don't have missing chapters"): the series' releases card with the Other releases section open - the
+        To get search for a series with volume gaps, else a search of its own for a series with nothing missing (every
+        release is compared with the volumes held; one that holds only those is an other release)."""
+        folder = target.folder
+        series = self._by_folder.get(folder)
+        searchable = series is not None and series.group in (GROUP_VOLUMES, GROUP_UPGRADES) and not self._reason(series)
+        if searchable and self.select_series(folder, series.group):
+            self.releases.open_others_next(target.series_id)     # when its search comes in ...
+            if self._results.get(folder) is not None:            # ... or now: it was searched before
+                self.releases.show_outcome(self._results[folder])
+            return True
+        self._show_upgrade_note(None)
+        self._delay.stop()
+        self._current = folder
+        self._browsing = replace(target, browse=True)
+        self.panels.setCurrentIndex(PANEL_RELEASES)
+        _log.info("Download tab: searching every release of %s (Search releases...)", target.title)
+        self.releases.open_others_next(target.series_id)
+        self.releases.open_target(self._browsing)
+        self._sync_series_buttons()
+        return True
+
     def _on_chapter_lookup(self, series_id: int, lookup) -> None:
         folder = next((f for f, sid in self._series_ids.items() if sid == series_id), None)
         if folder is None:
@@ -1280,6 +1326,11 @@ class DownloadTab(QWidget):
 
     def _search_again(self) -> None:
         folder = self._current
+        browsing = self._browsing
+        if browsing is not None and folder == browsing.folder:
+            self.releases.open_others_next(browsing.series_id)
+            self.releases.open_target(browsing)              # "Search releases..." of a series not in To get
+            return
         if folder is None or self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
             return
         self._results.pop(folder, None)
@@ -1344,8 +1395,9 @@ class DownloadTab(QWidget):
         self._results[folder] = outcome
         if outcome.candidates is None:
             self._states[folder] = SEARCH_FAILED
-        else:
-            self._states[folder] = SEARCH_READY if outcome.candidates else SEARCH_NONE
+        else:           # "Releases ready" for a release that fills a gap - the other releases alone do not (2026-10-24)
+            usable = [c for c in outcome.candidates if not getattr(c, "other", False)]
+            self._states[folder] = SEARCH_READY if usable else SEARCH_NONE
         self._bulk_done += 1 if self._bulk_total else 0
         self._refresh_statuses()
         if folder == self._current:

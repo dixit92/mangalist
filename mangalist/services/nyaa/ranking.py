@@ -95,18 +95,24 @@ def _covered(volumes: Sequence[str], parsed: ParsedTitle) -> Tuple[str, ...]:
 _MAX_RANGE = 500    # a range wider than this is not expanded into volume numbers (a malformed title)
 
 
+def range_volumes(vol_from: Optional[str], vol_to: Optional[str]) -> Tuple[str, ...]:
+    """The volumes a stated range holds - its whole numbers and its two ends, as :func:`_covered` reads a range
+    (exact decimal strings, ascending; empty for no range or one wider than a sane pack)."""
+    low, high = to_decimal(vol_from), to_decimal(vol_to if vol_to is not None else vol_from)
+    if low is None or high is None or high < low or high - low > _MAX_RANGE:
+        return ()
+    first = int(low) if low == low.to_integral_value() else int(low) + 1
+    numbers = sorted({low, high} | {Decimal(n) for n in range(first, int(high) + 1)})
+    return tuple(_plain(d) for d in numbers)
+
+
 def _not_held(parsed: ParsedTitle, held: Sequence[str]) -> Tuple[str, ...]:
     """With no missing list (MangaList cannot tell which English volumes are out): the volumes of the release's range
     that are not held - its whole numbers and its two ends, as :func:`_covered` reads a range."""
     if parsed.vol_from is None or parsed.vol_to is None or parsed.renumbered:
         return ()
-    low, high = Decimal(parsed.vol_from), Decimal(parsed.vol_to)
-    if high < low or high - low > _MAX_RANGE:
-        return ()
     have = {d for d in (to_decimal(v) for v in held) if d is not None}
-    first = int(low) if low == low.to_integral_value() else int(low) + 1
-    numbers = sorted({low, high} | {Decimal(n) for n in range(first, int(high) + 1)})
-    return tuple(_plain(d) for d in numbers if d not in have)
+    return tuple(v for v in range_volumes(parsed.vol_from, parsed.vol_to) if Decimal(v) not in have)
 
 
 def _plain(d: Decimal) -> str:
@@ -188,4 +194,4 @@ def order(candidates: Iterable[NyaaCandidate]) -> List[NyaaCandidate]:
     return sorted(by_date, key=lambda c: c.rank, reverse=True)
 
 
-__all__ = ["build_candidate", "fills_nothing", "matches_series", "order", "series_forms"]
+__all__ = ["build_candidate", "fills_nothing", "matches_series", "order", "range_volumes", "series_forms"]

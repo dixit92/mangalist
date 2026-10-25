@@ -27,6 +27,8 @@ what it can do itself::
     behind_counts(folders) -> (can mark, marked)
     set_behind_done(folders, done) -> str    Mark Behind as up to date / clear it; the states follow
     folder_for_series(series_id) -> str | None
+    search_releases_for(folder) -> str       "Search releases…": the Download tab's releases card, other releases open
+    search_releases_blocked(folder) -> str   why the series cannot be searched on nyaa ('' when it can)
     library_targets(folders) -> [(root id, name, path)]   Move to library ▸: the other library folders
     move_to_library(folders, root id) -> str              asks, moves, rescans; the status line
     last_library_move() -> str | None                     the "Undo last move (…)" label (None: nothing to undo)
@@ -75,6 +77,9 @@ OPEN_MU = "Open MangaUpdates page"
 OPEN_MANGAPIXER = "Open in MangaPixer"
 FIX_MU = "Fix MangaUpdates match…"
 CHECK_NEW_CHAPTERS = "Check for new chapters…"
+SEARCH_RELEASES = "Search releases…"
+SEARCH_RELEASES_TIP = ("Every release of the series on nyaa - also when nothing is missing: a newer collection or another "
+                       "group's release can replace your copies (the old ones go to the holding folder, restorable)")
 CHANGE_SOURCE = "Change source…"
 CHECK_NEW_TIP = ("Ask the series' chapter source for chapters newer than the newest one you have - also before "
                  "MangaUpdates lists them")
@@ -383,6 +388,18 @@ class SeriesMenu:
         if ref is None or fix is None or not ref.folder:
             return None
         return self._add(FIX_MU, lambda: self._call(fix, ref.folder), "Pick the series on MangaUpdates yourself")
+
+    def add_search_releases(self) -> Optional[QAction]:
+        """Search releases… (owner, 2026-10-24: "optionally show downloads even if you don't have missing chapters"):
+        the series' releases card in the Download tab with its Other releases open - also for a series with no gaps.
+        Off, with the reason, for a series that cannot be searched on nyaa."""
+        ref = self.single
+        run = self._host_fn("search_releases_for")
+        if ref is None or run is None or not ref.folder:
+            return None
+        blocked = self._host_fn("search_releases_blocked")
+        why = (blocked(ref.folder) or "") if blocked is not None else ""
+        return self._add(SEARCH_RELEASES, lambda: run(ref.folder) or "", why or SEARCH_RELEASES_TIP, not why)
 
     def add_action(self, text: str, do: Callable[[], Optional[str]], tip: str = "", enabled: bool = True) -> QAction:
         """A screen's own entry, run by :meth:`run` like the shared ones."""

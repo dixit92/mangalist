@@ -27,6 +27,7 @@ class VolumeTarget:
     missing: Tuple[str, ...]
     held: Tuple[str, ...]
     upgrade: Tuple[str, ...] = ()       # those of *missing* that replace chapters held (an upgrade), for the wording
+    browse: bool = False                # "Search releases..." (owner, 2026-10-24): every release, other ones open
 
 
 @dataclass(frozen=True)
