@@ -392,4 +392,4 @@ def test_a_deleted_identical_copy_is_recorded_as_a_deliberate_deletion(db, libra
     check = series_merge.check_merge(db, library / "Summoned Partner", kept)
     res = series_merge.merge_folders(db, check)
     assert res.deleted == ["Summoned Partner v02.cbz"]
-    assert [os.path.basename(d.path) for d in list_discards(db)] == ["Summoned Partner v02.cbz"]
+    assert [Path(d.path).name for d in list_discards(db)] == ["Summoned Partner v02.cbz"]
