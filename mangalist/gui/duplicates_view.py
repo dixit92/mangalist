@@ -367,6 +367,7 @@ class DuplicatesView(QWidget):
         self._hash_total = 0
         self._hash_done = 0
         self._hashing = False
+        self._rejudging = 0                                 # verdict re-reads in flight
         self._show_hidden = False
         self._card_apply: Dict[Tuple[Optional[int], str], List[QPushButton]] = {}   # a series' card in each section
         # series cards ticked for "Apply to selected" (owner, 2026-10-09: "select some series cards and do it on a subset")
@@ -717,8 +718,8 @@ class DuplicatesView(QWidget):
 
     @property
     def checking_pages(self) -> bool:
-        """Whether page hashes are being read for the content verdicts."""
-        return self._hashing
+        """Whether page hashes are being read for the content verdicts (or the verdicts re-read after a batch)."""
+        return self._hashing or self._rejudging > 0
 
     def refresh(self) -> None:
         """Re-read the duplicate files (off the UI thread)."""
@@ -1058,10 +1059,15 @@ class DuplicatesView(QWidget):
     def _rejudge(self) -> None:
         """The verdicts again from the cache (off the UI thread), after a batch of page hashes was stored."""
         db, overlaps, generation = self._db, list(self._overlaps), self._generation
-        self._start(lambda: judge(db, overlaps), lambda j: self._rejudged(generation, j),
-                    lambda message: _log.warning("Duplicates: the content verdicts could not be read: %s", message))
+        self._rejudging += 1
+        self._start(lambda: judge(db, overlaps), lambda j: self._rejudged(generation, j), self._rejudge_failed)
+
+    def _rejudge_failed(self, message: str) -> None:
+        self._rejudging = max(0, self._rejudging - 1)
+        _log.warning("Duplicates: the content verdicts could not be read: %s", message)
 
     def _rejudged(self, generation: int, judgement: Judgement) -> None:
+        self._rejudging = max(0, self._rejudging - 1)
         if generation != self._generation or self._applying or self._merging:
             return
         self._take_judgement(judgement)
@@ -1285,6 +1291,7 @@ class DuplicatesView(QWidget):
         self._calls.clear()
         self._hash_queue.clear()
         self._hashing = False
+        self._rejudging = 0
 
     def closeEvent(self, event) -> None:
         self.stop()

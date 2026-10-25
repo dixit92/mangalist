@@ -122,3 +122,17 @@ def test_the_reduced_decode_is_asked_for_jpeg_pages(pil, monkeypatch):
     image = Image.open(io.BytesIO(pil.encode(pil.page(5))))
     page_hash.hash_image(image)
     assert asked == [("L", (128, 128))] and 128 <= image.size[0] < pil.SIZE[0]     # decoded at a reduced size
+
+
+def test_pillow_is_a_runtime_dependency_of_every_build():
+    """The Docker image installs requirements.txt; the desktop builds bundle what PyInstaller is allowed to see."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    reqs = [line.split("#")[0].strip().lower() for line in (root / "requirements.txt").read_text().splitlines()]
+    assert any(r.startswith("pillow") for r in reqs)
+    spec = (root / "MangaList.spec").read_text()
+    excludes = spec[spec.index("excludes=["):spec.index("]", spec.index("excludes=["))]
+    assert '"PIL"' not in excludes and '"mangalist.page_hash"' in spec and '"PIL.Image"' in spec
+    dockerfile = (root / "packaging" / "docker" / "Dockerfile").read_text()
+    assert "-r /tmp/requirements-image.txt" in dockerfile

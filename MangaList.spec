@@ -62,6 +62,13 @@ a = Analysis(
         "mangalist.gui.settings_dialog",
         "mangalist.gui.duplicates_view",
         "mangalist.duplicates",
+        # The content verdicts decode pages with Pillow (imported on first use, so named here).
+        "mangalist.duplicate_verdicts",
+        "mangalist.page_hash",
+        "PIL.Image",
+        "PIL.JpegImagePlugin",
+        "PIL.PngImagePlugin",
+        "PIL.WebPImagePlugin",
     ],
     hookspath=[],
     hooksconfig={},
@@ -95,7 +102,6 @@ a = Analysis(
         "PySide6.QtSensors",
         "PySide6.QtTextToSpeech",
         # Build-time only.
-        "PIL",
         "pytest",
     ],
     noarchive=False,

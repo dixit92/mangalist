@@ -4,3 +4,6 @@ PySide6>=6.6,<6.12
 requests>=2.31
 regex>=2023.0
 platformdirs>=3.0
+# Page decode for the Duplicates view's content verdicts (mangalist/page_hash.py); the app runs without it (verdicts
+# then stay "undecided"). Also packaging/make_icon.py (the installer icons).
+pillow>=10.0
