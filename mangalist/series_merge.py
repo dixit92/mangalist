@@ -79,6 +79,7 @@ from .library_move import (
     _under,
 )
 from .duplicates import DiscardRefused, delete_checked, file_as_listed, human_size, other_numbers, stated_unit
+from .store.discards import record_discard
 from .store.journal import ACROSS_FILESYSTEMS, Journal, PlanStateError, StepRefused
 from .store.lock import LOCK_NAME, LockError
 from .store.names import windows_name_problem
@@ -496,7 +497,7 @@ def merge_folders(db, check: MergeCheck, *, journal: Optional[Journal] = None,
                     res.moved = [(s.src, s.dst) for s in plan.steps if s.state == "done"]
                 identity = None
                 if plan is None or plan.status == "applied":
-                    _delete_identical(check, [r.path for r in roots.values()], res)
+                    _delete_identical(check, [r.path for r in roots.values()], res, db)
                     res.removed = _remove_if_empty(check.merged_folder)
                     if res.removed:
                         identity = _fold_series(db, check.merged_series_id, check.kept_series_id)
@@ -540,7 +541,7 @@ def merge_folders(db, check: MergeCheck, *, journal: Optional[Journal] = None,
     return res
 
 
-def _delete_identical(check: MergeCheck, root_dirs: List[str], res: MergeResult) -> None:
+def _delete_identical(check: MergeCheck, root_dirs: List[str], res: MergeResult, db=None) -> None:
     """Delete the byte-identical copies the owner confirmed - each through :func:`delete_checked` (as listed), and only
     while the kept copy is still there as compared. The caller holds the roots' locks."""
     for c in check.identical:
@@ -554,6 +555,8 @@ def _delete_identical(check: MergeCheck, root_dirs: List[str], res: MergeResult)
             _log.warning("Merge: identical copy not deleted: %s (%s)", c.path, exc)
             continue
         res.deleted.append(c.name)
+        if db is not None:
+            record_discard(db, c.path)      # the owner confirmed it: a torrent that filed it is not kept for it
         _log.info("Merge: deleted %s (%d bytes, modified %s) - byte-identical to %s", c.path, c.size, c.modified,
                   c.kept_path)
 

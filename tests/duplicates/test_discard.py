@@ -250,3 +250,29 @@ def test_discard_file_deletes_one_stray_file_with_every_guard(db, lib, tmp_path)
     assert discard_file(db, str(notice), size, modified).deleted
     assert not notice.exists() and keep.exists() and not (lib.dir / LOCK_NAME).exists()   # the lock is released
     assert file_as_listed(str(notice)) is None
+
+
+# --- the log of deliberate deletions (a finished torrent's removal check reads it) -----------------------------------
+
+def test_a_discard_is_recorded_and_a_refused_one_is_not(db, two):
+    from mangalist.store.discards import list_discards
+
+    _lib, group, older, newer = two
+    discard_duplicates(db, [(group, [str(older), str(newer)])])          # refused: it would leave no copy
+    assert list_discards(db) == []
+    discard_duplicates(db, [(group, [str(older)])])
+    (entry,) = list_discards(db)
+    assert entry.path == os.path.normpath(str(older)) and entry.plan == 0 and entry.at
+
+
+def test_old_discards_are_dropped_when_a_new_one_is_recorded(db, tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    from mangalist.store.discards import PREFIX, RETENTION_DAYS, list_discards, record_discard
+
+    old = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS + 5)).replace(microsecond=0).isoformat()
+    db.set_meta(f"{PREFIX}{old}:abc", '{"path": "/old/file.cbz", "plan": 1, "at": "x"}')
+    db.set_meta(f"{PREFIX}garbage", "not json")
+    assert len(list_discards(db)) == 1                                   # the unreadable row is skipped
+    record_discard(db, str(tmp_path / "new.cbz"))
+    assert [d.path for d in list_discards(db)] == [os.path.normpath(str(tmp_path / "new.cbz"))]

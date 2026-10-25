@@ -378,3 +378,18 @@ def test_unmatched_or_differently_matched_folders_are_never_merged(db, library, 
     assert "has no confirmed MangaUpdates match" in series_merge.check_merge(db, gone, kept).refused
     _dress(db, r1, "Summoned Partner", mu_id=5151, ledger=None)
     assert series_merge.check_merge(db, gone, kept).refused == "the two folders are matched to different series"
+
+
+def test_a_deleted_identical_copy_is_recorded_as_a_deliberate_deletion(db, library, library2, two):
+    from mangalist.store.discards import list_discards
+
+    r1, r2 = two
+    kept = library2 / "Summoned Partner (EN)"
+    make_archive(kept / "Summoned Partner v02.cbz")
+    scan(db)
+    _dress(db, r2, "Summoned Partner (EN)", ledger=None)
+    _dress(db, r1, "Summoned Partner", ledger=None)
+    check = series_merge.check_merge(db, library / "Summoned Partner", kept)
+    res = series_merge.merge_folders(db, check)
+    assert res.deleted == ["Summoned Partner v02.cbz"]
+    assert [os.path.basename(d.path) for d in list_discards(db)] == ["Summoned Partner v02.cbz"]

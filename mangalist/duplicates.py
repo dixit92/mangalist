@@ -65,6 +65,7 @@ from .inventory import to_number
 from .parsing.model import Layer
 from .parsing.parser import ParseContext, parse_name
 from .split_chapters import part_numbers
+from .store.discards import record_discard
 from .store.lock import LOCK_NAME, LockError, RootLock
 
 _log = logging.getLogger(__name__)
@@ -532,6 +533,7 @@ def discard_duplicates(db, selections: Sequence[Tuple[DuplicateGroup, Collection
                     continue
                 _log.info("Discarded duplicate %s %s: deleted %s (%d bytes, modified %s)", group.kind, group.number,
                           f.path, f.size, f.modified)
+                record_discard(db, f.path)      # so a torrent that filed it is not kept for a "lost" file
                 outcomes.append(DiscardOutcome(f.path, True))
     finally:
         for lock in locks.values():
