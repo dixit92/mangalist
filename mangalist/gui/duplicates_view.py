@@ -90,7 +90,7 @@ from ..duplicate_verdicts import (
 )
 from ..same_series import FranchiseSplit, SamePair, SameSeriesReport, SeriesCopy, find_same_series
 from . import theme
-from .background import BackgroundCall, start_call, start_process_call
+from .background import BackgroundCall, start_call
 from .links import open_folder as open_folder_default, open_link
 from .palette import Palette, current
 from .shell import DuplicateFile, DuplicateGroup, DuplicateSeries
@@ -1070,6 +1070,8 @@ class DuplicatesView(QWidget):
         self._rejudging = max(0, self._rejudging - 1)
         if generation != self._generation or self._applying or self._merging:
             return
+        if judgement.verdicts == self._verdicts:
+            return                                          # nothing new decided: no re-render
         self._take_judgement(judgement)
         self._render_files()
         self._update_summary()
@@ -1274,6 +1276,8 @@ class DuplicatesView(QWidget):
     def _start_process(self, fn, args, on_done, on_error) -> None:
         """*fn(*args)* in the subprocess pool (CPU-bound work: the page decode must not share the window's
         interpreter lock)."""
+        from .background import start_process_call
+
         holder: list = []
 
         def finished() -> None:
@@ -1298,7 +1302,7 @@ class DuplicatesView(QWidget):
         super().closeEvent(event)
 
 
-HASH_BATCH = 12                     # archives per subprocess job: the verdicts are updated after each
+HASH_BATCH = 20                     # archives per subprocess job: the verdicts are re-read after each
 
 
 _VERDICT_PILL = {VERDICT_PARTS: "same pages", VERDICT_COPY: "copy", VERDICT_WRONG: "wrong chapter",
