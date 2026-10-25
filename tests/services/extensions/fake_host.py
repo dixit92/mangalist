@@ -90,6 +90,7 @@ class FakeHost:
         self.instance = "fake-host-db-1"                   # the database's id (/compat/about; MangaList's audit B4)
         self.auto_download = auto_download
         self.lock = threading.RLock()
+        self._run_lock = threading.Lock()         # one run_downloads at a time (the worker thread and a test)
         self.repo: List[RepoEntry] = [
             RepoEntry(MANGADEX_PKG, "MangaDex", "1.4.200", "all", [(MANGADEX_EN, "MangaDex", "en"), ("5", "MangaDex", "fr")]),
             RepoEntry(WEEB_PKG, "Weeb Example", "1.4.3", "en", [(WEEB_ID, "Weeb Example", "en")]),
@@ -211,7 +212,12 @@ class FakeHost:
             self._stop.wait(0.05)
 
     def run_downloads(self) -> None:
-        """Download every QUEUED chapter now (one CBZ each); a failing one is retried up to 3 tries, then ERROR."""
+        """Download every QUEUED chapter now (one CBZ each); a failing one is retried up to 3 tries, then ERROR. One run
+        at a time: the worker thread and a test calling this directly used to write the same ``.tmp`` (Windows CI)."""
+        with self._run_lock:
+            self._run_downloads()
+
+    def _run_downloads(self) -> None:
         with self.lock:
             todo = [q for q in self.queue if q["state"] in ("QUEUED", "DOWNLOADING")]
         for item in todo:

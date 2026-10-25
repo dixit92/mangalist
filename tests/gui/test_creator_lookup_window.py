@@ -34,6 +34,16 @@ def mu(monkeypatch):
     fake = MangaUpdates()
     monkeypatch.setattr(lanes, "creator_name_clients", lambda: (fake.get_series, fake.get_author, lambda e: False))
     monkeypatch.setattr(cn.time, "sleep", lambda s: None)
+    # Every GUI module first, with the real runner (see test_auto_modes_window's make_window): this fixture patches
+    # before make_window's own import loop runs, so a module first imported here would keep the synchronous runner for
+    # the rest of the worker's session - on Windows CI the volumes window's refresh then waited for ever (2026-10-25).
+    import importlib
+    import pkgutil
+
+    import mangalist.gui as gui
+
+    for module in pkgutil.iter_modules(gui.__path__):
+        importlib.import_module(f"mangalist.gui.{module.name}")
     monkeypatch.setattr(bg, "start_call", _sync)
     return fake
 

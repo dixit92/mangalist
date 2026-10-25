@@ -23,9 +23,11 @@ library database's units, so MangaList and MangaPixer agree on what a folder hol
   it is listed in a section of its own with its own count - one entry per chapter, never among the numbers held more
   than once nor in the Duplicates chip - as an overlap to review, never a copy: two scanlation groups, one releasing
   whole chapters, one in parts.
-  The parts follow the split model (:mod:`mangalist.split_chapters`): ``N.2`` onwards next to the whole ``N`` (the whole
-  stands in for the missing ``N.1``; keeping both is the expected answer), or ``N.1`` and ``N.2`` onwards (they count as
-  chapter ``N`` on their own, so the whole may be redundant). A lone ``N.1`` next to ``N`` is an extra, as MangaPixer
+  The parts follow the split model (:mod:`mangalist.split_chapters`): ``N.1`` and ``N.2`` onwards (they count as
+  chapter ``N`` on their own, so the whole may be redundant). ``N.2`` onwards next to the whole ``N`` without ``N.1`` is
+  the plain split - the file ``N`` is part 1 - and is not listed (owner, 2026-10-24: "Rule fixes"; research lane D:
+  all 10 such items on the owner's library held different pages in ``N`` and ``N.2``); the content verdicts
+  (:mod:`mangalist.duplicate_verdicts`) still read them and list one only when its pages overlap. A lone ``N.1`` next to ``N`` is an extra, as MangaPixer
   counts it, and so is a file whose name says so (``Extra``, ``Special``, ``Omake``, ``Bonus``, ``Side Story``,
   ``Afterword``): measured on the owner's library (2026-10-18), the broader "any ``N.x`` next to ``N``" listed 206
   chapters in 67 series, mostly extras. Every file of an overlap defaults to Keep; nothing is deleted unless the owner
@@ -65,6 +67,7 @@ from .inventory import to_number
 from .parsing.model import Layer
 from .parsing.parser import ParseContext, parse_name
 from .split_chapters import part_numbers
+from .store.discards import record_discard
 from .store.lock import LOCK_NAME, LockError, RootLock
 
 _log = logging.getLogger(__name__)
@@ -216,15 +219,20 @@ def find_duplicate_files(db, root_ids: Optional[Collection[int]] = None) -> List
     return out
 
 
-def find_whole_and_parts(db, root_ids: Optional[Collection[int]] = None) -> List[DuplicateGroup]:
+def find_whole_and_parts(db, root_ids: Optional[Collection[int]] = None, *,
+                         stand_ins: bool = False) -> List[DuplicateGroup]:
     """Every whole chapter held with its parts in one folder (:func:`part_overlaps`; ``overlap`` set), in the roots
     *root_ids* (None: all roots) - the Duplicates view's own section and count (owner, 2026-10-18: "Own section, own
-    count"); never part of the duplicate numbers or the Duplicates chip. Sorted as :func:`find_duplicate_files`."""
+    count"); never part of the duplicate numbers or the Duplicates chip. Sorted as :func:`find_duplicate_files`.
+
+    *stand_ins*: also the plain splits - a whole ``N`` next to ``N.2`` onwards without ``N.1``, where the file ``N`` is
+    simply part 1 (the split model). They are not listed (owner, 2026-10-24: "Rule fixes"); the content verdicts
+    (:mod:`mangalist.duplicate_verdicts`) ask for them, to show one only when its pages say it overlaps after all."""
     read = _buckets(db, root_ids)
     if read is None:
         return []
     roots, folders, buckets = read
-    out = _order(part_overlaps(buckets, folders))
+    out = _order(part_overlaps(buckets, folders, stand_ins=stand_ins))
     _log.info("Duplicates: %d whole chapter%s held with parts in %d root%s", len(out), "" if len(out) == 1 else "s",
               len(roots), "" if len(roots) == 1 else "s")
     return out
@@ -243,9 +251,11 @@ def _says_extra(rel: str) -> bool:
 
 
 def part_overlaps(buckets: Dict[Tuple[int, str, str, Decimal], List[Tuple[str, Optional[str]]]],
-                  folders: Dict[int, Path]) -> List[DuplicateGroup]:
+                  folders: Dict[int, Path], *, stand_ins: bool = False) -> List[DuplicateGroup]:
     """A whole chapter held together with its parts in one folder (see the module docstring), one group per chapter.
-    *buckets*: (series id, container, kind, number) -> [(archive rel, group)]; *folders*: series id -> its folder."""
+    *buckets*: (series id, container, kind, number) -> [(archive rel, group)]; *folders*: series id -> its folder.
+    *stand_ins*: also a whole ``N`` next to parts from ``N.2`` without ``N.1`` (``OVERLAP_STAND_IN``), which the split
+    model counts as part 1 and the section no longer lists (owner, 2026-10-24: "Rule fixes")."""
     by_folder: Dict[Tuple[int, str], Dict[Decimal, List[Tuple[str, Optional[str]]]]] = {}
     for (sid, container, kind, number), members in buckets.items():
         if kind == KIND_CHAPTER:
@@ -261,6 +271,8 @@ def part_overlaps(buckets: Dict[Tuple[int, str, str, Decimal], List[Tuple[str, O
             if not parts or not ((_tenth(parts[0]) == 2 and not first_held)
                                  or (_tenth(parts[0]) == 1 and len(parts) > 1)):
                 continue                # the split model: a lone N.1 next to N is an extra, a run from N.3 too
+            if _tenth(parts[0]) == 2 and not stand_ins:
+                continue                # the file N is part 1 (N + N.2): a plain split, not an overlap
             series_folder = folders[sid]
             files, there = [], set()
             for x in (whole, *parts):
@@ -532,6 +544,7 @@ def discard_duplicates(db, selections: Sequence[Tuple[DuplicateGroup, Collection
                     continue
                 _log.info("Discarded duplicate %s %s: deleted %s (%d bytes, modified %s)", group.kind, group.number,
                           f.path, f.size, f.modified)
+                record_discard(db, f.path)      # so a torrent that filed it is not kept for a "lost" file
                 outcomes.append(DiscardOutcome(f.path, True))
     finally:
         for lock in locks.values():

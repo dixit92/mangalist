@@ -579,3 +579,25 @@ def test_a_queued_send_can_be_cancelled_from_its_link(qapp):
     wait_until(qapp, lambda: len(panel.sent_records) == 1)
     qapp.processEvents()
     assert backend.started == [(7, "a" * 40)]                                   # the cancelled one never went
+
+
+# --- releases that are not comic volumes are refused (owner, 2026-10-24) ------------------------------------------
+
+def test_a_release_of_epub_files_is_refused_with_its_reason(qapp):
+    epubs = choose_files([(f"Made Up Novel v{n:02d} [Pub] [Grp].epub", 7 * MB) for n in (1, 2, 3)],
+                         ["3", "4", "5"], "volumes")
+    backend = PartialBackend(packs={"a" * 40: epubs})
+    panel = open_panel(qapp, backend)
+    assert panel.pack_state() == "refused" and panel.partial_row.isVisibleTo(panel)
+    assert panel.partial_note.text().startswith("Not a volume release: its files are e-books or audio")
+    assert panel.send_blocker().startswith("Not a volume release") and not panel.btn_send.isEnabled()
+    panel.partial_check.setChecked(False)                   # unticking does not make it sendable
+    assert panel.send_blocker() is not None
+
+
+def test_a_bare_number_chapter_pack_is_refused(qapp):
+    chapters = choose_files([(f"Made Up Webtoon {n:03d} (Digital).cbz", 10 * MB) for n in range(1, 159)],
+                            ["3", "4", "5"], None)
+    backend = PartialBackend(packs={"a" * 40: chapters})
+    panel = open_panel(qapp, backend)
+    assert panel.pack_state() == "refused" and "its files are chapters, not volumes" in panel.send_blocker()

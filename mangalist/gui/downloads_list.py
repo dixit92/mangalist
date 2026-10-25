@@ -79,6 +79,10 @@ ACT_TO_FRONT = "Move to the front of the queue"
 ACT_DEQUEUE = "Remove from the queue…"
 QUEUE_ACTIONS = {ACT_SEND_NOW: "send_queued_now", ACT_TO_FRONT: "move_to_front", ACT_DEQUEUE: "remove_from_queue"}
 ACT_DISMISS = "Dismiss"
+ACT_REMOVE_FAILED = "Remove from qBittorrent…"
+REMOVE_FAILED_TIP = ("Delete this failed download's torrent from qBittorrent - with its downloaded files or keeping them "
+                     "- and take it out of In progress. Nothing in the library is touched: a failed download filed "
+                     "nothing.")
 ACT_RETRY = "Retry in Suwayomi"
 ACT_CANCEL = "Cancel download…"
 #: Written for Suwayomi; shown worded for each row's program (:func:`~.volumes_target.chapter_words`).
@@ -110,9 +114,11 @@ class DownloadsList(QWidget):
                  heading: str = "In progress", series_name: Optional[Callable[[int], str]] = None,
                  confirm_remove: Optional[Callable[[DownloadRecord], bool]] = None,
                  confirm_queue: Optional[Callable[[str, DownloadRecord], bool]] = None,
-                 confirm_cancel: Optional[Callable[[Sequence[DownloadRecord]], bool]] = None):
+                 confirm_cancel: Optional[Callable[[Sequence[DownloadRecord]], bool]] = None,
+                 confirm_remove_failed: Optional[Callable[[DownloadRecord], Optional[bool]]] = None):
         super().__init__(parent)
         self._confirm_cancel = confirm_cancel or self._ask_cancel
+        self._confirm_remove_failed = confirm_remove_failed or self._ask_remove_failed
         self._confirm_remove = confirm_remove or self._ask_remove
         self._confirm_queue = confirm_queue or self._ask_queue
         self.setObjectName("downloadsList")
@@ -434,12 +440,56 @@ class DownloadsList(QWidget):
         if not callable(getattr(self._backend, "dismiss_downloads", None)):
             return
         menu = QMenu(self.table)
+        remove = None
+        if (not record.is_chapters and record.in_client
+                and callable(getattr(self._backend, "remove_failed_download", None))):
+            remove = menu.addAction(ACT_REMOVE_FAILED)
+            remove.setToolTip(REMOVE_FAILED_TIP)
+            remove.setEnabled(self._call is None)
         act = menu.addAction(ACT_DISMISS)
         act.setToolTip(DISMISS_TIP)
         act.setEnabled(self._call is None)
         menu.setToolTipsVisible(True)
-        if self._exec_menu(menu, self.table.viewport().mapToGlobal(pos)) is act:
+        chosen = self._exec_menu(menu, self.table.viewport().mapToGlobal(pos))
+        if chosen is act:
             self.dismiss(record)
+        elif remove is not None and chosen is remove:
+            files = self._confirm_remove_failed(record)
+            if files is not None:
+                self.remove_failed(record, delete_files=files)
+
+    def _ask_remove_failed(self, record: DownloadRecord) -> Optional[bool]:
+        """True: remove with its files; False: remove, keep its files; None: not removed."""
+        box = QMessageBox(QMessageBox.Icon.Question, "Remove from qBittorrent?",
+                          f"Remove the failed download \"{record.title}\" from qBittorrent?\n\n"
+                          "MangaList filed nothing from it, so nothing in the library changes. With its files, the "
+                          "downloaded data is deleted too.", parent=self)
+        with_files = box.addButton("Remove with its files", QMessageBox.ButtonRole.DestructiveRole)
+        keep = box.addButton("Remove, keep its files", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.exec()
+        clicked = box.clickedButton()
+        return True if clicked is with_files else False if clicked is keep else None
+
+    def remove_failed(self, record: DownloadRecord, *, delete_files: bool) -> bool:
+        """Remove a failed torrent download from qBittorrent (off the UI thread); the list reloads after."""
+        fn = getattr(self._backend, "remove_failed_download", None)
+        if self._call is not None or record.status != DownloadStatus.FAILED or not callable(fn):
+            return False
+        self._busy(True)
+        set_tone(self.status_label, "")
+        self.status_label.setText("Removing from qBittorrent...")
+        self._check_failed = False
+        _log.info("In progress: removing failed download %d from qBittorrent (files: %s)", record.id, delete_files)
+        self._call = start_call(lambda: fn(record.id, delete_files=delete_files),
+                                lambda _r: self._on_removed_failed(record, delete_files), self._on_remove_failed_error,
+                                self._after_check)
+        return True
+
+    def _on_removed_failed(self, record: DownloadRecord, delete_files: bool) -> None:
+        self._note = (f"Removed from qBittorrent{' with its files' if delete_files else ''}: {record.title}. "
+                      "It is under Show finished.")
 
     def dismiss(self, record: DownloadRecord) -> bool:
         """Dismiss a failed row (off the UI thread): its records are marked cancelled; the list reloads after."""
@@ -459,6 +509,12 @@ class DownloadsList(QWidget):
     def _on_dismissed(self, record: DownloadRecord, n: int) -> None:
         self._note = (f"Dismissed: {record.title} ({self.name_of(record)}). It is under Show finished." if n
                       else f"Not dismissed: {record.title} is no longer failed.")
+
+    def _on_remove_failed_error(self, message: str) -> None:
+        self._note = None
+        set_tone(self.status_label, "bad")
+        self.status_label.setText(f"Could not remove it: {message}")
+        self._check_failed = True
 
     def _on_dismiss_error(self, message: str) -> None:
         self._note = None

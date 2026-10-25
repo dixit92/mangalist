@@ -55,6 +55,11 @@ HOST_INTRO = ("MangaList's own extension host runs Mihon / Tachiyomi extensions 
               "yourself and enter its address.")
 HOST_FOLDER_HELP = ("Where MangaList finds the host's downloads (the folder holding \"mangas\"), as MangaList sees it. "
                     "Empty: the host's own folder - right whenever the host runs next to MangaList, as in the container.")
+HOST_DOWNLOADS_HELP = ("Where the host downloads chapters (the container starts it with this folder). Put it on the same disk "
+                       "as the library: finished chapters are then hard-linked into it instead of copied. Empty: the "
+                       "container's MANGALIST_EXTENSION_DOWNLOADS, else the host's data folder. The host restarts to use "
+                       "a changed folder (once the chapters waiting in the old one are filed); the folder, or its "
+                       "parent, must exist.")
 HOST_FLARESOLVERR_HELP = ("Sources behind Cloudflare need FlareSolverr: its address, e.g. http://<unraid-ip>:8191 (the "
                           "box's address, not localhost). Empty: MANGALIST_FLARESOLVERR_URL, else none.")
 HOST_WEBVIEW_HELP = ("Some sources (Comix, ...) need a browser engine: the host downloads a Chromium bundle into its data "
@@ -161,6 +166,16 @@ class ExtensionHostPanel(QWidget):
         fl.addWidget(self.folder_edit)
         fl.addWidget(label(HOST_FOLDER_HELP, "muted", wrap=True))
         form.addRow("Download folder:", folder)
+        self.host_downloads_edit = QLineEdit()
+        self.host_downloads_edit.setPlaceholderText("/data/appdata/mangalist/extension-host-downloads")
+        self.host_downloads_edit.setAccessibleName("Host downloads folder")
+        hd = QWidget()
+        hdl = QVBoxLayout(hd)
+        hdl.setContentsMargins(0, 0, 0, 0)
+        hdl.setSpacing(2)
+        hdl.addWidget(self.host_downloads_edit)
+        hdl.addWidget(label(HOST_DOWNLOADS_HELP, "muted", wrap=True))
+        form.addRow("Host downloads folder:", hd)
         self.flare_edit = QLineEdit()
         self.flare_edit.setPlaceholderText("http://192.168.1.10:8191")
         flare = QWidget()
@@ -210,6 +225,7 @@ class ExtensionHostPanel(QWidget):
         self.folder_edit.setText(c.download_dir)
         self.folder_edit.setPlaceholderText(c.downloads_path or "the host's own downloads folder")
         self.flare_edit.setText(c.flaresolverr_url)
+        self.host_downloads_edit.setText(c.host_downloads)
         self.webview_check.setChecked(c.webview)
         getter = getattr(self._backend, "extension_auto_update", None)
         self.auto_update_check.setChecked(bool(getter()) if callable(getter) else False)
@@ -249,7 +265,8 @@ class ExtensionHostPanel(QWidget):
         return ExtensionHostConfig(url=self.url_edit.text().strip(), download_dir=self.folder_edit.text().strip(),
                                    downloads_path=self._config.downloads_path, repo_url=self._config.repo_url,
                                    flaresolverr_url=self.flare_edit.text().strip(),
-                                   webview=self.webview_check.isChecked(), repos=self._config.repos)
+                                   webview=self.webview_check.isChecked(), repos=self._config.repos,
+                                   host_downloads=self.host_downloads_edit.text().strip())
 
     def save(self) -> bool:
         from .downloads_backend import BackendError

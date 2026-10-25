@@ -88,11 +88,14 @@ def client_down(exc: BaseException) -> bool:
 def submit(client: TorrentClient, ledger, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
            placement: Placement, save_path: str, *, only_missing: bool = False, size_bytes: Optional[int] = None,
            size_source: Optional[str] = None, over_cap: str = OVER_CAP_QUEUE, wait: Optional[PackWait] = None,
-           on_pack: Optional[Callable[[PackOutcome], None]] = None) -> DownloadRecord:
+           on_pack: Optional[Callable[[PackOutcome], None]] = None,
+           replace_volumes: Sequence[str] = ()) -> DownloadRecord:
     """Send the pick now when it fits the budget, else queue it (``over_cap="queue"``, the default) or send it past the
     cap (``over_cap="send"``, the owner's override). *size_bytes* is what it counts (default: the release's size; a
     partial send passes its selected files' total, ``size_source="selected files"``). Returns the record: SENT or
-    QUEUED. Raises :class:`OverBudget` for a release bigger than the cap on its own unless ``over_cap="send"``."""
+    QUEUED. Raises :class:`OverBudget` for a release bigger than the cap on its own unless ``over_cap="send"``.
+    *replace_volumes*: a replacement's held volumes (kept on the record for the filing; owner, 2026-10-24)."""
+    replacing = {"replace_volumes": tuple(replace_volumes)} if replace_volumes else {}
     if over_cap not in (OVER_CAP_QUEUE, OVER_CAP_SEND):
         raise ValueError(f"over_cap is 'queue' or 'send', not {over_cap!r}")
     size = size_bytes if size_bytes and size_bytes > 0 else max(0, candidate.size_bytes)
@@ -109,7 +112,7 @@ def submit(client: TorrentClient, ledger, series_id: int, candidate: NyaaCandida
                              f"{gb_text(state.cap_bytes)} on its own; send it past the cap or not at all")
         if verdict in (OVER, TOO_BIG) and over_cap == OVER_CAP_QUEUE:
             record = ledger.create(series_id, candidate, wanted_volumes, target, status=DownloadStatus.QUEUED,
-                                   only_missing=only_missing, size_bytes=size, size_source=source)
+                                   only_missing=only_missing, size_bytes=size, size_source=source, **replacing)
             record = ledger.get(record.id) or record
             _log.info("Budget: download %d (%s, %s) queued, %s: %s, %d waiting", record.id, candidate.title,
                       gb_text(size), place_text(record.queue_position), _why_waiting(state, size), len(state.queued) + 1)
@@ -117,7 +120,8 @@ def submit(client: TorrentClient, ledger, series_id: int, candidate: NyaaCandida
         from .service import send_pick
 
         record = send_pick(client, ledger, series_id, candidate, wanted_volumes, placement, save_path,
-                           only_missing=only_missing, wait=wait, on_pack=on_pack, size_bytes=size, size_source=source)
+                           only_missing=only_missing, wait=wait, on_pack=on_pack, size_bytes=size, size_source=source,
+                           **replacing)
         if verdict != "fits":
             _log.info("Budget: download %d (%s, %s) sent PAST the cap on the owner's word: now %s", record.id,
                       candidate.title, gb_text(record.size_bytes), budget_state(ledger).usage_text())

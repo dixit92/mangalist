@@ -27,10 +27,11 @@ Never a whole ``N`` together with ``N.1``. The form not taken is listed with its
 never sent by a pass or the scheduled check).
 
 **Late parts** (:func:`late_parts`): a part ``N.k`` the source lists and the series lacks, while the series holds other
-parts of ``N`` (``38.1`` listed later, ``38.2`` held - with or without the stand-in whole ``38``), is wanted although it
-is numbered below the newest chapter held. Only parts of a chapter whose other parts are held, and only among the
-series' last :data:`RECENT` chapters (an old chapter split differently by another group is not asked for); never an
-older whole chapter.
+parts of ``N`` (``38.1`` listed later, ``38.2`` held without a whole ``38``), is wanted although it is numbered below
+the newest chapter held. Only parts of a chapter whose other parts are held, and only among the series' last
+:data:`RECENT` chapters (an old chapter split differently by another group is not asked for); never an older whole
+chapter. Never ``N.1`` while the file ``N`` is held next to ``N.2``: that file is part 1 (owner, 2026-10-24: "Rule
+fixes" - research lane D found that both times the rule fetched it, ``N.1`` was a copy of ``N``).
 """
 
 from __future__ import annotations
@@ -183,6 +184,8 @@ def late_parts(listed: Iterable[Decimal], held: Iterable[Decimal], newest: Optio
         for p in part_numbers(around).get(n, ()):
             if p in held or p not in listed or (newest is not None and p > newest):
                 continue
+            if _first_part_is_the_whole(p, held):
+                continue
             have = sorted(x for x in held if int(x) == n and (is_whole(x) or x in own))
             out[p] = f"a late part of ch {n} (held: {', '.join(_plain(x) for x in have)})"
     return out
@@ -195,7 +198,16 @@ def is_late_part(number: Decimal, held: Iterable[Decimal]) -> bool:
     if number in held or is_whole(number):
         return False
     n = int(number)
+    if _first_part_is_the_whole(number, held):
+        return False
     return n in recent_chapters(held) and bool(part_numbers(held).get(n)) and is_part(number, held | {number})
+
+
+def _first_part_is_the_whole(number: Decimal, held: Set[Decimal]) -> bool:
+    """Whether *number* is ``N.1`` while the file ``N`` is held: next to ``N.2`` that file IS part 1 (the split model),
+    so ``N.1`` is never a late part (owner, 2026-10-24: "Rule fixes" - both times the rule fetched it, ``N.1`` was the
+    group's own re-post of ``N``, a byte-identical copy)."""
+    return _tenth(number) == 1 and Decimal(int(number)) in held
 
 
 __all__ = ["FormChoice", "HeldForm", "RECENT", "choose", "held_form", "is_late_part", "is_part", "is_whole",

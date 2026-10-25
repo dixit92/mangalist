@@ -161,8 +161,13 @@ def upgrade_note(volumes: Sequence[str], mode: str, days: int) -> str:
     return f"Upgrade {vols}: volumes for chapters you hold. Once filed, {after}."
 
 
-def _files(n: int) -> str:
-    return f"{n} chapter file{'s' if n != 1 else ''}"
+def _files(n: int, word: str = "chapter file") -> str:
+    return f"{n} {word}{'s' if n != 1 else ''}"
+
+
+def _replaced_volumes(batches: Sequence) -> bool:
+    """Some of the batches are a replacement's old copies (other releases, 2026-10-24): files without chapters."""
+    return any(not getattr(f, "chapters", "x") for b in batches for f in b.files)
 
 
 def replaced_bar_text(batches: Sequence) -> Tuple[str, str]:
@@ -178,13 +183,17 @@ def replaced_bar_text(batches: Sequence) -> Tuple[str, str]:
         n = sum(len(b.files) for b in pending)
         series = len({b.series_dir for b in pending})
         waiting = [b for b in pending if b.mode == "holding" and b.error]
-        text = f"Replace {_files(n)} of {series} series with the volumes filed?"
+        text = (f"Replace {_files(n, 'file')} of {series} series with the volumes filed?" if _replaced_volumes(pending)
+                else f"Replace {_files(n)} of {series} series with the volumes filed?")
         if waiting:
             text += f" ({len(waiting)} could not be moved yet)"
         return text, "warn"
     if held:                            # the space first (owner, 2026-10-10: more useful than the number of files)
         n = sum(len(b.files) for b in held)
         series = len({b.series_dir for b in held})
+        if _replaced_volumes(held):     # a replacement's old copies among them: not only chapters
+            return (f"{held_size_text(held)} of replaced files in the holding folder ({_files(n, 'file')}, "
+                    f"{series} series)", "muted")
         return (f"{held_size_text(held)} of replaced chapters in the holding folder ({_files(n)}, {series} series)",
                 "muted")
     return "", ""

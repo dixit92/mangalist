@@ -96,15 +96,18 @@ def test_main_window_missing_button_and_examined_follow(qapp, db, library):
     (library / "Wanted").mkdir()
     db.add_root(str(library))
     win = MainWindow()
+    # The window signs new archives on a background thread after every scan. This test signs them itself, on its own
+    # thread, and counts what it signed: a window worker that signed one archive before `_stop_signatures` flagged it
+    # left this test two (macOS / Python 3.12, seen as `signed == 2`). Nothing to stop and nothing to race: the window
+    # starts no worker here (the same stub other GUI tests use).
+    win._start_signatures = lambda: None
     try:
         def run_scan():
             got = []
             worker = ScanWorker(db.list_roots(), db)
             worker.finished.connect(got.append)
             worker.run()
-            win._stop_signatures()
             win._on_scan_finished(got[0])
-            win._stop_signatures()
 
         assert not win._missing_action.isVisible()
         run_scan()

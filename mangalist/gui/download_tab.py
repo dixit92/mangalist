@@ -37,6 +37,11 @@ a Found card's "⋯" has Show in To get, Show in List, Open folder, Automatic do
 (:meth:`DownloadTab.set_series_host`); a mode set here fires :attr:`DownloadTab.modes_changed`, and the List's own
 changes come back through :meth:`DownloadTab.refresh_modes` and :meth:`DownloadTab.set_wanted`.
 
+**Other releases** (owner, 2026-10-24): the releases card lists the releases that fill no gap under a collapsed "Other
+releases (N)" section (a row whose search found only those says "No releases"); **Search releases…** - a To get row's
+menu and the List's row menu (through the window) - opens the series' card with that section open, also for a series with
+nothing missing (:meth:`DownloadTab.search_releases`; not in To get: its own search, Search again repeats it).
+
 Every backend call runs off the UI thread (:mod:`.background`) - the findings, the modes and the last pass are quick
 reads (the contract) and run on it; the search queue runs one series at a time.
 """
@@ -45,6 +50,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional, Sequence
 
@@ -107,11 +113,14 @@ from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList
 from .found_view import FoundView
 from .palette import current
-from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome
+from .releases_panel import ConfirmFn, ReleasesPanel, SearchOutcome, search_releases
 from .series_actions import (
     CHANGE_SOURCE,
     CHANGE_SOURCE_TIP,
     CHECK_NEW_CHAPTERS,
+    NOT_SCANNED,
+    SEARCH_RELEASES,
+    SEARCH_RELEASES_TIP,
     SHOW_IN_TO_GET,
     SeriesMenu,
     SeriesRef,
@@ -126,6 +135,7 @@ ROLE_HEADER = Qt.ItemDataRole.UserRole + 11       # a group header's text
 ROLE_NOTE_TONE = Qt.ItemDataRole.UserRole + 12
 ROLE_GROUP = Qt.ItemDataRole.UserRole + 13         # a series row's group (its chips: torrents or chapter downloads)
 ROLE_FOUND = Qt.ItemDataRole.UserRole + 14         # a Found row's series id
+CHECK_FAILING_CHIP = "Source not readable"      # a Missing chapters row the scheduled check keeps failing on
 PANEL_RELEASES, PANEL_CHAPTERS, PANEL_FOUND = 0, 1, 2
 GROUP_FOUND = "found"           # the Found chip (automatic downloads): not a "To get" group
 
@@ -168,7 +178,7 @@ def run_lookup(backend: DownloadsBackend, target: VolumeTarget) -> SearchOutcome
     except Exception as exc:  # noqa: BLE001 - shown to the owner
         outcome.placement_error = describe_error(exc)
     try:
-        outcome.candidates = list(backend.search(target.titles, target.missing, target.held))
+        outcome.candidates = search_releases(backend, target)        # the usable releases, then the other ones
     except Exception as exc:  # noqa: BLE001
         outcome.error = describe_error(exc)
     return outcome
@@ -241,6 +251,7 @@ class DownloadTab(QWidget):
         self._series_ids: Dict[str, Optional[int]] = {}
         self._checked: set = set()
         self._by_hand: set = set()          # folders the owner asked to search by hand (a declared edition's volumes)
+        self._browsing: Optional[VolumeTarget] = None   # "Search releases..." of a series not in To get (no gaps)
         # One group at a time, picked with the chips above the list (owner, 2026-10-09: "I shouldn't need to scroll down
         # to get to 'upgrades'"); remembered, like the panel's width.
         cfg = config.load()                 # read once: the group, the sort and the panels' sizes (_build_ui)
@@ -259,6 +270,7 @@ class DownloadTab(QWidget):
         self._seen_status: Optional[Dict[int, str]] = None     # record id -> status at the last reload (None: none yet)
         self._chapter_lookups: Dict[str, object] = {}           # folder -> the chapters panel's last lookup
         self._chapter_states: Dict[str, str] = {}               # folder -> SEARCH_* of its chapter lookup
+        self._check_warnings: Dict[int, str] = {}               # series id -> the scheduled check keeps failing on it
         self._items: Dict[str, QTreeWidgetItem] = {}
         self._rows: Dict[str, List[QTreeWidgetItem]] = {}
         self._header_items: Dict[str, QTreeWidgetItem] = {}
@@ -660,6 +672,8 @@ class DownloadTab(QWidget):
                 if row.data(0, ROLE_GROUP) == GROUP_CHAPTERS:
                     chips = row_chips([r for r in records if r.is_chapters], self._chapter_states.get(folder),
                                       CHAPTER_CHIPS)
+                    if sid in self._check_warnings:         # the scheduled check could not read its source (3+ times)
+                        chips = list(chips) + [(CHECK_FAILING_CHIP, "warn")]
                 else:
                     chips = row_chips([r for r in records if not r.is_chapters], self._states.get(folder))
                 row.setData(0, ROLE_CHIPS, chips)
@@ -914,6 +928,7 @@ class DownloadTab(QWidget):
         series = self._by_folder.get(folder)
         if series is None:
             return
+        self._browsing = None
         chapters = self._chapters_entry(folder)
         if chapters is not None and (self._group == GROUP_CHAPTERS or series.group == GROUP_CHAPTERS):
             self._current = folder
@@ -958,6 +973,7 @@ class DownloadTab(QWidget):
             self._show_unavailable(series, reason)
             return
         self.panels.setCurrentIndex(PANEL_CHAPTERS)
+        self.chapters.set_warning(self._check_warnings.get(sid, ""))
         cached = self._chapter_lookups.get(series.folder)
         if cached is None:
             self._chapter_states[series.folder] = SEARCH_RUNNING
@@ -1055,6 +1071,12 @@ class DownloadTab(QWidget):
             act_new = menu.addAction(CHECK_NEW_CHAPTERS)
             act_new.setToolTip(self._w("Ask the series' chapter source for chapters newer than the newest one you have "
                                        "(for volumes: the last chapter of your newest volume)"))
+            if series.group in (GROUP_VOLUMES, GROUP_UPGRADES):       # its releases with Other releases open
+                target = self._target_for(series)
+                actions.add_action(SEARCH_RELEASES, lambda t=target: self._search_releases_line(t),
+                                   SEARCH_RELEASES_TIP if target is not None and not self._reason(series)
+                                   else "Not available: " + (self._reason(series) or NOT_SCANNED),
+                                   target is not None and not self._reason(series))
             if self._chapters_entry(folder) is not None and callable(getattr(self._backend, "other_candidates", None)):
                 act_source = menu.addAction(CHANGE_SOURCE)
                 act_source.setToolTip(self._w(CHANGE_SOURCE_TIP))
@@ -1186,6 +1208,35 @@ class DownloadTab(QWidget):
         self._sync_series_buttons()
         return True
 
+    def _search_releases_line(self, target: Optional[VolumeTarget]) -> str:
+        if target is not None:
+            self.search_releases(target)
+        return ""
+
+    def search_releases(self, target: VolumeTarget) -> bool:
+        """"Search releases..." (the List's row menu, a To get row; owner, 2026-10-24: "optionally show downloads even
+        if you don't have missing chapters"): the series' releases card with the Other releases section open - the
+        To get search for a series with volume gaps, else a search of its own for a series with nothing missing (every
+        release is compared with the volumes held; one that holds only those is an other release)."""
+        folder = target.folder
+        series = self._by_folder.get(folder)
+        searchable = series is not None and series.group in (GROUP_VOLUMES, GROUP_UPGRADES) and not self._reason(series)
+        if searchable and self.select_series(folder, series.group):
+            self.releases.open_others_next(target.series_id)     # when its search comes in ...
+            if self._results.get(folder) is not None:            # ... or now: it was searched before
+                self.releases.show_outcome(self._results[folder])
+            return True
+        self._show_upgrade_note(None)
+        self._delay.stop()
+        self._current = folder
+        self._browsing = replace(target, browse=True)
+        self.panels.setCurrentIndex(PANEL_RELEASES)
+        _log.info("Download tab: searching every release of %s (Search releases...)", target.title)
+        self.releases.open_others_next(target.series_id)
+        self.releases.open_target(self._browsing)
+        self._sync_series_buttons()
+        return True
+
     def _on_chapter_lookup(self, series_id: int, lookup) -> None:
         folder = next((f for f, sid in self._series_ids.items() if sid == series_id), None)
         if folder is None:
@@ -1280,6 +1331,11 @@ class DownloadTab(QWidget):
 
     def _search_again(self) -> None:
         folder = self._current
+        browsing = self._browsing
+        if browsing is not None and folder == browsing.folder:
+            self.releases.open_others_next(browsing.series_id)
+            self.releases.open_target(browsing)              # "Search releases..." of a series not in To get
+            return
         if folder is None or self._states.get(folder) in (SEARCH_QUEUED, SEARCH_RUNNING):
             return
         self._results.pop(folder, None)
@@ -1344,8 +1400,9 @@ class DownloadTab(QWidget):
         self._results[folder] = outcome
         if outcome.candidates is None:
             self._states[folder] = SEARCH_FAILED
-        else:
-            self._states[folder] = SEARCH_READY if outcome.candidates else SEARCH_NONE
+        else:           # "Releases ready" for a release that fills a gap - the other releases alone do not (2026-10-24)
+            usable = [c for c in outcome.candidates if not getattr(c, "other", False)]
+            self._states[folder] = SEARCH_READY if usable else SEARCH_NONE
         self._bulk_done += 1 if self._bulk_total else 0
         self._refresh_statuses()
         if folder == self._current:
@@ -1450,6 +1507,7 @@ class DownloadTab(QWidget):
         except Exception as exc:  # noqa: BLE001 - shown in the view; the old list stays
             self.found.say(f"Could not read what was found: {describe_error(exc)}", "bad")
             return
+        self._reload_check_warnings()
         new = findings != self._findings
         self._findings, self._last_run = findings, last_run
         names = self.found_names() if new else self._found_names     # (names of the series not in To get: a read)
@@ -1459,6 +1517,29 @@ class DownloadTab(QWidget):
         if changed:                                     # the chips' counts, the Found list on the left
             self._rebuild()
         self.count_changed.emit(self.badge_count())
+
+    def _reload_check_warnings(self) -> None:
+        """The series the scheduled chapter check could not read several times in a row (a quick read, with the
+        findings): a chip on their Missing chapters row and a line in their chapters panel."""
+        read = getattr(self._backend, "chapter_check_warnings", None)
+        if not callable(read):
+            return
+        try:
+            warnings = dict(read())
+        except Exception:  # noqa: BLE001 - a warning is a courtesy; the old ones stay
+            _log.debug("Reading the chapter check's warnings failed", exc_info=True)
+            return
+        if warnings == self._check_warnings:
+            return
+        self._check_warnings = warnings
+        self._refresh_statuses()
+        sid = self._series_ids.get(self._current) if self._current else None
+        if sid is not None and self.chapters.series_id == sid:
+            self.chapters.set_warning(warnings.get(sid, ""))
+
+    def check_warning_of(self, folder: str) -> str:
+        """The scheduled check's warning for a series (its folder), "" when it reads fine."""
+        return self._check_warnings.get(self._series_ids.get(folder), "")
 
     def findings(self) -> list:
         return list(self._findings)

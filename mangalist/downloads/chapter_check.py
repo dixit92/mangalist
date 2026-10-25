@@ -73,6 +73,8 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..store.findings import GONE, MODE_OFF, WAITING, FindingConflict, FindingStore
+from . import chapter_failures
+from .chapter_failures import WARN_AFTER
 
 _log = logging.getLogger(__name__)
 
@@ -129,6 +131,7 @@ class CheckReport:
     sent: int = 0                       # picks sent (Auto)
     waiting: int = 0                    # findings waiting for the owner
     unreadable: int = 0                 # series whose source could not be read now (tried again next time)
+    failing: int = 0                    # ... of which could not be read for WARN_AFTER checks in a row (warned about)
     errors: int = 0                     # sends that failed, Suwayomi down
     stopped: bool = False
     not_checked: Optional[str] = None   # why no series could be asked (Suwayomi not set up, not answering)
@@ -143,6 +146,8 @@ class CheckReport:
                 f"MangaDex), {self.with_new} with new chapters: {self.sent} sent, {self.waiting} waiting")
         if self.unreadable:
             text += f", {self.unreadable} could not be read"
+            if self.failing:
+                text += f" ({self.failing} for {WARN_AFTER}+ checks in a row)"
         if self.errors:
             text += f", {self.errors} failed"
         if self.stopped:
@@ -418,9 +423,9 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
             ctx.report.errors += 1
             _line(ctx, name, _w(ctx, f"Suwayomi did not answer ({type(exc).__name__})"))
             raise _Stop() from exc
-        report.unreadable += 1
-        _log.info("%s: %s: %s; next time", LABEL, name, _w(ctx, f"Suwayomi's MangaDex search failed "
-                                                               f"({type(exc).__name__})"))
+        reason = _w(ctx, f"Suwayomi's MangaDex search failed ({type(exc).__name__})")
+        _unreadable(ctx, report, cand, "MangaDex", reason)
+        _log.info("%s: %s: %s; next time", LABEL, name, reason)
         return
     match = found.match
     if match is None:                   # the saved source is no longer allowed, or MangaDex lacks the linked id
@@ -436,6 +441,7 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
             _log.debug("%s: %s: the MangaDex gate could not tell; fetched", LABEL, name, exc_info=True)
             same = None
         if same is not None:
+            chapter_failures.clear(ctx.db, sid)         # unchanged since a good read: not failing
             report.unchanged += 1
             _log.debug("%s: %s: not fetched: unchanged on MangaDex since its last check (latest upload %s, from %s)",
                        LABEL, name, same.chapter or "none", same.origin)
@@ -450,10 +456,11 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
             ctx.report.errors += 1
             _line(ctx, name, _w(ctx, f"Suwayomi did not answer ({type(exc).__name__})"))
             raise _Stop() from exc
-        report.unreadable += 1
+        _unreadable(ctx, report, cand, match.source.display_name, f"{type(exc).__name__}: {exc}")
         _log.info("%s: %s: %s manga %s could not be read (%s: %s); next time", LABEL, name,
                   match.source.display_name, match.manga.id, type(exc).__name__, exc)
         return
+    chapter_failures.clear(ctx.db, sid)                 # read: the failures in a row start again
     errors = ctx.report.errors
     _offer_or_send(ctx, report, cand, match, lookup, newer_text(lookup))
     if ctx.report.errors == errors:     # the series' check succeeded: what MangaDex said before it is kept
@@ -461,6 +468,17 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
             gate.record(sid, match, lookup.manga_url, local_state(ctx.db, ctx.backend, ctx.store, sid))
         except Exception:  # noqa: BLE001 - not kept: the next check fetches the series
             _log.debug("%s: %s: the MangaDex gate's value could not be kept", LABEL, name, exc_info=True)
+
+
+def _unreadable(ctx, report: CheckReport, cand: Candidate, source: str, reason: str) -> None:
+    """The series' source could not be read in this check: counted, remembered, and from WARN_AFTER checks in a row
+    warned about in the log (WARNING) and in the Download tab (see :mod:`~.chapter_failures`)."""
+    report.unreadable += 1
+    failure = chapter_failures.record_failure(ctx.db, cand.series_id, reason, source)
+    if failure is not None and failure.warn:
+        report.failing += 1
+        _log.warning("%s: %s: %s could not be read in %d checks in a row (%s); the Download tab shows a warning - "
+                     "Change source… picks another", LABEL, cand.name, source, failure.count, failure.reason)
 
 
 def _offer_or_send(ctx, report: CheckReport, cand: Candidate, match, lookup, found_text: str) -> None:

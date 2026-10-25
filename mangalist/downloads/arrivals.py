@@ -6,6 +6,8 @@ One pass (:func:`run_arrivals`) is idempotent and safe to run hourly. For each a
 
 - **Missing** from the category (removed, or moved to another category) -> FAILED with the reason; nothing else.
 - **SENT** + complete -> DOWNLOADED (and on to filing in the same pass).
+- **DOWNLOADED**, a replacement (``replace_volumes``: an other release sent to replace the owner's copies, 2026-10-24)
+  -> the owner's copies it covers to the holding folder first, then filed as below (:mod:`.replacing`).
 - **DOWNLOADED** -> filing: the torrent's archive files (``scanner.ARCHIVE_EXTS``) whose parsed volume is one of
   the record's ``wanted_volumes`` AND is not held by the series right now (its stored units AND a fresh look at
   its folder) are linked into the record's ``target_dir`` through ONE journal plan - under their own names, or
@@ -165,6 +167,7 @@ class _Pass:
         self.journal = journal if journal is not None else Journal(self.db)
         self.remove = ledger.remove_completed() if remove_completed is None else bool(remove_completed)
         self._moves = None                  # the journal's applied moves, read once per pass (see _current_path)
+        self._discards = None               # the deliberate deletions, read once per pass (see _discarded)
         self.should_stop = should_stop
         self.report = ArrivalsReport()
 
@@ -241,6 +244,8 @@ class _Pass:
             return self._settle(rec, plan_id, series_dir, blocked=problem)
         if problem:
             return self._fail(rec, problem + "; nothing filed, the torrent is left alone")
+        if rec.replace_volumes:         # an other release sent to replace the owner's copies (owner, 2026-10-24)
+            return self._file_replacement(rec, t, series, root, series_dir)
         links, notes = self._pick(rec, t, series, series_dir, root)
         if not links:
             return self._fail(rec, f"none of the torrent's archives is a wanted volume still missing from the series "
@@ -284,11 +289,16 @@ class _Pass:
             _log.debug("Arrivals: no scheme naming", exc_info=True)
             return None
 
-    def _pick(self, rec: DownloadRecord, t: TorrentInfo, series, series_dir: str, root=None):
+    def _pick(self, rec: DownloadRecord, t: TorrentInfo, series, series_dir: str, root=None, *,
+              held: Optional[Set[Decimal]] = None, free: Iterable[str] = ()):
+        """(links, notes): the torrent's files to file and why the others are not. *held*: the volumes counted as held
+        (default: :func:`held_volumes`); *free*: library paths (normcase'd) whose name a link may take - a
+        replacement's old copies, moved to the holding folder first."""
         request = self.ledger.request(rec.id)
         hint = release_hint(request.get("title") or rec.title, request.get("vol_from"))   # the title states volumes
         wanted = {Decimal(v) for v in rec.wanted_volumes}
-        held = held_volumes(self.db, series, series_dir)
+        held = held_volumes(self.db, series, series_dir) if held is None else held
+        free = set(free)
         save_path = os.path.normpath(t.save_path)
         links: List[Tuple[str, str]] = []
         taken_names: Set[str] = set()
@@ -327,13 +337,122 @@ class _Pass:
             named = (namer.scheme_name(root, series, base, size=int(getattr(f, "size", 0) or 0))
                      if namer is not None else None) or base
             dst = os.path.join(rec.target_dir, named)
-            if os.path.lexists(dst) or os.path.normcase(named) in taken_names:
+            if (os.path.lexists(dst) and os.path.normcase(os.path.normpath(dst)) not in free) \
+                    or os.path.normcase(named) in taken_names:
                 notes.append(f"{base}: a file of that name is already in the target folder")
                 continue
             taken_names.add(os.path.normcase(named))
             taken_vols |= vols
             links.append((src, dst))
         return links, notes
+
+    # --- filing a replacement (other releases; mangalist.downloads.replacing) ---------------------------------------
+
+    def _file_replacement(self, rec: DownloadRecord, t: TorrentInfo, series, root,
+                          series_dir: str) -> Optional[DownloadRecord]:
+        """File a replacement: the owner's copies it covers to the holding folder first (one replaced-files batch,
+        journaled like an upgrade's), then the release's files as any arrival's; the batch is put back when nothing
+        could be filed. A pass that stops in between resumes from the batch kept on the record."""
+        from .. import upgrades
+        from ..store.replacements import ReplacementConflict, ReplacementStore
+        from .replacing import held_files, held_volumes_except, plan_replacement
+
+        request = self.ledger.request(rec.id)
+        hint = release_hint(request.get("title") or rec.title, request.get("vol_from"))
+        store = ReplacementStore(self.db)
+        batch_id = request.get("replace_batch")
+        batch = store.get(int(batch_id)) if isinstance(batch_id, int) and not isinstance(batch_id, bool) else None
+        if batch is not None and batch.status == "pending":         # its move was interrupted or had to wait
+            try:
+                batch = upgrades.hold_batch(self.db, batch.id, journal=self.journal)
+            except ReplacementConflict as exc:
+                _log.info("Arrivals: download %d: %s", rec.id, exc)
+                batch = store.get(batch.id)
+        if batch is not None and batch.status == "pending":
+            self._wait(rec, f"moving your old copies to the holding folder: {batch.error or 'waiting'}")
+            return None
+        if batch is not None and batch.status not in ("held", "purged"):
+            why = (f"your old copies could not be moved to the holding folder ({batch.error or batch.status})"
+                   if batch.status == "failed" else
+                   f"its replaced files were {batch.status} before the release was filed")
+            return self._fail(rec, f"{why}; nothing filed, the torrent is left alone")
+        if batch is None:
+            files = held_files(self.db, series, series_dir)
+            plan = plan_replacement(
+                files, {Decimal(v) for v in rec.replace_volumes},
+                lambda held, free: self._pick(rec, t, series, series_dir, root, held=held, free=free),
+                lambda src: volumes_of(os.path.basename(src), hint),
+                lambda away: held_volumes_except(self.db, series, series_dir, away),
+                exists=lambda p: upgrades._plain_below(p, root.path) is not None)
+            if not plan.links:
+                return self._fail(rec, "none of the torrent's archives is a wanted volume that can be filed (wanted: "
+                                       f"{', '.join(rec.wanted_volumes)}; replacing: {', '.join(rec.replace_volumes)}; "
+                                       f"{'; '.join(plan.notes) or 'no archives'}); nothing filed, the torrent is "
+                                       "left alone")
+            if plan.away:
+                sizes = {src: os.stat(src).st_size for src, _ in plan.replacing}
+                replaced = []
+                for f in plan.away:
+                    st = upgrades._plain_below(f.path, root.path)
+                    replaced.append(upgrades.ReplacedFile(
+                        path=f.path, rel=f.rel, size=st.st_size, modified=upgrades._iso_from_ns(st.st_mtime_ns),
+                        chapters="", volume=", ".join(_plain([v]) for v in sorted(f.volumes))))
+                try:
+                    batch = upgrades.hold_replaced_volumes(
+                        self.db, download_id=rec.id, title=rec.title, series_id=rec.series_id, root_path=root.path,
+                        series_dir=series_dir, files=replaced, volumes=[_plain([v]) for v in plan.volumes],
+                        volume_files=[(dst, sizes[src]) for src, dst in plan.replacing], journal=self.journal)
+                except ReplacementConflict as exc:
+                    self._wait(rec, f"your old copies wait for the holding folder: {exc}")
+                    _log.warning("Arrivals: download %d (%s): not filed yet - the holding folder cannot be used: %s",
+                                 rec.id, rec.title, exc)
+                    return None
+                self.ledger.note_replacement(rec.id, batch.id)
+                _log.info("Arrivals: download %d (%s) replaces %s: %s", rec.id, rec.title,
+                          _plain(plan.volumes), ", ".join(f.rel for f in plan.away))
+                return self._file_replacement(rec, t, series, root, series_dir)   # on from the batch's state
+        away = []
+        if batch is not None and batch.plan_id is not None:
+            away = [s.src for s in self.journal.get_plan(batch.plan_id).steps if s.op == "hold" and s.state == "done"]
+        links, notes = self._pick(rec, t, series, series_dir, root,
+                                  held=held_volumes_except(self.db, series, series_dir, away))
+        if not links:
+            return self._replacement_failed(rec, batch, "none of the torrent's archives can be filed now ("
+                                            f"{'; '.join(notes) or 'no archives'})")
+        from ..store.journal import StepRefused
+
+        try:
+            plan = self.journal.plan_links(PLAN_REASON, links, root_path=root.path,
+                                           note=f"download {rec.id}: {rec.title} (replacing {len(away)} file(s))")
+        except StepRefused as exc:
+            return self._replacement_failed(rec, batch, f"the journal refused the filing: {exc}")
+        self.ledger.attach_plan(rec.id, plan.id)
+        if notes:
+            _log.info("Arrivals: download %d: not filed: %s", rec.id, "; ".join(notes))
+        out = self._settle(rec, plan.id, series_dir)
+        if out is not None and out.status == DownloadStatus.FAILED and not out.filed_files and batch is not None:
+            self._put_back(rec, batch)
+        return out
+
+    def _replacement_failed(self, rec: DownloadRecord, batch, why: str) -> DownloadRecord:
+        if batch is not None:
+            self._put_back(rec, batch)
+        return self._fail(rec, f"{why}; nothing filed, the torrent is left alone"
+                          + ("; your old copies were put back" if batch is not None else ""))
+
+    def _put_back(self, rec: DownloadRecord, batch) -> None:
+        """Nothing of the replacement was filed: its old copies go back from the holding folder (Restore)."""
+        from .. import upgrades
+
+        try:
+            after = upgrades.restore_batch(self.db, batch.id, journal=self.journal)
+        except Exception as exc:  # noqa: BLE001 - the batch stays held, restorable from the Download tab
+            _log.warning("Arrivals: download %d: the old copies of batch %d were not put back: %s", rec.id, batch.id,
+                         exc)
+            return
+        _log.info("Arrivals: download %d: nothing filed - batch %d %s", rec.id, batch.id,
+                  "restored (the old copies are back)" if after.status == "restored" else
+                  f"not fully restored: {after.error}")
 
     def _settle(self, rec: DownloadRecord, plan_id: int, series_dir: str,
                 blocked: Optional[str] = None) -> Optional[DownloadRecord]:
@@ -435,6 +554,8 @@ class _Pass:
             if size is None:
                 if self._held(s.dst, plan_id):
                     continue        # an upgrade replaced it (the owner's choice): the torrent's copy is not needed
+                if self._discarded(s.dst, plan_id):
+                    continue        # the owner discarded it in Duplicates (or the merge's identical copy): same
                 return f"{name} is no longer in the library"
             if size != s.src_size:
                 return f"{name} in the library is not the filed size"
@@ -450,6 +571,15 @@ class _Pass:
     def _held(self, path: str, after_plan: int) -> bool:
         """Whether the file filed at *path* was later replaced by an upgrade (held, perhaps since emptied)."""
         return self._follower().held(path, after_plan)
+
+    def _discarded(self, path: str, after_plan: int) -> bool:
+        """Whether the file filed at *path* was deleted on purpose by the owner (Duplicates > Discard, a merge's
+        identical copy) - recorded in :mod:`mangalist.store.discards`, since a delete is not a journal step."""
+        if self._discards is None:
+            from ..store.discards import list_discards
+
+            self._discards = list_discards(self.db)
+        return bool(self._discards) and self._follower().discarded(path, after_plan, self._discards)
 
     def _follower(self):
         if self._moves is None:

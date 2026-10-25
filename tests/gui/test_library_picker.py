@@ -13,7 +13,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 
 from mangalist import config  # noqa: E402
-from mangalist.gui import lanes  # noqa: E402
+from mangalist.gui import background, lanes  # noqa: E402
 from mangalist.gui.main_window import _count_by_folder  # noqa: E402
 from mangalist.gui.table_model import COL_DUPE, COL_LIBRARY  # noqa: E402
 from mangalist.identity.backfill import backfill_signatures  # noqa: E402
@@ -62,6 +62,10 @@ class Lib:
         assert index >= 0, name
         picker.setCurrentIndex(index)
         picker.activated.emit(index)
+        # The Download tab's list (and its badge) follow a pick only once every row of the library picked has its state
+        # (`_rebuild_wanted` returns while states are pending; the background push brings the list). A test that asked
+        # at once raced that push (failed once in the 8-worker full run, 2026-10-24): wait for the condition itself.
+        settle_states(win)
 
     def scan_synchronously(self, win, roots=None, scopes=None):
         """What ``_start_scan`` does, with the worker run on this thread: every signal reaches the window in order."""
@@ -111,6 +115,11 @@ def lib(qapp, tmp_path, monkeypatch):
     for win in made:
         win.close()
         win.deleteLater()
+    # A scan leaves counts running on background threads (Rename pending, ...); `close` only drops their results. Let
+    # them end while the application still exists: a QThread destroyed while it runs aborts the process at exit
+    # ("QThread: Destroyed while thread '' is still running" - seen after this module's picks, which spin the event
+    # loop for the last time just as a count starts).
+    wait_until(qapp, lambda: not any(call.isRunning() for call in list(background._ACTIVE)))
 
 
 def _two_libraries(lib, **kw):

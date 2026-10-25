@@ -1003,6 +1003,34 @@ class MainWindow(QMainWindow):
         self.show_tab(TAB_DOWNLOAD)
         return self._download_tab.check_new_chapters(series_id, folder, entry.title, titles)
 
+    def _releases_target(self, folder: str):
+        """(the series' search target, '') or (None, why it cannot be searched on nyaa)."""
+        if self._download_tab is None or self._volumes is None:
+            return None, "Downloads are not set up here."
+        row = self._row_for_folder(folder)
+        if row is None:
+            return None, "The series is not in the List."
+        availability = self._volumes.availability(row)
+        if not availability.enabled or availability.target is None:
+            return None, availability.reason or "This series cannot be searched on nyaa."
+        return availability.target, ""
+
+    def search_releases_blocked(self, folder: str) -> str:
+        """Why "Search releases…" is off for *folder* ('' when it can be searched)."""
+        return self._releases_target(folder)[1]
+
+    def search_releases_for(self, folder: str) -> str:
+        """"Search releases…" (owner, 2026-10-24: "optionally show downloads even if you don't have missing
+        chapters"): the Download tab's releases card for *folder* with the other releases open - for a series with
+        no gaps too. Returns the status line ('' when it opened)."""
+        target, why = self._releases_target(folder)
+        if target is None:
+            return why
+        self._rebuild_wanted()
+        self.show_tab(TAB_DOWNLOAD)
+        self._download_tab.search_releases(target)
+        return ""
+
     def set_aside_volume_chapters(self, folder: str) -> bool:
         """"Set aside chapters its volumes hold…" (owner, 2026-10-11: "Until then, 3 is correct"; MangaPixer 1.42.0
         estimates the volumes its list does not map): list the chapter files inside volumes the series holds, ask, then
@@ -2483,6 +2511,7 @@ class MainWindow(QMainWindow):
                                    "Nothing missing: no gaps to download")
                 act_new = menu.addAction("Check for new chapters…")
                 act_new.setToolTip(CHECK_NEW_TIP)
+                series.add_search_releases()            # every release, also with nothing missing (2026-10-24)
                 menu.setToolTipsVisible(True)
             act_aside = menu.addAction("Set aside chapters its volumes hold…")
             act_aside.setToolTip("Chapter files inside volumes this series holds, by MangaPixer's estimated volume ranges: "

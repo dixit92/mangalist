@@ -34,6 +34,7 @@ sends one finding later; the modes, the findings and the last run are quick read
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -93,6 +94,7 @@ from .options import (
     set_budget_gb,
     set_flag,
 )
+from .chapter_failures import FailuresBackendMixin
 from .extensions_backend import ExtensionsBackendMixin
 from .partial import PackOutcome, PackSelection, choose_files, hint_for, log_selection
 from .placement import placement_for
@@ -100,6 +102,14 @@ from .queueing import ClientDown, budget_state, move_to_front, refresh, remove_f
 from .service import PackSetupError, SendRefused
 
 _log = logging.getLogger(__name__)
+
+
+def _takes_others(search) -> bool:
+    """Whether *search* can return the other releases (an injected test search may not)."""
+    try:
+        return "others" in inspect.signature(search.search).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 class _UploadsKnownTorrents:
@@ -122,7 +132,7 @@ class _UploadsKnownTorrents:
         return getattr(self._client, name)
 
 
-class Backend(ExtensionsBackendMixin):
+class Backend(ExtensionsBackendMixin, FailuresBackendMixin):
     def __init__(self, db, *, search: Optional[NyaaSearch] = None, nyaa_client: Optional[NyaaClient] = None,
                  client_factory: Callable[[QbtConnection], TorrentClient] = client_from_connection,
                  chapter_client_factory: Optional[Callable[[SuwayomiConnection], ChapterClient]] = None,
@@ -164,6 +174,16 @@ class Backend(ExtensionsBackendMixin):
     # --- nyaa ------------------------------------------------------------------------------------------
 
     def search(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> Sequence[NyaaCandidate]:
+        """The usable releases (the find pass's and the find-volumes dialog's search)."""
+        return self._search_nyaa(titles, missing, held, others=False)
+
+    def search_all(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str]) -> Sequence[NyaaCandidate]:
+        """The usable releases, then the other releases (``other=True``: they fill none of the missing volumes) - the
+        releases card's search (owner, 2026-10-24). The same requests as :meth:`search`."""
+        return self._search_nyaa(titles, missing, held, others=True)
+
+    def _search_nyaa(self, titles: Sequence[str], missing: Sequence[str], held: Sequence[str], *,
+                     others: bool) -> Sequence[NyaaCandidate]:
         options = load_nyaa_options(self.db)
         if not options.enabled:
             raise BackendError("nyaa is switched off (Settings > Download sources)")
@@ -172,12 +192,18 @@ class Backend(ExtensionsBackendMixin):
             searches = self._searches_for(options)
             try:
                 for search in searches:
-                    for candidate in search.search(titles, missing, held):
-                        found.setdefault(candidate.info_hash, candidate)
+                    got = search.search(titles, missing, held, others=True) if others and _takes_others(search) \
+                        else search.search(titles, missing, held)
+                    for candidate in got:
+                        known = found.get(candidate.info_hash)
+                        if known is None or (known.other and not candidate.other):     # usable in another category
+                            found[candidate.info_hash] = candidate
             except NyaaError as exc:
                 raise BackendError(f"nyaa: {exc}") from None
         results = [c for c in found.values() if c.trusted or not options.trusted_only]
-        return order(results) if len(searches) > 1 else results      # one search is ranked already
+        if len(searches) <= 1:
+            return results                                          # one search is ranked already
+        return order([c for c in results if not c.other]) + order([c for c in results if c.other])
 
     def _searches_for(self, options: NyaaOptions) -> List[NyaaSearch]:
         """The searches to run: the injected one, else one per category the options ask for, sharing one client (so
@@ -203,6 +229,29 @@ class Backend(ExtensionsBackendMixin):
 
     def set_nyaa_options(self, options: NyaaOptions) -> None:
         save_nyaa_options(self.db, options)
+
+    def replacement_preview(self, series_id: int, volumes: Sequence[str]) -> Tuple[List[str], List[str]]:
+        """A replacement of *volumes* (other releases, 2026-10-24), as the scan has the series now: (the files it would
+        move to the holding folder - the archives holding only volumes among them; the files holding one of them with
+        something else, which stay), each relative to the series folder. What the filing really moves is decided when
+        the torrent has finished (:mod:`mangalist.downloads.replacing`)."""
+        from decimal import Decimal
+
+        from ..parsing.model import to_decimal
+        from .placement import locate_series
+        from .replacing import held_files
+
+        try:
+            series, _root, series_dir = locate_series(self.db, series_id)
+        except LookupError as exc:
+            raise BackendError(str(exc)) from None
+        wanted = {d for d in (to_decimal(v) for v in volumes) if d is not None}
+        moved, kept = [], []
+        for f in held_files(self.db, series, series_dir):
+            if not f.volumes & wanted:
+                continue
+            (moved if f.pure and f.volumes <= {Decimal(d) for d in wanted} else kept).append(f.rel)
+        return moved, kept
 
     # --- partial downloads -----------------------------------------------------------------------------
 
@@ -260,19 +309,20 @@ class Backend(ExtensionsBackendMixin):
 
     def send(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str], target_dir: str,
              only_missing: bool = False, over_cap: str = OVER_CAP_QUEUE,
-             size_bytes: Optional[int] = None) -> DownloadRecord:
+             size_bytes: Optional[int] = None, replace_volumes: Sequence[str] = ()) -> DownloadRecord:
         """Send the release - or queue it when it would go over the download budget (``over_cap="queue"``, the
         default), or send it past the cap (``"send"``, the owner's override). *size_bytes*: what it counts (a partial
-        send: the selected files' total; default the release's size). Returns the record: SENT or QUEUED."""
+        send: the selected files' total; default the release's size). *replace_volumes*: an other release sent as a
+        replacement - the held volumes whose files it replaces when filed. Returns the record: SENT or QUEUED."""
         try:
             return self._submit(series_id, candidate, wanted_volumes, target_dir, only_missing=only_missing,
-                                over_cap=over_cap, size_bytes=size_bytes)
+                                over_cap=over_cap, size_bytes=size_bytes, replace_volumes=replace_volumes)
         except (SendRefused, QbtError, PackSetupError) as exc:
             raise BackendError(str(exc)) from None
 
     def _submit(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str], target_dir: str, *,
                 only_missing: bool = False, over_cap: str = OVER_CAP_QUEUE,
-                size_bytes: Optional[int] = None) -> DownloadRecord:
+                size_bytes: Optional[int] = None, replace_volumes: Sequence[str] = ()) -> DownloadRecord:
         """:meth:`send` with the service's own exceptions (the find pass tells a release that is gone from a
         qBittorrent that is down); BackendError only for what is not set up."""
         conn = self.ledger.connection()
@@ -289,7 +339,8 @@ class Backend(ExtensionsBackendMixin):
         return submit(client, self.ledger, series_id, candidate, wanted_volumes, placement,
                       self.ledger.save_path(), only_missing=only_missing, size_bytes=size_bytes,
                       size_source=SIZE_SELECTED if only_missing and size_bytes else None, over_cap=over_cap,
-                      on_pack=lambda outcome: self._outcomes.__setitem__(key, outcome))
+                      on_pack=lambda outcome: self._outcomes.__setitem__(key, outcome),
+                      **({"replace_volumes": tuple(replace_volumes)} if replace_volumes else {}))
 
     # --- the download budget ---------------------------------------------------------------------------------
 
@@ -364,6 +415,40 @@ class Backend(ExtensionsBackendMixin):
             return remove_now(self._client_factory(conn), self.ledger, record_id)
         except (RemoveRefused, QbtError) as exc:
             raise BackendError(f"not removed: {exc}") from None
+
+    def remove_failed_download(self, record_id: int, *, delete_files: bool) -> DownloadRecord:
+        """The owner's "Remove from qBittorrent" of a FAILED torrent download (owner, 2026-10-24: a failed torrent stayed
+        in qBittorrent for a week): its torrent is deleted from qBittorrent - with its downloaded files when
+        *delete_files* - and the record is marked cancelled (under Show finished). Nothing in the library is touched: a
+        failed download filed nothing. A torrent already gone from qBittorrent only cancels the record."""
+        from ..services.qbittorrent import TorrentNotFound
+        from .contracts import DownloadStatus
+
+        record = self.ledger.get(record_id)
+        if record is None or record.status != DownloadStatus.FAILED or record.is_chapters:
+            raise BackendError("not removed: only a failed torrent download can be removed this way")
+        conn = self.ledger.connection()
+        if conn is None or not conn.base_url:
+            raise BackendError("qBittorrent is not set up yet")
+        client = self._client_factory(conn)
+        try:
+            client.delete(record.info_hash, delete_files=delete_files)
+            _log.info("In progress: failed download %d removed from qBittorrent (files: %s)", record_id, delete_files)
+        except TorrentNotFound:
+            _log.info("In progress: failed download %d was no longer in qBittorrent", record_id)
+        except QbtError as exc:
+            raise BackendError(f"not removed: {exc}") from None
+        finally:
+            closer = getattr(client, "close", None)
+            if callable(closer):
+                closer()
+        why = record.error or "failed"
+        try:
+            return self.ledger.set_status(record_id, DownloadStatus.CANCELLED, expect=(DownloadStatus.FAILED,),
+                                          error=f"removed from qBittorrent by the owner"
+                                                f"{' with its files' if delete_files else ''} (it had failed: {why})")
+        except StatusConflict as exc:
+            raise BackendError(f"removed from qBittorrent, but the record changed meanwhile: {exc}") from None
 
     def dismiss_downloads(self, record_ids: Sequence[int]) -> int:
         """Dismiss FAILED download records (torrents or chapters): marked cancelled, nothing else touched. Returns how
@@ -720,12 +805,14 @@ class Backend(ExtensionsBackendMixin):
         self.suwayomi.set_series_choice(series_id, backend=match.backend or None, source_id=match.source.id,
                                         manga_id=int(match.manga.id), manga_title=match.manga.title,
                                         manga_url=match.manga.url or None, how=HOW_CONFIRMED, stale_manga_id=None)
+        self.forget_chapter_check_failures(series_id)       # another source: the failures in a row start again
         _log.info("Chapters: series %s matched to %s manga %s by the owner", series_id, match.source.display_name,
                   match.manga.id)
 
     def forget_match(self, series_id: int) -> None:
         self.suwayomi.set_series_choice(series_id, source_id=None, manga_id=None, manga_title=None, manga_url=None,
                                         how=None, stale_manga_id=None)
+        self.forget_chapter_check_failures(series_id)
 
     def set_series_group(self, series_id: int, group: Optional[str]) -> None:
         self.suwayomi.set_series_choice(series_id, group=group or None)

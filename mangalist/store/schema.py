@@ -488,6 +488,37 @@ UPDATE ledger SET backend = CASE
 WHERE tool = 'suwayomi' AND backend IS NULL;
 """
 
+# Content verdicts for the Duplicates view's "Whole chapters with parts" (owner, 2026-10-24: "Content verdicts";
+# mangalist.duplicate_verdicts). page_hashes: every page's 64-bit perceptual hash (MangaPixer's CoverHash) and zip
+# CRC32 + size of an archive, keyed by its content signature (archives.signature, v1) - a rename or a move keeps the
+# rows, a changed file gets a new signature and is read again. Only candidate archives are hashed (the files of a whole
+# chapter held with its parts, and their neighbouring chapters as controls), never the whole library.
+# overlap_dismissals: an item the owner dismissed ("this is fine"), keyed by its files' signatures, so it comes back
+# when a file changes.
+_V11_PAGE_HASHES = """
+CREATE TABLE IF NOT EXISTS page_hashes (
+    signature  TEXT    NOT NULL,                     -- archives.signature: v1:<len>:<sha256>
+    algorithm  TEXT    NOT NULL,                     -- mangalist.page_hash.ALGORITHM
+    status     TEXT    NOT NULL,                     -- ok | unreadable
+    pages      INTEGER NOT NULL DEFAULT 0,
+    hashes     BLOB,                                 -- 8 bytes per page, big-endian; natural page order
+    unread     TEXT,                                 -- pages that could not be decoded: comma-separated indexes
+    crcs       BLOB,                                 -- 8 bytes per page: zip CRC32 + uncompressed size, big-endian
+    reason     TEXT,                                 -- why not ok, in words
+    seconds    REAL,                                 -- how long the read took
+    hashed_at  TEXT    NOT NULL,
+    PRIMARY KEY (signature, algorithm)
+);
+CREATE TABLE IF NOT EXISTS overlap_dismissals (
+    key          TEXT PRIMARY KEY,                   -- sha256 of the item's files' signatures, sorted
+    series_id    INTEGER,
+    folder       TEXT,                               -- the folder holding the files (for the log)
+    number       TEXT,                               -- the whole chapter's number
+    files        TEXT,                               -- JSON list of the file names then
+    dismissed_at TEXT    NOT NULL
+);
+"""
+
 # (version, script). Append only; never edit a shipped entry.
 MIGRATIONS: List[Tuple[int, str]] = [
     (1, _V1),
@@ -500,6 +531,7 @@ MIGRATIONS: List[Tuple[int, str]] = [
     (8, _V8_ROOT_AUTO_MODE),
     (9, _V9_ENGLISH_TITLES),
     (10, _V10_LEDGER_BACKEND),
+    (11, _V11_PAGE_HASHES),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
