@@ -160,7 +160,7 @@ def _add_partial(client: TorrentClient, candidate: NyaaCandidate, wanted: Sequen
         live = _wait_for_files(client, h, wait)
         selection = choose_from_live(live, wanted, hint)
         log_selection(candidate.title, selection, "qBittorrent's file list")
-        if selection.chapters_only:
+        if selection.refused:
             raise PackSetupError(f"not sent for volumes: {selection.problem}")
         skip, enable = priority_changes(live, selection)
         if skip:

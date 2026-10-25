@@ -59,6 +59,12 @@ class PackSelection:
     problem: Optional[str] = None
     whole_reason: Optional[str] = None
     chapters_only: bool = False         # every archive is a chapter file: not a volume release - never sent for volumes
+    not_comic: bool = False             # no comic archive, only e-book / audio files: a light novel or audiobook - never sent
+
+    @property
+    def refused(self) -> bool:
+        """True when the release must not be sent for volumes at all (chapters, or not a comic)."""
+        return self.chapters_only or self.not_comic
 
     @property
     def readable(self) -> bool:
@@ -139,6 +145,15 @@ def file_lines(selection: PackSelection, limit: int = 12) -> str:
 
 
 CHAPTERS_ONLY = "its files are chapters, not volumes"
+NOT_COMIC = "its files are e-books or audio (a light novel or audiobook), not comic archives"
+#: Files of a light novel or an audiobook: a release with these and no comic archive is not a comic (owner, 2026-10-24:
+#: a Seven Seas pack of .epub volumes with no "novel" word in its title was offered for a manga's missing volumes).
+NOVEL_EXTS = frozenset({".epub", ".mobi", ".azw", ".azw3", ".kfx", ".m4b", ".m4a", ".mp3", ".aac", ".flac", ".ogg",
+                        ".opus", ".wav"})
+#: A bare-number release ("001-158") whose archives name no volume is a chapter pack when it has this many archives,
+#: or archives this small on average (owner, 2026-10-24: 158 episode files of ~10 MB went out for a missing volume).
+CHAPTER_PACK_FILES = 60
+CHAPTER_PACK_AVG_BYTES = 40 * 1024 * 1024
 
 
 def hint_for(candidate: NyaaCandidate) -> Optional[str]:
@@ -188,8 +203,13 @@ def choose_files(files: Sequence[Tuple[str, int]], wanted_volumes: Sequence[str]
     if not choices:
         return PackSelection((), wanted, problem="the torrent lists no files")
     archives = [c for c in choices if c.reason != "not a volume archive"]
+    if not archives and any(posixpath.splitext(posixpath.basename(c.name))[1].lower() in NOVEL_EXTS for c in choices):
+        return PackSelection(choices, wanted, problem=NOT_COMIC, not_comic=True)
     if archives and all(c.reason == "chapter files, not a volume" for c in archives):
         return PackSelection(choices, wanted, problem=CHAPTERS_ONLY, chapters_only=True)
+    if hint is None and archives and not any(c.volumes for c in archives) and (
+            len(archives) >= CHAPTER_PACK_FILES or sum(c.size for c in archives) / len(archives) < CHAPTER_PACK_AVG_BYTES):
+        return PackSelection(choices, wanted, problem=CHAPTERS_ONLY, chapters_only=True)     # bare numbers, chapter-sized
     if not any(c.keep and c.volumes for c in choices):
         reason = ("none of the files names a missing volume, so the whole pack is kept" if wanted
                   else "the missing volumes are not known, so the whole pack is kept")

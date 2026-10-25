@@ -188,9 +188,9 @@ def _uncertain_volume_release(ctx, candidates: Sequence[NyaaCandidate], skip: Se
             selection = ctx.backend.inspect_pack(unsure, list(fills))
         except Exception:  # noqa: BLE001 - not readable now: offered as uncertain, as before
             return unsure
-        if not getattr(selection, "chapters_only", False):
+        if not (getattr(selection, "chapters_only", False) or getattr(selection, "not_comic", False)):
             return unsure
-        _log.info("Find pass %d: %s: its files are chapters, not volumes - not offered", ctx.run_id, unsure.title)
+        _log.info("Find pass %d: %s: %s - not offered", ctx.run_id, unsure.title, selection.problem)
         passed.add(unsure.info_hash.lower())
     return None
 
