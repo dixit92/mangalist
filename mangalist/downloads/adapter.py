@@ -285,19 +285,20 @@ class Backend(ExtensionsBackendMixin):
 
     def send(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str], target_dir: str,
              only_missing: bool = False, over_cap: str = OVER_CAP_QUEUE,
-             size_bytes: Optional[int] = None) -> DownloadRecord:
+             size_bytes: Optional[int] = None, replace_volumes: Sequence[str] = ()) -> DownloadRecord:
         """Send the release - or queue it when it would go over the download budget (``over_cap="queue"``, the
         default), or send it past the cap (``"send"``, the owner's override). *size_bytes*: what it counts (a partial
-        send: the selected files' total; default the release's size). Returns the record: SENT or QUEUED."""
+        send: the selected files' total; default the release's size). *replace_volumes*: an other release sent as a
+        replacement - the held volumes whose files it replaces when filed. Returns the record: SENT or QUEUED."""
         try:
             return self._submit(series_id, candidate, wanted_volumes, target_dir, only_missing=only_missing,
-                                over_cap=over_cap, size_bytes=size_bytes)
+                                over_cap=over_cap, size_bytes=size_bytes, replace_volumes=replace_volumes)
         except (SendRefused, QbtError, PackSetupError) as exc:
             raise BackendError(str(exc)) from None
 
     def _submit(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str], target_dir: str, *,
                 only_missing: bool = False, over_cap: str = OVER_CAP_QUEUE,
-                size_bytes: Optional[int] = None) -> DownloadRecord:
+                size_bytes: Optional[int] = None, replace_volumes: Sequence[str] = ()) -> DownloadRecord:
         """:meth:`send` with the service's own exceptions (the find pass tells a release that is gone from a
         qBittorrent that is down); BackendError only for what is not set up."""
         conn = self.ledger.connection()
@@ -314,7 +315,8 @@ class Backend(ExtensionsBackendMixin):
         return submit(client, self.ledger, series_id, candidate, wanted_volumes, placement,
                       self.ledger.save_path(), only_missing=only_missing, size_bytes=size_bytes,
                       size_source=SIZE_SELECTED if only_missing and size_bytes else None, over_cap=over_cap,
-                      on_pack=lambda outcome: self._outcomes.__setitem__(key, outcome))
+                      on_pack=lambda outcome: self._outcomes.__setitem__(key, outcome),
+                      **({"replace_volumes": tuple(replace_volumes)} if replace_volumes else {}))
 
     # --- the download budget ---------------------------------------------------------------------------------
 

@@ -542,16 +542,70 @@ def set_aside_estimated(db, series_id: int, rels: Sequence[str], *, journal=None
     if found.status != "pending" or not files:
         raise ReplacementConflict(found.error or "none of the confirmed chapter files is still listed")
     store = ReplacementStore(db)
-    with db.connect() as con:
-        lowest = con.execute("SELECT MIN(download_id) FROM replacements").fetchone()[0]
-    manual_id = min(-1, (lowest or 0) - 1)
-    batch = store.create(NewBatch(download_id=manual_id, series_id=series_id, status="pending",
+    batch = store.create(NewBatch(download_id=_unlinked_id(db), series_id=series_id, status="pending",
                                   root_path=found.root_path, series_dir=found.series_dir, volumes=found.volumes,
                                   volume_files=found.volume_files, files=files, kept=found.kept, mode=MODE_HOLDING,
                                   error=None))
     _log.info("Upgrades: batch %d: %d chapter file(s) of series %d set aside by hand (volumes %s, MangaPixer's "
               "estimated ranges)", batch.id, len(files), series_id, ", ".join(found.volumes))
     return hold_batch(db, batch.id, journal=journal, now=now)
+
+
+def _unlinked_id(db) -> int:
+    """A ``download_id`` for a batch that is not a filed download's own chapter batch (negative, unique): set aside by
+    hand, or a replacement's old copies (the download's own id stays free for its chapters)."""
+    with db.connect() as con:
+        lowest = con.execute("SELECT MIN(download_id) FROM replacements").fetchone()[0]
+    return min(-1, (lowest or 0) - 1)
+
+
+# --- a replacement's old copies (other releases; owner, 2026-10-24) -------------------------------------------------
+#
+# "Replace, keep old": when a release sent as a replacement is filed, every file of the owner's that it covers goes to
+# the holding folder FIRST (its name may be the one the new file takes), through the journal's ``hold`` steps - the same
+# batch as an upgrade's replaced chapters, restorable from the Download tab and emptied after the holding period. Its
+# ``volume_files`` are the release's files as they are about to be filed; the filing (``mangalist.downloads.replacing``)
+# links them right after. Always holding, whatever Settings > Automation says for chapters: the owner's answer.
+
+REPLACED_VOLUMES_REASON = "replaced volumes"
+
+
+def hold_replaced_volumes(db, *, download_id: int, title: str, series_id: Optional[int], root_path: str,
+                          series_dir: str, files: Sequence[ReplacedFile], volumes: Sequence[str],
+                          volume_files: Sequence[Tuple[str, int]], journal=None,
+                          now: Optional[datetime] = None) -> Batch:
+    """Record the old copies a replacement covers as one batch and move them to the holding folder (one journal plan
+    of ``hold`` steps). Raises :class:`ReplacementConflict` - nothing recorded - while the holding folder cannot be used.
+    The batch comes back ``held`` (moved; perhaps only partly - ``error`` says), ``pending`` (the root was busy: moved
+    by the next pass) or ``failed`` (nothing moved, ``error`` says why)."""
+    from .store.journal import Journal, StepRefused
+
+    journal = journal if journal is not None else Journal(db)
+    settings = load_settings(db)
+    problem = holding_problem(db, settings.holding_folder)
+    if problem:
+        raise ReplacementConflict(problem)
+    if not files:
+        raise ReplacementConflict("no file to replace")
+    store = ReplacementStore(db)
+    batch = store.create(NewBatch(download_id=_unlinked_id(db), series_id=series_id, status="pending",
+                                  root_path=root_path, series_dir=series_dir, volumes=list(volumes),
+                                  volume_files=list(volume_files), files=list(files), mode=MODE_HOLDING,
+                                  error=None))
+    stamp = _now(now).astimezone(timezone.utc).strftime("%Y-%m-%d")
+    holding_dir = os.path.join(os.path.normpath(settings.holding_folder), f"{stamp} batch {batch.id}",
+                               os.path.basename(os.path.normpath(root_path)) or "root")
+    try:
+        plan = journal.plan_holding(REPLACED_VOLUMES_REASON, [f.path for f in files], root_path=root_path,
+                                    holding_dir=holding_dir, note=f"replaced by download {download_id}: {title}")
+    except StepRefused as exc:
+        _log.warning("Upgrades: batch %d: the journal refused to hold the old copies: %s", batch.id, exc)
+        return store.update(batch.id, expect=("pending",), status="failed",
+                            error=f"the journal refused the move: {exc}")
+    store.update(batch.id, expect=("pending",), plan_id=plan.id, holding_dir=os.path.dirname(holding_dir))
+    _log.info("Upgrades: batch %d: %d old cop%s of series %s replaced by download %d (%s): %s", batch.id, len(files),
+              "y" if len(files) == 1 else "ies", series_id, download_id, title, ", ".join(f.rel for f in files))
+    return hold_batch(db, batch.id, journal=journal, now=now)       # its plan is made: the volumes are filed next
 
 
 # --- the downloads job's hook -----------------------------------------------------------------------------------

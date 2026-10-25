@@ -176,7 +176,8 @@ def _record(r: sqlite3.Row) -> DownloadRecord:
                           updated_at=r["updated_at"],
                           filed_files=tuple(str(f) for f in _loads(r["filed_files"], [])),
                           copied=bool(r["copied"]), error=r["error"], size_bytes=size, size_source=source,
-                          in_client=req.get("in_client") is not False)
+                          in_client=req.get("in_client") is not False,
+                          replace_volumes=tuple(str(v) for v in req.get("replace_volumes") or ()))
 
 
 def _queue_key(r: sqlite3.Row):
@@ -227,10 +228,12 @@ class DownloadLedger:
 
     def create(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
                target_dir: str, *, status: str = DownloadStatus.SENT, only_missing: bool = False,
-               size_bytes: Optional[int] = None, size_source: Optional[str] = None) -> DownloadRecord:
+               size_bytes: Optional[int] = None, size_source: Optional[str] = None,
+               replace_volumes: Sequence[str] = ()) -> DownloadRecord:
         """A new SENT record (or QUEUED: waiting for room under the download budget, at the end of the queue). Refused
         while another record tracks the same torrent (queued or in qBittorrent). *size_bytes* / *size_source*: what it
-        counts against the budget (default: the release's size)."""
+        counts against the budget (default: the release's size). *replace_volumes*: a replacement's held volumes (of
+        the wanted ones) whose files it replaces when filed (owner, 2026-10-24)."""
         self._writable(TOOL_QBITTORRENT)
         info_hash = (candidate.info_hash or "").strip().lower()
         if not info_hash:
@@ -251,6 +254,9 @@ class DownloadLedger:
                    "covers_missing": list(candidate.covers_missing), "only_missing": bool(only_missing),
                    "budget_bytes": _size(size_bytes) or _size(candidate.size_bytes),
                    "budget_source": (size_source or SIZE_RELEASE) if _size(size_bytes) else SIZE_RELEASE}
+        replacing = [v for v in normalize_volumes(replace_volumes) if v in wanted]
+        if replacing:
+            request["replace_volumes"] = replacing
         now = utcnow()
         with self.connect(durable=True) as con:
             if self._tracked_ids(con, info_hash):
@@ -446,6 +452,13 @@ class DownloadLedger:
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             return self._set_request(con, record_id, in_client=bool(in_client))
+
+    def note_replacement(self, record_id: int, batch_id: int) -> bool:
+        """Remember the replaced-files batch (``mangalist.store.replacements``) that took a replacement's old copies to
+        the holding folder before its filing (owner, 2026-10-24), so a later pass resumes it. True when it changed."""
+        with self.connect(durable=True) as con:
+            con.execute("BEGIN IMMEDIATE")
+            return self._set_request(con, record_id, replace_batch=int(batch_id))
 
     def active(self, backends: Optional[Sequence[str]] = None) -> Sequence[DownloadRecord]:
         """Every record not yet REMOVED / FAILED / CANCELLED, oldest first. *backends*: only the chapter records of

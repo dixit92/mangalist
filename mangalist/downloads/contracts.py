@@ -244,6 +244,9 @@ class DownloadRecord:
     # CHAPTER_BACKEND_SUWAYOMI | CHAPTER_BACKEND_EXTENSIONS; '' for a torrent, or a record an older build wrote.
     backend: str = ""
     stuck: bool = False                 # a chapter download its program gave up on (the last arrivals pass saw ERROR)
+    # A replacement (an other release, owner 2026-10-24): the held volumes of *wanted_volumes* whose files the release
+    # replaces when it is filed - the owner's copies go to the holding folder first (mangalist.downloads.replacing).
+    replace_volumes: Tuple[str, ...] = ()
 
     @property
     def is_chapters(self) -> bool:
@@ -253,7 +256,8 @@ class DownloadRecord:
 class DownloadStore(Protocol):
     def create(self, series_id: int, candidate: NyaaCandidate, wanted_volumes: Sequence[str],
                target_dir: str, *, status: str = DownloadStatus.SENT, only_missing: bool = False,
-               size_bytes: Optional[int] = None, size_source: Optional[str] = None) -> DownloadRecord: ...
+               size_bytes: Optional[int] = None, size_source: Optional[str] = None,
+               replace_volumes: Sequence[str] = ()) -> DownloadRecord: ...
 
     def get(self, record_id: int) -> Optional[DownloadRecord]: ...
 

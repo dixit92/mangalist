@@ -262,7 +262,8 @@ def send_pick(client: TorrentClient, store: DownloadStore, series_id: int, candi
               wanted_volumes: Sequence[str], placement: Placement, save_path: str, *, only_missing: bool = False,
               wait: Optional[PackWait] = None,
               on_pack: Optional[Callable[[PackOutcome], None]] = None,
-              size_bytes: Optional[int] = None, size_source: Optional[str] = None) -> DownloadRecord:
+              size_bytes: Optional[int] = None, size_source: Optional[str] = None,
+              replace_volumes: Sequence[str] = ()) -> DownloadRecord:
     """Add *candidate* to qBittorrent in the ``mangalist`` category (saving to *save_path*) and record it as SENT.
 
     ``only_missing``: download only the files that hold *wanted_volumes* (see the module docstring); *on_pack*
@@ -282,7 +283,8 @@ def send_pick(client: TorrentClient, store: DownloadStore, series_id: int, candi
     if outcome is not None and outcome.partial:
         size_bytes, size_source = outcome.selection.kept_bytes, SIZE_SELECTED
     record = store.create(series_id, candidate, wanted_volumes, target, only_missing=only_missing,
-                          size_bytes=size_bytes, size_source=size_source)
+                          size_bytes=size_bytes, size_source=size_source,
+                          **({"replace_volumes": tuple(replace_volumes)} if replace_volumes else {}))
     _log.info("Sent download %d to qBittorrent: %s (volumes %s, %s) -> %s", record.id, candidate.title,
               ", ".join(record.wanted_volumes), gb_text(record.size_bytes) if record.size_bytes else "size not known",
               target)
