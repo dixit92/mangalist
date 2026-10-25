@@ -37,10 +37,11 @@ def test_a_few_small_bare_number_files_are_chapters_too():
     assert choose_files(files, ["3"], None).chapters_only
 
 
-def test_a_bare_number_pack_of_volume_sized_files_is_still_offered():
-    files = [(f"Made Up Series {n:02d} (Digital).cbz", 150 * MB) for n in range(1, 13)]
+def test_a_bare_number_pack_of_few_volume_sized_unreadable_files_is_still_offered():
+    """The size rule only adds chapter-sized files: a few big files whose names say nothing stay offered (kept whole)."""
+    files = [(f"Made Up Series - Book {w} (2021) (Digital).cbz", 150 * MB) for w in ("One", "Two", "Three")]
     sel = choose_files(files, ["3"], None)
-    assert not sel.refused
+    assert not sel.refused and sel.whole_reason
 
 
 def test_the_rule_needs_the_bare_number_hint():
