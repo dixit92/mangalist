@@ -229,6 +229,29 @@ class Backend(ExtensionsBackendMixin):
     def set_nyaa_options(self, options: NyaaOptions) -> None:
         save_nyaa_options(self.db, options)
 
+    def replacement_preview(self, series_id: int, volumes: Sequence[str]) -> Tuple[List[str], List[str]]:
+        """A replacement of *volumes* (other releases, 2026-10-24), as the scan has the series now: (the files it would
+        move to the holding folder - the archives holding only volumes among them; the files holding one of them with
+        something else, which stay), each relative to the series folder. What the filing really moves is decided when
+        the torrent has finished (:mod:`mangalist.downloads.replacing`)."""
+        from decimal import Decimal
+
+        from ..parsing.model import to_decimal
+        from .placement import locate_series
+        from .replacing import held_files
+
+        try:
+            series, _root, series_dir = locate_series(self.db, series_id)
+        except LookupError as exc:
+            raise BackendError(str(exc)) from None
+        wanted = {d for d in (to_decimal(v) for v in volumes) if d is not None}
+        moved, kept = [], []
+        for f in held_files(self.db, series, series_dir):
+            if not f.volumes & wanted:
+                continue
+            (moved if f.pure and f.volumes <= {Decimal(d) for d in wanted} else kept).append(f.rel)
+        return moved, kept
+
     # --- partial downloads -----------------------------------------------------------------------------
 
     def partial_default(self) -> bool:

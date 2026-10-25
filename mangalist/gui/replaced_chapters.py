@@ -64,8 +64,11 @@ def __getattr__(name: str):
 
 
 def file_line(f, *, full: bool = False) -> str:
-    """One chapter file in a list: its path, the chapters, the volume that holds them, its size."""
+    """One chapter file in a list: its path, the chapters, the volume that holds them, its size - or a replacement's old
+    copy of a volume (no chapters; other releases, 2026-10-24)."""
     vols = ", ".join(volume_label(v.strip()) for v in f.volume.split(",") if v.strip())
+    if not f.chapters:
+        return f"{f.path if full else f.rel}    {vols}, replaced by a newer release    {_human(f.size)}"
     return f"{f.path if full else f.rel}    ch. {f.chapters} in {vols}    {_human(f.size)}"
 
 

@@ -151,7 +151,8 @@ def test_a_to_get_row_has_the_shared_series_entries(qapp):
     menu = tree_menu(tab, "/lib/Alpha Saga")
     assert texts(menu) == ["Automatic downloads", UNBUNDLED_MENU, "Mark Behind as up to date",
                            "Clear 'up to date' override", "Show in List", OPEN_FOLDER_LABEL, "Copy title",
-                           "Open MangaUpdates page", "Fix MangaUpdates match…", "Check for new chapters…"]
+                           "Open MangaUpdates page", "Fix MangaUpdates match…", "Check for new chapters…",
+                           "Search releases…"]
     assert [(a.text(), a.isChecked()) for a in submenu(menu).actions() if not a.isSeparator()] == [
         ("Off", False), ("Notify", False), ("Auto", False), ("Use the default (Notify)", True)]
     assert not find_action(menu, "Clear 'up to date' override").isEnabled()
@@ -220,7 +221,8 @@ def test_without_a_host_the_menu_offers_what_the_tab_does_itself(qapp):
     tab, _backend, _host = make(qapp, host=False)
     tab.show_group(GROUP_VOLUMES)
     assert texts(tree_menu(tab, "/lib/Alpha Saga")) == ["Automatic downloads", "Show in List", OPEN_FOLDER_LABEL,
-                                                        "Copy title", "Check for new chapters…"]
+                                                        "Copy title", "Check for new chapters…",
+                                                        "Search releases…"]
 
 
 def test_change_source_from_to_get_opens_the_chapters_and_looks_on_other_sources(qapp):
