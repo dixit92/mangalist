@@ -1139,6 +1139,9 @@ class ReleasesPanel(QWidget):
             return f"This release is already {where} ({download_chip(existing)[0]}); it is not added twice."
         if self.is_other(candidate) and not self.chosen_volumes(candidate):
             return "Choose at least one volume of this release to download."
+        refused = self._packs.get(candidate.info_hash)
+        if refused is not None and getattr(refused, "refused", False):
+            return f"Not a volume release: {refused.problem}. It is not sent."
         if self._partial_on and self.pack_state() in ("waiting", "reading"):
             return "Reading the release's file list... (or untick the box to send the whole pack)"
         if self.is_other(candidate):
@@ -1188,7 +1191,8 @@ class ReleasesPanel(QWidget):
 
     def pack_state(self) -> str:
         """``none`` (nothing to show), ``waiting`` / ``reading`` (a file list is on its way), ``failed`` (not readable),
-        ``whole`` (readable, but nothing to leave out), ``partial`` (some files can be left out)."""
+        ``whole`` (readable, but nothing to leave out), ``partial`` (some files can be left out), ``refused`` (its files
+        are chapters or e-books / audio: never sent for volumes)."""
         candidate = self.selected_candidate()
         if candidate is None or self.target is None or not self._can_inspect():
             return "none"
@@ -1199,6 +1203,8 @@ class ReleasesPanel(QWidget):
             if candidate.info_hash in self._pack_failed:
                 return "failed"
             return "reading" if candidate.info_hash in self._pack_reading else "waiting"
+        if getattr(sel, "refused", False):
+            return "refused"
         if not sel.readable:
             return "failed"
         return "partial" if sel.narrows else "whole"
@@ -1289,7 +1295,7 @@ class ReleasesPanel(QWidget):
         """Set the box and its line for the selected release."""
         state = self.pack_state()
         sel = self.pack_selection()
-        self.partial_row.setVisible(state in ("waiting", "reading", "failed", "partial")
+        self.partial_row.setVisible(state in ("waiting", "reading", "failed", "partial", "refused")
                                     or (state == "whole" and bool(sel and (sel.whole_reason or sel.unknown_kept))))
         self.partial_check.blockSignals(True)
         tone, note, tip = "", "", ""
@@ -1298,6 +1304,10 @@ class ReleasesPanel(QWidget):
         if state in ("waiting", "reading"):
             enabled = True                                  # unticking now sends the whole pack without waiting
             note = "Reading the release's file list..."
+        elif state == "refused" and sel is not None:
+            checked = False
+            note, tone = f"Not a volume release: {sel.problem}. It is not sent.", "bad"
+            tip = file_lines(sel)
         elif state == "failed":
             checked = False
             reason = (sel.problem if sel is not None and sel.problem else None) or self._failed_reason()

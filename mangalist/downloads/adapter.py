@@ -416,6 +416,40 @@ class Backend(ExtensionsBackendMixin, FailuresBackendMixin):
         except (RemoveRefused, QbtError) as exc:
             raise BackendError(f"not removed: {exc}") from None
 
+    def remove_failed_download(self, record_id: int, *, delete_files: bool) -> DownloadRecord:
+        """The owner's "Remove from qBittorrent" of a FAILED torrent download (owner, 2026-10-24: a failed torrent stayed
+        in qBittorrent for a week): its torrent is deleted from qBittorrent - with its downloaded files when
+        *delete_files* - and the record is marked cancelled (under Show finished). Nothing in the library is touched: a
+        failed download filed nothing. A torrent already gone from qBittorrent only cancels the record."""
+        from ..services.qbittorrent import TorrentNotFound
+        from .contracts import DownloadStatus
+
+        record = self.ledger.get(record_id)
+        if record is None or record.status != DownloadStatus.FAILED or record.is_chapters:
+            raise BackendError("not removed: only a failed torrent download can be removed this way")
+        conn = self.ledger.connection()
+        if conn is None or not conn.base_url:
+            raise BackendError("qBittorrent is not set up yet")
+        client = self._client_factory(conn)
+        try:
+            client.delete(record.info_hash, delete_files=delete_files)
+            _log.info("In progress: failed download %d removed from qBittorrent (files: %s)", record_id, delete_files)
+        except TorrentNotFound:
+            _log.info("In progress: failed download %d was no longer in qBittorrent", record_id)
+        except QbtError as exc:
+            raise BackendError(f"not removed: {exc}") from None
+        finally:
+            closer = getattr(client, "close", None)
+            if callable(closer):
+                closer()
+        why = record.error or "failed"
+        try:
+            return self.ledger.set_status(record_id, DownloadStatus.CANCELLED, expect=(DownloadStatus.FAILED,),
+                                          error=f"removed from qBittorrent by the owner"
+                                                f"{' with its files' if delete_files else ''} (it had failed: {why})")
+        except StatusConflict as exc:
+            raise BackendError(f"removed from qBittorrent, but the record changed meanwhile: {exc}") from None
+
     def dismiss_downloads(self, record_ids: Sequence[int]) -> int:
         """Dismiss FAILED download records (torrents or chapters): marked cancelled, nothing else touched. Returns how
         many were dismissed; one that is no longer FAILED (a pass moved it meanwhile) is left as it is."""
