@@ -7,7 +7,9 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
-Other releases in the Download tab, duplicates judged by their pages, and a batch of fixes.
+## [2026.10.58] - 2026-10-25
+
+The fifty-seventh MangaList release (testing build): other releases in the Download tab, duplicates judged by their pages, and a batch of fixes.
 
 - **Other releases.** The Download tab's releases card lists the releases that fill no gap under a collapsible **Other releases (N)** section, hidden by default - a newer collection, another group's release - with what each replaces and adds. When nothing fills the gap it says so instead of "No releases found" (a series missing only v15 used to show nothing while nyaa had 11 releases up to v14).
 - **Replace a collection.** Sending an other release replaces your copies of the volumes you choose (**Choose volumes…**): the confirmation names the files, and when the download has finished your old copies go to the holding folder first (restorable from the Download tab, emptied after the holding period) and the release's files are filed in their place; files it does not hold stay. Earlier downloads whose files were replaced stay removable from qBittorrent.
