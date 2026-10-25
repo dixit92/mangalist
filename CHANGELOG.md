@@ -7,6 +7,24 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+Other releases in the Download tab, duplicates judged by their pages, and a batch of fixes.
+
+- **Other releases.** The Download tab's releases card lists the releases that fill no gap under a collapsible **Other releases (N)** section, hidden by default - a newer collection, another group's release - with what each replaces and adds. When nothing fills the gap it says so instead of "No releases found" (a series missing only v15 used to show nothing while nyaa had 11 releases up to v14).
+- **Replace a collection.** Sending an other release replaces your copies of the volumes you choose (**Choose volumes…**): the confirmation names the files, and when the download has finished your old copies go to the holding folder first (restorable from the Download tab, emptied after the holding period) and the release's files are filed in their place; files it does not hold stay. Earlier downloads whose files were replaced stay removable from qBittorrent.
+- **Search releases…** in the List's row menu and the To get row menu shows a series' releases with the other releases open - also for a series with nothing missing.
+- **Duplicates read the pages.** "Whole chapters with parts" reads the pages of its candidates and their neighbouring chapters - in the background, once per file - and says on each card what they show, with the evidence: the same pages (the form the series does not otherwise use is marked Discard), a copy (`9.1` is `9` again) or the wrong chapter (the file `14` holds chapter 13's pages). Different chapters that only look like parts are hidden, and the count is what is shown. Nothing is deleted without Apply and your confirmation. Needs Pillow, now included in the image and the desktop builds; without it the section works from the names as before.
+- **Dismiss** ("this is fine") hides a whole chapter with parts until one of its files changes; **Show hidden** lists the hidden ones, with Restore.
+- A whole chapter next to `N.2` without `N.1` is a plain split (the file `N` is part 1) and is no longer listed, unless its pages say otherwise. The late-part rule no longer fetches `N.1` when the files `N` and `N.2` are held (both times it did, `N.1` was a copy of `N`).
+- **Light novels and audiobooks are refused.** A release whose files are e-books or audio (`.epub`, `.m4b`, `.mp3`...) is marked "not a volume release" once its file list is read and is not sent - also when its title does not say "novel" (a Seven Seas pack of `.epub` volumes was offered for a manga's missing volumes).
+- **Chapter packs with bare numbers are refused.** A release like "001-158" whose files name no volume and are chapter-sized is a chapter pack: it is no longer sent for a missing volume (one such pack was sent for volume 5, filed nothing and stayed in qBittorrent). The releases card now says so, instead of "the file list could not be read".
+- **Remove from qBittorrent…** on a failed torrent download in In progress deletes its torrent, with its files or keeping them, and takes it out of In progress.
+- **The merge confirmation fits the screen.** "Merge into this folder?" shows a short summary with the deletion warning always visible and the file lists in a scroll box; its buttons can always be reached.
+- **A volume discarded from the Duplicates view lets its torrent go.** Discards are recorded, so the torrent is removed at its seed goal instead of "... is no longer in the library" every hour.
+- **A series that keeps failing is flagged.** After 3 chapter checks in a row that could not read a series, its Missing chapters row shows "Source not readable" and its chapters panel says why, with Change source…; a successful read or a new source clears it.
+- **Host downloads folder** in Settings > Connected services > Built-in extensions > Edit (otherwise `MANGALIST_EXTENSION_DOWNLOADS`, then the default).
+- On a container's very first start, the window and the background runner no longer both create the database (one could fail with "duplicate column name").
+- Two flaky GUI tests are deterministic.
+
 ## [2026.10.57] - 2026-10-24
 
 The fifty-sixth MangaList release (testing build): fixes from an audit of the switch to the built-in extensions - stuck chapters, switching back and forth, and texts that name the program in use.
