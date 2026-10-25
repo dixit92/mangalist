@@ -62,6 +62,10 @@ class Lib:
         assert index >= 0, name
         picker.setCurrentIndex(index)
         picker.activated.emit(index)
+        # The Download tab's list (and its badge) follow a pick only once every row of the library picked has its state
+        # (`_rebuild_wanted` returns while states are pending; the background push brings the list). A test that asked
+        # at once raced that push (failed once in the 8-worker full run, 2026-10-24): wait for the condition itself.
+        settle_states(win)
 
     def scan_synchronously(self, win, roots=None, scopes=None):
         """What ``_start_scan`` does, with the worker run on this thread: every signal reaches the window in order."""
