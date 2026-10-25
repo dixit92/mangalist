@@ -122,6 +122,24 @@ def test_edit_tests_what_is_typed_and_saves(qapp, db, backend, host, tmp_path):
     page.stop()
 
 
+def test_the_host_downloads_folder_field_saves_and_explains_itself(qapp, db, backend, host, tmp_path):
+    page = page_for(backend, db)
+    panel = page.edit_extension_host()
+    assert panel.host_downloads_edit.text() == "" and "same disk" in texts(panel) and "hard-linked" in texts(panel)
+    assert "restarts" in texts(panel) and "MANGALIST_EXTENSION_DOWNLOADS" in texts(panel)
+    panel.host_downloads_edit.setText("relative/folder")
+    assert not panel.save() and "full path" in panel.status_label.text()
+    assert backend.load_extension_host().host_downloads == ""
+    panel.host_downloads_edit.setText("/data/appdata/mangalist/host-dl")
+    assert panel.save()
+    assert backend.load_extension_host().host_downloads == "/data/appdata/mangalist/host-dl"
+    panel2 = page.edit_extension_host()
+    assert panel2.host_downloads_edit.text() == "/data/appdata/mangalist/host-dl"
+    panel2.host_downloads_edit.setText("")
+    assert panel2.save() and backend.load_extension_host().host_downloads == ""
+    page.stop()
+
+
 def test_extensions_page_lists_and_installs_with_buttons(qapp, db, backend, host):
     host.repo.append(type(host.repo[0])("eu.kanade.tachiyomi.extension.ja.rawexample", "Raw Example", "1.4.1", "ja",
                                         [("77", "Raw Example", "ja")]))

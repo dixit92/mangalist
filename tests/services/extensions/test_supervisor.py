@@ -339,3 +339,50 @@ def test_the_downloads_folder_is_learned_once_the_database_exists(tmp_path, sett
     there["db"] = settings
     sup.tick()
     assert settings.extension_host().downloads_path == str(tmp_path / "config" / "extension-host" / "downloads")
+
+
+# --- the Host downloads folder in Settings (owner-approved 2026-10-24): Settings > the env var > the default ----------
+
+def test_the_downloads_folder_precedence_is_settings_then_the_env_var_then_the_default(tmp_path):
+    config = tmp_path / "config"
+    default = config / "extension-host" / "downloads"
+    share = tmp_path / "share"
+    share.mkdir()
+    from_env, from_settings = share / "from-env", share / "from-settings"
+    env = {sv.ENV_DOWNLOADS: str(from_env)}
+    assert sv.downloads_folder(config, {}) == default
+    assert sv.downloads_folder(config, env) == from_env
+    assert sv.downloads_folder(config, env, str(from_settings)) == from_settings          # Settings wins
+    assert sv.downloads_folder(config, {}, str(from_settings)) == from_settings           # without the env var too
+    assert sv.downloads_folder(config, env, "") == from_env and sv.downloads_folder(config, env, "  ") == from_env
+    # a Settings folder that cannot be used (neither it nor its parent exists) falls through to the env var / default
+    missing = tmp_path / "nowhere" / "deeper" / "dl"
+    assert sv.downloads_folder(config, env, str(missing)) == from_env
+    assert sv.downloads_folder(config, {}, str(missing)) == default
+
+
+def test_the_settings_folder_is_what_the_host_is_started_with_and_a_change_restarts_it(tmp_path, settings):
+    share = tmp_path / "share"
+    share.mkdir()
+    env = {sv.ENV_DOWNLOADS: str(share / "from-env")}
+    settings.set_backend(CHAPTER_BACKEND_EXTENSIONS)
+    sup, spawned, _clock = make(tmp_path, settings, env=env)
+    sup.tick()
+    args = spawned[0].args
+    assert args[args.index("--downloads") + 1] == str(share / "from-env")
+    settings.save_extension_host(ExtensionHostConfig(host_downloads=str(share / "from-settings")))
+    sup.tick()
+    assert spawned[0].terminated                                   # the host restarts to use it
+    sup.tick()
+    args = spawned[-1].args
+    assert args[args.index("--downloads") + 1] == str(share / "from-settings")
+    assert settings.extension_host().host_downloads == str(share / "from-settings")
+
+
+def test_an_unusable_settings_folder_is_said_and_the_env_var_is_used(tmp_path, settings):
+    share = tmp_path / "share"
+    share.mkdir()
+    settings.set_backend(CHAPTER_BACKEND_EXTENSIONS)
+    settings.save_extension_host(ExtensionHostConfig(host_downloads=str(tmp_path / "nowhere" / "x" / "dl")))
+    want = sv.wanted(tmp_path / "config", env={sv.ENV_DOWNLOADS: str(share / "dl")}, open_settings=lambda: settings)
+    assert want.downloads == str(share / "dl") and "do not exist" in want.why

@@ -35,3 +35,12 @@ def test_auto_update_is_off_until_turned_on():
     assert s.extension_auto_update() is True
     s.set_extension_auto_update(False)
     assert s.extension_auto_update() is False
+
+
+def test_the_host_downloads_folder_round_trips_and_is_absent_when_unset():
+    s = settings()
+    assert s.extension_host().host_downloads == ""
+    s.save_extension_host(ExtensionHostConfig(host_downloads="  /data/appdata/mangalist/host-dl  "))
+    assert s.extension_host().host_downloads == "/data/appdata/mangalist/host-dl"
+    s.save_extension_host(ExtensionHostConfig(url="http://127.0.0.1:4570", host_downloads=""))
+    assert s.extension_host().host_downloads == "" and "host_downloads" not in s.store.get_setting(SETTING_EXTENSION_HOST)

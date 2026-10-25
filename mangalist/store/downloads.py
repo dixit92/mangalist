@@ -705,6 +705,11 @@ class ExtensionHostConfig:
     host's own answer, learned at the last connection test or host start. ``flaresolverr_url`` empty: the environment's
     (``MANGALIST_FLARESOLVERR_URL``), else none.
 
+    ``host_downloads`` (Settings > Built-in extensions > Edit > Host downloads folder, owner-approved 2026-10-24): the
+    folder the container's supervisor starts the host downloading into. Empty: ``MANGALIST_EXTENSION_DOWNLOADS``, else
+    ``<data>/extension-host/downloads`` (:func:`mangalist.services.extensions.supervisor.downloads_folder`). It should be
+    on the same disk as the library, so finished chapters are hard-linked into it instead of copied.
+
     ``repos``: the extension repositories as the owner last left the host's list (Settings > Built-in extensions; each
     added one checked by the host first) - the container's host is started with them (``--repo`` each), so a new data
     folder gets the same list. None: never edited - the single ``repo_url`` of an older version, else
@@ -717,6 +722,7 @@ class ExtensionHostConfig:
     flaresolverr_url: str = ""
     webview: bool = True
     repos: Optional[Tuple[str, ...]] = None
+    host_downloads: str = ""
 
     @property
     def files_from(self) -> str:
@@ -765,7 +771,7 @@ class SuwayomiSettings:
         repos = data.get("repos")
         return ExtensionHostConfig(url=text("url") or DEFAULT_EXTENSION_HOST_URL, download_dir=text("download_dir"),
                                    downloads_path=text("downloads_path"), repo_url=text("repo_url"),
-                                   flaresolverr_url=text("flaresolverr_url"),
+                                   flaresolverr_url=text("flaresolverr_url"), host_downloads=text("host_downloads"),
                                    webview=webview if isinstance(webview, bool) else True,
                                    repos=tuple(r.strip() for r in repos if isinstance(r, str) and r.strip())
                                    if isinstance(repos, list) else None)
@@ -776,6 +782,8 @@ class SuwayomiSettings:
             "download_dir": (config.download_dir or "").strip(), "downloads_path": (config.downloads_path or "").strip(),
             "repo_url": (config.repo_url or "").strip(), "flaresolverr_url": (config.flaresolverr_url or "").strip(),
             "webview": bool(config.webview)}
+        if (config.host_downloads or "").strip():                 # absent when unset: older builds read the data as before
+            data["host_downloads"] = config.host_downloads.strip()
         if config.repos is not None:
             data["repos"] = [r.strip() for r in config.repos if r and r.strip()]
         self.store.set_setting(SETTING_EXTENSION_HOST, data)
