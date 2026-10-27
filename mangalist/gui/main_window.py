@@ -64,8 +64,9 @@ from .mu_picker import MuPickerDialog
 from .mu_worker import MuWorker, _apply_cache, _clear_examined_if_newly_licensed
 from .shell import WantedSeries
 from .table_model import (
-    COL_BEHIND, COL_DUPE, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS, COL_LIBRARY, COL_LICENSED, COL_MTIME,
-    COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_TITLE, COL_VERDICT, COLUMNS, SUBTITLE_ROLE, MangaTableModel,
+    COL_BEHIND, COL_BOTH, COL_CH, COL_COMPLETED, COL_DUPE, COL_ENG, COL_ENGLISH, COL_EXAMINED, COL_FILES, COL_GAPS,
+    COL_LIBRARY, COL_LICENSED, COL_MTIME, COL_MU_TITLE, COL_OFFICIAL, COL_RENAME, COL_STATE, COL_SUBS, COL_TITLE,
+    COL_VERDICT, COL_VOL, COLUMNS, SUBTITLE_ROLE, MangaTableModel,
     column_label, merge_folder_scan, state_matches, under_any,
 )
 from .top_bar import TAB_DOWNLOAD, TAB_LIST, TopBar
@@ -358,7 +359,11 @@ class MainWindow(QMainWindow):
     # the six default columns fit a 1200 px window beside the details panel (UI taste review 2026-10-16).
     _DEFAULT_WIDTHS = {COL_TITLE: 300, COL_STATE: 204, COL_GAPS: 110, COL_ENGLISH: 120, COL_VERDICT: 88,
                        COL_FILES: 72, COL_EXAMINED: 32, COL_DUPE: 130, COL_MU_TITLE: 260, COL_OFFICIAL: 180,
-                       COL_LIBRARY: 130, COL_RENAME: 90, COL_MTIME: 150}
+                       COL_LIBRARY: 130, COL_RENAME: 90, COL_MTIME: 150,
+                       # every column has one (owner, 2026-10-26: "I can't see the completed column" - a column without
+                       # a default was shown 0 px wide: Qt reports a hidden column's width as 0)
+                       COL_ENG: 220, COL_SUBS: 90, COL_VOL: 70, COL_CH: 70, COL_BOTH: 70, COL_LICENSED: 110,
+                       COL_BEHIND: 80, COL_COMPLETED: 110}
     _CFG_COLUMNS = "list_column_state"
     _CFG_HIDDEN = "list_hidden_columns"
     # 2: the Library column exists, 3: the Rename column exists (each hidden unless the owner showed it)
@@ -2366,11 +2371,24 @@ class MainWindow(QMainWindow):
             header.resizeSection(last, need)
 
     def _apply_hidden_columns(self) -> None:
-        """Hide/show columns according to config."""
+        """Hide/show columns according to config; a shown column is never left narrower than its header."""
         hidden = self._hidden_columns()
         header = self._table.horizontalHeader()
         for col, name in enumerate(COLUMNS):
             header.setSectionHidden(col, name in hidden)
+        self._widen_narrow_columns()
+
+    def _widen_narrow_columns(self) -> None:
+        """Give every shown column at least its header's width - its default when it has one. A column shown while its
+        remembered width was 0 (a layout saved by a build without a default for it) was ticked in the menu but
+        invisible (owner, 2026-10-26: "I can't see the completed column")."""
+        header = self._table.horizontalHeader()
+        for col in range(header.count()):
+            if col == COL_TITLE or header.isSectionHidden(col):
+                continue
+            least = max(header.sectionSizeHint(col), 24)
+            if header.sectionSize(col) < least:
+                header.resizeSection(col, max(self._DEFAULT_WIDTHS.get(col, 0), least))
 
     def _on_header_context_menu(self, pos: QPoint) -> None:
         """Show / hide columns (remembered); the title column always stays."""
