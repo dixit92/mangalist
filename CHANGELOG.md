@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.59] - 2026-10-26
+
+The fifty-eighth MangaList release (testing build): a List column you tick is always visible.
+
+- **Ticked columns are no longer invisible.** Eight of the List's columns (Alternative Title, Subfolders, Vol %, Ch %, Both %, Licensed, Behind, Completed) had no default width, so ticking one in the column menu - or a layout saved that way - showed it 0 pixels wide: ticked, but nowhere to be seen. Every column now has a width of its own, and a shown column is never narrower than its header; a layout saved with such a column is repaired when MangaList starts, the other columns' widths and order kept.
+
 ## [2026.10.58] - 2026-10-25
 
 The fifty-seventh MangaList release (testing build): other releases in the Download tab, duplicates judged by their pages, and a batch of fixes.
