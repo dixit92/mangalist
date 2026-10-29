@@ -1938,7 +1938,10 @@ class MainWindow(QMainWindow):
         """The top bar's Add series...: paste a link, make the empty folder, rescan its library (add_series_dialog.py)."""
         from .add_series_dialog import NEXT_FIND, NEXT_OPEN, AddSeriesDialog, LiveBackend
 
-        steps = (NEXT_FIND, NEXT_OPEN) if self._download_tab is not None else ()
+        # one choice: "Find releases now" lands on the new series' own panel in the Download tab, which looks for its
+        # releases / chapters by itself (owner, 2026-10-29: "When you add a new series, it should send you to this page
+        # instead of the top of the find page") - a bulk find on top only left the owner at the top of Found
+        steps = (NEXT_FIND,) if self._download_tab is not None else ()
         dlg = AddSeriesDialog(LiveBackend(self._db), self._roots(), self, current_root_id=self._library,
                               next_steps=steps)
         dlg.exec()
@@ -1950,7 +1953,8 @@ class MainWindow(QMainWindow):
             self._retry_pending_scans()
 
     def _run_after_add(self) -> None:
-        """After the rescan that follows Add series: the finish step's choice (lane A, owner 2026-10-15, answer 5). The
+        """After the rescan that follows Add series: the finish step's choice (lane A, owner 2026-10-15, answer 5) opens
+        the series' own panel in the Download tab - for "find" as well (owner, 2026-10-29), since the panel searches. The
         series' state is computed in the background after the scan (UI performance stage 2): until it is in, the new
         series is in no wanted list, so a find then searched nothing ("0 series searched", owner 2026-10-15) - the
         choice waits for it and :meth:`_on_states_computed` runs this again."""
@@ -1965,11 +1969,6 @@ class MainWindow(QMainWindow):
         if rows and self._model.states_pending(rows):
             return                              # its state is on its way
         self._after_add = None
-        if what == "find" and series_id is not None and callable(getattr(self._download_tab, "find_for", None)):
-            self._rebuild_wanted()
-            self.show_tab(TAB_DOWNLOAD)
-            if self._download_tab.find_for([series_id]):
-                return
         self.get_missing(folder)
 
     def _on_missing(self) -> None:

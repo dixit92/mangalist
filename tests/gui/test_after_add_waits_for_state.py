@@ -35,15 +35,16 @@ def _window(pending):
     return win, finds, missing
 
 
-def test_the_find_waits_while_the_new_series_state_is_computed():
+def test_the_series_panel_waits_while_the_new_series_state_is_computed():
+    """Until its state is in, the new series is in no wanted list: its panel would have nothing to show."""
     win, finds, missing = _window(pending=True)
     MainWindow._run_after_add(win)
     assert finds == [] and missing == [] and win._after_add is not None          # kept for the states' push
     win._model.pending = False                                                   # the background states arrived
     MainWindow._run_after_add(win)
-    assert finds == [[7]] and win._after_add is None
+    assert missing == ["/lib/Made Up Series"] and finds == [] and win._after_add is None   # its panel, no bulk find
     MainWindow._run_after_add(win)                                               # runs once
-    assert finds == [[7]]
+    assert missing == ["/lib/Made Up Series"]
 
 
 def test_a_series_the_scan_did_not_list_still_opens_its_missing_list():
