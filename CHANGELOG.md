@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.10.60] - 2026-10-29
+
+The fifty-ninth MangaList release (testing build): adding a series takes you to that series.
+
+- **Add series lands on the new series.** When a series is added, **Find releases now** opens that series' own panel in the Download tab - its releases or its chapters, looked up there and then - instead of running a find for it and leaving you at the top of Found. The separate "Open in Download" button is gone, since both now do the same.
+
 ## [2026.10.59] - 2026-10-26
 
 The fifty-eighth MangaList release (testing build): a List column you tick is always visible.

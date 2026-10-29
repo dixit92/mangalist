@@ -443,12 +443,14 @@ def test_the_top_bar_button_opens_the_dialog_and_rescans_the_library_it_was_adde
     assert len(scopes[roots[1].id]) == 1                                     # ... and in it only the new folder
 
 
-def test_find_releases_now_runs_after_the_rescan(qapp, window, libs, monkeypatch):
+def test_find_releases_now_opens_the_new_series_panel_after_the_rescan(qapp, window, libs, monkeypatch):
+    """Owner, 2026-10-29: "When you add a new series, it should send you to this page instead of the top of the find
+    page" - the series' own panel, which searches by itself; no bulk find."""
     db, roots, base = libs
     backend = FakeBackend(db, look={MU_URL: mu_look()})
 
     def fake_exec(self):
-        assert self.next_steps == (ui.NEXT_FIND, ui.NEXT_OPEN)
+        assert self.next_steps == (ui.NEXT_FIND,)              # one choice: Open in Download is the same now
         look_up(qapp, self, MU_URL)
         self.add()
         wait_until(qapp, lambda: self.outcome is not None)
@@ -462,15 +464,15 @@ def test_find_releases_now_runs_after_the_rescan(qapp, window, libs, monkeypatch
     window._download_tab.find_for = lambda ids: found.append(list(ids)) or True
     window.get_missing = lambda folder: opened.append(folder) or True
     window._top.btn_add_series.click()
-    assert found == [] and window._after_add[0] == ui.NEXT_FIND             # nothing before the rescan
-    series_id = window._after_add[2]
+    assert opened == [] and window._after_add[0] == ui.NEXT_FIND            # nothing before the rescan
+    folder = window._after_add[1]
     window._run_after_add()                                                  # what the rescan's end calls
-    assert found == [[series_id]] and opened == [] and window._after_add is None
+    assert opened == [folder] and found == [] and window._after_add is None
     window._run_after_add()                                                  # once only
-    assert found == [[series_id]]
+    assert opened == [folder] and found == []
 
 
-def test_open_in_download_and_a_find_that_cannot_run_select_the_series(qapp, window, libs):
+def test_open_and_find_both_select_the_series_and_done_does_nothing(qapp, window, libs):
     opened = []
     window.get_missing = lambda folder: opened.append(folder) or True
     window._after_add = (ui.NEXT_OPEN, "/lib/Made Up", 5)
