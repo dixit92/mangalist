@@ -22,9 +22,16 @@ seen as downloaded, never as lost), and for each record:
   crash in between is settled by the next pass. Refused (nothing moved, Suwayomi's copy left alone) and FAILED when: the
   series or target folder is gone or no longer inside a root; no CBZ is found (or Suwayomi saved a folder of images: "Download
   as CBZ" is off); the CBZ is another chapter; a file of that name, or a file of that chapter, is already in the folder.
+  **The usual group's copy** of a provisional chapter (``replaces`` in its request; owner, 2026-11-06,
+  :mod:`.usual_group`): the provisional file (followed through the journal's moves) goes to the holding folder FIRST -
+  the replaced-files batch of other releases (:func:`mangalist.upgrades.hold_replaced_volumes`), restorable, its id kept
+  on the record so a stopped pass resumes - and no longer counts as that chapter's file; then the new copy is filed as
+  above. Nothing filed: the old copy is put back. The holding folder unusable: the record waits.
 - **FILED** -> the move is completed: once the library file is verified (present at its filed size) Suwayomi is asked to
   delete its downloaded copy (``deleteDownloadedChapters``: Suwayomi removes the file and its now-empty folders and marks
   the chapter not downloaded) -> REMOVED. The library file survives it (a hard link keeps the data; a copy is its own).
+  A library file the usual group's copy replaced (held on purpose, :class:`~mangalist.store.journal.MoveFollower`)
+  counts as verified.
   Never when Suwayomi's download folder overlaps a library root. Suwayomi not answering -> stays FILED with the reason,
   retried next pass.
 

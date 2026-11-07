@@ -22,12 +22,16 @@ extras the panel never offered): the source's decimal chapters within the folder
 hold and that are not counted as missing - listed after their neighbours, unticked. **The series' group** (:func:`default_group`; owner: "the folder's usual group"): the
 owner's stored choice for the series when the source offers it; else the group the folder's own chapter files use around
 the first missing chapter (:func:`mangalist.duplicates.usual_group`'s rule: the nearest neighbours, else the folder's
-clear favourite); else the group with the most of the missing chapters.
+clear favourite); else the group with the most of the missing chapters. Whatever it picks, the choice also names the
+series' **usual group** (:attr:`GroupChoice.usual`; owner, 2026-11-06: "Download and if the usual group releases,
+replace the downloaded chapter"): an automatic send of a chapter from another group is provisional, and the usual
+group's copy replaces it when it is released (:mod:`.usual_group`).
 
 **Sending** (:func:`send_chapters`): the series is added to Suwayomi's library (best effort), one SENT ledger record per
 chapter is written first (tool ``suwayomi``; a chapter already in hand is skipped), then the chapters are enqueued; when
 the enqueue fails every record of the send becomes FAILED with Suwayomi's reason. Chapter downloads are outside the
-download budget.
+download budget. An automatic send passes the series' usual group: a chapter from another group is recorded as
+provisional; the usual group's copy of a provisional chapter is sent although the chapter is held (:mod:`.usual_group`).
 """
 
 from __future__ import annotations

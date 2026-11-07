@@ -37,6 +37,12 @@ sent (:func:`still_new`, :func:`mangalist.downloads.finder.retire_filled`) or wh
 A pick the owner skipped (or one sent before) is never offered or sent again. Chapters a waiting find-pass finding of
 the series already offers are not offered twice.
 
+**The usual group's copy** (owner, 2026-11-06: "Download and if the usual group releases, replace the downloaded
+chapter"; :mod:`~.usual_group`): a chapter sent from another group than the series' usual one is provisional; for
+:data:`~.usual_group.WATCH_DAYS` days each check looks for the usual group's copy of it in the list it fetched (no other
+request) and sends it - on Notify too, the owner's answer stands for a chapter already held; filing it puts the
+provisional file in the holding folder (restorable). Only the same chapter number from the same source replaces it.
+
 **Locks**: not the find pass's nyaa lock - nyaa is never asked, and a check of a few hundred series must not hold back a
 find pass. A check runs alone (its own lock, :class:`CheckBusy` otherwise) and not while a find pass runs, here or in
 another MangaList on the same database (:class:`CheckBusy`: it runs again at its next time); sends are made safe against

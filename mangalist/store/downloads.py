@@ -35,6 +35,11 @@
   ``suwayomi`` | ``extensions``; NULL for a torrent, or a record an older build wrote - read as either program). The
   "already sent" checks compare chapter ids within one program only (chapter numbers across both), each record is
   finished with its own program, and a stuck chapter is marked by state (``request.stuck``), not by its note's words.
+- **The series' usual group** (owner, 2026-11-06; no migration - request keys, :mod:`mangalist.downloads.usual_group`):
+  a provisional chapter's request keeps ``usual_group`` / ``usual_until`` (and ``replaced_by`` once the usual group's
+  copy replaced it); the usual group's own record keeps ``replaces`` / ``replaces_group`` (the provisional record) and,
+  once the old copy is held, ``replace_batch``. Its chapter number is sent although held (``create_chapters``'
+  *replacing*), unless a download of that number is on its way.
 - **Clearing finished records** (2026-10-15, owner: "Setting, user clearable, scheduled task to clear [Daily, Weekly,
   Monthly]"; :meth:`DownloadLedger.clear_finished`). Only the records the Download tab calls finished - REMOVED
   (the torrent left at its seed goal / Suwayomi's copy deleted) and CANCELLED - and only those not touched for the
