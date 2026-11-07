@@ -13,7 +13,9 @@ C's, and nothing happened when the usual group's came out.
 or a waiting finding the owner sends - whose group is not the series' usual group (:func:`usual_of`: the owner's own
 group choice for the series when there is one, else the folder's usual group by
 :func:`mangalist.duplicates.usual_group`'s rule around the first chapter sent - the nearest neighbours, else the folder's
-clear favourite). Its record keeps ``usual_group`` and ``usual_until`` (the end of the watch) in its request. Never
+clear favourite). A group is compared as :func:`same_group` reads it: the library's files and the source spell a joint
+group differently (``A, B`` and ``A & B``; the naming scheme cuts a long one with ``…``). Its record keeps
+``usual_group`` and ``usual_until`` (the end of the watch) in its request. Never
 provisional: a chapter from the usual group; a series with no usual group (no chapter file names a group, or no clear
 favourite); a chapter the owner sent from the chapters panel (they chose the copy themselves).
 
@@ -49,6 +51,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -81,6 +84,39 @@ def _key(group: Optional[str]) -> str:
     return (group or "").strip().casefold()
 
 
+_JOINERS = re.compile(r"\s*[,&+/|]\s*")
+_CUT = "\u2026"                          # the naming scheme cuts a long group to 32 characters, ending with it
+
+
+def _members(group: Optional[str]) -> Tuple[List[str], bool]:
+    """(the groups a joint group names, letters and digits only, in order; whether the name was cut)."""
+    text = (group or "").strip()
+    cut = text.endswith(_CUT)
+    parts = [re.sub(r"[\W_]+", "", p.casefold()) for p in _JOINERS.split(text.rstrip(_CUT))]
+    return [p for p in parts if p], cut
+
+
+def same_group(a: Optional[str], b: Optional[str]) -> bool:
+    """*a* and *b* name the same scanlation group, as the library's files and the source spell it: a joint group is
+    the same whatever joins its members (the files say ``A, B``, the extension host ``A & B``), brackets and case aside
+    (the scheme writes ``[SW]`` as ``(SW)``), and a name the naming scheme cut (``A, Long Na…``) matches the full one
+    it starts. Live, 2026-11-06: the usual group's files said ``ToruScans, Luminare Translations``."""
+    if _key(a) == _key(b):
+        return bool(_key(a))
+    ma, cut_a = _members(a)
+    mb, cut_b = _members(b)
+    if not ma or not mb:
+        return False
+    if not cut_a and not cut_b:
+        return sorted(ma) == sorted(mb)
+    if cut_b and not cut_a:
+        ma, mb, cut_a, cut_b = mb, ma, cut_b, cut_a
+    # *a* is cut: its members but the last are the other's first ones, its last one starts the other's next one
+    if len(ma) > len(mb) or ma[:-1] != mb[:len(ma) - 1]:
+        return False
+    return mb[len(ma) - 1].startswith(ma[-1]) or (cut_b and ma[-1].startswith(mb[len(ma) - 1]))
+
+
 def _today(now: Optional[datetime] = None) -> date:
     return (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date()
 
@@ -106,8 +142,9 @@ def usual_of(held: Mapping[Decimal, Sequence[str]], missing: Sequence[Decimal],
 
 
 def provisional(scanlator: Optional[str], usual: Optional[str]) -> bool:
-    """A chapter from *scanlator* is provisional: the series has a usual group and it is another one."""
-    return bool(usual and _key(usual)) and _key(scanlator) != _key(usual)
+    """A chapter from *scanlator* is provisional: the series has a usual group and it is another one
+    (:func:`same_group`)."""
+    return bool(usual and _key(usual)) and not same_group(scanlator, usual)
 
 
 def extra_for(picks: Sequence[SuwayomiChapter], usual: Optional[str],
@@ -236,15 +273,17 @@ def usual_copies(chapters: Sequence[SuwayomiChapter], watch: Sequence[Watched], 
         number = to_decimal(w.number)
         if number is None:
             continue
-        copy = per.get(number, {}).get(_key(w.usual))
+        copy = next((ch for ch in per.get(number, {}).values() if same_group(ch.scanlator, w.usual)), None)
         if copy is not None:
             if int(copy.id) not in queued:
                 pairs.append((w, copy))
             continue
         whole = number.to_integral_value() == number
-        other = ([n for n in per if n != number and n.to_integral_value() != n and int(n) == number
-                  and _key(w.usual) in per[n]] if whole else
-                 [n for n in per if n == int(number) and _key(w.usual) in per[n]])
+        def usual_has(n: Decimal) -> bool:
+            return any(same_group(ch.scanlator, w.usual) for ch in per[n].values())
+
+        other = ([n for n in per if n != number and n.to_integral_value() != n and int(n) == number and usual_has(n)]
+                 if whole else [n for n in per if n == int(number) and usual_has(n)])
         if other:
             notes.append(f"ch {w.number}: {w.usual} released it as ch "
                          f"{', '.join(_plain(n) for n in sorted(other))} - another form, so "
@@ -301,5 +340,5 @@ def note_text(request: Mapping[str, Any], status: str) -> str:
 
 
 __all__ = ["KEY_REPLACED_BY", "KEY_REPLACES", "KEY_REPLACES_GROUP", "KEY_UNTIL", "KEY_USUAL", "MAX_TRIES", "WATCH_DAYS",
-           "Watched", "extra_for", "note_text", "old_copy", "provisional", "send_usual_copies", "usual_copies",
-           "usual_of", "watched"]
+           "Watched", "extra_for", "note_text", "old_copy", "provisional", "same_group", "send_usual_copies",
+           "usual_copies", "usual_of", "watched"]

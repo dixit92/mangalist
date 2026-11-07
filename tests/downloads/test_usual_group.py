@@ -95,6 +95,25 @@ def test_the_usual_group_is_the_owners_choice_else_the_folders():
     assert (stored.group, stored.reason, stored.usual) == (OTHER, "your choice for this series", OTHER)
 
 
+def test_a_joint_group_is_the_same_whatever_joins_it_and_where_the_scheme_cut_it():
+    # live, 2026-11-06: the files said "A, B", the extension host says "A & B"; the scheme cuts groups to 32 characters
+    assert ug.same_group("Alder Scans, Birch Translations", "Alder Scans & Birch Translations")
+    assert ug.same_group("alder scans + birch translations", "Birch Translations & Alder Scans")
+    assert ug.same_group("(SW) Scans, Galaxy Scans", "[SW] Scans & Galaxy Scans")
+    assert ug.same_group("Alder Scans, Birch Transl\u2026", "Alder Scans & Birch Translations")
+    assert ug.same_group("Alder Scans & Birch Translations", "Alder Scans, Bir\u2026")
+    assert not ug.same_group("Alder Scans", "Alder Scans & Birch Translations")
+    assert not ug.same_group("Alder Scans, Cedar\u2026", "Alder Scans & Birch Translations")
+    assert not ug.same_group(OTHER, USUAL) and not ug.same_group("", "") and not ug.same_group(None, USUAL)
+    held = {D(1): ["Alder Scans, Birch Translations"], D(2): ["Alder Scans, Birch Translations"]}
+    choice = default_group({"Alder Scans & Birch Translations": 1, OTHER: 2}, held, [D(3)])
+    assert choice == default_group.__globals__["GroupChoice"](
+        "Alder Scans & Birch Translations", "the folder's usual group", "Alder Scans & Birch Translations")
+    # the usual group's own copy, spelled the host's way, is not provisional
+    assert ug.extra_for([chapter(301, "3", "Alder Scans & Birch Translations")],
+                        "Alder Scans, Birch Translations") == ({}, [])
+
+
 def test_only_a_chapter_from_another_group_is_provisional():
     picks = [chapter(204, "4", OTHER), chapter(205, "5", USUAL.upper()), chapter(206, "6", None)]
     now = datetime(2026, 11, 6, 12, tzinfo=timezone.utc)
@@ -269,3 +288,18 @@ def test_a_waiting_finding_the_owner_sends_is_provisional_too(db, lib):
     # the owner's answer stands for the chapter: on Notify too, the usual group's copy is sent when it is released
     lib.suwayomi.chapter_list.append(chapter(304, "4", USUAL))
     assert check(db, lib).usual == 1
+
+
+def test_the_usual_group_spelled_another_way_by_the_source_is_found(db, lib):
+    for p in lib.folder.iterdir():                       # the files say "A, B"; the source says "A & B"
+        p.rename(p.with_name(p.name.replace(USUAL, "Alder, Birch Scans")))
+    scan(db)
+    check(db, lib)
+    (rec,) = records(lib).values()
+    assert lib.backend.chapter_ledger.request(rec.id)[ug.KEY_USUAL] == "Alder, Birch Scans"
+    arrive(lib, 204)
+    lib.suwayomi.chapter_list.append(chapter(304, "4", "Alder & Birch Scans"))
+    assert check(db, lib).usual == 1
+    arrive(lib, 304)
+    assert "Ch. 0004.00 Vol. 001 (Example Title 304) [Alder & Birch Scans].cbz" in files(lib)
+    assert not any(OTHER in n for n in files(lib))

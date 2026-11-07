@@ -22,7 +22,8 @@ extras the panel never offered): the source's decimal chapters within the folder
 hold and that are not counted as missing - listed after their neighbours, unticked. **The series' group** (:func:`default_group`; owner: "the folder's usual group"): the
 owner's stored choice for the series when the source offers it; else the group the folder's own chapter files use around
 the first missing chapter (:func:`mangalist.duplicates.usual_group`'s rule: the nearest neighbours, else the folder's
-clear favourite); else the group with the most of the missing chapters. Whatever it picks, the choice also names the
+clear favourite) - also when the source spells it another way (``A & B`` for the files' ``A, B``, a name the scheme cut:
+:func:`.usual_group.same_group`); else the group with the most of the missing chapters. Whatever it picks, the choice also names the
 series' **usual group** (:attr:`GroupChoice.usual`; owner, 2026-11-06: "Download and if the usual group releases,
 replace the downloaded chapter"): an automatic send of a chapter from another group is provisional, and the usual
 group's copy replaces it when it is released (:mod:`.usual_group`).
@@ -273,11 +274,13 @@ def default_group(available: Mapping[str, int], held: Mapping[Decimal, Sequence[
     """The group the missing chapters are taken from (see the module docstring). *available*: group -> how many of the
     missing chapters it has (a group named '' = no group)."""
     from ..duplicates import usual_group
-    from .usual_group import usual_of
+    from .usual_group import same_group, usual_of
 
     usual = usual_of(held, missing, stored)
     named = {g: n for g, n in available.items() if g}
     by_key = {group_key(g): g for g in named}
+    spelled = [g for g in named if usual and same_group(g, usual)]
+    usual = spelled[0] if spelled and not stored else usual       # the source's own spelling of the folder's group
     if stored and group_key(stored) in by_key:
         return GroupChoice(by_key[group_key(stored)], "your choice for this series", usual)
     if not named:
@@ -291,6 +294,8 @@ def default_group(available: Mapping[str, int], held: Mapping[Decimal, Sequence[
         pick = usual_group({n: list(gs) for n, gs in held.items()}, first, [*named, None])
         if pick and group_key(pick) in by_key:
             return GroupChoice(by_key[group_key(pick)], "the folder's usual group", usual)
+        if spelled and not stored:      # the folder's group spelled another way there ("A, B" in the files, "A & B")
+            return GroupChoice(spelled[0], "the folder's usual group", usual)
     best = sorted(named.items(), key=lambda kv: (-kv[1], group_key(kv[0])))[0][0]
     return GroupChoice(best, "the group with the most of these chapters", usual)
 
