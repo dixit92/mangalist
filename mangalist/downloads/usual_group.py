@@ -22,7 +22,10 @@ filed (its file still in the series folder, as the journal followed it), from th
 differently), and not replaced yet. The scheduled chapter check (:mod:`.chapter_check`) looks at the source's list it
 fetched anyway - no extra request - and when the usual group's copy of the SAME chapter number is listed and not in the
 download queue, it is sent (:func:`usual_copies`, :func:`send_usual_copies`) into the folder the provisional file lies
-in. Up to :data:`MAX_TRIES` sends when one fails; a replacement the owner cancelled ends the watch.
+in. Up to :data:`MAX_TRIES` sends when one fails; a replacement the owner cancelled ends the watch. The check's
+MangaDex gate does not hide it: the usual group's upload is MangaDex's new latest upload, and a series is fetched at
+least daily anyway (:data:`~.chapter_gate.REFETCH_AFTER`). It is sent on Notify too: the chapter is held already, and
+the owner's answer stands for it.
 
 **One form per chapter** (:mod:`.chapter_forms`): only the same number replaces. When the usual group lists the chapter
 in another form - parts ``47.1`` / ``47.2`` where the provisional copy is the whole ``47``, or the whole where the
