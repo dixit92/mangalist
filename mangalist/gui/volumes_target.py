@@ -135,7 +135,15 @@ def units_text(record: DownloadRecord) -> str:
 def chapter_status_text(record: DownloadRecord) -> str:
     """A chapter download (Suwayomi): "Downloading", "Downloading - <Suwayomi's error>", "Downloaded" (or "Downloaded -
     <why it is not filed yet>"), "Filed ch 4",
-    "Filed ch 4 - <why Suwayomi still has its copy>", "Filed ch 4 - done", "Failed: <reason>", "Cancelled"."""
+    "Filed ch 4 - <why Suwayomi still has its copy>", "Filed ch 4 - done", "Failed: <reason>", "Cancelled" - and what it
+    says about the series' usual group (owner, 2026-11-06): "Filed ch 47 - done - from Group C; replaced by Group A's
+    copy when it is released (watched until 2026-11-20)", "Filed ch 47 - done - replaced Group C's copy (...)"."""
+    text = _chapter_status(record)
+    note = getattr(record, "usual_note", "")
+    return f"{text} - {note}" if note else text
+
+
+def _chapter_status(record: DownloadRecord) -> str:
     status, units = record.status, units_text(record)
     filed = f"Filed {units}" if units else "Filed"
     if status == DownloadStatus.SENT:

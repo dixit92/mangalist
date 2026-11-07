@@ -22,12 +22,17 @@ extras the panel never offered): the source's decimal chapters within the folder
 hold and that are not counted as missing - listed after their neighbours, unticked. **The series' group** (:func:`default_group`; owner: "the folder's usual group"): the
 owner's stored choice for the series when the source offers it; else the group the folder's own chapter files use around
 the first missing chapter (:func:`mangalist.duplicates.usual_group`'s rule: the nearest neighbours, else the folder's
-clear favourite); else the group with the most of the missing chapters.
+clear favourite) - also when the source spells it another way (``A & B`` for the files' ``A, B``, a name the scheme cut:
+:func:`.usual_group.same_group`); else the group with the most of the missing chapters. Whatever it picks, the choice also names the
+series' **usual group** (:attr:`GroupChoice.usual`; owner, 2026-11-06: "Download and if the usual group releases,
+replace the downloaded chapter"): an automatic send of a chapter from another group is provisional, and the usual
+group's copy replaces it when it is released (:mod:`.usual_group`).
 
 **Sending** (:func:`send_chapters`): the series is added to Suwayomi's library (best effort), one SENT ledger record per
 chapter is written first (tool ``suwayomi``; a chapter already in hand is skipped), then the chapters are enqueued; when
 the enqueue fails every record of the send becomes FAILED with Suwayomi's reason. Chapter downloads are outside the
-download budget.
+download budget. An automatic send passes the series' usual group: a chapter from another group is recorded as
+provisional; the usual group's copy of a provisional chapter is sent although the chapter is held (:mod:`.usual_group`).
 """
 
 from __future__ import annotations
@@ -258,6 +263,10 @@ def newer_numbers(chapters: Sequence[SuwayomiChapter], newest: Optional[Decimal]
 class GroupChoice:
     group: Optional[str]                # None: the source names no groups at all
     reason: str                         # e.g. "your choice for this series", "the folder's usual group"
+    # The series' usual group (:func:`.usual_group.usual_of`: the owner's choice for the series, else the folder's
+    # usual group) - an automatic send of a chapter from any other group is provisional: replaced by the usual group's
+    # copy when it is released (owner, 2026-11-06). None: the series has none.
+    usual: Optional[str] = None
 
 
 def default_group(available: Mapping[str, int], held: Mapping[Decimal, Sequence[str]], missing: Sequence[Decimal],
@@ -265,24 +274,30 @@ def default_group(available: Mapping[str, int], held: Mapping[Decimal, Sequence[
     """The group the missing chapters are taken from (see the module docstring). *available*: group -> how many of the
     missing chapters it has (a group named '' = no group)."""
     from ..duplicates import usual_group
+    from .usual_group import same_group, usual_of
 
+    usual = usual_of(held, missing, stored)
     named = {g: n for g, n in available.items() if g}
     by_key = {group_key(g): g for g in named}
+    spelled = [g for g in named if usual and same_group(g, usual)]
+    usual = spelled[0] if spelled and not stored else usual       # the source's own spelling of the folder's group
     if stored and group_key(stored) in by_key:
-        return GroupChoice(by_key[group_key(stored)], "your choice for this series")
+        return GroupChoice(by_key[group_key(stored)], "your choice for this series", usual)
     if not named:
-        return GroupChoice(None, "the source names no scanlation groups")
+        return GroupChoice(None, "the source names no scanlation groups", usual)
     if len(named) == 1:
         (only,) = named
-        return GroupChoice(only, "the only group with these chapters")
+        return GroupChoice(only, "the only group with these chapters", usual)
     if missing and held:
         first = min(missing)
         # usual_group tells copies apart: give it every available group and a nameless one, so "some have it" holds.
         pick = usual_group({n: list(gs) for n, gs in held.items()}, first, [*named, None])
         if pick and group_key(pick) in by_key:
-            return GroupChoice(by_key[group_key(pick)], "the folder's usual group")
+            return GroupChoice(by_key[group_key(pick)], "the folder's usual group", usual)
+        if spelled and not stored:      # the folder's group spelled another way there ("A, B" in the files, "A & B")
+            return GroupChoice(spelled[0], "the folder's usual group", usual)
     best = sorted(named.items(), key=lambda kv: (-kv[1], group_key(kv[0])))[0][0]
-    return GroupChoice(best, "the group with the most of these chapters")
+    return GroupChoice(best, "the group with the most of these chapters", usual)
 
 
 # --- the rows the chapters panel shows --------------------------------------------------------------------------
@@ -637,6 +652,7 @@ class ChapterLookup:
     newer: bool = False                             # "Check for new chapters": *missing* is what the source lists
     newer_than: Optional[str] = None                # ... after this chapter, the newest held (None: none held)
     backend: str = ""                               # the program that answered (its words in the texts)
+    fetched: Optional[MangaChapters] = None         # the source's list as fetched (the usual group's watch reads it)
 
     @property
     def available(self) -> List[ChapterRow]:
@@ -679,7 +695,7 @@ def build_lookup(client: ChapterClient, *, series_id: int, missing: Sequence[str
                          manga_url=fetched.manga.url or match.manga.url,
                          source_name=fetched.source_name or match.source.display_name, rows=rows, group=choice,
                          groups=counts, queued_in_suwayomi=queued, source_empty=not fetched.chapters,
-                         backend=getattr(match, "backend", ""))
+                         backend=getattr(match, "backend", ""), fetched=fetched)
 
 
 def newer_lookup(client: ChapterClient, db, *, series_id: int, match: MangaMatch,
@@ -782,8 +798,12 @@ class ChapterSendOutcome:
 
 
 def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMatch, picks: Sequence[SuwayomiChapter],
-                  target_dir: str, *, manga_title: str = "", source_name: str = "") -> ChapterSendOutcome:
-    """Record and enqueue the picked chapters (see the module docstring). *ledger*: a Suwayomi ledger."""
+                  target_dir: str, *, manga_title: str = "", source_name: str = "", usual_group: Optional[str] = None,
+                  replacing: Optional[Mapping[str, Mapping[str, Any]]] = None) -> ChapterSendOutcome:
+    """Record and enqueue the picked chapters (see the module docstring). *ledger*: a Suwayomi ledger. *usual_group*:
+    the series' usual group of an automatic send - a pick from another group is recorded as provisional
+    (:mod:`.usual_group`); *replacing*: chapter number -> the provisional copy a pick replaces (the usual group's copy,
+    sent although the chapter is held)."""
     from ..store.downloads import StatusConflict
 
     if not match.confirmed:
@@ -805,8 +825,12 @@ def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMat
 
     batch = uuid.uuid4().hex[:12]
     backend = backend_of(client)            # the program whose chapter ids these are (never the setting: B2 / B5)
+    from .usual_group import extra_for
+
+    per, waived = extra_for(picks, usual_group, replacing)
     records, skipped = ledger.create_chapters(series_id, picks, source=source, manga=manga, target_dir=target_dir,
-                                              batch=batch, backend=backend, extra=record_extra(client))
+                                              batch=batch, backend=backend, extra=record_extra(client),
+                                              extra_for=per, replacing=waived)
     out = ChapterSendOutcome(records=list(records), skipped=list(skipped), backend=backend)
     if not records:
         return out

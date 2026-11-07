@@ -277,7 +277,7 @@ def merge_batches(records: Iterable[DownloadRecord]) -> List[DownloadRecord]:
         if not record.is_chapters:
             out.append(record)
             continue
-        key = (record.batch or f"#{record.id}", record.status, record.error or "")
+        key = (record.batch or f"#{record.id}", record.status, record.error or "", record.usual_note)
         if key not in groups:
             groups[key] = []
             out.append(record)                  # its place; replaced below

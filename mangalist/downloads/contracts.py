@@ -247,6 +247,9 @@ class DownloadRecord:
     # A replacement (an other release, owner 2026-10-24): the held volumes of *wanted_volumes* whose files the release
     # replaces when it is filed - the owner's copies go to the holding folder first (mangalist.downloads.replacing).
     replace_volumes: Tuple[str, ...] = ()
+    # A chapter download and the series' usual group (owner, 2026-11-06; mangalist.downloads.usual_group): what the
+    # owner is told - "from C; replaced by A + B's copy when it is released", "replaced C's copy" ('' : nothing).
+    usual_note: str = ""
 
     @property
     def is_chapters(self) -> bool:
