@@ -31,9 +31,15 @@ class _Lib:
         self.folder_count = self.item_count = self.last_scan_at = None
 
 
-def _item():
-    """Volumes 1-6 mapped; MangaDex's map of 7-9 gone (listed without chapters); 9 English volumes out."""
-    items = [vol(n, a, b) for n, (a, b) in ENDS.items()] + [vol(str(n)) for n in (7, 8, 9)]
+def _item(estimates=False):
+    """Volumes 1-6 mapped; MangaDex's map of 7-9 gone (listed without chapters - or with MangaPixer's estimate from
+    the folder's files: 51-58, 59-66, 67-86); 9 English volumes out."""
+    items = [vol(n, a, b) for n, (a, b) in ENDS.items()]
+    if estimates:
+        items += [dict(vol(str(n), str(a), str(b)), chaptersEstimated=True, sources=["estimate"])
+                  for n, a, b in ((7, 51, 58), (8, 59, 66), (9, 67, 86))]
+    else:
+        items += [vol(str(n)) for n in (7, 8, 9)]
     return item(nodeId="n1", trail=[TITLE], record__title=TITLE, record__latestChapter="90", record__originVolumes=12,
                 record__englishPublishers=[{"name": "Example Press", "volumes": 9, "chapters": None,
                                             "status": "Ongoing", "omnibus": False}],
@@ -47,7 +53,7 @@ def chapter_name(n: int, tagged: bool) -> str:
 
 
 class Mixed:
-    def __init__(self, base: Path, *, tagged: bool):
+    def __init__(self, base: Path, *, tagged: bool, estimates: bool = False):
         store.reset_stores()
         self.db = store.get_store()
         self.folder = base / "Manga" / TITLE
@@ -59,7 +65,7 @@ class Mixed:
         self.root = self.db.add_root(str(base / "Manga"), "Manga")
         cache = MangaPixerCache(self.db)
         cache.save_libraries([_Lib(LIB_ID, "Manga")])
-        cache.apply_page(LIB_ID, [], [_item()])
+        cache.apply_page(LIB_ID, [], [_item(estimates)])
         cache.save_mapping(Mapping(self.root.id, LIB_ID, [], manual=True))
         self.scan()
         self.sid = self.db.series_for_folder(str(self.folder.resolve())).id
@@ -117,6 +123,12 @@ def test_the_volumes_chapters_are_not_wanted_once_the_chapter_files_are_gone(tag
 def test_a_chapter_no_volume_holds_is_still_wanted(tagged):
     tagged.remove([*range(51, 76), *range(80, 83)], tagged=True)
     assert tagged.missing_chapters() == ("80", "81", "82")
+
+
+def test_an_estimated_range_hides_no_hole(tmp_path):
+    lib = Mixed(tmp_path / "lib", tagged=True, estimates=True)
+    lib.remove([*range(51, 76), *range(80, 83)], tagged=True)
+    assert lib.missing_chapters() == ("80", "81", "82")             # not hidden by the estimate 67-86 of volume 9
 
 
 def test_without_records_the_volumes_chapters_are_wanted(untagged):

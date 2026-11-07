@@ -25,7 +25,11 @@ Volume list (optional input), MangaPixer's ``volumes.items`` shape::
 Numbers are strings (or ints / Decimals); a float is refused (``TypeError``) because it is not exact.
 Other keys are ignored. An item without a readable volume is skipped (noted in ``notes``); a missing
 or unreadable ``chapters`` means the coverage is unknown. A ``to`` without ``from`` (or the reverse)
-covers that one chapter; ``from`` > ``to`` is read as unknown.
+covers that one chapter; ``from`` > ``to`` is read as unknown. An item whose range is MangaPixer's
+estimate (``"chaptersEstimated": true``, 1.42.0: the first and last chapter file its Volumes view places
+in the volume) is unknown coverage too - estimates never act on their own (owner, 2026-10-11: "Until
+then, 3 is correct"), and one hides every hole between those two files (lane note "Volume Coverage of
+Chapters", 2026-11-06: an estimate of 67-86 for a volume that holds 67-75).
 
 ``Inventory`` (frozen dataclass)::
 
@@ -225,7 +229,7 @@ def read_volume_list(items: Optional[Iterable[Any]]) -> Tuple[Dict[Decimal, Opti
         if vol in out:
             notes.append(f"volume {_plain(vol)} listed twice; the first item kept")
             continue
-        out[vol] = _coverage(item.get("chapters"))
+        out[vol] = None if item.get("chaptersEstimated") is True else _coverage(item.get("chapters"))
     return out, notes
 
 

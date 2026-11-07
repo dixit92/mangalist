@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from decimal import Decimal as D
 
+from mangalist.inventory import Span, compute_inventory
 from mangalist.knowledge import from_mangapixer_item
+from mangalist.store.units import Unit
 from mangalist.states import GAP_CHAPTER, InventorySnapshot, State, compute_state
 from mangalist.volume_contents import (SOURCE_FILED, SOURCE_NAME, _batch_claims, claim, contents_text,
                                        held_volume_contents)
@@ -141,3 +143,11 @@ def test_numbering_that_restarts_or_a_declared_edition_uses_no_records():
 def test_unbundled_chapters_also_skip_what_the_records_put_in_a_volume():
     st = state(range(76, 91), CLAIMS, unbundled=True)
     assert not missing(st)
+
+
+def test_an_estimated_range_is_unknown_coverage_in_the_inventory():
+    units = [Unit(rel_path=f"v{n:02d}.cbz", kind="volume", vol_from=str(n), vol_to=str(n)) for n in (6, 9)]
+    inv = compute_inventory(units, [vol("6", "42", "50"),
+                                    dict(vol("9", "67", "86"), chaptersEstimated=True, sources=["estimate"])])
+    assert inv.coverage == {D(6): Span(D(42), D(50)), D(9): None}
+    assert [str(s) for s in inv.covered] == ["42-50"] and inv.volumes_unknown_coverage == (D(9),)
