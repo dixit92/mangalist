@@ -79,6 +79,15 @@ chapters are missing and *Upgrade available* once they are held; a volume whose 
 chapters start stays a missing volume (only it brings them). A Complete series may have the setting (question
 16: "Allow it - then the unbundled chapters can be upgraded once the volumes are out").
 
+**What a held volume contains when the volume list does not say** (owner, 2026-11-06: "fix the gap logic so it knows
+what volumes 7-9 contain." -> "Yes"; :mod:`mangalist.volume_contents`): MangaDex's map can disappear (its chapters taken
+down), and a mixed folder whose list still maps its first volumes then counted the chapters of the later held volumes
+as missing - every chapter from 1 that is neither a file nor inside a MAPPED volume. The series' own records (chapter
+files named with their volume, held now or gone since; filed downloads' replacement batches) put chapters in the held
+volumes the list does not map, by the module's conservative rule; those chapters are held (``_Held.holds_chapter``) and
+nothing else changes - the records only ever take a chapter off a missing list. MangaPixer's estimated ranges are not
+coverage (``mangalist.inventory``).
+
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
 a :class:`~mangalist.models.MangaEntry` already has (FALLBACK until the real inventory is wired).

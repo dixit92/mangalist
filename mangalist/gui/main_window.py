@@ -1595,7 +1595,8 @@ class MainWindow(QMainWindow):
 
     def _inventory_for(self, entry: MangaEntry):
         """The series' held units for the state columns, merged with MangaPixer's volume list (which
-        chapters each volume collects) when MangaPixer knows the series."""
+        chapters each volume collects) when MangaPixer knows the series, and with the series' records of which volume a
+        chapter belongs to (mangalist.volume_contents; read once per scan)."""
         return wanted.inventory_of(entry, self._mp_item_for(entry), self._recorded.of(entry.folder))
 
     def _after_roots_changed(self, rescan: bool = False) -> None:
