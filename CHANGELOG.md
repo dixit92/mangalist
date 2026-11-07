@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **A chapter from another group is swapped for your usual group's copy.** When a series' newest chapter is only out from a different scanlation group, MangaList still downloads it at once - and now remembers that the series' usual group has not released it yet. For 14 days the scheduled chapter check looks for the usual group's copy of that chapter on the same source; when it appears, it is downloaded and replaces the other group's file, which goes to the holding folder (restorable, emptied after the holding period like any replaced file). The In progress line says "from C; replaced by A's copy when it is released" and later "replaced C's copy". Not for a group you chose for the series, a chapter you sent by hand, or a chapter released in a different form (whole versus parts). Joint groups now match however the files and the source spell them (`A, B` and `A & B`, or a name cut short).
+- **Chapters inside a held volume are not asked for again when the volume data disappears.** A series whose volumes are held but whose source no longer says which chapters each volume holds (for example, chapters taken down on MangaDex) listed those chapters as missing, and the Download tab or the find pass downloaded them again beside the volumes. MangaList now also uses the series' own records - chapter files named with their volume, held now or before, and the chapters a filed volume replaced - to know what each held volume contains. These records only ever remove chapters from a missing list, never add one.
+- **Chapter files numbered ten times too high are read correctly.** File names like `0003 [0030].cbz`, where the number in brackets is ten times the chapter, were read by the bracket and renamed to `Ch. 0030.00` - and the chapters they hid were then downloaded again. Such a bracket is now read as its tenth when it sits next to the file's own number.
+
 ## [2026.10.60] - 2026-10-29
 
 The fifty-ninth MangaList release (testing build): adding a series takes you to that series.
