@@ -37,6 +37,12 @@ sent (:func:`still_new`, :func:`mangalist.downloads.finder.retire_filled`) or wh
 A pick the owner skipped (or one sent before) is never offered or sent again. Chapters a waiting find-pass finding of
 the series already offers are not offered twice.
 
+**The usual group's copy** (owner, 2026-11-06: "Download and if the usual group releases, replace the downloaded
+chapter"; :mod:`~.usual_group`): a chapter sent from another group than the series' usual one is provisional; for
+:data:`~.usual_group.WATCH_DAYS` days each check looks for the usual group's copy of it in the list it fetched (no other
+request) and sends it - on Notify too, the owner's answer stands for a chapter already held; filing it puts the
+provisional file in the holding folder (restorable). Only the same chapter number from the same source replaces it.
+
 **Locks**: not the find pass's nyaa lock - nyaa is never asked, and a check of a few hundred series must not hold back a
 find pass. A check runs alone (its own lock, :class:`CheckBusy` otherwise) and not while a find pass runs, here or in
 another MangaList on the same database (:class:`CheckBusy`: it runs again at its next time); sends are made safe against
@@ -132,6 +138,7 @@ class CheckReport:
     waiting: int = 0                    # findings waiting for the owner
     unreadable: int = 0                 # series whose source could not be read now (tried again next time)
     failing: int = 0                    # ... of which could not be read for WARN_AFTER checks in a row (warned about)
+    usual: int = 0                      # usual group's copies sent to replace provisional ones (owner, 2026-11-06)
     errors: int = 0                     # sends that failed, Suwayomi down
     stopped: bool = False
     not_checked: Optional[str] = None   # why no series could be asked (Suwayomi not set up, not answering)
@@ -144,6 +151,8 @@ class CheckReport:
             return f"nothing checked: {self.not_checked}"
         text = (f"{self.series_checked} series checked ({self.fetched} fetched, {self.unchanged} unchanged on "
                 f"MangaDex), {self.with_new} with new chapters: {self.sent} sent, {self.waiting} waiting")
+        if self.usual:
+            text += f", {self.usual} usual group's cop{'y' if self.usual == 1 else 'ies'} sent to replace another's"
         if self.unreadable:
             text += f", {self.unreadable} could not be read"
             if self.failing:
@@ -463,6 +472,7 @@ def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], 
     chapter_failures.clear(ctx.db, sid)                 # read: the failures in a row start again
     errors = ctx.report.errors
     _offer_or_send(ctx, report, cand, match, lookup, newer_text(lookup))
+    _usual_copies(ctx, report, cand, match, lookup, queue)
     if ctx.report.errors == errors:     # the series' check succeeded: what MangaDex said before it is kept
         try:
             gate.record(sid, match, lookup.manga_url, local_state(ctx.db, ctx.backend, ctx.store, sid))
@@ -482,7 +492,7 @@ def _unreadable(ctx, report: CheckReport, cand: Candidate, source: str, reason: 
 
 
 def _offer_or_send(ctx, report: CheckReport, cand: Candidate, match, lookup, found_text: str) -> None:
-    from .finder import _offer, _send_chapters, _settled, _waits, chapter_pick, is_newer
+    from .finder import _offer, _send_chapters, _settled, _waits, chapter_pick, is_newer, usual_payload
 
     sid, name = cand.series_id, cand.name
     waiting = ctx.store.list(None, sid)
@@ -498,7 +508,7 @@ def _offer_or_send(ctx, report: CheckReport, cand: Candidate, match, lookup, fou
         return
     source_name = lookup.source_name or match.source.display_name
     pick = chapter_pick(match, picks, lookup.group.group, source_name, lookup.manga_title or match.manga.title,
-                        newer=True, newer_than=lookup.newer_than)
+                        newer=True, newer_than=lookup.newer_than, **usual_payload(lookup.group.usual))
     keep.add(pick.pick_key)
     existing = {(f.kind, f.pick_key): f for f in waiting}
     if not _settled(existing, pick.kind, pick.pick_key):
@@ -508,7 +518,7 @@ def _offer_or_send(ctx, report: CheckReport, cand: Candidate, match, lookup, fou
         said: List[str] = []
         if reason is None:
             reason = _send_chapters(ctx, sid, name, pick, match, picks, pick.payload["manga_title"], source_name,
-                                    said=said)
+                                    said=said, usual=lookup.group.usual)
         if reason is None:
             text = f"{pick.title} new {after}: {'; '.join(said) or 'sent'}"
         else:
@@ -523,6 +533,53 @@ def _offer_or_send(ctx, report: CheckReport, cand: Candidate, match, lookup, fou
         report.lines.append(f"{name}: {text}")
         _log.info("%s: %s: %s", LABEL, name, text)
     _retire_newer(ctx, sid, keep)
+
+
+def _usual_copies(ctx, report: CheckReport, cand: Candidate, match, lookup, queue: Sequence[Any]) -> None:
+    """The usual group's copies of the series' provisional chapters, when the source lists them now (owner, 2026-11-06:
+    "Download and if the usual group releases, replace the downloaded chapter"; :mod:`~.usual_group`): sent - on
+    Notify too: the chapter is held already and the owner's answer stands for it - from the list this check fetched (no
+    other request). Filing them replaces the provisional files (the old copies to the holding folder)."""
+    from . import usual_group
+    from .contracts import DownloadStatus
+    from .finder import _w
+
+    sid, name = cand.series_id, cand.name
+    if lookup.fetched is None:
+        return
+    try:
+        watch = usual_group.watched(ctx.db, ctx.backend.chapter_ledger, sid)
+    except Exception:  # noqa: BLE001 - the watch is looked at again next time
+        _log.debug("%s: %s: the provisional chapters could not be read", LABEL, name, exc_info=True)
+        return
+    if not watch:
+        return
+    pairs, notes = usual_group.usual_copies(lookup.fetched.chapters, watch, source_id=match.source.id,
+                                            queued_ids=[q.chapter_id for q in queue])
+    for note in notes:
+        _log.debug("%s: %s: %s", LABEL, name, note)
+    if not pairs:
+        return
+    what = "; ".join(f"ch {w.number} from {w.usual} replaces {w.group or 'the first'}'s copy" for w, _ch in pairs)
+    try:
+        outcomes = usual_group.send_usual_copies(ctx.chapter_client, ctx.backend.chapter_ledger, sid, match, pairs,
+                                                 manga_title=lookup.manga_title or match.manga.title,
+                                                 source_name=lookup.source_name or match.source.display_name)
+    except Exception as exc:  # noqa: BLE001 - Suwayomi down, the folder gone: next time
+        ctx.report.errors += 1
+        text = f"{what}: not sent ({type(exc).__name__}: {exc})"
+        report.lines.append(f"{name}: {text}")
+        _log.warning("%s: %s: %s", LABEL, name, _w(ctx, text))
+        return
+    said = []
+    for outcome in outcomes:
+        if outcome.error:
+            ctx.report.errors += 1
+        report.usual += sum(1 for r in outcome.records if r.status == DownloadStatus.SENT)
+        said.append(outcome.text())
+    text = f"{what}: {'; '.join(said)}"
+    report.lines.append(f"{name}: {text}")
+    _log.info("%s: %s: %s", LABEL, name, text)
 
 
 def _retire_newer(ctx, sid: int, keep: Set[str]) -> None:

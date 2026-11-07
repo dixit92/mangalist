@@ -100,6 +100,12 @@ def _head_label(body: str, pos: int = 0) -> Optional["re.Match[str]"]:
 _HEAD_NUMBER = re.compile(
     rf"^\s*(?P<c>{UNIT})(?:-(?P<c2>{UNIT}))?(?P<after>$|\s{{2,}}|\s+[-\u2013\u2014]\s|[.:]\s|\s*\[|\s)")
 _PADDED = re.compile(r"^0\d")
+# A bare bracket number ten times the file's own index is the chapter times ten (owner's library, 2026-11-04: one
+# source's names were "0003 [0030]" ... "0165 [1650]" for chapters 3 ... 165, another's "0297 [2960]" for 296 after a
+# prologue and a 0.5 shifted its index; read by the bracket, they were renamed to Ch. 0030 ... Ch. 1650, and the chapters
+# they hid were downloaded again). Taken as N / 10 only when it ends in 0, N / 10 is within this many of the index and
+# N itself is not: "0050 [100]" stays chapter 100, "0011 [0011 ...]" chapter 11.
+_TENFOLD_NEAR_INDEX = 3
 
 # A body without any unit is accepted as FMD2 only for "NNNN [ ... ]" with an index of 3+ digits.
 _MIN_INDEX_DIGITS_UNITLESS = 3
@@ -132,6 +138,9 @@ def parse_fmd2(name: str) -> Optional[ParsedName]:
                 same = _head_label(body, rest_at)           # "0011 report011. <title>": the label says it again
                 if same is not None and UnitRange.maybe(same.group("c"), same.group("c2")) == chapter:
                     rest_at = same.end()
+                elif _tenfold(chapter, index):
+                    chapter = UnitRange.of(chapter.start / 10)
+                    note = "the bracket's number is ten times the index: its tenth"
     if volume is not None or chapter is not None:
         rest = body[rest_at:]
         if rest.startswith("."):
@@ -156,6 +165,14 @@ def parse_fmd2(name: str) -> Optional[ParsedName]:
     return ParsedName(
         name=name, kind=kind, layer=Layer.FMD2, volume=volume, chapter=chapter, is_extra=is_extra,
         title=title, group=group, index=index, series=series.strip() if series else None, notes=(note,))
+
+
+def _tenfold(chapter: UnitRange, index: int) -> bool:
+    """Whether the bracket's bare *chapter* is ten times the chapter the *index* stands for (see ``_TENFOLD_NEAR_INDEX``)."""
+    n = chapter.start
+    if chapter.is_range or n < 10 or n != n.to_integral_value() or n % 10:
+        return False
+    return abs(n / 10 - index) <= _TENFOLD_NEAR_INDEX < abs(n - index)
 
 
 def _head_number(body: str) -> Optional[Tuple[UnitRange, int]]:

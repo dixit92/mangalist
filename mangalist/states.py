@@ -79,6 +79,15 @@ chapters are missing and *Upgrade available* once they are held; a volume whose 
 chapters start stays a missing volume (only it brings them). A Complete series may have the setting (question
 16: "Allow it - then the unbundled chapters can be upgraded once the volumes are out").
 
+**What a held volume contains when the volume list does not say** (owner, 2026-11-06: "fix the gap logic so it knows
+what volumes 7-9 contain." -> "Yes"; :mod:`mangalist.volume_contents`): MangaDex's map can disappear (its chapters taken
+down), and a mixed folder whose list still maps its first volumes then counted the chapters of the later held volumes
+as missing - every chapter from 1 that is neither a file nor inside a MAPPED volume. The series' own records (chapter
+files named with their volume, held now or gone since; filed downloads' replacement batches) put chapters in the held
+volumes the list does not map, by the module's conservative rule; those chapters are held (``_Held.holds_chapter``) and
+nothing else changes - the records only ever take a chapter off a missing list. MangaPixer's estimated ranges are not
+coverage (``mangalist.inventory``).
+
 The inventory interface is the inventory lane's (``mangalist/inventory.py``); :class:`InventorySnapshot`
 is a stand-in with the same attributes, and :func:`fallback_inventory_from_entry` builds one from what
 a :class:`~mangalist.models.MangaEntry` already has (FALLBACK until the real inventory is wired).
@@ -172,7 +181,10 @@ class InventoryLike(Protocol):
     * ``chapters_covered_by_volumes`` - chapter numbers the held volume archives collect (when known);
     * ``extras`` - extras / specials (not counted as gaps);
     * ``highest_volume`` / ``highest_chapter`` - the largest held numbers (or None);
-    * ``unknown_kind_files`` - files with bare numbers (volumes or chapters?), a collection or a count.
+    * ``unknown_kind_files`` - files with bare numbers (volumes or chapters?), a collection or a count;
+    * ``recorded_volume_contents`` (optional) - the series' records of which volume a chapter belongs to
+      (:class:`mangalist.volume_contents.Claim`, :func:`mangalist.volume_contents.load_claims`): for the held volumes the
+      volume list does not map, they take the chapters those volumes contain off the missing lists.
     """
 
     held_volumes: Collection[Any]
@@ -195,6 +207,7 @@ class InventorySnapshot:
     highest_volume: Any = None
     highest_chapter: Any = None
     unknown_kind_files: Any = ()
+    recorded_volume_contents: Collection[Any] = ()
 
 
 @dataclass(frozen=True)
@@ -208,11 +221,15 @@ class _Held:
     n_unknown: int
     split_missing: Tuple[Decimal, ...] = ()   # parts of a split chapter missing below the highest part held
     inside_volumes: int = 0        # loose chapter files inside a held volume's mapped range (owner, 2026-10-14)
+    # held volumes the list does not map -> the chapters the series' records put in them (mangalist.volume_contents):
+    # read by holds_chapter alone, so they only ever take a chapter off a missing list (owner, 2026-11-06)
+    recorded: Tuple[Tuple[Decimal, Decimal, Decimal], ...] = ()     # (volume, first chapter, last chapter)
 
     def holds_chapter(self, c: Decimal) -> bool:
         if c in self.chapters or c in self.covered:
             return True
-        return any(lo <= c <= hi for lo, hi in self.chapter_ranges)
+        return (any(lo <= c <= hi for lo, hi in self.chapter_ranges)
+                or any(lo <= c <= hi for _v, lo, hi in self.recorded))
 
     @property
     def has_volumes(self) -> bool:
@@ -255,7 +272,7 @@ def _count(value: Any) -> int:
         return 0
 
 
-def _held(inv: Any, knowledge: Optional[SeriesKnowledge]) -> _Held:
+def _held(inv: Any, knowledge: Optional[SeriesKnowledge], restarts: Collection[str] = ()) -> _Held:
     vols, _ = _decimals(getattr(inv, "held_volumes", ()) or ())
     chs, ranges = _decimals(getattr(inv, "held_chapters", ()) or ())
     # Loose chapter files a held volume already holds by the volume list's MAPPED range - however the volume arrived
@@ -295,7 +312,27 @@ def _held(inv: Any, knowledge: Optional[SeriesKnowledge]) -> _Held:
     if hc is None and (chs or ranges):
         hc = max(list(chs) + [hi for _, hi in ranges])
     return _Held(frozenset(vols), frozenset(chs), tuple(ranges), frozenset(covered), hv, hc,
-                 _count(getattr(inv, "unknown_kind_files", None)), splits.missing_parts, inside)
+                 _count(getattr(inv, "unknown_kind_files", None)), splits.missing_parts, inside,
+                 _recorded(inv, knowledge, vols, restarts))
+
+
+def _recorded(inv: Any, knowledge: Optional[SeriesKnowledge], vols: Collection[Decimal],
+              restarts: Collection[str]) -> Tuple[Tuple[Decimal, Decimal, Decimal], ...]:
+    """The chapters the series' records put in the held volumes MangaPixer's volume list does not map
+    (:func:`mangalist.volume_contents.held_volume_contents`): none for a folder whose numbers restart, nor for a
+    declared edition (the records number the regular edition's volumes)."""
+    claims = getattr(inv, "recorded_volume_contents", None) or ()
+    if not claims or not vols or restarts or (knowledge is not None and knowledge.edition_label is not None):
+        return ()
+    from .volume_contents import held_volume_contents     # no cycle: it imports knowledge only
+
+    mapped = {}
+    for v in (knowledge.volumes if knowledge is not None else ()):
+        lo, hi, n = to_decimal(v.chapters_from), to_decimal(v.chapters_to), to_decimal(v.volume)
+        if v.has_chapters and n is not None and lo is not None and hi is not None and lo <= hi:
+            mapped.setdefault(n, (lo, hi))
+    contents = held_volume_contents(claims, vols, mapped)
+    return tuple((v, lo, hi) for v, (lo, hi) in sorted(contents.items()))
 
 
 def _whole_numbers(lo: Decimal, hi: Decimal) -> Set[Decimal]:
@@ -695,7 +732,7 @@ def _evaluate(
         # not know): no numbers, no gaps, not wanted even when empty, nothing to review.
         return SeriesState(state=State.NOT_A_SERIES, reasons=(k.not_a_series_reason,), source=k.source,
                            rename_pending=rename_pending, rename_count=rename_count)
-    held = _held(inventory, k) if inventory is not None else _held(InventorySnapshot(), k)
+    held = _held(inventory, k, restarts) if inventory is not None else _held(InventorySnapshot(), k)
 
     attention: List[str] = []
     if k is None or k.link_state in (LINK_UNMATCHED, LINK_NOT_LOOKED_UP):
@@ -952,6 +989,14 @@ def _evaluate(
     # volumes; a released volume is an upgrade - provided every chapter is present.
     if unmapped_for_chapters and chapters_checked and not any(g.kind == GAP_CHAPTER for g in gaps):
         gaps += [Gap(GAP_UPGRADE, v.volume, note="every chapter held; the volume is out") for v in unmapped_for_chapters]
+
+    if held.recorded and chapters_checked:
+        # owner, 2026-11-06 ("fix the gap logic so it knows what volumes 7-9 contain"): the source lost the map
+        from .volume_contents import contents_text
+
+        reasons.append("The volume list does not say which chapters some held volumes hold; the series' own records "
+                       "do (never wanted as chapters): "
+                       + contents_text({v: (lo, hi) for v, lo, hi in held.recorded}))
 
     if not compared:
         why = [r for r in reasons if "start again" in r]

@@ -12,7 +12,10 @@ dependencyResolutionManagement {
     repositories {
         mavenCentral()
         google()
-        maven("https://github.com/Suwayomi/Suwayomi-Server/raw/android-jar/")
+        // Suwayomi's Android stubs, pinned to a commit: the branch republishes the same version 1.0.0 whenever its
+        // AndroidCompat takes over a class (2026-11-01: android.net.Network* left the jar), and the vendored
+        // AndroidCompat here is v2.4.2366's, which still needs those stubs.
+        maven("https://github.com/Suwayomi/Suwayomi-Server/raw/3983289d9481a8ba99c0b16350b27f41364906a2/")
         maven("https://jitpack.io")
         // JetBrains' JCEF (the WebView), as Suwayomi
         maven("https://packages.jetbrains.team/maven/p/ij/intellij-dependencies")

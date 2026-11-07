@@ -65,8 +65,11 @@ def __getattr__(name: str):
 
 def file_line(f, *, full: bool = False) -> str:
     """One chapter file in a list: its path, the chapters, the volume that holds them, its size - or a replacement's old
-    copy of a volume (no chapters; other releases, 2026-10-24)."""
+    copy of a volume (no chapters; other releases, 2026-10-24), or a chapter the usual group's copy replaced (no volume;
+    2026-11-06)."""
     vols = ", ".join(volume_label(v.strip()) for v in f.volume.split(",") if v.strip())
+    if f.chapters and not vols:     # a chapter the series' usual group's copy replaced (owner, 2026-11-06)
+        return f"{f.path if full else f.rel}    ch. {f.chapters}, replaced by the usual group's copy    {_human(f.size)}"
     if not f.chapters:
         return f"{f.path if full else f.rel}    {vols}, replaced by a newer release    {_human(f.size)}"
     return f"{f.path if full else f.rel}    ch. {f.chapters} in {vols}    {_human(f.size)}"
@@ -282,7 +285,8 @@ class ReplacedDialog(QDialog):
              "They are moved to the holding folder (outside your libraries) and can be restored until it is emptied."))
         self.table.setRowCount(len(self._batches))
         for row, b in enumerate(self._batches):
-            cells = (self._title(b), numbers_text(b.volumes, pad=True), str(len(b.files)), batch_status_text(b))
+            units = numbers_text(b.volumes, pad=True) or ", ".join(f"ch {f.chapters}" for f in b.files if f.chapters)
+            cells = (self._title(b), units, str(len(b.files)), batch_status_text(b))
             for col, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 item.setData(Qt.ItemDataRole.UserRole, b.id)

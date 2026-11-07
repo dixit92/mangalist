@@ -794,12 +794,12 @@ def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> b
         _retire_chapters(ctx, sid, keep)
         return True
     manga_title = fetched.manga.title or match.manga.title
-    pick = chapter_pick(match, picks, choice.group, source_name, manga_title)
+    pick = chapter_pick(match, picks, choice.group, source_name, manga_title, **usual_payload(choice.usual))
     keep.add(pick.pick_key)
     if not _settled(existing, pick.kind, pick.pick_key):
         reason = _waits(ctx, mode, None)
         if reason is None:
-            reason = _send_chapters(ctx, sid, name, pick, match, picks, manga_title, source_name)
+            reason = _send_chapters(ctx, sid, name, pick, match, picks, manga_title, source_name, usual=choice.usual)
         if reason is not None:
             _offer(ctx, sid, pick, reason)
             _line(ctx, name, f"{pick.title} waits: {reason}")
@@ -819,6 +819,12 @@ def chapter_pick(match, picks: Sequence[SuwayomiChapter], group: Optional[str], 
                   "manga_id": int(match.manga.id), "manga_title": manga_title, "manga_url": match.manga.url,
                   "how": match.how, "chapter_ids": ids, "group": group, "backend": getattr(match, "backend", ""),
                   **payload})
+
+
+def usual_payload(usual: Optional[str]) -> Dict[str, Any]:
+    """A chapter pick's payload key for the series' usual group (owner, 2026-11-06; :mod:`.usual_group`): sending the
+    finding later records its other groups' chapters as provisional. Nothing when the series has none."""
+    return {"usual": usual} if usual else {}
 
 
 def is_newer(finding) -> bool:
@@ -886,9 +892,11 @@ def _dropped(ctx: _Context, sid: int, name: str, match, missing: Tuple[str, ...]
 
 
 def _send_chapters(ctx: _Context, sid: int, name: str, pick: _Pick, match, picks: Sequence[SuwayomiChapter],
-                   manga_title: str, source_name: str, said: Optional[List[str]] = None) -> Optional[str]:
+                   manga_title: str, source_name: str, said: Optional[List[str]] = None,
+                   usual: Optional[str] = None) -> Optional[str]:
     """Send an Auto pick of chapters. Returns None when it went out, else why it waits. What was sent is logged as the
-    series' line - or added to *said* for the caller's own line (the chapter check's)."""
+    series' line - or added to *said* for the caller's own line (the chapter check's). *usual*: the series' usual
+    group - a pick from another group is provisional (:mod:`.usual_group`)."""
     from .chapters import ChapterSendRefused, chapter_placement_for, send_chapters
 
     try:
@@ -899,7 +907,8 @@ def _send_chapters(ctx: _Context, sid: int, name: str, pick: _Pick, match, picks
         return f"where to file the chapters is not decided ({placement.reason}); choose a folder first"
     try:
         outcome = send_chapters(ctx.chapter_client, ctx.backend.chapter_ledger, sid, match, picks,
-                                placement.target_dir, manga_title=manga_title, source_name=source_name)
+                                placement.target_dir, manga_title=manga_title, source_name=source_name,
+                                usual_group=usual)
     except ChapterSendRefused as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001 - Suwayomi down: it waits, and the next pass tries again
@@ -1078,7 +1087,8 @@ def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str,
         try:
             outcome = send_chapters(client, backend.chapter_ledger, f.series_id, match, picks, placement.target_dir,
                                     manga_title=fetched.manga.title or manga.title,
-                                    source_name=fetched.source_name or source.display_name)
+                                    source_name=fetched.source_name or source.display_name,
+                                    usual_group=p.get("usual") or None)
         except ChapterSendRefused as exc:
             return f"Not sent: {exc}."
     except Exception as exc:  # noqa: BLE001 - Suwayomi down: the finding waits
