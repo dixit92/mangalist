@@ -303,3 +303,16 @@ def test_the_usual_group_spelled_another_way_by_the_source_is_found(db, lib):
     arrive(lib, 304)
     assert "Ch. 0004.00 Vol. 001 (Example Title 304) [Alder & Birch Scans].cbz" in files(lib)
     assert not any(OTHER in n for n in files(lib))
+
+
+def test_another_copy_of_the_chapter_in_the_folder_stops_the_replacement_before_anything_moves(db, lib):
+    check(db, lib)
+    arrive(lib, 204)
+    lib.suwayomi.chapter_list.append(chapter(304, "4", USUAL))
+    check(db, lib)
+    chapter_file(lib.folder, 4, "Elm Scans")            # the owner put another copy of chapter 4 there meanwhile
+    arrive(lib, 304)
+    new = records(lib)["304"]
+    assert new.status == S.FAILED and "chapter 4 is already in the folder" in new.error
+    assert f"Ch. 0004.00 Vol. 001 (Example Title 204) [{OTHER}].cbz" in files(lib)
+    assert ReplacementStore(db).all() == []             # nothing was held

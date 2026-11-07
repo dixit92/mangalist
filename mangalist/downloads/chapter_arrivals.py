@@ -325,7 +325,10 @@ class _ChapterPass:
         problem = self._target_problem(rec, series, series_dir)
         plan_id = self.ledger.plan_id(rec.id)
         if plan_id is not None:
-            return self._settle(rec, plan_id, series_dir, blocked=problem)
+            out = self._settle(rec, plan_id, series_dir, blocked=problem)
+            if out is not None and out.status == DownloadStatus.FAILED and not out.filed_files:
+                self._put_back(rec, self._old_copy(rec, self.ledger.request(rec.id), root)[0])
+            return out
         if problem:
             return self._fail(rec, problem + "; nothing filed, Suwayomi's copy is left alone")
         if not self.download_dir or not os.path.isdir(self.download_dir):
