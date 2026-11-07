@@ -63,6 +63,30 @@ def test_fmd2_number_heads(name, ch, title, group):
     assert r.volume is None and not r.is_extra
 
 
+@pytest.mark.parametrize("name, ch, title", [
+    ("0003 [0030].cbz", "3", None),
+    ("0001 [0010].cbz", "1", None),
+    ("0165 [1650].cbz", "165", None),
+    ("0123 [1230 - Season 1 End].cbz", "123", "Season 1 End"),
+    ("0297 [2960 - A Title].cbz", "296", "A Title"),         # a prologue and a 0.5 before it: index - 1
+])
+def test_a_bare_bracket_number_ten_times_the_index_is_its_tenth(name, ch, title):
+    r = parse_fmd2(name)
+    assert r.kind is Kind.CHAPTER and (_u(r.chapter), r.title) == (ch, title)
+
+
+@pytest.mark.parametrize("name, ch", [
+    ("0149 [0147].cbz", "147"),             # near the index: the chapter itself
+    ("0010 [0010].cbz", "10"),
+    ("0050 [100].cbz", "100"),              # not near ten times the index
+    ("0003 [0035].cbz", "35"),              # not a multiple of ten
+    ("0003 [0030.5].cbz", "30.5"),
+    ("0003 [0030-0031].cbz", "30-31"),
+])
+def test_other_bare_bracket_numbers_stay_as_they_are(name, ch):
+    assert _u(parse_fmd2(name).chapter) == ch
+
+
 @pytest.mark.parametrize("name, title", [
     ("0001 [3 Days Later].cbz", "3 Days Later"),
     ("0002 [1 Year Later [G]].cbz", "1 Year Later"),
