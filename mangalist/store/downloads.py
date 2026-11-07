@@ -171,7 +171,8 @@ def _record(r: sqlite3.Row) -> DownloadRecord:
                               batch=str(req.get("batch") or ""), source=str(req.get("source_name") or ""),
                               group=str(req.get("scanlator") or ""),
                               backend=backend if backend in CHAPTER_BACKENDS else "",
-                              stuck=req.get("stuck") is True and r["status"] == DownloadStatus.SENT)
+                              stuck=req.get("stuck") is True and r["status"] == DownloadStatus.SENT,
+                              usual_note=_usual_note(req, r["status"]))
     size = _size(req.get("budget_bytes")) or _size(req.get("size_bytes"))
     source = str(req.get("budget_source") or "") if _size(req.get("budget_bytes")) else (SIZE_RELEASE if size else "")
     return DownloadRecord(id=r["id"], series_id=r["series_id"], info_hash=r["external_ref"] or "",
@@ -183,6 +184,15 @@ def _record(r: sqlite3.Row) -> DownloadRecord:
                           copied=bool(r["copied"]), error=r["error"], size_bytes=size, size_source=source,
                           in_client=req.get("in_client") is not False,
                           replace_volumes=tuple(str(v) for v in req.get("replace_volumes") or ()))
+
+
+def _usual_note(req: Dict[str, Any], status: str) -> str:
+    from ..downloads.usual_group import note_text
+
+    try:
+        return note_text(req, status)
+    except Exception:  # noqa: BLE001 - a note only: never stops a record from being read
+        return ""
 
 
 def _queue_key(r: sqlite3.Row):
@@ -279,13 +289,18 @@ class DownloadLedger:
 
     def create_chapters(self, series_id: int, chapters: Sequence[SuwayomiChapter], *, source: SuwayomiSource,
                         manga: SuwayomiManga, target_dir: str, batch: str, backend: str = CHAPTER_BACKEND_SUWAYOMI,
-                        extra: Optional[Dict[str, Any]] = None) -> Tuple[List[DownloadRecord], List[str]]:
+                        extra: Optional[Dict[str, Any]] = None,
+                        extra_for: Optional[Dict[int, Dict[str, Any]]] = None,
+                        replacing: Sequence[str] = ()) -> Tuple[List[DownloadRecord], List[str]]:
         """New SENT chapter records (a Suwayomi ledger only), one per chapter, in one transaction - written BEFORE the
         chapters are enqueued in the program (the caller marks them FAILED when the enqueue fails). *backend*: the
         program the chapters' ids belong to (the client that listed them; transition audit B2/B5). A chapter already in
         hand - the same chapter of the same program, or the same chapter number of this series, sent and not failed or
-        cancelled - is skipped. *extra*: more request keys (the extension host's database id). Returns (records made,
-        why each skipped chapter was skipped)."""
+        cancelled - is skipped. *extra*: more request keys (the extension host's database id); *extra_for*: more keys
+        for one chapter (by its id: a provisional copy's usual group, the copy a replacement replaces). *replacing*:
+        chapter numbers held by a provisional copy that the usual group's copy replaces (owner, 2026-11-06) - sent
+        although held, unless a download of that number is on its way already. Returns (records made, why each skipped
+        chapter was skipped)."""
         self._writable(TOOL_SUWAYOMI)
         if backend not in CHAPTER_BACKENDS:
             raise DownloadError(f"unknown chapter backend {backend!r}")
@@ -300,12 +315,18 @@ class DownloadLedger:
             con.execute("BEGIN IMMEDIATE")          # the in-hand check and the inserts as one step
             held, refs = self._chapters_in_hand(con, series_id, backend)
             elsewhere = self._chapters_elsewhere(con, series_id, backend)
+            waived = {exact_number(n) for n in replacing} - {None}
+            on_the_way = self._chapters_on_the_way(con, series_id) if waived else set()
             for ch in chapters:
                 number = exact_number(ch.number) if ch.number and not ch.number.startswith("-") else None
                 if number is None:
                     skipped.append(f"{ch.name}: no chapter number")
                     continue
-                if str(ch.id) in refs or number in held:
+                if number in waived and str(ch.id) not in refs:
+                    if number in on_the_way:
+                        skipped.append(f"ch {number}: already on its way")
+                        continue
+                elif str(ch.id) in refs or number in held:
                     skipped.append(f"ch {number}: already sent")
                     continue
                 if str(ch.id) in elsewhere:
@@ -315,7 +336,7 @@ class DownloadLedger:
                            "chapter_name": ch.name, "scanlator": ch.scanlator or "", "chapter_url": ch.real_url or ch.url,
                            "upload_date": ch.upload_date, "source_id": str(source.id),
                            "source_name": source.display_name, "manga_id": int(manga.id), "manga_title": manga.title,
-                           "batch": batch, **(extra or {})}
+                           "batch": batch, **(extra or {}), **((extra_for or {}).get(int(ch.id)) or {})}
                 cur = con.execute(
                     "INSERT INTO ledger (created_at, updated_at, series_id, request, tool, destination, status,"
                     " external_ref, backend) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -324,6 +345,7 @@ class DownloadLedger:
                 made.append(int(cur.lastrowid))
                 held.add(number)
                 refs.add(str(ch.id))
+                on_the_way.add(number)
         return [self.get(i) for i in made], skipped  # type: ignore[misc]
 
     def chapters_in_hand(self, series_id: int) -> Set[str]:
@@ -363,6 +385,30 @@ class DownloadLedger:
             if r["backend"] in (None, backend):
                 refs.add(r["external_ref"])
         return numbers, refs
+
+    @staticmethod
+    def _chapters_on_the_way(con, series_id: int) -> Set[str]:
+        """The series' chapter numbers a chapter download (any program's) has on its way: sent or downloaded."""
+        numbers: Set[str] = set()
+        for r in con.execute("SELECT request FROM ledger WHERE tool = ? AND series_id = ? AND status IN (?, ?, ?)",
+                             (TOOL_SUWAYOMI, int(series_id), DownloadStatus.QUEUED, DownloadStatus.SENT,
+                              DownloadStatus.DOWNLOADED)):
+            numbers.update(str(c) for c in _loads(r["request"], {}).get("wanted_chapters") or ())
+        return numbers
+
+    def chapter_requests(self, series_id: int) -> Dict[int, Dict[str, Any]]:
+        """Every chapter record of *series_id* by id -> its request JSON (one read; the usual group's watch)."""
+        with self.connect() as con:
+            return {int(r["id"]): _loads(r["request"], {}) for r in con.execute(
+                "SELECT id, request FROM ledger WHERE tool = ? AND series_id = ? ORDER BY id",
+                (TOOL_SUWAYOMI, int(series_id)))}
+
+    def note_usual_copy(self, record_id: int, replaced_by: int) -> bool:
+        """Remember on a provisional chapter record that the usual group's copy (record *replaced_by*) replaced it - its
+        file went to the holding folder (owner, 2026-11-06). True when it changed. ``updated_at`` is left alone."""
+        with self.connect(durable=True) as con:
+            con.execute("BEGIN IMMEDIATE")
+            return self._set_request(con, record_id, replaced_by=int(replaced_by))
 
     @staticmethod
     def _chapters_elsewhere(con, series_id: int, backend: str) -> Set[str]:
