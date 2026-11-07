@@ -568,12 +568,15 @@ def _unlinked_id(db) -> int:
 # links them right after. Always holding, whatever Settings > Automation says for chapters: the owner's answer.
 
 REPLACED_VOLUMES_REASON = "replaced volumes"
+#: The journal reason of a provisional chapter replaced by the series' usual group's copy (owner, 2026-11-06;
+#: ``mangalist.downloads.usual_group``) - the same batch and hold steps as a replacement's old copies.
+REPLACED_CHAPTER_REASON = "replaced chapter"
 
 
 def hold_replaced_volumes(db, *, download_id: int, title: str, series_id: Optional[int], root_path: str,
                           series_dir: str, files: Sequence[ReplacedFile], volumes: Sequence[str],
                           volume_files: Sequence[Tuple[str, int]], journal=None,
-                          now: Optional[datetime] = None) -> Batch:
+                          now: Optional[datetime] = None, reason: str = REPLACED_VOLUMES_REASON) -> Batch:
     """Record the old copies a replacement covers as one batch and move them to the holding folder (one journal plan
     of ``hold`` steps). Raises :class:`ReplacementConflict` - nothing recorded - while the holding folder cannot be used.
     The batch comes back ``held`` (moved; perhaps only partly - ``error`` says), ``pending`` (the root was busy: moved
@@ -596,7 +599,7 @@ def hold_replaced_volumes(db, *, download_id: int, title: str, series_id: Option
     holding_dir = os.path.join(os.path.normpath(settings.holding_folder), f"{stamp} batch {batch.id}",
                                os.path.basename(os.path.normpath(root_path)) or "root")
     try:
-        plan = journal.plan_holding(REPLACED_VOLUMES_REASON, [f.path for f in files], root_path=root_path,
+        plan = journal.plan_holding(reason, [f.path for f in files], root_path=root_path,
                                     holding_dir=holding_dir, note=f"replaced by download {download_id}: {title}")
     except StepRefused as exc:
         _log.warning("Upgrades: batch %d: the journal refused to hold the old copies: %s", batch.id, exc)
