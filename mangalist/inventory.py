@@ -451,10 +451,11 @@ def inventory_of_parsed(names: Sequence[Tuple[str, Any]],
     return compute_inventory((u for rel, p in names for u in units_from_parsed(rel, p)), volume_list)
 
 
-def as_state_inventory(inv: Inventory) -> Any:
+def as_state_inventory(inv: Inventory, recorded: Iterable[Any] = ()) -> Any:
     """*inv* in the shape the rescan states read (:class:`mangalist.states.InventoryLike`): held volume
     and chapter numbers, the chapters held volumes collect as ``(from, to)`` pairs, extras, the highest
-    numbers and the files whose kind is not known yet."""
+    numbers and the files whose kind is not known yet - and *recorded*, the series' records of which volume a
+    chapter belongs to (:func:`mangalist.volume_contents.load_claims`), for the volumes the list does not map."""
     from .states import InventorySnapshot  # states does not import this module; no cycle
 
     return InventorySnapshot(
@@ -465,6 +466,7 @@ def as_state_inventory(inv: Inventory) -> Any:
         highest_volume=inv.highest_volume,
         highest_chapter=inv.highest_chapter,
         unknown_kind_files=tuple(inv.unknown),
+        recorded_volume_contents=tuple(recorded or ()),
     )
 
 

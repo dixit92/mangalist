@@ -55,6 +55,7 @@ from ..scanner import (
 )
 from ..store import Journal, Root, RootError
 from ..unbundled import UnbundledFolders
+from ..volume_contents import ClaimsByFolder
 from . import lanes
 from .app_icon import build_app_icon
 from .downloads_backend import create_backend as create_downloads_backend
@@ -404,6 +405,7 @@ class MainWindow(QMainWindow):
         self._mp_roots: dict = {}   # root id -> (stored path, resolved path), read once per resolver
         self._mp_roots_of = None    # ... the resolver they were read for
         self._unbundled = UnbundledFolders(self._db)     # the per-series Unbundled Chapters setting
+        self._recorded = ClaimsByFolder(self._db)        # which volume a chapter belongs to, by the series' records
         self._model.set_state_providers(knowledge_for=self._knowledge_for, inventory_for=self._inventory_for,
                                         needs_kind_for=lambda e: bool(getattr(e, "needs_kind", False)),
                                         unbundled_for=lambda e: self._unbundled.choice(e.folder) or False)
@@ -1594,7 +1596,7 @@ class MainWindow(QMainWindow):
     def _inventory_for(self, entry: MangaEntry):
         """The series' held units for the state columns, merged with MangaPixer's volume list (which
         chapters each volume collects) when MangaPixer knows the series."""
-        return wanted.inventory_of(entry, self._mp_item_for(entry))
+        return wanted.inventory_of(entry, self._mp_item_for(entry), self._recorded.of(entry.folder))
 
     def _after_roots_changed(self, rescan: bool = False) -> None:
         self._show_roots()
@@ -1772,6 +1774,7 @@ class MainWindow(QMainWindow):
         self._mp_resolver = None  # folders may have been renamed or added
         self._mp_items = {}
         self._unbundled.reset()
+        self._recorded.reset()
 
     def _apply_root_scan(self, rs: RootScan, renamed=()) -> None:
         """Show one library folder's scan: its series replace the folder's rows (the other folders' rows stay); a
