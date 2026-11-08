@@ -37,6 +37,13 @@ VOLUME_CASES = [
      "Cyborgzx-repack"),
     # the leading [Group] is the group when no trailing group is given
     ("[0v3r] Vinland Saga v25-26 (= Vinland Saga Omnibus 13)", "Vinland Saga", "25", "26", False, True, "0v3r"),
+    # a bracketed series title: a volume straight after the bracket, so it is no group
+    ("[Some Title] v01-12 (2023-2025) (Digital) (1r0n)", "Some Title", "1", "12", True, True, "1r0n"),
+    ("[Some Title] v13 (2026) (Digital) (ShelfLife)", "Some Title", "13", "13", True, False, "ShelfLife"),
+    ("[Some Title] Vol. 3 (Digital) (Group)", "Some Title", "3", "3", True, False, "Group"),
+    # ... but a bare number after the bracket may start the series' name: the bracket stays a group
+    ("[Grp] 86 v03 (Digital)", "86", "3", "3", True, False, "Grp"),
+    ("[Grp] 7 Seeds v01-35", "7 Seeds", "1", "35", False, True, "Grp"),
 ]
 
 

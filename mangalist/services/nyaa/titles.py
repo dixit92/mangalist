@@ -30,6 +30,11 @@ _I = re.IGNORECASE
 _UNIT = r"\d+(?:\.\d+)?"
 
 _LEADING_GROUP = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?=\S)")
+# What follows a leading [...] that is the series' own title, not a group: a volume straight away (a marked one - a
+# bare number may start the series' name: "[Group] 86 v03", "[Group] 7 Seeds v01")
+# (owner's library, 2026-11-08: Yen Press titles the series "[Oshi No Ko]", so nyaa lists "[Oshi No Ko] v01-12 (2023-2025)
+# (Digital) (1r0n)" - read with the bracket as a group, the release had no series and was never offered).
+_UNITS_FIRST = re.compile(rf"^v(?:ol(?:ume)?)?\.?\s*{_UNIT}\b", _I)
 _BRACKETS = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
 _TRAILING_TAGS = re.compile(r"((?:\s*(?:\([^()]*\)|\[[^\[\]]*\]))+)\s*$")
 _TAG = re.compile(r"\(([^()]*)\)|\[([^\[\]]*)\]")
@@ -151,7 +156,9 @@ def parse_title(title: str) -> ParsedTitle:
         text = text.replace("_", " ")
     lead_group: Optional[str] = None
     m = _LEADING_GROUP.match(text)
-    if m is not None:
+    if m is not None and _UNITS_FIRST.match(text[m.end():]):
+        text = f"{m.group(1).strip()} {text[m.end():]}"         # "[Title] v01-12": the bracket is the series
+    elif m is not None:
         lead_group = m.group(1).strip()
         text = text[m.end():]
     text = text.strip()
