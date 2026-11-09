@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.1] - 2026-11-08
+
+The sixty-first MangaList release (testing build): volume releases of a series whose title is in square brackets are found on nyaa.
+
 - **Series whose title is in square brackets are found on nyaa.** A release named like `[Oshi No Ko] v01-12 (2023-2025) (Digital) (1r0n)` - the publisher's own title has the brackets - was read as group "Oshi No Ko" with no series, so it never matched and only chapter packs were shown. A bracket followed straight by a volume (`v01`, `Vol. 3`) is now read as the series' title.
 
 ## [2026.11.0] - 2026-11-06
