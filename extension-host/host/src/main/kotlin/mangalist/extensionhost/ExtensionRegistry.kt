@@ -75,10 +75,21 @@ class ExtensionRegistry(
         root.createDirectories()
     }
 
-    /** Load every extension recorded in `installed.json` (one that fails to load is logged and skipped). */
+    /**
+     * Load every extension recorded in `installed.json` (one that fails to load is logged and skipped). A file that
+     * cannot be read as that list is moved aside (`installed.json.bad`) and the host starts with no extensions.
+     */
     fun loadInstalled() {
         if (!manifest.exists()) return
-        val recorded = json.decodeFromString<List<InstalledExtension>>(manifest.readText())
+        val recorded =
+            try {
+                json.decodeFromString<List<InstalledExtension>>(manifest.readText())
+            } catch (e: Exception) {
+                val bad = manifest.resolveSibling(manifest.fileName.toString() + ".bad")
+                logger.error(e) { "Could not read $manifest: kept as ${bad.fileName}, starting with no extensions" }
+                Files.move(manifest, bad, StandardCopyOption.REPLACE_EXISTING)
+                return
+            }
         for (ext in recorded) {
             try {
                 register(ext, instantiate(root.resolve(ext.jar), ext.className))
@@ -230,9 +241,20 @@ class ExtensionRegistry(
                 nsfw = m.meta(METADATA_NSFW)?.toIntOrNull() ?: 0,
             )
         val jar = root.resolve(ext.jar)
+        // made and loaded under another name first: a package that fails here leaves the installed version as it was
+        val fresh = root.resolve("new-${ext.jar}")
+        try {
+            fresh.deleteIfExists()
+            prepare(fresh)
+            sourcesOf(instantiate(fresh, className))
+        } catch (e: Throwable) {
+            closeLoader(fresh)
+            fresh.deleteIfExists()
+            throw e
+        }
+        closeLoader(fresh)
         unload(pkg)
-        jar.deleteIfExists()
-        prepare(jar)
+        Files.move(fresh, jar, StandardCopyOption.REPLACE_EXISTING)
         val made = register(ext, instantiate(jar, className))
         saveManifest()
         logger.info { "Installed ${ext.name} ${ext.version} ($pkg): ${made.size} source(s)" }
@@ -248,25 +270,30 @@ class ExtensionRegistry(
         ext: InstalledExtension,
         instance: Any,
     ): List<Source> {
-        val made =
-            when (instance) {
-                is Source -> listOf(instance)
-                is SourceFactory -> instance.createSources()
-                else -> error("unknown source class type ${instance.javaClass}")
-            }
+        val made = sourcesOf(instance)
         installed[ext.pkg] = ext
         made.forEach { sources[it.id] = it }
         sourcesByPkg[ext.pkg] = made.map { it.id }
         return made
     }
 
+    private fun sourcesOf(instance: Any): List<Source> =
+        when (instance) {
+            is Source -> listOf(instance)
+            is SourceFactory -> instance.createSources()
+            else -> error("unknown source class type ${instance.javaClass}")
+        }
+
     /** Forget a package's sources and close its class loader (before an update). */
     private fun unload(pkg: String) {
         sourcesByPkg.remove(pkg)?.forEach { sources.remove(it) }
         val old = installed.remove(pkg) ?: return
-        val jarPath = root.resolve(old.jar).toAbsolutePath().toString()
-        (PackageTools.jarLoaderMap.remove(jarPath) as? URLClassLoader)?.close()
+        closeLoader(root.resolve(old.jar))
         root.resolve(old.jar).deleteIfExists()
+    }
+
+    private fun closeLoader(jar: Path) {
+        (PackageTools.jarLoaderMap.remove(jar.toAbsolutePath().toString()) as? URLClassLoader)?.close()
     }
 
     /** The ids of an installed extension's sources (none when it is not installed). */
@@ -276,7 +303,9 @@ class ExtensionRegistry(
         sourcesByPkg.entries.firstOrNull { sourceId in it.value }?.let { installed[it.key] }
 
     private fun saveManifest() {
-        manifest.writeText(json.encodeToString(installed.values.sortedBy { it.pkg }))
+        val tmp = manifest.resolveSibling(manifest.fileName.toString() + ".tmp")
+        tmp.writeText(json.encodeToString(installed.values.sortedBy { it.pkg }))
+        Files.move(tmp, manifest, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
 
     /** Some extensions read files from their APK's `assets/` (as Suwayomi's `extractAssetsFromApk`): put them in the jar. */

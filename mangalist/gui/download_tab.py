@@ -54,8 +54,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional, Sequence
 
-from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PySide6.QtCore import QModelIndex, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -66,7 +66,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QStackedWidget,
-    QStyle,
     QStyleOptionViewItem,
     QTreeWidget,
     QTreeWidgetItem,
@@ -107,7 +106,7 @@ from .download_rules import (
     upgrade_note,
     upgrade_volumes_of,
 )
-from .download_style import FONT_MONO, apply_style, set_tone
+from .download_style import apply_style
 from .download_widgets import ROLE_ASIDE, ROLE_CHIPS, ROLE_SUB, TwoLineDelegate, button, hbox, label
 from .downloads_backend import DownloadsBackend
 from .downloads_list import DownloadsList

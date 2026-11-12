@@ -12,7 +12,7 @@ from mangalist.downloads.arrivals import run_arrivals, volumes_of
 from mangalist.downloads.contracts import DownloadStatus as S
 from mangalist.store import Journal, LOCK_NAME, RootLock
 
-from .fakes import HASH, candidate, data
+from .fakes import HASH, candidate, data, long_ago
 
 PACK = {
     "Series A v01 (Digital).cbz": data("pack v01"),       # held already
@@ -73,10 +73,29 @@ def test_v4_paused_up_counts_as_stopped(ledger, sent, qbt):
 
 def test_a_missing_torrent_fails_the_record(ledger, sent, qbt):
     del qbt.infos[HASH]
+    long_ago(ledger.store, sent.id)                 # sent an hour ago: qBittorrent would list it by now
     report = run_arrivals(qbt, ledger)
     rec = ledger.get(sent.id)
     assert rec.status == S.FAILED and "no longer in qBittorrent's 'mangalist' category" in rec.error
     assert report.failed == [(sent.id, rec.error)] and qbt.deleted == []
+
+
+def test_a_torrent_just_sent_that_qbittorrent_does_not_list_yet_waits(ledger, sent, qbt, series):
+    """Added by link, qBittorrent lists a torrent only once it has fetched the .torrent (once 87 s): not "removed"."""
+    info = qbt.infos.pop(HASH)
+    report = run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.SENT and report.failed == []
+    assert report.waiting == [(sent.id, "sent; not in qBittorrent's 'mangalist' category yet")]
+    qbt.infos[HASH] = info                          # listed now: on as any download
+    report = run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.SENT and report.waiting == [(sent.id, "downloading (40%)")]
+
+    # only a SENT record waits: one that finished and whose torrent then went is still failed at once
+    qbt.set(HASH, state="uploading", progress=1.0)
+    ledger.set_status(sent.id, S.DOWNLOADED, expect=(S.SENT,))
+    del qbt.infos[HASH]
+    run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.FAILED
 
 
 def test_a_torrent_moved_to_another_category_is_never_touched(ledger, sent, qbt, series):
@@ -87,6 +106,7 @@ def test_a_torrent_moved_to_another_category_is_never_touched(ledger, sent, qbt,
     sid, sdir = series
     other = ledger.create(sid, candidate(info_hash="cd" * 20), ["4"], str(sdir))
     qbt.put("cd" * 20, "Series A v04", {"Series A v04.cbz": data("v04")}, state="stoppedUP", category="other")
+    long_ago(ledger.store, other.id)                # past the wait for a torrent qBittorrent does not list yet
     report = run_arrivals(qbt, ledger)
     assert status(ledger, other) == S.FAILED and qbt.deleted == [HASH] and report.filed == []
 
@@ -202,6 +222,35 @@ def test_a_vanished_or_foreign_target_folder_fails(ledger, series, qbt, db, tmp_
     assert "is gone" in ledger.get(gone.id).error
     assert "no longer inside the series folder" in ledger.get(foreign.id).error
     assert sorted(p.name for p in sdir.iterdir()) == ["Series A v01 (Digital).cbz"]
+
+
+def test_a_library_root_that_is_not_mounted_waits_instead_of_failing(ledger, sent, qbt, library, series, caplog):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    away = library.with_name("Manga (share offline)")
+    library.rename(away)                                    # the share went: no root folder at all
+    report = run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.DOWNLOADED and report.failed == []
+    assert "is not there (not mounted?)" in report.waiting[0][1] and "not filed yet" in caplog.text
+    library.mkdir()                                         # ... or its empty mountpoint is all that is left
+    (library / ".DS_Store").write_bytes(b"")
+    report = run_arrivals(qbt, ledger)
+    assert status(ledger, sent) == S.DOWNLOADED and "is empty (not mounted?)" in report.waiting[0][1]
+    (library / ".DS_Store").unlink()
+    library.rmdir()
+    away.rename(library)                                    # mounted again: filed as if nothing had happened
+    report = run_arrivals(qbt, ledger)
+    assert report.filed == [sent.id] and (sdir / "Series A v02 (Digital).cbz").exists()
+
+
+def test_a_series_folder_gone_from_a_mounted_root_still_fails(ledger, sent, qbt, library, series):
+    _, sdir = series
+    qbt.set(HASH, state="uploading", progress=1.0)
+    (library / "Series B").mkdir()                          # the root is there and holds something
+    sdir.rename(library / "Series A (renamed by hand)")
+    run_arrivals(qbt, ledger)
+    rec = ledger.get(sent.id)
+    assert rec.status == S.FAILED and "the series folder is gone" in rec.error
 
 
 def test_a_root_no_longer_configured_fails(ledger, sent, qbt, db):

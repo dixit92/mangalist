@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from mangalist import store
-from mangalist.downloads.contracts import CHAPTER_BACKEND_EXTENSIONS
+from mangalist.downloads.contracts import CHAPTER_BACKEND_EXTENSIONS, CHAPTER_BACKEND_SUWAYOMI
 from mangalist.services.extensions import on_demand
 from mangalist.services.extensions.client import HostUnreachable
 from mangalist.store.downloads import SuwayomiSettings
@@ -17,8 +17,11 @@ URL = "http://127.0.0.1:4570"
 
 @pytest.fixture
 def db():
+    """A database with Suwayomi chosen (the module's subject; a fresh install is on the built-in extensions)."""
     store.reset_stores()
-    return store.get_store()
+    st = store.get_store()
+    SuwayomiSettings(st).set_backend(CHAPTER_BACKEND_SUWAYOMI)
+    return st
 
 
 class Probe:

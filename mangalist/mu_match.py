@@ -31,7 +31,6 @@ from .matcher import (
     MatchBand,
     MatchCandidate,
     MatchLevel,
-    MatchReason,
     MatchThresholds,
     ScoredCandidate,
     WorkClass,

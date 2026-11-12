@@ -497,6 +497,8 @@ def test_series_scopes_merge_and_widen(tmp_path):
     assert widen_scopes(lib.db, {lib.manga.id: {"Alpha", "Beta"}}, minimum=1) == {lib.manga.id: None}
     assert widen_scopes(lib.db, {lib.manga.id: None, lib.done.id: {"Omega"}}) == {lib.manga.id: None,
                                                                                   lib.done.id: {"Omega"}}
+    many = {f"Series {i}" for i in range(30)}            # the root's folders are not known: the folders are kept
+    assert widen_scopes(None, {7: many}) == {7: many}
 
 
 def test_the_journal_names_both_sides_of_what_mangalist_moved(tmp_path):

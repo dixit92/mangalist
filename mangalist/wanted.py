@@ -7,7 +7,8 @@ MangaPixer cache alone - no Qt, no network, no disk walk.
 **Where the files come from: the database, not a fresh walk.** The find pass runs right after the scheduled rescan, which
 has just recorded every series folder (``series``) and every archive with its size (``archives``). Each series' archives are
 parsed again from their names with exactly the scanner's context (the folder title, the root's naming scheme, the series'
-"volumes or chapters?" answer - :func:`mangalist.scanner._parse_context` + :func:`mangalist.classifier.annotate_file`), so
+"volumes or chapters?" answer, each folder's series head - :func:`mangalist.scanner._parse_context` +
+:func:`mangalist.scanner._annotate_folder`), so
 the rebuilt :class:`~mangalist.models.MangaEntry` reads the same as the scanned one: the same inventory, the same
 "volumes or chapters?" question (a guessed chapter is not in the ``units`` rows, so those are not used), the same
 numbering-restart rule (season subfolders). Why not walk the disk again: the rescan just did, a second walk wakes the
@@ -285,8 +286,8 @@ def entries_from_db(db, root) -> List[Tuple[Any, MangaEntry]]:
     records: the folder under the resolved root (the scanner's key), the title from the folder name, the series' own
     present archives parsed with the scanner's context - and, as the scanner does, a franchise parent's nested series'
     archives in its file count but not in its inventory (``nested_series``). No disk access beyond resolving the root."""
-    from .classifier import annotate_file, parse_folder_name
-    from .scanner import MAX_DEPTH, _parse_context, _root_schemes
+    from .classifier import parse_folder_name
+    from .scanner import MAX_DEPTH, _annotate_folder, _parse_context, _root_schemes
 
     root_dir = _resolved(root.path)
     rows = [s for s in db.list_series(root.id) if s.status == "present"]
@@ -317,12 +318,15 @@ def entries_from_db(db, root) -> List[Tuple[Any, MangaEntry]]:
                 if inner.count("/") <= MAX_DEPTH:
                     own.append((inner, a, False))
         files: List[FileHit] = []
+        by_folder: Dict[Path, List[FileHit]] = defaultdict(list)       # parsed a folder at a time, as the scanner does
         for inner, a, parse in sorted(own, key=lambda t: _walk_order(t[0])):
             hit = FileHit(path=folder.joinpath(*inner.split("/")), size=int(a.size or 0), depth=inner.count("/"),
                           mtime_ns=a.mtime_ns)
             if parse:
-                annotate_file(hit, ctx)
+                by_folder[hit.path.parent].append(hit)
             files.append(hit)
+        for hits in by_folder.values():
+            _annotate_folder(hits, ctx)
         entry.files = files
         entry.nested_series = [root_dir.joinpath(*s.rel_path.split("/")) for s in nested]
         out.append((row, entry))

@@ -4,7 +4,10 @@ filed; the earlier downloads' torrents stay removable. Made-up names, a FAKE qBi
 
 from __future__ import annotations
 
+import errno
 import os
+import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -203,6 +206,61 @@ def test_when_nothing_can_be_filed_the_old_copies_are_put_back(db, ledger, libra
     assert out.status == S.FAILED and "put back" in out.error
     (batch,) = batches(db)
     assert batch.status == "restored" and all((sdir / name(v)).read_bytes() == OLD[v] for v in "123")
+
+
+def _stop_before_the_filing(monkeypatch):
+    """The next pass stops (as a crash would) when it applies the filing plan: the hold is done, the plan attached."""
+    real = Journal.apply
+
+    def crash(self, plan_id, *a, **kw):
+        if self.get_plan(plan_id).reason == "arrival":
+            raise RuntimeError("the process stopped here")
+        return real(self, plan_id, *a, **kw)
+
+    monkeypatch.setattr(Journal, "apply", crash)
+    return real
+
+
+def test_a_resumed_filing_that_files_nothing_puts_the_old_copies_back(db, ledger, library, holding, monkeypatch):
+    sid, sdir, qbt, _ = library
+    rec = send_collection(ledger, sid, sdir, qbt)
+    real = _stop_before_the_filing(monkeypatch)
+    report = run_arrivals(qbt, ledger)
+    assert report.errors and ledger.get(rec.id).status == S.DOWNLOADED and ledger.plan_id(rec.id) is not None
+    (batch,) = batches(db)
+    assert batch.status == "held" and not any((sdir / name(v)).exists() for v in "123")
+    monkeypatch.setattr(Journal, "apply", real)
+    shutil.rmtree(qbt.save_root / f"{SERIES} v01-04 (New Group)")      # the release's files went meanwhile
+    run_arrivals(qbt, ledger)
+    out = ledger.get(rec.id)
+    assert out.status == S.FAILED and out.filed_files == ()
+    (batch,) = batches(db)
+    assert batch.status == "restored" and all((sdir / name(v)).read_bytes() == OLD[v] for v in "123")
+
+
+def test_a_filing_that_stops_half_way_says_which_old_copies_stay_held(db, ledger, library, holding, monkeypatch):
+    sid, sdir, qbt, _ = library
+    rec = send_collection(ledger, sid, sdir, qbt)
+    real = os.link
+
+    def no_third(src, dst, *a, **kw):
+        if os.path.basename(dst) == name("3", "New Group"):
+            raise OSError(errno.EIO, "Input/output error")
+        return real(src, dst, *a, **kw)
+
+    monkeypatch.setattr(os, "link", no_third)
+    report = run_arrivals(qbt, ledger)
+    out = ledger.get(rec.id)
+    assert out.status == S.FAILED and sorted(out.filed_files) == [name(v, "New Group") for v in "12"]
+    (batch,) = batches(db)
+    assert batch.status == "held"                                   # volumes 1 and 2 have their new copies
+    assert not (sdir / name("3")).exists() and not (sdir / name("3", "New Group")).exists()
+    assert f"of your old copies, {name('3')} is still in the holding folder" in out.error
+    assert name("1") not in out.error.split("of your old copies")[1]
+    assert report.failed == [(rec.id, out.error)]
+    # ... and the holding period ending does not delete the only copy of volume 3 (nor the others' old copies)
+    later = datetime.now(timezone.utc) + timedelta(days=400)
+    assert upgrades.purge_expired(db, now=later) == [] and batches(db)[0].status == "held"
 
 
 def test_a_pass_that_stops_after_the_hold_resumes_with_the_filing(db, ledger, library, holding, monkeypatch):

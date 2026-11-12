@@ -9,7 +9,7 @@ import pytest
 
 from mangalist import store
 from mangalist.downloads import extension_updates as eu
-from mangalist.downloads.contracts import CHAPTER_BACKEND_EXTENSIONS
+from mangalist.downloads.contracts import CHAPTER_BACKEND_EXTENSIONS, CHAPTER_BACKEND_SUWAYOMI
 from mangalist.headless.extension_updates_job import JOB_NAME, make_extension_updates, schedule_interval
 from mangalist.headless.jobs import JobContext
 from mangalist.store.downloads import ExtensionHostConfig, SuwayomiSettings
@@ -43,6 +43,7 @@ def run(db):
 
 def test_skipped_while_chapter_downloads_go_through_suwayomi(db, host):
     host.installed[WEEB_PKG] = "1.4.1"
+    SuwayomiSettings(db).set_backend(CHAPTER_BACKEND_SUWAYOMI)
     SuwayomiSettings(db).save_extension_host(ExtensionHostConfig(url=host.url))
     result = run(db)
     assert result.status == "skipped" and "Built-in extensions is not chosen" in result.message

@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from mangalist.models import MangaEntry
-from mangalist.gui.table_model import MangaTableModel
+pytest.importorskip("PySide6")
+
+from mangalist.gui.table_model import MangaTableModel  # noqa: E402
+from mangalist.models import MangaEntry  # noqa: E402
 
 
 def test_duplicate_detection_basic():

@@ -21,7 +21,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, NamedTuple, Optional
+from typing import List, NamedTuple
 
 from .db import utcnow
 

@@ -21,7 +21,14 @@ from mangalist.store.names import windows_name_problem
     ("Made Up [Tag] Romaji", "English [Note]", "Made Up (Tag) Romaji [English (Note)]"),  # brackets stay unambiguous
     ("  Spaced   out  ", None, "Spaced out"),
     ("Ends with dots...", "English.", "Ends with dots [English]"),
-    (".Hidden Romaji", None, "Hidden Romaji"),                           # a hidden folder would never be scanned
+    (".Hidden Romaji", None, "DOT Hidden Romaji"),                       # a hidden folder would never be scanned
+    (".made//UP", None, "DOT made--UP"),                                 # ".hack//SIGN" -> "DOT hack--SIGN"
+    (".made//UP", "Made Up English", "DOT made--UP [Made Up English]"),
+    (".made//UP", ".Made//Up", "DOT made--UP"),                          # the English title is the romaji again
+    ("..made up", None, "DOT .made up"),                                 # only the first dot
+    ("...", None, "DOT"),                                                # only dots: never empty, never hidden
+    ("…", None, "DOT"),
+    ("Made.Up Ro.maji", ".Made Up English", "Made.Up Ro.maji [Made Up English]"),  # only the name's own first dot
     ("CON", None, "CON_"),                                               # a Windows reserved name
     ("", "Made Up English", None),                                       # no romaji: no name
     ("???", None, None),
@@ -311,3 +318,48 @@ def test_a_bracket_repeating_the_start_of_the_title_is_not_wrapped_in_parenthese
     romaji = "The Girl on the Made Up Island ~Some Subtitle~"
     titles = fs.titles_for(folder, romaji, (), official="The Girl on the Made Up Island: Some Subtitle")
     assert titles.name() == folder
+
+
+# --- a title starting with a dot (owner, 2026-11: "replace '.' with 'DOT'") ---------------------------------------
+
+def test_folder_head_writes_the_leading_dot_as_DOT():
+    assert fs.folder_head(".made//UP") == "DOT made--UP" and fs.clean_part(".made//UP") == "made--UP"
+    assert fs.folder_head(' ?.made') == "DOT made"                       # what is dropped in front does not hide it
+    assert fs.folder_head("Made Up.") == "Made Up" and fs.folder_head("???") == ""
+    assert fs.folder_head(".") == fs.folder_head("...") == "DOT"
+
+
+@pytest.mark.parametrize("romaji, english", [
+    (".made//UP", None),
+    (".made//UP", "The Made Up English"),
+    (".made//The Up", None),                 # the DOT name reads as English: it is still the romaji, no bracket
+    ("...", None),
+])
+def test_a_DOT_folder_is_already_in_the_scheme(romaji, english):
+    name = fs.scheme_name(romaji, english)
+    assert name.startswith("DOT") and windows_name_problem(name) is None
+    again = fs.titles_for(name, romaji, official=english)                # the Renamer's reading of the named folder
+    assert again.name() == name and fs.titles_for(name, romaji).name() == name
+    assert fs.english_from_folder(name, romaji) == english
+
+
+def test_a_folder_named_before_DOT_is_a_rename_candidate():
+    assert fs.titles_for("made--UP", ".made//UP").name() == "DOT made--UP"
+
+
+def test_a_short_name_that_is_the_dotted_titles_head_keeps_the_DOT():
+    long = ".made up: " + "Romaji no Long Title " * 3
+    assert fs.scheme_name(long, alt_titles=[".made up"]) == "DOT made up"
+    assert fs.scheme_name(long, alt_titles=["Rolota"]) == "Rolota"       # another name: not the dotted title
+
+
+def test_the_windows_path_rule_on_windows_itself():
+    root = "D:\\Manga\\" + "L" * 150
+    name = fs.scheme_name("Made Up Romaji", "E" * 120, fits=fs.windows_fits(root, None, native=True))
+    full = root + "\\" + name + "\\" + fs.PROBE_FILE
+    assert len(full) <= 259 and name.startswith("Made Up Romaji [E") and name.endswith(fs.ELLIPSIS + "]")
+    assert fs.windows_fits(root, None, native=False)("N" * 255)          # elsewhere: only the 255 bytes
+    assert not fs.windows_fits(root, None, native=True)("N" * 255)
+    assert fs.windows_fits("D:\\Manga", None, native=True)("N" * 200)
+    container = fs.windows_fits("/data/share/" + "L" * 150, "SERVER", native=False)     # the container rule, as before
+    assert container("N" * 60) and not container("N" * 80)

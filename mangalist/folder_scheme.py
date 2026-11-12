@@ -27,8 +27,9 @@ The rules follow animefetch's show folders (``animefetch/placement.py``: ``clean
 - **Characters** (animefetch's ``clean_name``, plus Windows' rules): typographic quotes, dashes, the ellipsis
   character and non-breaking spaces in plain ASCII (:func:`fold_typography`), ``:`` dropped (``Re:Zero`` -> ``ReZero``), ``/``
   -> ``-``, ``\\ * ? " < > |`` and control characters dropped, ``[ ]`` inside a part -> ``( )`` (the scheme's own
-  brackets stay unambiguous), white space collapsed, no leading dot (a hidden folder is never scanned), no trailing dot
-  or space, a Windows reserved name suffixed (:func:`mangalist.store.names.windows_safe_name`). Articles and other
+  brackets stay unambiguous), white space collapsed, no leading dot (a hidden folder is never scanned: a part's
+  leading dots go, but the dot the folder name itself would start with is written ``DOT``, owner 2026-11:
+  ``.hack//SIGN`` -> ``DOT hack--SIGN``; :func:`folder_head`), no trailing dot or space, a Windows reserved name suffixed (:func:`mangalist.store.names.windows_safe_name`). Articles and other
   punctuation stay as the titles write them.
 - **Length**: the name is at most :data:`MAX_FOLDER_BYTES` (255) bytes of UTF-8; when a Windows server name is set the
   folder's whole Windows path must also leave room for a chapter file below it (:func:`fit_name`). A name too long is
@@ -45,13 +46,14 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Optional, Sequence, Tuple
 
 LONG_TITLE = 50                 # animefetch's LONG_TITLE: a longer romaji title uses an official short name
 MAX_FOLDER_BYTES = 255
 MAX_PATH_CHARS = 255            # answer 85: a longer path of the series' longest file loses the folder's [English] part
 ELLIPSIS = "…"
+DOT = "DOT"                     # what the folder name starts with in place of a leading "." (owner, 2026-11)
 #: The shortest file name the length rule must leave room for under the folder (a chapter in the file scheme).
 PROBE_FILE = "Ch. 0000.00 Vol. 000.cbz"
 
@@ -150,14 +152,30 @@ def fold_typography(text: Optional[str]) -> str:
 def clean_part(text: Optional[str]) -> str:
     """One part of the folder name (the romaji or the English title) in the scheme's characters: see the module
     docstring. Empty when nothing usable is left."""
+    return _characters(text).lstrip(".").strip().rstrip(". ")
+
+
+def _characters(text: Optional[str]) -> str:
+    """:func:`clean_part` before the dots at either end go."""
     t = fold_typography(unicodedata.normalize("NFC", text or ""))
     # a subtitle's colon (": ") becomes " - " like the owner's own names and Add series' cleaning ("My Monster Secret -
     # Actually, I Am", not "...Secret Actually, I Am"); a colon inside a word goes, as animefetch does ("ReZero")
     t = _CONTROL.sub(" ", t)
     t = re.sub(r"\s*:(?=\s)", " -", t).replace(":", "").replace("/", "-")
     t = _DROPPED.sub("", t).replace("[", "(").replace("]", ")")
-    t = _SPACES.sub(" ", t).strip().lstrip(".").strip()
-    return t.rstrip(". ")
+    return _SPACES.sub(" ", t).strip()
+
+
+def folder_head(text: Optional[str]) -> str:
+    """The part a folder name starts with (the romaji), cleaned like :func:`clean_part` - but a leading dot is written
+    :data:`DOT` (owner, 2026-11: "replace '.' with 'DOT'"; a folder starting with a dot is never scanned, and
+    ``.hack`` without it is another title): ``.hack//SIGN`` -> ``DOT hack--SIGN``. Only the first dot: ``...`` ->
+    ``DOT`` (the others are trailing dots)."""
+    t = _characters(text)
+    if not t.startswith("."):
+        return clean_part(text)
+    rest = t[1:].strip().rstrip(". ")
+    return f"{DOT} {rest}" if rest else DOT
 
 
 _ACRONYM = re.compile(r"^[A-Z0-9&.\-]+$")
@@ -304,17 +322,21 @@ def scheme_name(romaji: Optional[str], english: Optional[str] = None, *, fits=No
                 alt_titles: Iterable[str] = (), max_chars: Optional[int] = None) -> Optional[str]:
     """The scheme's folder name for a series called *romaji* (its MangaUpdates title) with the English title *english*
     (None: unknown) and the alternative titles *alt_titles* (where an official short name of a long romaji comes from:
-    :func:`short_romaji`); None without a usable romaji title. The bracket is left out when the English title is the
+    :func:`short_romaji`); None without a usable romaji title. A name that would start with a dot starts with
+    :data:`DOT` instead (:func:`folder_head`; an official short name that is not the title's own head is not the
+    dotted title and stays as it is). The bracket is left out when the English title is the
     romaji, its short form, or the short name is the English title (answer 86), written differently; and when the name
     with it would be longer than *max_chars* characters (answer 85: the room :func:`name_room` leaves for the folder
     name below the path limit; None: no path limit)."""
-    full = clean_part(romaji)
-    if not full:
+    full, head = clean_part(romaji), folder_head(romaji)
+    if not head:
         return None
     short = short_romaji(romaji, english, alt_titles)
     eng = clean_part(english_remainder(english, (full, short))) if english else ""
     if eng and (same_title(eng, short) or same_title(eng, full)):
         eng = ""
+    if full.casefold().startswith(short.casefold()):      # the title or its own head: with what stands for its dot
+        short = head[:len(head) - len(full)] + short
     if eng and max_chars is not None and len(_windows_safe(_render(short, eng))) > max_chars:
         eng = ""
     return fit_name(short, eng or None, fits) or None
@@ -353,20 +375,21 @@ def name_room(root_path: Optional[str], longest_file: Optional[str]) -> Optional
     return MAX_PATH_CHARS - len(str(root_path).rstrip("/\\")) - len(longest_file) - 2
 
 
-def windows_fits(root_path: str, server: Optional[str]):
-    """The length rule of a folder in library folder *root_path*: at most 255 bytes, and - with a Windows server name -
-    the Windows path of a short chapter file below it at most 259 characters (:mod:`mangalist.naming`'s rule)."""
-    from .naming import NameLimits, windows_path
+def windows_fits(root_path: str, server: Optional[str], native: Optional[bool] = None):
+    """The length rule of a folder in library folder *root_path*: at most 255 bytes, and - with a Windows server name,
+    or on Windows itself (*native*; None: where MangaList runs) - the Windows path of a short chapter file below it
+    at most 259 characters (:mod:`mangalist.naming`'s rule)."""
+    from .naming import NameLimits, path_fits_windows
 
     limits = NameLimits(windows_server=server or None)
+    if native is not None:
+        limits = replace(limits, native_windows=native)
 
     def fits(name: str) -> bool:
         if len(name.encode("utf-8")) > MAX_FOLDER_BYTES:
             return False
-        if limits.windows_server and root_path:
-            wp = windows_path(f"{str(root_path).rstrip('/')}/{name}/{PROBE_FILE}", limits.windows_server)
-            if wp is not None and len(wp.encode("utf-16-le")) // 2 > limits.max_windows_path:
-                return False
+        if root_path and not path_fits_windows(f"{str(root_path).rstrip('/')}/{name}/{PROBE_FILE}", limits):
+            return False
         return True
 
     return fits
@@ -384,7 +407,9 @@ def _after_the_title(name: str, bracket: str, romaji: Optional[str]) -> bool:
     piece of the romaji (owner's ``Long Title ~Subtitle~ [Long Title]``: read as part of the title, the whole folder
     name was taken for the English and renamed to ``Long Title ~Subtitle~ [(Long Title)]``, 2026-10-18). A bracket
     that does not read as English (``Romaji Title - Gaiden [Romaji Title]``) is still a piece of the title."""
-    return (bool(romaji) and looks_english(bracket) and same_title(name.replace(f"[{bracket}]", " "), romaji))
+    rest = name.replace(f"[{bracket}]", " ")
+    return (bool(romaji) and looks_english(bracket)
+            and (same_title(rest, romaji) or same_title(rest, folder_head(romaji))))
 
 
 def _in_title(part: str, romaji: Optional[str]) -> bool:
@@ -413,7 +438,8 @@ def english_from_folder(folder_name: str, romaji: Optional[str], alt_titles: Ite
     if not top_level or not name:
         return None
     alt_titles = tuple(alt_titles or ())
-    if romaji and (same_title(name, romaji) or same_title(name, short_romaji(romaji, None, alt_titles))):
+    if romaji and (same_title(name, romaji) or same_title(name, short_romaji(romaji, None, alt_titles))
+                   or same_title(name, scheme_name(romaji, alt_titles=alt_titles))):     # "DOT hack" for ".hack"
         return None
     latin_alts = [a for a in alt_titles if isinstance(a, str) and latin(a)]
     paren = _TRAILING_PAREN.match(name)
@@ -457,7 +483,7 @@ def titles_for(folder_name: str, romaji: Optional[str], alt_titles: Iterable[str
     English title, :mod:`mangalist.english_titles`) when known, else the folder's (:func:`english_from_folder`), else
     *english* (a title the caller knows, e.g. MangaDex's only English title). None without a romaji title (the folder
     cannot be named: it is left alone)."""
-    if not clean_part(romaji):
+    if not folder_head(romaji):
         return None
     alts = tuple(a.strip() for a in alt_titles or () if isinstance(a, str) and a.strip())
     eng = english_from_folder(folder_name, romaji, alts, top_level=top_level) if folder_name else None
@@ -494,6 +520,6 @@ def english_candidates(alt_titles: Iterable[str], romaji: Optional[str], limit: 
 __all__ = [
     "ELLIPSIS", "ENGLISH_FOLDER", "ENGLISH_OFFICIAL", "ENGLISH_OTHER", "ENGLISH_WORDS", "LONG_TITLE",
     "MAX_FOLDER_BYTES", "MAX_PATH_CHARS", "ROMAJI_WORDS", "name_room", "SeriesTitles", "english_remainder", "fold_typography", "clean_part",
-    "english_candidates", "english_from_folder", "fit_name", "looks_english", "parse_folder", "romaji_like",
+    "DOT", "english_candidates", "english_from_folder", "fit_name", "folder_head", "looks_english", "parse_folder", "romaji_like",
     "same_title", "scheme_name", "short_name_candidates", "short_romaji", "title_key", "titles_for", "windows_fits",
 ]

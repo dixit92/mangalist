@@ -42,7 +42,7 @@ def test_one_chapter_from_send_to_filed_through_the_built_in_extensions(db, tmp_
     catalog(host)
     sid = library_with_series(db, tmp_path, SERIES)
     backend = Backend(db)
-    assert backend.chapter_backend() == CHAPTER_BACKEND_SUWAYOMI and not backend.suwayomi_ready()
+    assert backend.chapter_backend() == CHAPTER_BACKEND_EXTENSIONS      # a fresh install: nothing chosen yet
     choose_builtin(backend, host.url)
     assert backend.suwayomi_ready()                           # the host has an address: chapters can be looked up
     # The Extensions page installs MangaDex.

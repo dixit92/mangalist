@@ -30,3 +30,7 @@ def test_an_image_folder_named_only_by_the_series_title_is_not_a_volume():
 def test_other_numbers_with_the_series_title():
     assert other_numbers(f"{TITLE} v01.cbz", Decimal(1), TITLE) == other_numbers(f"{TITLE} v01 (copy).cbz", Decimal(1),
                                                                                     TITLE)
+
+
+def test_other_numbers_reads_a_trailing_zero_as_the_same_number():
+    assert other_numbers("Sea 10.0 Vol 01.cbz", Decimal(1)) == other_numbers("Sea 10 Vol 01.cbz", Decimal(1)) == ("10",)

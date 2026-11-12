@@ -33,7 +33,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from .alias_search import CreatorIndex, distinct_titles
 

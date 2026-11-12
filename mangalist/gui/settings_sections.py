@@ -266,7 +266,6 @@ class SourcesPage(SectionPage):
         set_prop(self.suwayomi_badge, "badge", kind)
 
     def _show_suwayomi_state(self) -> None:
-        from .download_style import set_prop
 
         ready = self._suwayomi_ready()
         builtin = self._builtin()

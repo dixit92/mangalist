@@ -93,6 +93,15 @@ def data(seed: str, size: int = 5000) -> bytes:
     return (seed.encode() * (size // max(1, len(seed)) + 1))[:size]
 
 
+def long_ago(db, record_id: int, minutes: int = 60) -> None:
+    """Make a download record look last changed *minutes* ago (a SENT one: past the arrivals' grace period)."""
+    from datetime import datetime, timedelta, timezone
+
+    then = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).replace(microsecond=0).isoformat()
+    with db.connect() as con:
+        con.execute("UPDATE ledger SET updated_at = ? WHERE id = ?", (then, record_id))
+
+
 def scan(db) -> None:
     from mangalist.scanner import record_library_scan, scan_library
 

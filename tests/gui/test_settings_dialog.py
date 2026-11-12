@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit  # noqa: E402
+from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QPushButton  # noqa: E402
 
 from mangalist import config, store  # noqa: E402
 from mangalist.downloads.options import KEY_MU_AUTOSTART, KEY_SCAN_AFTER_FILING, NyaaOptions, get_flag, load_nyaa_options  # noqa: E402,E501
@@ -97,8 +97,9 @@ def make(qapp, db, cache, backend="default", mp=None, section=None, **kw):
     backend = FakeBackend() if backend == "default" else backend
     mp = mp or FakeMp()
     info = kw.pop("info", lambda parent, title, text: None)
+    confirm = kw.pop("confirm", lambda parent, what: True)          # unsaved edits: "Discard" (no modal in a test)
     dlg = SettingsDialog(None, db, backend, section, client_factory=lambda url, token, verify: mp, info=info,
-                         cache=cache, env=kw.pop("env", {}), **kw)
+                         cache=cache, env=kw.pop("env", {}), confirm=confirm, **kw)
     return dlg, backend
 
 
@@ -740,3 +741,116 @@ def test_automation_empties_the_holding_folder_now_after_a_yes(qapp, db, cache, 
     wait_until(qapp, lambda: page._empty_call is None)
     assert calls == [1] and "Emptied 1 batch." in page.replaced_status.text()
     assert "v02.cbz is no longer in the library" in page.replaced_status.text()
+
+
+# --- unsaved edits ------------------------------------------------------------------------------------------
+
+def asking(answers):
+    """A ``confirm`` that records what it was asked about and answers from *answers* ("Discard" once they run out)."""
+    asked = []
+
+    def confirm(parent, what):
+        asked.append(what)
+        return answers.pop(0) if answers else True
+
+    return asked, confirm
+
+
+def back_of(page):
+    return next(b for b in page.editor_page.findChildren(QPushButton) if b.text().startswith("‹"))
+
+
+def open_editors(db, cache, library):
+    """(section, what the question names, open the editor, edit it, what is stored) for every form with a Save."""
+    def rename(editor):
+        editor.name_edit.setText("Renamed")
+        editor.name_edit.textEdited.emit("Renamed")
+
+    return [
+        (SECTION_LIBRARY, "the library roots", lambda page: page.edit_root(0), rename,
+         lambda backend: [(r.name, r.exclusions) for r in db.list_roots()]),
+        (SECTION_SERVICES, "qBittorrent's settings", lambda page: page.edit_qbittorrent(),
+         lambda panel: panel.url_edit.setText("http://qbt.example:9090"), lambda backend: list(backend.saved)),
+        (SECTION_SERVICES, "Suwayomi's settings", lambda page: page.edit_suwayomi(),
+         lambda panel: panel.password_edit.setText(PASSWORD_SUWA), lambda backend: list(backend.suwayomi_saved)),
+        (SECTION_SERVICES, "MangaPixer's connection", lambda page: page.edit_mangapixer(),
+         lambda panel: panel.token_edit.setText(TOKEN), lambda backend: (cache.connection(), cache.token())),
+    ]
+
+
+def test_an_editor_that_was_not_edited_closes_without_a_question(qapp, db, cache, library):
+    db.add_root(str(library), "First")
+    connect_mangapixer(cache)
+    for close in ("accept", "reject"):                                    # the Close button; Esc and the window's X
+        for section, _what, open_, _edit, _stored in open_editors(db, cache, library):
+            asked, confirm = asking([])
+            dlg, _ = make(qapp, db, cache, FakeChapterBackend(connected=False), section=section, confirm=confirm)
+            page = dlg.pages[section]
+            assert open_(page) is not None and page.unsaved() == ""          # filled by the program: not an edit
+            back_of(page).click()
+            assert page.stack.currentIndex() == 0                               # the back link: the same
+            open_(page)
+            dlg.show()
+            getattr(dlg, close)()
+            assert asked == [] and not dlg.isVisible()
+
+
+def test_keep_editing_leaves_settings_open_on_the_edited_form(qapp, db, cache, library):
+    db.add_root(str(library), "First")
+    connect_mangapixer(cache)
+    for section, what, open_, edit, stored in open_editors(db, cache, library):
+        asked, confirm = asking([False] * 4)
+        dlg, backend = make(qapp, db, cache, FakeChapterBackend(connected=False), section=section, confirm=confirm)
+        page = dlg.pages[section]
+        before = stored(backend)
+        form = open_(page)
+        edit(form)
+        assert page.unsaved() == what
+        dlg.show()
+        dlg.show_section(SECTION_MATCHING)                                  # the form stays open behind another section
+        dlg.btn_close.click()
+        assert asked == [what] and dlg.isVisible() and dlg.current == section
+        dlg.reject()                                                        # Esc
+        dlg.close()                                                         # the window's X
+        back_of(page).click()                                               # the back link asks too
+        assert asked == [what] * 4 and dlg.isVisible() and page.stack.currentWidget() is page.editor_page
+        assert page.unsaved() == what and stored(backend) == before         # the edit is still there, nothing written
+        cancel = [b for b in page.editor_page.findChildren(QPushButton) if b.text() == "Cancel"]
+        if cancel:                                                          # Cancel is the answer: no question
+            cancel[0].click()
+            assert asked == [what] * 4 and page.stack.currentIndex() == 0 and page.unsaved() == ""
+            dlg.btn_close.click()
+            assert asked == [what] * 4 and not dlg.isVisible() and stored(backend) == before
+
+
+def test_discard_closes_settings_and_writes_nothing(qapp, db, cache, library):
+    db.add_root(str(library), "First")
+    connect_mangapixer(cache)
+    for section, what, open_, edit, stored in open_editors(db, cache, library):
+        asked, confirm = asking([True])
+        dlg, backend = make(qapp, db, cache, FakeChapterBackend(connected=False), section=section, confirm=confirm)
+        page = dlg.pages[section]
+        before = stored(backend)
+        edit(open_(page))
+        dlg.show()
+        dlg.reject()
+        assert asked == [what] and not dlg.isVisible() and stored(backend) == before
+        assert dlg.result_data() == SettingsResult()                        # nothing for the window to follow
+
+
+def test_the_question_has_discard_and_keep_editing_and_keeps_by_default(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from mangalist.gui.settings_common import ask_discard
+
+    seen = []
+
+    def fake_exec(box):
+        seen.append((box.text(), sorted(b.text() for b in box.buttons()), box.defaultButton().text(),
+                     box.escapeButton().text()))
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    assert ask_discard(None, "qBittorrent's settings") is False             # closed without a click: keep editing
+    assert seen == [("Discard the changes to qBittorrent's settings?", ["Discard", "Keep editing"], "Keep editing",
+                     "Keep editing")]

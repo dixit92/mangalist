@@ -377,7 +377,8 @@ def test_the_other_numberless_packs_are_read_one_after_another_in_the_background
     backend = PartialBackend(results=[titled] + packs)
     panel = open_panel(qapp, backend)
     limit = releases_panel.MAX_BACKGROUND_PACKS
-    wait_until(qapp, lambda: len(backend.inspected) == 1 + limit)
+    # every read delivered to the panel, not merely started on its thread (a start alone left the last cell "?")
+    wait_until(qapp, lambda: len(panel._packs) == 1 + limit and not panel._pack_reading)
     assert backend.inspected[0][0] == "a" * 40                         # the selected release first
     assert [h for h, _w in backend.inspected[1:]] == [p.info_hash for p in packs[:limit]]
     assert all(w == ("3", "4", "5", "9") for _h, w in backend.inspected[1:])

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from mangalist.downloads.adapter import Backend
-from mangalist.downloads.contracts import NyaaCandidate, QbtConnection, SuwayomiConnection
+from mangalist.downloads.contracts import CHAPTER_BACKEND_SUWAYOMI, NyaaCandidate, QbtConnection, SuwayomiConnection
 from mangalist.gui.shell import GROUP_CHAPTERS, GROUP_UPGRADES, GROUP_VOLUMES, WantedSeries
 from mangalist.services.nyaa.ranking import order
 
@@ -120,6 +120,8 @@ def wire(db, series, tmp_path, *, qbittorrent=True, suwayomi=False) -> Wired:
     backend = Backend(db, search=search, nyaa_client=nyaa, client_factory=lambda conn: qbt,
                       chapter_client_factory=lambda conn: fake_suwayomi,
                       wanted=lambda db_, root_ids=None: holder[0].wanted(db_, root_ids))
+    # the chapter program of these tests is the fake Suwayomi, set up or not: chosen, not the fresh-install default
+    backend.suwayomi.set_backend(CHAPTER_BACKEND_SUWAYOMI)
     if qbittorrent:
         backend.ledger.save_connection(QbtConnection("http://qbt.example:8080", "owner", "pw"))
         backend.ledger.set_save_path(str(save))

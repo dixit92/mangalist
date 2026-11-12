@@ -16,7 +16,9 @@ Rules (:func:`map_target`, MangaPixer's ``MapTarget``):
 How (:func:`carry`, MangaPixer's ``MoveRowsAsync``): T's own data is NEVER overwritten.
 
 - T has no data of its own (no link, no kind answer): O's row takes T's place - the same series id, now at
-  T's root and path (T's just-created row is folded into it); O's link and examined mark follow.
+  T's root and path (T's just-created row is folded into it); O's link and examined mark follow. What T was given
+  by its id meanwhile stays with the row: its own mode and per-series settings (Unbundled, the chapter source)
+  where O has none, its ledger rows and replaced-files batches.
 - Otherwise each kind of data moves only when T has none of that kind; what cannot move stays on O, which
   stays ``missing`` (shown in the Missing series list for a manual decision). An O with nothing left is
   retired (its data now lives on T).
@@ -36,12 +38,15 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from ..store.db import utcnow
+from ..store.downloads import META_EXTENSIONS_SERIES, META_SUWAYOMI_SERIES
 from ..store.series import link_key
+from ..unbundled import META_PREFIX as META_UNBUNDLED
 
 _log = logging.getLogger(__name__)
 
 MIN_MOVED_SHARE = 0.8
 EXAMINED_SETTING = "examined"
+SERIES_META = (META_UNBUNDLED, META_SUWAYOMI_SERIES, META_EXTENSIONS_SERIES)    # + the series id: its own settings
 
 
 @dataclass
@@ -187,6 +192,19 @@ def _rekey(con: sqlite3.Connection, old_key: str, new_key: str) -> bool:
     return con.execute("UPDATE links_cache SET folder = ? WHERE folder = ?", (new_key, old_key)).rowcount > 0
 
 
+def _rekey_settings(con: sqlite3.Connection, old_id: int, new_id: int) -> None:
+    """The settings kept under the series id *old_id* (``meta``: Unbundled Chapters, the chapter source in either
+    program) now belong to *new_id* - never over one *new_id* has; nothing stays under *old_id* (a later row can get
+    that id again)."""
+    for prefix in SERIES_META:
+        old_key, new_key = f"{prefix}{int(old_id)}", f"{prefix}{int(new_id)}"
+        if con.execute("SELECT 1 FROM meta WHERE key = ? AND value IS NOT NULL", (new_key,)).fetchone() is None:
+            con.execute("DELETE FROM meta WHERE key = ?", (new_key,))
+            con.execute("UPDATE meta SET key = ? WHERE key = ?", (new_key, old_key))
+        else:
+            con.execute("DELETE FROM meta WHERE key = ?", (old_key,))
+
+
 # --- the rule ---------------------------------------------------------------------------------------------------
 
 
@@ -227,16 +245,20 @@ def carry(con: sqlite3.Connection, ctx: _Ctx, old_id: int, new_id: int, how: str
     o_link, t_link = _has_link(con, key_o), _has_link(con, key_t)
     o_kind, t_kind = o["kind_hint"], t["kind_hint"]
     if not t_link and not t_kind:
-        # T has nothing of its own: O's row takes T's place (same id), T's fresh row is folded into it.
+        # T has nothing of its own: O's row takes T's place (same id), T's fresh row is folded into it - with what T
+        # was given meanwhile (its own mode and per-series settings, where O has none; its replaced-files batches).
         con.execute("UPDATE archives SET series_id = ? WHERE series_id = ?", (old_id, new_id))
         con.execute("UPDATE archive_moves SET to_series_id = ? WHERE to_series_id = ?", (old_id, new_id))
         con.execute("UPDATE ledger SET series_id = ? WHERE series_id = ?", (old_id, new_id))
+        con.execute("UPDATE replacements SET series_id = ? WHERE series_id = ?", (old_id, new_id))
+        _rekey_settings(con, new_id, old_id)
         con.execute("DELETE FROM units WHERE series_id = ?", (old_id,))
         con.execute("UPDATE units SET series_id = ? WHERE series_id = ?", (old_id, new_id))
         con.execute("DELETE FROM series WHERE id = ?", (new_id,))
         con.execute("UPDATE series SET root_id = ?, rel_path = ?, fingerprint = ?, n_archives = ?, status = 'present',"
-                    " last_seen_at = ?, missing_since = NULL WHERE id = ?",
-                    (t["root_id"], t["rel_path"], t["fingerprint"], t["n_archives"], t["last_seen_at"], old_id))
+                    " last_seen_at = ?, missing_since = NULL, auto_mode = COALESCE(auto_mode, ?) WHERE id = ?",
+                    (t["root_id"], t["rel_path"], t["fingerprint"], t["n_archives"], t["last_seen_at"], t["auto_mode"],
+                     old_id))
         res.moved.append("row")
         res.to_series_id = old_id
         if o_link and _rekey(con, key_o, key_t):
@@ -267,6 +289,7 @@ def carry(con: sqlite3.Connection, ctx: _Ctx, old_id: int, new_id: int, how: str
         else:
             # Nothing left on O: retire it (its data lives on T now; its unmatched archive rows stay, unattached).
             con.execute("UPDATE ledger SET series_id = ? WHERE series_id = ?", (new_id, old_id))
+            con.execute("UPDATE replacements SET series_id = ? WHERE series_id = ?", (new_id, old_id))
             con.execute("DELETE FROM series WHERE id = ?", (old_id,))
     con.execute("INSERT INTO series_carries (from_series_id, to_series_id, from_root_id, from_path, to_root_id, to_path,"
                 " how, moved, kept, at) VALUES (?,?,?,?,?,?,?,?,?,?)",

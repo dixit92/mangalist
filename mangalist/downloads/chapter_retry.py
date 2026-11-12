@@ -29,7 +29,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from ..store.downloads import DownloadLedger, StatusConflict
 from .chapter_backend import backend_of, name_of_backend, wording

@@ -420,3 +420,20 @@ def test_a_long_file_in_a_subfolder_counts_too(db, library):
              else ("Made Up Gaiden", ()))
     parent = next(s for s in r.dry_run(root_ids=[root.id]).series if s.title == "Old Name")
     assert parent.folder_target == romaji                                 # 256 with the English part: left out
+
+
+# --- a title starting with a dot (owner, 2026-11: "replace '.' with 'DOT'") ---------------------------------------
+
+def test_a_dotted_title_names_the_folder_DOT_and_the_named_folder_is_unchanged(db, library):
+    root = make_library(db, library, {"made--UP": {"Ch. 0001.00 [G].cbz": payload("d1")},
+                                      "DOT made--THE UP": {"Ch. 0001.00 [G].cbz": payload("d2")}})
+    lookup = {"made--UP": (".made//UP", ()), "DOT made--UP": (".made//UP", ()), "DOT made--THE UP": (".made//THE UP", ())}
+    r = make(db, title_for=lambda root_, series: lookup[series.rel_path])
+    s = r.preview_series(_sid(db, root, "made--UP"))
+    assert (s.folder_status, s.folder_target) == (RENAME, "DOT made--UP")        # never ".made--UP": not scanned
+    kept = r.preview_series(_sid(db, root, "DOT made--THE UP"))                   # no perpetual "Rename pending"
+    assert (kept.folder_status, kept.folder_target) == (UNCHANGED, "DOT made--THE UP")
+    os.rename(os.path.join(root.path, "made--UP"), os.path.join(root.path, "DOT made--UP"))
+    rescan(db)
+    again = r.preview_series(_sid(db, root, "DOT made--UP"))
+    assert (again.folder_status, again.folder_target) == (UNCHANGED, "DOT made--UP")

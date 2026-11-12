@@ -68,6 +68,7 @@ def world(db, tmp_path):
         return SuwayomiClient(conn, session=session)
 
     backend = Backend(db, chapter_client_factory=factory, namer=namer)
+    backend.suwayomi.set_backend("suwayomi")          # Suwayomi's flow: chosen, not the fresh-install default
     return {"db": db, "sid": sid, "dir": sdir, "root": r, "downloads": downloads, "session": session,
             "backend": backend, "conns": conns, "namer": namer}
 

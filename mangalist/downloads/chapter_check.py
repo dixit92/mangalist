@@ -412,7 +412,7 @@ def _check(db, backend, report: CheckReport, series: Sequence[Candidate], should
 
 def _check_one(ctx, report: CheckReport, cand: Candidate, queue: Sequence[Any], gate: Any = None) -> None:
     from .chapter_gate import Gate, local_state
-    from .chapters import HOW_MANGADEX, find_manga, newer_lookup, newer_text
+    from .chapters import find_manga, newer_lookup, newer_text
     from .finder import _line, _suwayomi_up
 
     gate = gate if gate is not None else Gate.off(ctx.db)

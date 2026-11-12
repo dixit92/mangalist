@@ -279,6 +279,7 @@ class DownloadLedger:
             request["replace_volumes"] = replacing
         now = utcnow()
         with self.connect(durable=True) as con:
+            con.execute("BEGIN IMMEDIATE")          # the tracked check and the insert as one step
             if self._tracked_ids(con, info_hash):
                 raise DownloadError(f"the torrent {info_hash} is already being tracked")
             if status == DownloadStatus.QUEUED:     # at the end of the queue, whatever was moved to its front
@@ -753,7 +754,7 @@ SETTING_SUWAYOMI_SOURCES = "downloads.suwayomi_sources"     # the source ids Man
 
 # The built-in extensions backend (prototype/mihon-mangalist): which program downloads chapters, and MangaList's own
 # extension host. Plain settings (no secret: the host has no login).
-SETTING_CHAPTER_BACKEND = "downloads.chapter_backend"      # 'suwayomi' (default) | 'extensions'
+SETTING_CHAPTER_BACKEND = "downloads.chapter_backend"      # 'extensions' (default) | 'suwayomi'
 SETTING_EXTENSION_HOST = "downloads.extension_host"        # {url, download_dir, downloads_path, repos, ...}
 SETTING_EXTENSION_AUTO_UPDATE = "downloads.extension_auto_update"   # bool: the update job installs what it finds
 META_EXTENSIONS_SERIES = "extensions.series."              # + the series id: the per-series choices on the host
@@ -816,8 +817,13 @@ class SuwayomiSettings:
     # --- the backend ---------------------------------------------------------------------------------------------
 
     def backend(self) -> str:
+        """The chosen program. Nothing chosen yet: the built-in extensions (the default since 2026.11.2; owner,
+        2026-11-10) - unless a Suwayomi connection is stored, which is a set-up from when Suwayomi was the default
+        and stays on Suwayomi until the owner switches."""
         value = self.store.get_setting(SETTING_CHAPTER_BACKEND, None)
-        return CHAPTER_BACKEND_EXTENSIONS if value == CHAPTER_BACKEND_EXTENSIONS else CHAPTER_BACKEND_SUWAYOMI
+        if value in CHAPTER_BACKENDS:
+            return value
+        return CHAPTER_BACKEND_SUWAYOMI if self.suwayomi_connection() is not None else CHAPTER_BACKEND_EXTENSIONS
 
     def set_backend(self, backend: str) -> None:
         if backend not in CHAPTER_BACKENDS:

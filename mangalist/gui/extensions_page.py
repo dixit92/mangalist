@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
 
 from ..services.extensions.client import (
     PREF_CHECKBOX,
-    PREF_EDITTEXT,
     PREF_LIST,
     PREF_MULTISELECT,
     PREF_SWITCH,
@@ -228,7 +227,8 @@ class ExtensionHostPanel(QWidget):
         self.host_downloads_edit.setText(c.host_downloads)
         self.webview_check.setChecked(c.webview)
         getter = getattr(self._backend, "extension_auto_update", None)
-        self.auto_update_check.setChecked(bool(getter()) if callable(getter) else False)
+        self._auto_update = bool(getter()) if callable(getter) else False
+        self.auto_update_check.setChecked(self._auto_update)
         self._measure_browser_files(c.webview)
 
     def _measure_browser_files(self, webview_on: bool) -> None:
@@ -267,6 +267,15 @@ class ExtensionHostPanel(QWidget):
                                    flaresolverr_url=self.flare_edit.text().strip(),
                                    webview=self.webview_check.isChecked(), repos=self._config.repos,
                                    host_downloads=self.host_downloads_edit.text().strip())
+
+    def has_unsaved_edits(self) -> bool:
+        """The form differs from the settings as loaded (the repository list is saved as it is changed: not counted)."""
+        c = self._config
+        loaded = (c.url, c.download_dir, c.flaresolverr_url, c.host_downloads)
+        typed = (self.url_edit.text(), self.folder_edit.text(), self.flare_edit.text(), self.host_downloads_edit.text())
+        return ([t.strip() for t in typed] != [(v or "").strip() for v in loaded]
+                or self.webview_check.isChecked() != bool(c.webview)
+                or self.auto_update_check.isChecked() != self._auto_update)
 
     def save(self) -> bool:
         from .downloads_backend import BackendError

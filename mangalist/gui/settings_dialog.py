@@ -31,7 +31,7 @@ from .downloads_backend import DownloadsBackend
 from .mangapixer_dialog import ClientFactory
 from .roots_dialog import BrowseFn
 from .settings_appearance import SECTION_APPEARANCE, AppearancePage
-from .settings_common import SectionPage
+from .settings_common import SectionPage, ask_discard
 from .settings_library import LibraryPage
 from .extension_notice import SECTION_EXTENSIONS
 from .settings_sections import SECTION_LOGGING, AutomationPage, LoggingPage, MatchingPage, SourcesPage
@@ -92,6 +92,9 @@ class _LazyPages(Mapping):
     def built(self) -> List[SectionPage]:
         return list(self._built.values())
 
+    def is_built(self, key: str) -> bool:
+        return key in self._built
+
 
 class _NavButton(QFrame):
     """A section's entry: its name over a smaller grey hint (which wraps). A frame, not a push button, so the wrapped
@@ -121,7 +124,8 @@ class _NavButton(QFrame):
 class SettingsDialog(QDialog):
     def __init__(self, parent: Optional[QWidget], db, backend: Optional[DownloadsBackend], section: Optional[str] = None,
                  browse: Optional[BrowseFn] = None, client_factory: Optional[ClientFactory] = None,
-                 info: Optional[Callable[[QWidget, str, str], None]] = None, cache=None, env=None):
+                 info: Optional[Callable[[QWidget, str, str], None]] = None, cache=None, env=None,
+                 confirm: Optional[Callable[[QWidget, str], bool]] = None):
         super().__init__(parent)
         self.setObjectName("settingsDialog")
         self.setWindowTitle("Settings")
@@ -129,6 +133,7 @@ class SettingsDialog(QDialog):
         self._db = db
         self._backend = backend
         self._flags = {"roots": False, "mangapixer": False, "downloads": False}
+        self._confirm = confirm or ask_discard      # (parent, what) -> discard the unsaved edits to *what*?
         if cache is None:
             try:
                 from ..services.mangapixer import open_cache
@@ -207,6 +212,7 @@ class SettingsDialog(QDialog):
         holder = self._holders.get(key)
         if holder is not None:
             holder.addWidget(page)
+        page.confirm_discard = self._confirm
         page.roots_changed.connect(lambda: self._flag("roots"))
         page.mangapixer_changed.connect(lambda: self._flag("mangapixer"))
         page.downloads_changed.connect(lambda: self._flag("downloads"))
@@ -235,8 +241,9 @@ class SettingsDialog(QDialog):
     def show_section(self, section: str) -> None:
         if section == SECTION_EXTENSIONS:              # Connected services with the Extensions page open
             self.show_section(SECTION_SERVICES)
-            opener = getattr(self.pages[SECTION_SERVICES], "open_extensions", None)
-            if callable(opener):
+            page = self.pages[SECTION_SERVICES]
+            opener = getattr(page, "open_extensions", None)
+            if callable(opener) and page.may_discard():        # a form edited there is not replaced without a word
                 opener()
             return
         if section not in self.pages:
@@ -252,6 +259,12 @@ class SettingsDialog(QDialog):
                               downloads_changed=self._flags["downloads"])
 
     def done(self, result: int) -> None:
+        """Close, Esc and the window's X all end here (Qt routes Esc and X through reject()): an editor with edits not
+        saved is asked about first, and "Keep editing" leaves the dialog open on it."""
+        for key in self.pages:
+            if self.pages.is_built(key) and not self.pages[key].may_discard():
+                self.show_section(key)
+                return
         for page in self.pages.built():
             page.stop()
         super().done(result)

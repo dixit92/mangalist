@@ -61,6 +61,7 @@ class CompatHttpTest {
             HttpRequest
                 .newBuilder(URI("http://127.0.0.1:${server.port}$path"))
                 .method(method, if (body == null) HttpRequest.BodyPublishers.noBody() else HttpRequest.BodyPublishers.ofString(body))
+                .apply { if (body != null) header("Content-Type", "application/json") }
                 .build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
         return resp.statusCode() to Json.parseToJsonElement(resp.body())

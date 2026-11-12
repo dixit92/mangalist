@@ -85,7 +85,6 @@ import os
 import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from .db import utcnow

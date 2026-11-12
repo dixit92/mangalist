@@ -7,8 +7,9 @@ seen as downloaded, never as lost), and for each record:
 - **SENT** + Suwayomi has the chapter downloaded -> DOWNLOADED (and on to filing in the same pass). Still queued or
   downloading -> waits; Suwayomi's ``ERROR`` state (it gave up after its own tries) -> waits with the reason on the
   record, and MangaList puts it back in Suwayomi's queue every 6 h, up to 3 times (:mod:`.chapter_retry`; the owner can
-  Retry or Cancel it from In progress). Neither downloaded nor in the queue (removed in Suwayomi) -> FAILED. A chapter Suwayomi no longer
-  knows -> FAILED.
+  Retry or Cancel it from In progress). Neither downloaded nor in the queue (removed in Suwayomi) -> FAILED - unless it
+  was SENT less than ``arrivals.SENT_GRACE`` ago (the record is written before the enqueue): it waits. A chapter
+  Suwayomi no longer knows -> FAILED.
 - **DOWNLOADED** -> filing: the CBZ is found in the download folder MangaList reads (Settings > Connected services >
   Suwayomi) by Suwayomi's own path rule - ``<downloads>/mangas/<source>/<manga title>/<scanlator>_<chapter name>.cbz``,
   each part cleaned as Suwayomi cleans it (:func:`suwayomi_name`) - else by a look through that manga's folders for the CBZ
@@ -20,7 +21,8 @@ seen as downloaded, never as lost), and for each record:
   write-ahead, a hard link where the folders share a filesystem, else a copy verified by size and MangaPixer's content
   signature; never over an existing name) -> FILED. The plan id is stored on the record before the plan is applied, so a
   crash in between is settled by the next pass. Refused (nothing moved, Suwayomi's copy left alone) and FAILED when: the
-  series or target folder is gone or no longer inside a root; no CBZ is found (or Suwayomi saved a folder of images: "Download
+  series or target folder is gone or no longer inside a root (the library root itself not there or empty - a share
+  that is not mounted - is no refusal: the record waits for it); no CBZ is found (or Suwayomi saved a folder of images: "Download
   as CBZ" is off); the CBZ is another chapter; a file of that name, or a file of that chapter, is already in the folder.
   **The usual group's copy** of a provisional chapter (``replaces`` in its request; owner, 2026-11-06,
   :mod:`.usual_group`): the provisional file (followed through the journal's moves) goes to the holding folder FIRST -
@@ -54,7 +56,7 @@ from xml.etree import ElementTree
 from ..scanner import ARCHIVE_EXTS
 from ..store.downloads import DownloadLedger, StatusConflict
 from . import chapter_retry
-from .arrivals import ArrivalsReport
+from .arrivals import ArrivalsReport, just_sent, root_offline
 from .chapters import split_chapter_name, to_decimal
 from .contracts import ChapterClient, DownloadRecord, DownloadStatus, QueuedChapter, SuwayomiChapter
 from .placement import locate_series, same_or_inside
@@ -280,7 +282,9 @@ class _ChapterPass:
                                 "removed from Suwayomi)")
                 return
             if not ch.downloaded:
-                if queued is None:
+                if queued is None and just_sent(rec):   # written before the enqueue (FAILED would be final)
+                    self._wait(rec, "sent; not in Suwayomi's download queue yet")
+                elif queued is None:
                     self._fail(rec, "no longer in Suwayomi's download queue and not downloaded (removed there?)")
                 elif queued.state == chapter_retry.ERROR_STATE:
                     before = getattr(chapter_retry.load(self.db, rec.id), "auto", 0)
@@ -322,6 +326,13 @@ class _ChapterPass:
             series, root, series_dir = locate_series(self.db, rec.series_id)
         except LookupError as exc:
             return self._fail(rec, f"{exc}; nothing filed")
+        offline = root_offline(root.path)
+        if offline:                 # every series folder looks gone then: wait for the share, never fail on it
+            note = f"{offline}; filed once it is back"
+            self._wait(rec, note)
+            self._note(rec, note)
+            _log.warning("Chapter arrivals: download %d (%s) not filed yet: %s", rec.id, rec.title, offline)
+            return None
         problem = self._target_problem(rec, series, series_dir)
         plan_id = self.ledger.plan_id(rec.id)
         if plan_id is not None:

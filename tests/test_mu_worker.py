@@ -92,6 +92,22 @@ def test_confirmed_match_is_never_rescored(fake):
     assert row["mu_score_version"] == 1 and row["mu_score"] == 0.4
 
 
+def test_a_failed_refresh_keeps_the_stored_progress(fake, monkeypatch):
+    entry = _entry("Berserk", [f"Berserk v{i:02d}.cbz" for i in range(1, 6)])
+    mu_cache.save_entry(entry.folder, 51239621230, "Berserk", "", True, mu_confirmed=True, scan_latest_chapter=364.0,
+                        publisher_name="Dark Horse", publisher_volumes=41.0, completed_in_origin=False)
+
+    def unreachable(_mu_id):
+        raise OSError("MangaUpdates did not answer")
+
+    monkeypatch.setattr(mu_client, "get_series", unreachable)
+    assert _run(entry) == [0]
+    row = mu_cache.load_entry(entry.folder)
+    assert row["mu_confirmed"] is True and row["licensed"] is True
+    assert (row["scan_latest_chapter"], row["publisher_name"], row["publisher_volumes"]) == (364.0, "Dark Horse", 41.0)
+    assert row["completed_in_origin"] is False
+
+
 def test_collection_folder_is_not_searched(fake):
     entry = _entry("Shelf", ["Look Back.cbz", "Sayonara Eri.cbz", "Hunter x Hunter v01.cbz",
                              "Akira v01.cbz", "Oyasumi Punpun v01.cbz"])

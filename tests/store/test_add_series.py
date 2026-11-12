@@ -230,7 +230,10 @@ def test_a_failing_mangadex_request_is_a_readable_error():
     ("What? Really*", "What Really"),
     ("  Spaced   out  ", "Spaced out"),
     ("Ends with dots...", "Ends with dots"),
-    (".Hidden", "Hidden"),
+    (".Hidden", "DOT Hidden"),              # never a hidden folder; the folder scheme's DOT
+    (".made//UP", "DOT made--UP"),
+    ("...", "DOT"),
+    ("Made.Up .Name", "Made.Up .Name"),
     ("CON", "CON_"),
     ("", ""),
     ("???", ""),
@@ -410,7 +413,16 @@ class FakeScans:
         return self.answer
 
 
+def suwayomi_chosen(db) -> None:
+    """Suwayomi as the chapter program, chosen (a fresh install is on the built-in extensions): a source without its
+    program's name is stored under the chosen program's key."""
+    from mangalist.store.downloads import SuwayomiSettings
+
+    SuwayomiSettings(db).set_backend("suwayomi")
+
+
 def test_adding_makes_the_folder_the_row_the_confirmed_match_and_the_source(db, root, library):
+    suwayomi_chosen(db)
     info = A.info_from_mu(mu_record(1000), A.mangadex_from_record(md_body(mu="rst")))
     source = A.SourceChoice("5511", "MangaDex (EN)", 77, "Made Up English")
     scans = FakeScans()
@@ -435,6 +447,7 @@ def test_the_next_scan_keeps_the_choices(db, root, library):
     from mangalist.scanner import scan_root
     from mangalist.store.series import seen_from_entries
 
+    suwayomi_chosen(db)
     info = A.info_from_mu(mu_record(1000))
     out = A.add_series(db, root, "Made Up Series", info, source=A.SourceChoice("5511", "MangaDex", 77, "T"))
     entries = scan_root(library, root_id=root.id)
@@ -446,6 +459,7 @@ def test_the_next_scan_keeps_the_choices(db, root, library):
 
 
 def test_a_series_without_a_match_records_no_link(db, root):
+    suwayomi_chosen(db)
     info = A.info_from_mangadex(A.mangadex_from_record(md_body(mu=None)))
     out = A.add_series(db, root, "Made Up Series", info, source=A.SourceChoice("5511", "MangaDex", 77, "T"))
     assert mu_cache.load_entry(out.folder) is None
@@ -501,6 +515,7 @@ def test_the_source_is_found_by_the_mangadex_id_and_never_written(db):
         def close(self):
             self.closed = True
 
+    SuwayomiSettings(db).set_backend("suwayomi")                  # chosen, and not set up yet
     assert "not set up" in A.find_mangadex_source(db, UUID, client_factory=lambda c: Client()).note
     SuwayomiSettings(db).save_connection(SuwayomiConnection(base_url="http://suwayomi.invalid:4567"))
     client = Client()
@@ -618,3 +633,12 @@ def test_the_short_name_comes_from_mangaupdates_titles_only():
     info = A.info_from_mu(mu_record(title=long, associated=[{"title": "The Made Up Long Story"}]), md)
     assert "Made Up Romaji Kai" in info.associated and info.scheme_alts == ["The Made Up Long Story"]
     assert info.scheme_name().startswith("Made Up Romaji wa Hontou ni")
+
+
+def test_a_title_starting_with_a_dot_is_proposed_as_DOT(db, library):
+    info = A.SeriesInfo(title=".made//UP", mu_id=1, mu_title=".made//UP", english_title="Made Up English",
+                        associated=[".Made Up Other"])
+    names = A.propose_names(info)
+    assert names[0] == "DOT made--UP [Made Up English]" and "DOT made--UP" in names
+    root = db.add_root(str(library), "Lib")
+    assert not any(n.startswith(".") for n in names) and all(A.folder_problem(root, n) is None for n in names)

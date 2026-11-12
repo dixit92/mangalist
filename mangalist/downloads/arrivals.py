@@ -5,6 +5,7 @@ One pass (:func:`run_arrivals`) is idempotent and safe to run hourly. For each a
 ``mangalist`` category:
 
 - **Missing** from the category (removed, or moved to another category) -> FAILED with the reason; nothing else.
+  A record SENT less than :data:`SENT_GRACE` ago waits instead: qBittorrent lists a torrent added by link late.
 - **SENT** + complete -> DOWNLOADED (and on to filing in the same pass).
 - **DOWNLOADED**, a replacement (``replace_volumes``: an other release sent to replace the owner's copies, 2026-10-24)
   -> the owner's copies it covers to the holding folder first, then filed as below (:mod:`.replacing`).
@@ -14,8 +15,9 @@ One pass (:func:`run_arrivals`) is idempotent and safe to run hourly. For each a
   the naming scheme's when the library is set to "Rename automatically" and its conversion was started
   (:meth:`~mangalist.store.journal.Journal.plan_links`) -> FILED with ``filed_files`` / ``copied``. Nothing
   matched, the series or target folder gone, or the target no longer inside the series folder / a configured
-  root -> FAILED with the reason; the torrent is left alone. The plan id is stored on the record BEFORE the plan
-  is applied, so a crash in between is settled by the next pass (the plan recovered, resumed or read back).
+  root -> FAILED with the reason; the torrent is left alone. The library root itself not there, or empty (a share
+  that is not mounted, :func:`root_offline`) -> the record waits for it. The plan id is stored on the record BEFORE
+  the plan is applied, so a crash in between is settled by the next pass (the plan recovered, resumed or read back).
   Another MangaList instance holding the root's lock -> the record waits for the next pass.
 - **FILED** + "Remove Completed" on (``downloads.remove_completed``) + the torrent still in the ``mangalist``
   category + stopped at its seed goal (``stopped_complete``) + every filed library file present with the size
@@ -34,10 +36,12 @@ import logging
 import os
 import posixpath
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from ..scanner import ARCHIVE_EXTS
+from ..scanner import ARCHIVE_EXTS, root_is_empty
 from ..store.downloads import DownloadLedger, StatusConflict
 from .contracts import QBITTORRENT_CATEGORY, DownloadRecord, DownloadStatus, TorrentClient, TorrentInfo
 from .placement import locate_series, same_or_inside, series_units
@@ -46,6 +50,9 @@ _log = logging.getLogger(__name__)
 
 PLAN_REASON = "arrival"
 _MAX_RANGE = 1000   # a volume range wider than this is read as its two ends only
+#: How long a SENT record may be missing from its program before that counts as "removed there": qBittorrent lists a
+#: torrent added by link only once it has fetched the ``.torrent`` itself (once 87 s; owner, 2026-10-18).
+SENT_GRACE = timedelta(minutes=15)
 
 
 @dataclass
@@ -138,6 +145,30 @@ def _plain(values: Iterable[Decimal]) -> str:
     return ", ".join(plain(v) for v in sorted(values)) or "none"
 
 
+def just_sent(rec: DownloadRecord, now: Optional[datetime] = None) -> bool:
+    """Whether *rec* is SENT and was last changed less than :data:`SENT_GRACE` ago (a time that cannot be read: no)."""
+    if rec.status != DownloadStatus.SENT:
+        return False
+    try:
+        changed = datetime.fromisoformat(rec.updated_at)
+    except (TypeError, ValueError):
+        return False
+    if changed.tzinfo is None:
+        changed = changed.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) - changed < SENT_GRACE
+
+
+def root_offline(path: str) -> Optional[str]:
+    """Why the library root at *path* looks offline (None: it is there and holds something): not a folder, or an empty
+    one - the mountpoint of a share that is not mounted, as the scanner reads it
+    (:func:`~mangalist.scanner.root_is_empty`). Every series folder below it looks gone then, and none of them is."""
+    if not os.path.isdir(path):
+        return f"the library root {path} is not there (not mounted?)"
+    if root_is_empty(Path(path)):
+        return f"the library root {path} is empty (not mounted?)"
+    return None
+
+
 # --- the pass ------------------------------------------------------------------------------------------
 
 
@@ -198,6 +229,9 @@ class _Pass:
     # --- one record --------------------------------------------------------------------------------
 
     def _one(self, rec: DownloadRecord, t: Optional[TorrentInfo]) -> None:
+        if t is None and just_sent(rec):    # added by link: qBittorrent may not list it yet (FAILED would be final)
+            self._wait(rec, f"sent; not in qBittorrent's {QBITTORRENT_CATEGORY!r} category yet")
+            return
         if t is None or t.category != QBITTORRENT_CATEGORY:
             gone = (f"the torrent is no longer in qBittorrent's {QBITTORRENT_CATEGORY!r} category (removed there, or "
                     "moved to another category)")
@@ -238,10 +272,18 @@ class _Pass:
             series, root, series_dir = locate_series(self.db, rec.series_id)
         except LookupError as exc:
             return self._fail(rec, f"{exc}; nothing filed")
+        offline = root_offline(root.path)
+        if offline:                 # every series folder looks gone then: wait for the share, never fail on it
+            self._wait(rec, f"{offline}; filed once it is back")
+            _log.warning("Arrivals: download %d (%s) not filed yet: %s", rec.id, rec.title, offline)
+            return None
         problem = self._target_problem(rec, series, series_dir)
         plan_id = self.ledger.plan_id(rec.id)
         if plan_id is not None:     # a plan from an earlier pass: read it back, or resume it while still safe
-            return self._settle(rec, plan_id, series_dir, blocked=problem)
+            out = self._settle(rec, plan_id, series_dir, blocked=problem)
+            if rec.replace_volumes:
+                out = self._settled_replacement(rec, out, self._replaced_batch(rec))
+            return out
         if problem:
             return self._fail(rec, problem + "; nothing filed, the torrent is left alone")
         if rec.replace_volumes:         # an other release sent to replace the owner's copies (owner, 2026-10-24)
@@ -360,8 +402,7 @@ class _Pass:
         request = self.ledger.request(rec.id)
         hint = release_hint(request.get("title") or rec.title, request.get("vol_from"))
         store = ReplacementStore(self.db)
-        batch_id = request.get("replace_batch")
-        batch = store.get(int(batch_id)) if isinstance(batch_id, int) and not isinstance(batch_id, bool) else None
+        batch = self._replaced_batch(rec)
         if batch is not None and batch.status == "pending":         # its move was interrupted or had to wait
             try:
                 batch = upgrades.hold_batch(self.db, batch.id, journal=self.journal)
@@ -429,10 +470,49 @@ class _Pass:
         self.ledger.attach_plan(rec.id, plan.id)
         if notes:
             _log.info("Arrivals: download %d: not filed: %s", rec.id, "; ".join(notes))
-        out = self._settle(rec, plan.id, series_dir)
-        if out is not None and out.status == DownloadStatus.FAILED and not out.filed_files and batch is not None:
+        return self._settled_replacement(rec, self._settle(rec, plan.id, series_dir), batch)
+
+    def _replaced_batch(self, rec: DownloadRecord):
+        """The replaced-files batch that took a replacement's old copies to the holding folder (None: none yet)."""
+        from ..store.replacements import ReplacementStore
+
+        batch_id = self.ledger.request(rec.id).get("replace_batch")
+        if not isinstance(batch_id, int) or isinstance(batch_id, bool):
+            return None
+        return ReplacementStore(self.db).get(batch_id)
+
+    def _settled_replacement(self, rec: DownloadRecord, out: Optional[DownloadRecord],
+                             batch) -> Optional[DownloadRecord]:
+        """After a replacement's filing was settled (this pass's plan, or one resumed from an earlier pass). FAILED
+        with nothing filed: its old copies are put back. FAILED with some volumes filed: the batch stays as it is
+        (Restore moves a whole batch back, and the filed volumes have their new copies), and the record says which
+        old copies are in the holding folder with nothing in their place."""
+        if out is None or out.status != DownloadStatus.FAILED or batch is None or batch.status != "held":
+            return out
+        if not out.filed_files:
             self._put_back(rec, batch)
-        return out
+            return out
+        left = self._held_unreplaced(rec, batch)
+        if not left:
+            return out
+        why = (f"{out.error}; of your old copies, {', '.join(left)} {'is' if len(left) == 1 else 'are'} still in the "
+               "holding folder with nothing filed in their place (restorable from the Download tab)")
+        _log.warning("Arrivals: download %d (%s): batch %d: %s held, their volumes not filed", rec.id, rec.title,
+                     batch.id, ", ".join(left))
+        self.report.failed = [(i, why if i == out.id else w) for i, w in self.report.failed]
+        return self.ledger.set_status(out.id, DownloadStatus.FAILED, expect=(DownloadStatus.FAILED,), error=why)
+
+    def _held_unreplaced(self, rec: DownloadRecord, batch) -> List[str]:
+        """The batch's files in the holding folder whose volumes the record's plan did not file."""
+        request = self.ledger.request(rec.id)
+        hint = release_hint(request.get("title") or rec.title, request.get("vol_from"))
+        filed: Set[Decimal] = set()
+        for s in self.journal.get_plan(self.ledger.plan_id(rec.id)).done_steps:
+            filed |= volumes_of(os.path.basename(s.src), hint)
+        away = {os.path.normcase(s.src) for s in self.journal.get_plan(batch.plan_id).steps
+                if s.op == "hold" and s.state == "done"} if batch.plan_id is not None else set()
+        return [f.rel for f in batch.files if os.path.normcase(os.path.normpath(f.path)) in away
+                and not {Decimal(v) for v in f.volume.split(", ") if v} <= filed]
 
     def _replacement_failed(self, rec: DownloadRecord, batch, why: str) -> DownloadRecord:
         if batch is not None:
@@ -444,6 +524,8 @@ class _Pass:
         """Nothing of the replacement was filed: its old copies go back from the holding folder (Restore)."""
         from .. import upgrades
 
+        if batch.status != "held":
+            return
         try:
             after = upgrades.restore_batch(self.db, batch.id, journal=self.journal)
         except Exception as exc:  # noqa: BLE001 - the batch stays held, restorable from the Download tab

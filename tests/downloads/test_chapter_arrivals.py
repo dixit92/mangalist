@@ -17,7 +17,7 @@ from mangalist.downloads.chapter_arrivals import (
 from mangalist.downloads.contracts import TOOL_SUWAYOMI, QueuedChapter, DownloadStatus as S
 from mangalist.store.downloads import DownloadLedger
 
-from .fakes import data, scan
+from .fakes import data, long_ago, scan
 from .suwayomi_fakes import MANGA, MANGADEX, FakeNamer, FakeSuwayomi, chapter
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "suwayomi"
@@ -145,11 +145,43 @@ def test_waits_while_queued_and_notes_an_error(cledger, sent, suwa, downloads):
 def test_gone_from_the_queue_without_a_download_fails(cledger, sent, suwa, downloads):
     suwa.queued.pop(4)
     suwa.chapter_list = [c for c in suwa.chapter_list if c.id != 5]      # Suwayomi no longer knows chapter 5
+    long_ago(cledger.store, sent[0].id)             # sent an hour ago: it was in the queue, and was taken out
     report = run(suwa, cledger, downloads)
     assert status(cledger, sent[0]) == S.FAILED and "no longer in Suwayomi's download queue" in \
         cledger.get(sent[0].id).error
     assert status(cledger, sent[1]) == S.FAILED and "no longer knows" in cledger.get(sent[1].id).error
     assert len(report.failed) == 2
+
+
+def test_a_chapter_just_sent_and_not_in_the_queue_yet_waits(cledger, sent, suwa, downloads):
+    """The record is written before the enqueue: a pass in between must not fail it for good."""
+    queued = suwa.queued.pop(4)
+    report = run(suwa, cledger, downloads)
+    assert status(cledger, sent[0]) == S.SENT and report.failed == []
+    assert dict(report.waiting)[sent[0].id] == "sent; not in Suwayomi's download queue yet"
+    suwa.queued[4] = queued
+    assert "queued in Suwayomi" in dict(run(suwa, cledger, downloads).waiting)[sent[0].id]
+
+
+def test_a_library_root_that_is_not_mounted_waits_instead_of_failing(cledger, sent, suwa, downloads, cseries, caplog):
+    _, folder = cseries
+    root = folder.parent
+    suwa.finish(4)
+    away = root.with_name("Manga (share offline)")
+    root.rename(away)                                       # the share went: no root folder at all
+    report = run(suwa, cledger, downloads)
+    rec = cledger.get(sent[0].id)
+    assert rec.status == S.DOWNLOADED and report.failed == [] and "is not there (not mounted?)" in rec.error
+    assert "not filed yet" in caplog.text
+    root.mkdir()                                            # ... or its empty mountpoint is all that is left
+    run(suwa, cledger, downloads)
+    rec = cledger.get(sent[0].id)
+    assert rec.status == S.DOWNLOADED and "is empty (not mounted?)" in rec.error
+    root.rmdir()
+    away.rename(root)                                       # mounted again: filed as if nothing had happened
+    run(suwa, cledger, downloads)
+    assert status(cledger, sent[0]) == S.REMOVED
+    assert (folder / "Ch. 0004.00 Vol. 001 (Example Title 4) [Alpha Scans].cbz").exists()
 
 
 def test_suwayomi_down_changes_nothing(cledger, sent, suwa, downloads):

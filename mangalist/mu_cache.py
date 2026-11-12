@@ -38,7 +38,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import paths, store
+from . import store
 
 _log = logging.getLogger(__name__)
 
@@ -187,9 +187,15 @@ def save_entry(folder: Path, mu_id: int, mu_title: str, mu_url: str,
         # Never silently downgrade a confirmed match.
         if not mu_confirmed:
             existing = con.execute(
-                "SELECT mu_confirmed FROM links_cache WHERE folder = ?", (key,)
+                "SELECT mu_confirmed, mu_id FROM links_cache WHERE folder = ?", (key,)
             ).fetchone()
             if existing and existing["mu_confirmed"]:
+                if existing["mu_id"] != mu_id:
+                    # An automatic pick made from an older read (the owner confirmed another record meanwhile):
+                    # the confirmed record stays, and the pick must not become "confirmed" in its place.
+                    _log.info("Keeping the confirmed match of %s (%s); an automatic pick of %s is dropped",
+                              key, existing["mu_id"], mu_id)
+                    return
                 mu_confirmed = True
         con.execute("""
             INSERT INTO links_cache

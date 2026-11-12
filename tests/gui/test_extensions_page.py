@@ -58,9 +58,11 @@ def test_the_chooser_switches_backends_and_the_cards_say_which_is_in_use(qapp, d
     told = []
     page = page_for(backend, db, told)
     assert page.chooser.isVisibleTo(page) and page.ext_card.isVisibleTo(page)
-    assert page.backend_combo.currentData() == "suwayomi"
+    assert page.backend_combo.currentData() == "extensions"      # a fresh install: the built-in extensions
     assert [page.backend_combo.itemText(i) for i in range(page.backend_combo.count())] == ["Suwayomi",
                                                                                           "Built-in extensions"]
+    assert page.suwayomi_card.badge.text() == NOT_IN_USE
+    assert page.choose_backend("suwayomi") and page.backend_combo.currentData() == "suwayomi"
     assert page.ext_card.badge.text() == NOT_IN_USE and host.url in page.ext_card.detail_label.text()
     page.ext_info.click()
     assert told and told[0][0] == "Built-in extensions" and "Suwayomi" in told[0][1]
@@ -79,6 +81,7 @@ def test_the_chooser_switches_backends_and_the_cards_say_which_is_in_use(qapp, d
 
 
 def test_switching_is_refused_while_chapters_are_in_progress(qapp, db, backend, monkeypatch):
+    backend.set_chapter_backend("suwayomi")                      # chosen (a fresh install is on the built-in extensions)
     page = page_for(backend, db)
     from types import SimpleNamespace
 
@@ -119,6 +122,34 @@ def test_edit_tests_what_is_typed_and_saves(qapp, db, backend, host, tmp_path):
     saved = backend.load_extension_host()
     assert saved.flaresolverr_url == "http://192.168.2.50:8191" and saved.webview is False
     assert page.stack.currentIndex() == 0                                    # saved: back to the cards
+    page.stop()
+
+
+def test_the_host_form_asks_before_unsaved_edits_are_left(qapp, db, backend, host):
+    page = page_for(backend, db)
+    asked, answers = [], [False, True]
+    page.confirm_discard = lambda parent, what: asked.append(what) or answers.pop(0)
+    back = lambda: next(b for b in page.editor_page.findChildren(QPushButton) if b.text().startswith("‹"))  # noqa: E731
+    panel = page.edit_extension_host()
+    assert not panel.has_unsaved_edits() and page.unsaved() == ""             # as loaded: no question
+    back().click()
+    assert asked == [] and page.stack.currentIndex() == 0
+    panel = page.edit_extension_host()
+    panel.auto_update_check.setChecked(True)
+    assert panel.has_unsaved_edits()
+    panel.auto_update_check.setChecked(False)
+    assert not panel.has_unsaved_edits()                                      # put back: as loaded
+    panel.flare_edit.setText("http://192.168.2.50:8191")
+    assert panel.has_unsaved_edits() and page.unsaved() == "the built-in extensions' settings"
+    back().click()                                                            # "Keep editing"
+    assert asked == ["the built-in extensions' settings"] and page.host_panel is panel
+    assert panel.flare_edit.text() == "http://192.168.2.50:8191" and page.stack.currentIndex() == 1
+    back().click()                                                            # "Discard"
+    assert len(asked) == 2 and page.stack.currentIndex() == 0
+    assert backend.load_extension_host().flaresolverr_url == ""               # nothing was stored
+    panel = page.edit_extension_host()
+    panel.flare_edit.setText("http://192.168.2.50:8191")
+    assert panel.save() and page.unsaved() == "" and len(asked) == 2          # saved: nothing left to ask about
     page.stop()
 
 

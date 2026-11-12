@@ -10,7 +10,7 @@ CBZ" or FlareSolverr is off in Suwayomi (FlareSolverr is set in Suwayomi itself,
 **Carry over from Suwayomi** (2026-10-23): while Suwayomi is set up and series have a source picked there, the Built-in
 extensions card offers to carry those choices over to the host once (:mod:`mangalist.gui.carry_over_panel`).
 
-**Chapter downloads** (2026.10.56): a chooser at the top - "Suwayomi" (the default) or "Built-in extensions", MangaList's
+**Chapter downloads** (2026.10.56): a chooser at the top - "Suwayomi" or "Built-in extensions" (the default), MangaList's
 own extension host - and the host's card (its status; Extensions, Test, Edit: :mod:`mangalist.gui.extensions_page`). The
 card of the program not chosen says it is not in use. Switching is refused while chapter downloads are still in progress
 with the other program (the backend says why). The same chooser is on Download sources > Chapter sources: one setting, two
@@ -111,6 +111,21 @@ def scan_forbidden(cache: MangaPixerCache) -> bool:
     return bool(check and check())
 
 
+def _qbt_fields(panel: QbittorrentPanel) -> tuple:
+    """The qBittorrent form's fields as they are now: taken when the form opens, compared when it is left."""
+    return (panel.url_edit.text(), panel.user_edit.text(), panel.password_edit.text(), panel.tls_check.isChecked(),
+            panel.save_path_edit.text(), panel.remove_check.isChecked())
+
+
+def _mangapixer_edited(panel: MangaPixerPanel, cache: MangaPixerCache) -> bool:
+    """The connection fields differ from the stored connection (a token typed counts; the root mapping row is applied
+    with its own button and follows the selection: not counted)."""
+    conn = cache.connection()
+    return (panel.url_edit.text().strip() != (conn.base_url or "") or bool(panel.token_edit.text().strip())
+            or panel.insecure_check.isChecked() == bool(conn.verify_tls)
+            or panel.ca_edit.text().strip() != (conn.ca_file or ""))
+
+
 class ServicesPage(SectionPage):
     #: The owner chose another chapter backend here (the key): the dialog tells Download sources, which has the same chooser.
     backend_switched = Signal(str)
@@ -131,6 +146,7 @@ class ServicesPage(SectionPage):
         self.mp_panel: Optional[MangaPixerPanel] = None
         self.qbt_panel: Optional[QbittorrentPanel] = None
         self.suwayomi_panel: Optional["SuwayomiPanel"] = None
+        self._qbt_loaded: tuple = ()            # the qBittorrent form's fields when Edit opened it
         self.host_panel = None                  # ExtensionHostPanel while Edit is open
         self.extensions_panel = None            # ExtensionsPanel while Extensions is open
         self.carry_panel = None                 # CarryOverPanel while "Carry over from Suwayomi" is open
@@ -715,7 +731,7 @@ class ServicesPage(SectionPage):
 
     def _open_editor(self, title: str, widget: QWidget, *buttons) -> None:
         back = back_link("Connected services")
-        back.clicked.connect(self.close_editor)
+        back.clicked.connect(self.leave_editor)
         self.editor_layout.addLayout(hbox(back, None, *buttons))
         self.editor_layout.addWidget(label(title, "h3"))
         self.editor_layout.addWidget(widget, 1)
@@ -738,6 +754,7 @@ class ServicesPage(SectionPage):
         panel = QbittorrentPanel(self._backend, self.editor_page)
         panel.saved_changes.connect(self._qbt_saved)
         self.qbt_panel = panel
+        self._qbt_loaded = _qbt_fields(panel)
         save = button("Save", primary=True)
         save.clicked.connect(panel.save)
         cancel = button("Cancel")
@@ -768,6 +785,24 @@ class ServicesPage(SectionPage):
         self.downloads_changed.emit()
         self.close_editor()
         self.test_qbittorrent()
+
+    def leave_editor(self) -> None:
+        """The "back" link: like Cancel, but edits not saved are asked about first."""
+        if self.may_discard():
+            self.close_editor()
+
+    def unsaved(self) -> str:
+        """The form open under Edit whose fields are not as they were loaded (the Extensions list, a source's settings
+        and the carry-over store what they change at once: never unsaved)."""
+        if self.qbt_panel is not None and _qbt_fields(self.qbt_panel) != self._qbt_loaded:
+            return "qBittorrent's settings"
+        if self.suwayomi_panel is not None and self.suwayomi_panel.has_unsaved_edits():
+            return "Suwayomi's settings"
+        if self.host_panel is not None and self.host_panel.has_unsaved_edits():
+            return "the built-in extensions' settings"
+        if self.mp_panel is not None and self._cache is not None and _mangapixer_edited(self.mp_panel, self._cache):
+            return "MangaPixer's connection"
+        return ""
 
     def close_editor(self) -> None:
         was_mangapixer = self.mp_panel is not None
@@ -863,6 +898,13 @@ class SuwayomiPanel(QWidget):
 
         set_tone(self.status_label, tone)
         self.status_label.setText(text)
+
+    def has_unsaved_edits(self) -> bool:
+        """The form differs from the settings as loaded (a password typed counts: the stored one is never shown)."""
+        v = self._view
+        typed = (self.url_edit.text(), self.user_edit.text(), self.folder_edit.text())
+        return ([t.strip() for t in typed] != [(x or "").strip() for x in (v.base_url, v.username, v.download_dir)]
+                or bool(self.password_edit.text()))
 
     def save(self) -> bool:
         try:

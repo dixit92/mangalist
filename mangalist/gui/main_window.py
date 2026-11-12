@@ -1,6 +1,6 @@
 """Main application window (UI cycle, owner-approved mockup 2026-10-08): the top bar (List / Download tabs, the
 library status, Rescan, Settings), the List tab (filter bar with state chips, the table, the collapsible details
-panel, the footer) and the Download tab (lane B's; a placeholder until it merges).
+panel, the footer) and the Download tab (lane B's :mod:`.download_tab`).
 
 The window owns the model and every action - scans, MangaUpdates lookups, MangaPixer data, the row menu, kind
 answers, missing series, signatures; :mod:`.list_tab` and :mod:`.top_bar` only build the widgets."""
@@ -648,14 +648,7 @@ class MainWindow(QMainWindow):
         self._filter_edit.selectAll()
 
     def _on_settings(self) -> None:
-        from ..identity.carry import last_carry_id
-
-        try:
-            before = last_carry_id(self._db)
-        except Exception:  # noqa: BLE001
-            before = 0
-        result = lanes.open_settings_function()(self, self._db, self._volumes_backend)
-        self._apply_settings_result(result, before)
+        self._on_settings_at("")
 
     def _on_settings_at(self, section: str) -> None:
         """The Settings dialog at *section* (a Download tab button: Connected services, or the Extensions page)."""
@@ -1884,6 +1877,7 @@ class MainWindow(QMainWindow):
 
     def _on_scan_failed(self, msg: str) -> None:
         self._scan_applied = set()
+        self._scan_note = None                  # it was this scan's: the next one's result is not about it
         self._progress.setVisible(False)
         self._status_label.setText("Scan failed")
         QMessageBox.critical(self, "Scan failed", msg)
@@ -1940,7 +1934,7 @@ class MainWindow(QMainWindow):
 
     def _on_add_series(self) -> None:
         """The top bar's Add series...: paste a link, make the empty folder, rescan its library (add_series_dialog.py)."""
-        from .add_series_dialog import NEXT_FIND, NEXT_OPEN, AddSeriesDialog, LiveBackend
+        from .add_series_dialog import NEXT_FIND, AddSeriesDialog, LiveBackend
 
         # one choice: "Find releases now" lands on the new series' own panel in the Download tab, which looks for its
         # releases / chapters by itself (owner, 2026-10-29: "When you add a new series, it should send you to this page
