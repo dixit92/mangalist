@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.2] - 2026-11-11
+
+The sixty-second MangaList release (testing build): fixes from a full audit - replaced copies and downloads are safer when something goes wrong, the built-in extensions are the default for chapters, and Settings asks before dropping unsaved edits.
+
 - **Built-in extensions are the default for chapter downloads.** A new set-up downloads chapters through MangaList's own extension host without choosing anything; Suwayomi stays available in Settings > Connected services. A set-up that already has a Suwayomi connection and never chose keeps using Suwayomi.
 - **Old copies are safer when a replacement download goes wrong.** When a replacement was interrupted and then could not be filed, your old copies are moved back from the holding folder instead of staying there with nothing in their place. When only some volumes of a replacement are filed, the failed download says which old copies are still in the holding folder. The holding folder is no longer emptied at the end of its period for a batch whose replacement files are not in the library.
 - **Downloads are not marked failed for something that passes.** A download that was just sent waits up to 15 minutes for qBittorrent (or the chapter program) to list it, and finished downloads wait for a library share that is not mounted, instead of all failing with "the series folder is gone".
