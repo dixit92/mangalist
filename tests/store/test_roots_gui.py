@@ -216,4 +216,40 @@ def test_a_mode_only_save_in_settings_asks_for_no_rescan(qapp, db, lib):
     editor.auto_combo.setCurrentIndex(editor.auto_combo.findData("auto"))
     assert page.save_edit() and flags == ["downloads"]
     page.edit_root(0)
-    assert page.save_edit() and flags == ["downloads", "roots"]     # nothing changed: as before (a rescan)
+    assert page.save_edit() and flags == ["downloads"]              # nothing changed: nothing to follow, no rescan
+    editor = page.edit_root(0)
+    editor.name_edit.setText("Renamed")
+    editor.name_edit.textEdited.emit("Renamed")
+    assert page.save_edit() and flags == ["downloads", "roots"]     # a renamed library: a rescan
+    editor = page.edit_root(0)
+    editor.pattern_edit.setText("@Oneshots/**")
+    editor.add_pattern()
+    assert page.save_edit() and flags == ["downloads", "roots", "roots"]     # a changed exclusion: a rescan
+
+
+def test_the_editor_says_whether_it_holds_unsaved_edits(qapp, db, lib, tmp_path):
+    other = tmp_path / "Other"
+    other.mkdir()
+    db.add_root(str(lib), "Manga", exclusions=["*.txt"])
+    db.add_root(str(other), "Other")
+    dlg = RootsEditor(db)
+    assert not dlg.has_unsaved_edits()
+    dlg.root_list.setCurrentRow(1)                                  # shown and selected: the program's fill, no edit
+    dlg.pattern_edit.setText("@Oneshots/**")                        # typed, not added: Save would not keep it either
+    assert not dlg.has_unsaved_edits()
+    dlg.name_edit.setText("Renamed")
+    dlg.name_edit.textEdited.emit("Renamed")
+    assert dlg.has_unsaved_edits()
+    dlg.name_edit.setText("Other")
+    dlg.name_edit.textEdited.emit("Other")
+    assert not dlg.has_unsaved_edits()                              # typed back: as loaded
+    dlg.add_pattern()
+    assert dlg.has_unsaved_edits()
+    dlg.excl_list.setCurrentRow(0)
+    dlg.remove_pattern()
+    assert not dlg.has_unsaved_edits()
+    dlg.auto_combo.setCurrentIndex(dlg.auto_combo.findData("auto"))
+    assert dlg.has_unsaved_edits()
+    assert dlg.commit() and not dlg.has_unsaved_edits()             # saved
+    dlg.remove_selected()
+    assert dlg.has_unsaved_edits()

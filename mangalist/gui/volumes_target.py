@@ -195,7 +195,7 @@ def chapter_status_tooltip(record: DownloadRecord) -> str:
     if record.status == DownloadStatus.SENT:
         lines.append("In Suwayomi's download queue; MangaList files it once Suwayomi has it (every hour, or Check now).")
     if record.status == DownloadStatus.FILED:
-        lines.append(f"The chapter is in the library; Suwayomi still has its downloaded copy"
+        lines.append("The chapter is in the library; Suwayomi still has its downloaded copy"
                      + (f": {record.error}." if record.error else " (deleted at the next check)."))
     if record.status == DownloadStatus.REMOVED:
         lines.append("Done: filed into the library under MangaList's naming scheme; Suwayomi deleted its downloaded copy.")

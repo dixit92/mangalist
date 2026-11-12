@@ -1,4 +1,4 @@
-"""MangaList's own Mihon extension host (prototype branches ``prototype/mihon-extensions`` / ``-mangalist``; no Qt).
+"""MangaList's own Mihon extension host ("Built-in extensions"; no Qt).
 
 Runs Mihon / Tachiyomi extensions without Suwayomi: ``extension-host/`` is a small JVM program (Suwayomi's Android
 compatibility layer and Tachiyomi source API, vendored). :class:`ExtensionHostClient` talks to its own JSON API (the

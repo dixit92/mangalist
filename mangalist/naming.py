@@ -46,8 +46,9 @@ whitespace is collapsed; no part starts or ends with a space and no name ends wi
 Windows/SMB share"): every file name is at most :attr:`NameLimits.max_name_bytes` (255) bytes of UTF-8, and - when a
 Windows server name is set - the whole Windows path (``\\\\SERVER\\<share>\\...\\name``, from the container path
 ``/data/<share>/...``) is at most :attr:`NameLimits.max_windows_path` (259) characters (MAX_PATH 260 minus the
-terminator). The group is always capped at :attr:`NameLimits.group_cap` characters (32; owner: "Some group names are
-long, so have a cap"). When a name is still too long it is shortened in this order: the chapter title (cut, ending with
+terminator). On Windows itself the file's own absolute path (``D:\\Manga\\...\\name``) is held to the same limit, with
+or without a server name. The group is always capped at :attr:`NameLimits.group_cap` characters (32; owner: "Some
+group names are long, so have a cap"). When a name is still too long it is shortened in this order: the chapter title (cut, ending with
 ``…``, then left out), then the group (cut further, then left out); never the number, the volume or the extension. A
 volume name shortens its group. If even the shortest form is too long it is returned anyway and
 flagged (:attr:`NameResult.fits` False, logged as a warning).
@@ -56,6 +57,8 @@ flagged (:attr:`NameResult.fits` False, logged as a warning).
 from __future__ import annotations
 
 import logging
+import ntpath
+import os
 import re
 from dataclasses import dataclass
 from decimal import Decimal
@@ -86,12 +89,14 @@ Number = Union[Decimal, str, int]
 @dataclass(frozen=True)
 class NameLimits:
     """The length rule (see the module docstring). ``windows_server``: the Windows server name the library is shared
-    as (``"SERVER"`` or ``"\\\\SERVER"``); None = no Windows path check."""
+    as (``"SERVER"`` or ``"\\\\SERVER"``); None = no Windows path check for a container path. ``native_windows``:
+    MangaList runs on Windows itself, so a path that is not a container path is checked as it stands."""
 
     max_name_bytes: int = 255
     group_cap: int = 32
     windows_server: Optional[str] = None
     max_windows_path: int = 259
+    native_windows: bool = os.name == "nt"
 
 
 _DEFAULT_LIMITS = NameLimits()
@@ -243,15 +248,35 @@ def _utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def native_windows_path(path: str) -> Optional[str]:
+    """The absolute path of *path* on Windows itself (``D:/Manga/x`` -> ``D:\\Manga\\x``), without the long-path
+    prefix ``\\\\?\\`` (it is not part of what Explorer opens). None for an empty path."""
+    if not path:
+        return None
+    full = ntpath.abspath(str(path))
+    if full.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + full[8:]
+    return full[4:] if full.startswith("\\\\?\\") else full
+
+
+def path_fits_windows(path: str, limits: NameLimits = _DEFAULT_LIMITS) -> bool:
+    """*path* is short enough to be opened from Windows: its Windows form - the SMB path of a container path under
+    ``/data/<share>`` when a server name is set (:func:`windows_path`), else the path itself when MangaList runs on
+    Windows (:func:`native_windows_path`) - is at most :attr:`NameLimits.max_windows_path` characters. True when the
+    path has no Windows form (not on Windows, and no server or outside ``/data/<share>``)."""
+    wp = windows_path(path, limits.windows_server) if limits.windows_server else None
+    if wp is None and limits.native_windows:
+        wp = native_windows_path(path)
+    return wp is None or _utf16_length(wp) <= limits.max_windows_path
+
+
 def name_fits(name: str, *, folder: Optional[str] = None, limits: NameLimits = _DEFAULT_LIMITS) -> bool:
-    """``name`` keeps the length rule in ``folder`` (the target folder's container path; only needed for the Windows
-    path check, which is skipped without a server or for a folder outside ``/data/<share>``)."""
+    """``name`` keeps the length rule in ``folder`` (the target folder's path; only needed for the Windows path check,
+    which is skipped when the path has no Windows form: :func:`path_fits_windows`)."""
     if len(name.encode("utf-8")) > limits.max_name_bytes:
         return False
-    if limits.windows_server and folder:
-        wp = windows_path(f"{str(folder).rstrip('/')}/{name}", limits.windows_server)
-        if wp is not None and _utf16_length(wp) > limits.max_windows_path:
-            return False
+    if folder and not path_fits_windows(f"{str(folder).rstrip('/')}/{name}", limits):
+        return False
     return True
 
 
@@ -695,4 +720,5 @@ __all__ = [
     "restates_number", "sanitize_group", "sanitize_qualifier", "sanitize_series", "sanitize_title", "target_name",
     "titled_volume_name", "unkept_reason",
     "volume_file_name", "volume_lookup", "volume_name", "volumes_from_list", "windows_path",
+    "native_windows_path", "path_fits_windows",
 ]

@@ -54,6 +54,7 @@ def test_no_switch_while_a_find_pass_holds_the_programs_client(db):
     from mangalist.gui.downloads_backend import BackendError
 
     backend = Backend(db)
+    backend.suwayomi.set_backend(SUW)            # a switch needs the other program chosen (a fresh install is on EXT)
     with finder._PASS:
         with pytest.raises(BackendError, match="a find pass is running"):
             backend.set_chapter_backend(EXT)

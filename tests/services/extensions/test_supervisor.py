@@ -87,7 +87,16 @@ def test_the_switch(value, mode):
     assert sv.switch({sv.ENV_SWITCH: value} if value else {}) == mode
 
 
+def test_a_fresh_install_runs_the_host(tmp_path, settings):
+    """Nothing chosen is the built-in extensions (the default since 2026.11.2): the host runs from the first tick."""
+    assert settings.backend() == CHAPTER_BACKEND_EXTENSIONS
+    sup, spawned, _clock = make(tmp_path, settings)
+    sup.tick()
+    assert len(spawned) == 1 and spawned[0].args[0] == BIN and sup.last_why == "Built-in extensions chosen"
+
+
 def test_runs_only_while_built_in_extensions_are_chosen(tmp_path, settings):
+    settings.set_backend(CHAPTER_BACKEND_SUWAYOMI)
     sup, spawned, _clock = make(tmp_path, settings)
     sup.tick()
     assert spawned == [] and sup.last_why == "chapter downloads go through Suwayomi"
@@ -242,6 +251,7 @@ def test_on_demand_while_suwayomi_is_chosen_and_stopped_again_after(tmp_path, se
 
     from mangalist.services.extensions import on_demand
 
+    settings.set_backend(CHAPTER_BACKEND_SUWAYOMI)
     sup, spawned, _clock = make(tmp_path, settings)
     sup.tick()
     assert spawned == []
@@ -259,6 +269,7 @@ def test_runs_while_a_chapter_download_of_the_host_is_to_be_finished(tmp_path, s
     with settings.store.connect() as con:
         con.execute("INSERT INTO ledger (created_at, updated_at, request, tool, status, external_ref, backend)"
                     " VALUES ('t', 't', '{}', 'suwayomi', 'filed', '5', 'extensions')")
+    settings.set_backend(CHAPTER_BACKEND_SUWAYOMI)
     sup, spawned, _clock = make(tmp_path, settings)
     sup.tick()
     assert len(spawned) == 1 and "1 chapter download(s) of the host" in sup.last_why

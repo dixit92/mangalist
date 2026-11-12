@@ -197,8 +197,14 @@ class ChapterQueueDialog(QDialog):
 
     def _spawn(self, fn, on_done, on_error) -> BackgroundCall:
         made: list = []
-        call = start_call(fn, on_done, on_error, lambda: self._calls.remove(made[0]) if made and made[0] in self._calls
-                          else None)
+
+        def finished() -> None:
+            if made and made[0] in self._calls:
+                self._calls.remove(made[0])
+            if made and not getattr(made[0], "abandoned", False):      # (a closed dialog's buttons are gone)
+                self._update_buttons()          # they wait for the last call to end
+
+        call = start_call(fn, on_done, on_error, finished)
         made.append(call)
         self._calls.append(call)
         return call

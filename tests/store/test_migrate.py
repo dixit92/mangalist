@@ -63,7 +63,7 @@ def test_import_is_idempotent_and_never_overwrites():
     _legacy_files(data)
     st = store.get_store()
     st.ensure_initialized()
-    mu_cache.save_entry(Path("/library/Manga/A"), 2, "Changed since", "", None, mu_confirmed=False)
+    mu_cache.save_entry(Path("/library/Manga/A"), 1, "Changed since", "", None, mu_confirmed=False)
     # Running the imports again (even forced) adds nothing and overwrites nothing.
     assert migrate.import_mu_cache(st, data / paths.CACHE_NAME) is None
     assert migrate.import_mu_cache(st, data / paths.CACHE_NAME, force=True) == 0

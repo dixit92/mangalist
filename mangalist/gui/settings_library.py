@@ -10,7 +10,7 @@ changed here.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLineEdit, QStackedWidget, QVBoxLayout, QWidget
 
@@ -197,7 +197,7 @@ class LibraryPage(SectionPage):
             editor.add_root(add_path)
         self.editor = editor
         back = back_link("Library")
-        back.clicked.connect(self.cancel_edit)
+        back.clicked.connect(self.leave_edit)
         save = button("Save", primary=True)
         save.clicked.connect(self.save_edit)
         cancel = button("Cancel")
@@ -221,7 +221,7 @@ class LibraryPage(SectionPage):
         modes, others = self.editor.modes_changed, self.editor.others_changed
         self._close_editor()
         self.refresh()
-        if others or not modes:             # a library's mode alone needs no rescan
+        if others:                          # a library's mode alone, or a Save with nothing changed, needs no rescan
             self.roots_changed.emit()
         if modes:                           # the List's mode chips and Found follow (the window re-reads the modes)
             self.downloads_changed.emit()
@@ -229,6 +229,14 @@ class LibraryPage(SectionPage):
 
     def cancel_edit(self) -> None:
         self._close_editor()
+
+    def leave_edit(self) -> None:
+        """The "back" link: like Cancel, but edits not saved are asked about first."""
+        if self.may_discard():
+            self._close_editor()
+
+    def unsaved(self) -> str:
+        return "the library roots" if self.editor is not None and self.editor.has_unsaved_edits() else ""
 
     def _close_editor(self) -> None:
         if self.editor is not None:

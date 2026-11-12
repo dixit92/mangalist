@@ -394,10 +394,11 @@ def scan_root(
             raise NotADirectoryError(f"Cannot read {root}: {exc}") from exc
     else:
         try:        # an empty root is an offline share's mountpoint: judging its folders gone would be wrong
-            if next(iter(root.iterdir()), None) is None:
-                raise NotADirectoryError(f"{root} is empty (not mounted?)")
+            empty = next(iter(root.iterdir()), None) is None
         except OSError as exc:
             raise NotADirectoryError(f"Cannot read {root}: {exc}") from exc
+        if empty:
+            raise NotADirectoryError(f"Cannot read {root}: it is empty (not mounted?)")
         children = [root / n for n in sorted(set(only), key=str.lower) if is_top_name(n)]
     for p in children:
         try:
@@ -935,7 +936,7 @@ def widen_scopes(db, scopes: Mapping[int, Optional[Iterable[str]]], *, minimum: 
                 known = {top_of(s.rel_path) for s in db.list_series(rid)} if db is not None else set()
             except Exception:  # noqa: BLE001 - not known: keep the folders
                 known = set()
-            if len(names) > fraction * len(known):
+            if known and len(names) > fraction * len(known):
                 _log.info("Scan scope: %d folders of root %s - reading the whole root", len(names), rid)
                 out[rid] = None
                 continue

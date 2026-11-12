@@ -1,7 +1,7 @@
 """Which program downloads chapters for MangaList, and the ONE place its client is built. No Qt.
 
 Chapters are downloaded through one of two programs, chosen in Settings > Connected services ("Chapter downloads:
-Suwayomi | Built-in extensions"; default Suwayomi; :meth:`mangalist.store.downloads.SuwayomiSettings.backend`):
+Suwayomi | Built-in extensions"; default Built-in extensions; :meth:`mangalist.store.downloads.SuwayomiSettings.backend`):
 Suwayomi-Server (its own server, reached over GraphQL), or MangaList's built-in extension host (``extension-host/``:
 Mihon / Tachiyomi extensions on a JVM, without Suwayomi), reached through its Suwayomi-compatible ``/compat`` API by
 :class:`mangalist.services.extensions.compat.ExtensionsChapterClient`. The stored connection says which program it is

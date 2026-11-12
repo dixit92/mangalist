@@ -12,10 +12,11 @@ import eu.kanade.tachiyomi.util.chapter.ChapterRecognition
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import suwayomi.tachidesk.server.serverConfig
 import java.net.InetSocketAddress
@@ -179,6 +180,7 @@ class ApiServer(
             encodeDefaults = true
             explicitNulls = true
         }
+    private val localHost = Regex("""(127\.0\.0\.1|localhost|\[::1])(:\d+)?""", RegexOption.IGNORE_CASE)
     private lateinit var server: HttpServer
 
     val port: Int
@@ -198,6 +200,7 @@ class ApiServer(
         val path = ex.requestURI.path.trimEnd('/')
         val query = parseQuery(ex.requestURI.rawQuery)
         try {
+            screen(ex, method)
             val parts = path.split('/').filter { it.isNotEmpty() }
             when {
                 method == "GET" && path == "/health" ->
@@ -220,7 +223,7 @@ class ApiServer(
                     reply(ex, json.encodeToJsonElement(mapOf("state" to WebViewSetup.state())))
                 }
                 method == "POST" && path == "/webview/debug-eval" -> {
-                    val req = json.parseToJsonElement(body(ex)).jsonObject
+                    val req = request<JsonObject>(ex)
                     val url = req["url"]?.jsonPrimitive?.content ?: throw HttpError(400, "give url")
                     val script = req["script"]?.jsonPrimitive?.content ?: throw HttpError(400, "give script")
                     val wait = req["waitMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: 5000
@@ -242,7 +245,7 @@ class ApiServer(
                 }
                 method == "GET" && path == "/extensions" -> reply(ex, json.encodeToJsonElement(extensions()))
                 method == "POST" && path == "/extensions/install" -> {
-                    val req = json.decodeFromString<InstallRequest>(body(ex))
+                    val req = request<InstallRequest>(ex)
                     val repoUrl =
                         req.repo?.trim()?.takeIf { it.isNotEmpty() }
                             ?: req.pkg?.let { pkg -> repos.urls().firstOrNull { u -> runCatching { repos.index(u) }.getOrNull()?.extensions?.any { it.pkg == pkg } == true } }
@@ -275,7 +278,7 @@ class ApiServer(
                     reply(ex, json.encodeToJsonElement(extensionDto(ext, index)))
                 }
                 method == "POST" && path == "/extensions/update" -> {
-                    val req = json.decodeFromString<PkgRequest>(body(ex))
+                    val req = request<PkgRequest>(ex)
                     val pkg = req.pkg
                     val current = registry.installed[pkg] ?: throw HttpError(404, "$pkg is not installed")
                     val repoUrl = current.repo ?: defaultRepo
@@ -298,7 +301,7 @@ class ApiServer(
                     reply(ex, json.encodeToJsonElement(extensionDto(ext, index)))
                 }
                 method == "POST" && path == "/extensions/uninstall" -> {
-                    val req = json.decodeFromString<PkgRequest>(body(ex))
+                    val req = request<PkgRequest>(ex)
                     val current = registry.installed[req.pkg] ?: throw HttpError(404, "${req.pkg} is not installed")
                     val ext = guarded(req.pkg, current.name, req.waitSeconds) { registry.uninstall(req.pkg) }
                     reply(ex, json.encodeToJsonElement(extensionDto(ext, null)))
@@ -313,7 +316,7 @@ class ApiServer(
                     when (method) {
                         "GET" -> reply(ex, json.encodeToJsonElement(prefs.list(src)))
                         "POST" -> {
-                            val change = json.decodeFromString<PreferenceChange>(body(ex))
+                            val change = request<PreferenceChange>(ex)
                             prefs.set(src, change.key, change.value)
                             // as Suwayomi (unregisterSource): the extension's sources are made again with the new value
                             val pkg = registry.extensionOf(src.id)?.pkg
@@ -354,17 +357,17 @@ class ApiServer(
                 reply(ex, json.encodeToJsonElement(mangasPage(found, source)))
             }
             method == "POST" && action == "manga" -> {
-                val req = json.decodeFromString<UrlRequest>(body(ex))
+                val req = request<UrlRequest>(ex)
                 val update = source.getMangaUpdate(manga(req), emptyList(), fetchDetails = true, fetchChapters = false)
                 reply(ex, json.encodeToJsonElement(mangaDto(update.manga.also { if (it.url.isEmpty()) it.url = req.url }, source)))
             }
             method == "POST" && action == "chapters" -> {
-                val req = json.decodeFromString<UrlRequest>(body(ex))
+                val req = request<UrlRequest>(ex)
                 val update = source.getMangaUpdate(manga(req), emptyList(), fetchDetails = false, fetchChapters = true)
                 reply(ex, json.encodeToJsonElement(update.chapters.map { chapterDto(it, source, req.title) }))
             }
             method == "POST" && action == "pages" -> {
-                val req = json.decodeFromString<UrlRequest>(body(ex))
+                val req = request<UrlRequest>(ex)
                 val chapter = SChapter.create().apply { url = req.url; name = req.title }
                 val pages = source.getPageList(chapter)
                 if (query["resolve"] == "true" && source is HttpSource) {
@@ -374,7 +377,7 @@ class ApiServer(
             }
             method == "POST" && action == "image" -> {
                 val http = source as? HttpSource ?: throw HttpError(400, "${source.name} serves no images over HTTP")
-                val req = json.decodeFromString<ImageRequest>(body(ex))
+                val req = request<ImageRequest>(ex)
                 val page = Page(req.index, req.url, req.imageUrl)
                 if (page.imageUrl.isNullOrEmpty()) page.imageUrl = http.getImageUrl(page)
                 http.getImage(page).use { resp ->
@@ -422,6 +425,8 @@ class ApiServer(
         registry.install(url, signingKey, repoUrl)
     } catch (e: SignatureException) {
         throw HttpError(400, e.message ?: "signature check failed")
+    } catch (e: IllegalArgumentException) {
+        throw HttpError(400, e.message ?: "not an extension this host can run") // the registry's refusals (`require`)
     }
 
     /** Run [block] while none of [pkg]'s sources downloads a chapter (see [Downloader.whileIdle]); HTTP 409 when one still does. */
@@ -444,7 +449,7 @@ class ApiServer(
         ex: HttpExchange,
         query: Map<String, String>,
     ): String =
-        query["url"] ?: body(ex).takeIf { it.isNotBlank() }?.let { json.decodeFromString<RepoUrlRequest>(it).url }
+        query["url"] ?: body(ex).takeIf { it.isNotBlank() }?.let { decode<RepoUrlRequest>(it).url }
             ?: throw HttpError(400, "give url")
 
     private fun repoName(url: String): String = repos.record(url)?.name?.takeIf { it.isNotBlank() } ?: Repo.fallbackName(url)
@@ -521,7 +526,40 @@ class ApiServer(
         webUrl = runCatching { (source as? HttpSource)?.getChapterUrl(c) }.getOrNull(),
     )
 
+    /**
+     * The API has no login, so a web page open in a browser on this machine must not be able to call it: a request
+     * with an `Origin` (a page's script or form), one that names another host (a DNS name pointed at 127.0.0.1) and a
+     * body that is not sent as JSON (what a page can post without the browser asking first) are refused.
+     */
+    private fun screen(
+        ex: HttpExchange,
+        method: String,
+    ) {
+        val headers = ex.requestHeaders
+        if (headers.getFirst("Origin") != null) throw HttpError(403, "requests from a web page are not accepted")
+        val host = headers.getFirst("Host")
+        if (host != null && !localHost.matches(host.trim())) {
+            throw HttpError(403, "this API answers only as 127.0.0.1, localhost or [::1], not as $host")
+        }
+        val hasBody = (headers.getFirst("Content-Length")?.toLongOrNull() ?: 0) > 0 || headers.containsKey("Transfer-Encoding")
+        if ((method == "POST" || method == "DELETE") && hasBody &&
+            headers.getFirst("Content-Type")?.trim()?.startsWith("application/json", ignoreCase = true) != true
+        ) {
+            throw HttpError(415, "send the body as Content-Type: application/json")
+        }
+    }
+
     private fun body(ex: HttpExchange): String = ex.requestBody.use { String(it.readBytes(), Charsets.UTF_8) }
+
+    /** The request's JSON body as [T]; HTTP 400 when it is not that. */
+    private inline fun <reified T> request(ex: HttpExchange): T = decode(body(ex))
+
+    private inline fun <reified T> decode(text: String): T =
+        try {
+            json.decodeFromString<T>(text)
+        } catch (e: SerializationException) {
+            throw HttpError(400, "the body is not the JSON this call takes: ${e.message}")
+        }
 
     private fun parseQuery(raw: String?): Map<String, String> =
         raw

@@ -136,7 +136,7 @@ def _add_partial(client: TorrentClient, candidate: NyaaCandidate, wanted: Sequen
                            "the release has only a magnet link, so its files are not known before it starts")
     h = candidate.info_hash
     existing = _find(client, h)
-    added_here = adopted = False
+    added_here = False
     if existing is None:
         try:
             client.add(link, category=QBITTORRENT_CATEGORY, stopped=True)
@@ -148,7 +148,7 @@ def _add_partial(client: TorrentClient, candidate: NyaaCandidate, wanted: Sequen
                 raise
     if existing is not None:
         if existing.state in STOPPED_DOWNLOADING_STATES and not existing.complete:
-            adopted = True          # a leftover of a failed earlier send: finish configuring it
+            # a leftover of a failed earlier send: finish configuring it
             _log.info("Partial: %s: found stopped in qBittorrent from an earlier send; configuring it now",
                       candidate.title)
         else:

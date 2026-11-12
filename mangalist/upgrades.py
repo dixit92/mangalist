@@ -39,6 +39,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 from .downloads.contracts import DownloadStatus
 from .knowledge import VolumeInfo, fmt_num, to_decimal
 from .split_chapters import splits_of
+from .store.discards import record_discard
 from .store.replacements import Batch, NewBatch, ReplacedFile, ReplacementConflict, ReplacementStore
 
 _log = logging.getLogger(__name__)
@@ -845,7 +846,8 @@ def purge_batch(db, batch_id: int, *, journal=None, reason: str = "holding perio
 
 
 def purge_expired(db, *, journal=None, now: Optional[datetime] = None) -> List[int]:
-    """Empty every held batch whose holding period is over. Returns their ids."""
+    """Empty every held batch whose holding period is over - while the files that replaced its own are still in the
+    library (:func:`volumes_in_library_problem`, as for Empty now); else it stays held. Returns the emptied ids."""
     out = []
     when = _now(now)
     for batch in ReplacementStore(db).with_status("held"):
@@ -856,6 +858,10 @@ def purge_expired(db, *, journal=None, now: Optional[datetime] = None) -> List[i
         if due is None or due > when:
             continue
         try:
+            problem = volumes_in_library_problem(db, batch)
+            if problem:             # e.g. a replacement that was never filed: the held copy is the only one
+                _log.warning("Upgrades: batch %d is past its holding period but not emptied: %s", batch.id, problem)
+                continue
             after = purge_batch(db, batch.id, journal=journal)
         except Exception:  # noqa: BLE001 - one batch must not stop the others
             _log.exception("Upgrades: emptying batch %d failed", batch.id)
@@ -975,6 +981,7 @@ def delete_confirmed(db, batch_id: int, confirmed: Sequence[str]) -> List[Delete
                 continue
             _log.info("Upgrades: batch %d: deleted %s (%d bytes, chapter %s, replaced by volume %s) - confirmed by "
                       "the owner", batch.id, f.path, f.size, f.chapters, f.volume)
+            record_discard(db, f.path)          # so a torrent that filed it is not kept for a "lost" file
             out.append(DeleteOutcome(f.path, True))
     finally:
         lock.release()

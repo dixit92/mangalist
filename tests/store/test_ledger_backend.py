@@ -154,7 +154,7 @@ def test_active_by_program_and_the_stuck_mark(chapters, lib):
 
 def test_series_choices_go_under_the_program_that_answered(db, lib):
     settings = SuwayomiSettings(db)
-    assert settings.backend() == SUW
+    settings.set_backend(SUW)
     settings.set_series_choice(lib["A"], backend=EXT, manga_id=73, source_id="1", how="confirmed")
     assert settings.series_choice(lib["A"]) == {}                                    # Suwayomi's untouched
     assert settings.series_choice(lib["A"], EXT)["manga_id"] == 73
@@ -163,3 +163,28 @@ def test_series_choices_go_under_the_program_that_answered(db, lib):
     assert settings.series_choice(lib["A"], EXT)["host_instance"] == "db-1"
     settings.set_series_choice(lib["A"], backend=EXT, manga_id=75)                  # chosen on the host now
     assert "carried_from" not in settings.series_choice(lib["A"], EXT)
+
+
+def test_the_default_program_is_the_built_in_extensions_unless_suwayomi_was_set_up(db):
+    """Owner, 2026-11-10: nothing chosen is the built-in extensions; a stored Suwayomi connection (a set-up from when
+    Suwayomi was the default) stays on Suwayomi; an explicit choice wins either way."""
+    from mangalist.downloads.contracts import SuwayomiConnection
+
+    settings = SuwayomiSettings(db)
+    assert settings.backend() == EXT and settings.builtin                            # a fresh database
+    assert settings.connection().backend == EXT and settings.suwayomi_connection() is None
+    settings.save_connection(SuwayomiConnection("http://suwayomi.invalid:4567"))
+    assert settings.backend() == SUW and not settings.builtin                        # set up before, never chosen
+    assert settings.connection().base_url == "http://suwayomi.invalid:4567"
+    settings.set_backend(EXT)
+    assert settings.backend() == EXT                                                 # the choice wins over the connection
+    settings.set_backend(SUW)
+    settings.forget_connection()
+    assert settings.backend() == SUW and settings.connection() is None               # ... and over none
+    db.delete_setting("downloads.chapter_backend")
+    assert settings.backend() == EXT                                                 # forgotten and nothing chosen
+    settings.save_connection(SuwayomiConnection("http://suwayomi.invalid:4567"))
+    settings.forget_connection()
+    assert settings.backend() == EXT
+    with pytest.raises(ValueError):
+        settings.set_backend("nope")

@@ -57,6 +57,7 @@ class HostProcessTest {
             HttpRequest
                 .newBuilder(URI("http://127.0.0.1:$port$path"))
                 .method(method, if (body == null) HttpRequest.BodyPublishers.noBody() else HttpRequest.BodyPublishers.ofString(body))
+                .apply { if (body != null) header("Content-Type", "application/json") }
                 .build()
         return Json.parseToJsonElement(http.send(req, HttpResponse.BodyHandlers.ofString()).body())
     }

@@ -515,13 +515,19 @@ _WS = re.compile(r"\s+")
 def clean_folder_name(text: str) -> str:
     """*text* as a folder name every platform of the library takes: ``:`` becomes `` - `` (before a space) or ``-``,
     ``/ \\ |`` become ``-``, ``"`` becomes ``'``, ``< > ? *`` and control characters are dropped, white space is collapsed and
-    a trailing dot or space goes; whatever still breaks a Windows rule is replaced (:func:`windows_safe_name`)."""
+    a trailing dot or space goes; a leading dot is written ``DOT`` like the folder scheme's
+    (:func:`mangalist.folder_scheme.folder_head`: a folder starting with a dot is hidden from the scan); whatever
+    still breaks a Windows rule is replaced (:func:`windows_safe_name`)."""
+    from .folder_scheme import DOT
+
     s = unicodedata.normalize("NFC", text or "")
     s = re.sub(r":(?=\s)", " -", s).replace(":", "-")
     s = re.sub(r"[/\\|]", "-", s).replace('"', "'")
     s = re.sub(r'[<>?*\x00-\x1f]', "", s)
-    s = _WS.sub(" ", s).strip().rstrip(". ").lstrip(".")        # a leading dot would hide the folder from the scan
-    s = s.strip()
+    s = _WS.sub(" ", s).strip()
+    if s.startswith("."):                 # a leading dot would hide the folder from the scan
+        s = f"{DOT} {s[1:].strip()}"
+    s = s.rstrip(". ")
     return windows_safe_name(s, "_") if s else ""
 
 

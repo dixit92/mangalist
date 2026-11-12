@@ -610,7 +610,8 @@ def _fold_series(db, old_id: Optional[int], kept_id: Optional[int]) -> Optional[
         key_o, key_t = ctx.key(o), ctx.key(t)
         snap = {"series": {k: o[k] for k in o.keys()}, "key_o": key_o, "key_t": key_t, "link": None,
                 "link_moved": False, "link_dropped": False, "kind_moved": False, "kept_kind": t["kind_hint"],
-                "examined_moved": False, "examined_t": key_t in ctx.examined, "ledger": []}
+                "examined_moved": False, "examined_t": key_t in ctx.examined, "ledger": [],
+                "replacements": []}
         moved, dropped = ["row"], []
         if _has_link(con, key_o):
             link = con.execute("SELECT * FROM links_cache WHERE folder = ?", (key_o,)).fetchone()
@@ -631,6 +632,8 @@ def _fold_series(db, old_id: Optional[int], kept_id: Optional[int]) -> Optional[
             moved.append("examined")
         snap["ledger"] = [r[0] for r in con.execute("SELECT id FROM ledger WHERE series_id = ?", (old_id,))]
         con.execute("UPDATE ledger SET series_id = ? WHERE series_id = ?", (kept_id, old_id))
+        snap["replacements"] = [r[0] for r in con.execute("SELECT id FROM replacements WHERE series_id = ?", (old_id,))]
+        con.execute("UPDATE replacements SET series_id = ? WHERE series_id = ?", (kept_id, old_id))
         con.execute("DELETE FROM series WHERE id = ?", (old_id,))
         _sync_mu(con, kept_id, key_t)
         con.execute("INSERT INTO series_carries (from_series_id, to_series_id, from_root_id, from_path, to_root_id,"
@@ -680,6 +683,10 @@ def _restore_series(db, snap: dict, kept_id: Optional[int]) -> Optional[str]:
         ids = [int(i) for i in snap.get("ledger") or []]
         if ids:
             con.execute(f"UPDATE ledger SET series_id = ? WHERE id IN ({','.join('?' * len(ids))})", (row["id"], *ids))
+        ids = [int(i) for i in snap.get("replacements") or []]
+        if ids:
+            con.execute(f"UPDATE replacements SET series_id = ? WHERE id IN ({','.join('?' * len(ids))})",
+                        (row["id"], *ids))
         _sync_mu(con, row["id"], key_o)
         if kept_id is not None:
             _sync_mu(con, kept_id, key_t)

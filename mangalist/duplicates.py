@@ -330,7 +330,7 @@ def other_numbers(name: str, number: Decimal, series_title: Optional[str] = None
         text = re.sub(r"(?<![0-9.])0*" + str(int(parsed.index)) + r"(?![0-9.])", " ", text, count=1)
     if not re.search(r"(?i)(?<![a-z0-9])(?:v|vol|volume|c|ch|chap|chapter)\.?\s*\d", stem):
         text = re.sub(r"(?<![0-9.])" + num + r"(?![0-9])", " ", text, count=1)   # a bare number: the unit itself
-    return tuple(str(Decimal(d).normalize()) if "." in d else str(int(d)) for d in _DIGITS.findall(text))
+    return tuple(format(Decimal(d).normalize(), "f") if "." in d else str(int(d)) for d in _DIGITS.findall(text))
 
 
 def _alike(members: List[Tuple[str, Optional[str]]], number: Decimal,
@@ -583,6 +583,7 @@ def discard_file(db, path: str, size: int, modified: str) -> DiscardOutcome:
     finally:
         lock.release()
     _log.info("Deleted a stray file from the Rename window: %s (%d bytes, modified %s)", target, size, modified)
+    record_discard(db, target)                  # so a torrent that filed it is not kept for a "lost" file
     return DiscardOutcome(target, True)
 
 

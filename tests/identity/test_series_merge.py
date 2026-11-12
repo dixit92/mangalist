@@ -70,6 +70,18 @@ def _ledger(db):
         return sorted(r[0] for r in con.execute("SELECT series_id FROM ledger"))
 
 
+def _batch(db, sid):
+    """A replaced-files batch of the series that is settled (a held one refuses the merge)."""
+    with db.connect() as con:
+        con.execute("INSERT INTO replacements (download_id, series_id, status, created_at, updated_at) VALUES"
+                    " (901, ?, 'purged', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')", (sid,))
+
+
+def _batches(db):
+    with db.connect() as con:
+        return [r[0] for r in con.execute("SELECT series_id FROM replacements ORDER BY id")]
+
+
 def test_a_same_named_file_with_other_content_moves_in_under_a_suffixed_name(db, library, library2, two):
     """Owner, 2026-10-17: "Both, by content" - a different file of the same name moves in, named after its library, so
     the per-file duplicate review lists both; the folder empties."""
@@ -219,6 +231,7 @@ def test_a_merge_that_empties_the_folder_removes_it_and_folds_its_series_into_th
     r1, r2 = apart
     kept_id = _dress(db, r2, "Summoned Partner (EN)", mode="auto", ledger="filed")
     gone_id = _dress(db, r1, "Summoned Partner", mu_id=4242, kind="volumes", ledger="completed")
+    _batch(db, gone_id)
     db.set_setting("examined", [_key(r1, "Summoned Partner")])
     check = series_merge.check_merge(db, library / "Summoned Partner", library2 / "Summoned Partner (EN)")
     res = series_merge.merge_folders(db, check)
@@ -229,6 +242,7 @@ def test_a_merge_that_empties_the_folder_removes_it_and_folds_its_series_into_th
     assert FindingStore(db).own_mode(kept_id) == "auto"                                   # its own settings stay
     assert db.get_series(r1.id, "Summoned Partner") is None
     assert _ledger(db) == [kept_id, kept_id]                                              # the history joined it
+    assert _batches(db) == [kept_id]                                                      # its replaced files too
     assert mu_cache.load_entry(Path(_key(r1, "Summoned Partner"))) is None                # its link: the kept one's
     assert db.get_setting("examined", []) == [_key(r2, "Summoned Partner (EN)")]
     with db.connect() as con:
@@ -244,6 +258,7 @@ def test_undo_puts_the_files_and_the_folded_series_back(db, library, library2, a
     r1, r2 = apart
     kept_id = _dress(db, r2, "Summoned Partner (EN)", ledger=None)
     gone_id = _dress(db, r1, "Summoned Partner", mu_id=4242, kind="chapters", ledger="completed")
+    _batch(db, gone_id)
     db.set_setting("examined", [_key(r1, "Summoned Partner")])
     series_merge.merge_folders(db, series_merge.check_merge(db, library / "Summoned Partner",
                                                             library2 / "Summoned Partner (EN)"))
@@ -258,6 +273,7 @@ def test_undo_puts_the_files_and_the_folded_series_back(db, library, library2, a
     assert db.get_series(r2.id, "Summoned Partner (EN)").kind_hint is None
     assert mu_cache.load_entry(Path(_key(r1, "Summoned Partner")))["mu_id"] == 4242
     assert _ledger(db) == [gone_id] and _key(r1, "Summoned Partner") in db.get_setting("examined", [])
+    assert _batches(db) == [gone_id]
     assert {a.series_id for a in db.list_archives(r1.id)} == {gone_id}
     assert series_merge.last_merge(db) is None
     rep = scan(db).identity

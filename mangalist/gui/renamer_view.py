@@ -1008,7 +1008,7 @@ class RenamerWindow(QDialog):
     def _ask_automatic(name: str) -> bool:
         box = QMessageBox(QMessageBox.Icon.Question, AUTOMATIC_TITLE, automatic_text(name))
         yes = box.addButton("Rename automatically", QMessageBox.ButtonRole.AcceptRole)
-        no = box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+        box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(yes)
         box.exec()
         return box.clickedButton() is yes

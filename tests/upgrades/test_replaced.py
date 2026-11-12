@@ -201,6 +201,27 @@ def test_the_purge_empties_only_expired_batches_and_never_a_library(db, ledger, 
     assert upgrades.purge_expired(db, now=NOW + timedelta(days=31)) == []
 
 
+def test_the_purge_keeps_an_expired_batch_whose_volume_is_not_in_the_library(db, ledger, library, holding, known,
+                                                                             tmp_path, caplog):
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    held_before = names(holding)
+    volume = batch.volume_files[0][0]
+    payload = open(volume, "rb").read()
+    os.remove(volume)                                   # the volume that replaced the chapters is gone
+    with caplog.at_level(logging.WARNING):
+        assert upgrades.purge_expired(db, now=NOW + timedelta(days=31)) == []
+    assert "past its holding period but not emptied" in caplog.text and "no longer in the library" in caplog.text
+    assert ReplacementStore(db).get(batch.id).status == "held" and names(holding) == held_before
+    assert upgrades.after_filing(db, ledger, now=NOW + timedelta(days=31)).purged == []     # the job's own call
+    with open(volume, "wb") as f:                       # back in the library: emptied by the next pass
+        f.write(payload)
+    assert upgrades.purge_expired(db, now=NOW + timedelta(days=31)) == [batch.id]
+    assert names(holding) == []
+
+
 def test_a_tampered_record_cannot_make_the_purge_delete_library_files(db, ledger, library, holding, known, tmp_path):
     sid, sdir = make_series(db, library, chapter_files(CH))
     file_volumes(ledger, tmp_path, sid, sdir, ("1",))

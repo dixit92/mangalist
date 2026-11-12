@@ -4,12 +4,15 @@ answer and an examined mark before the change."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from mangalist import mu_cache
 from mangalist.identity import carry as carry_mod
+from mangalist.store.findings import FindingStore
+from mangalist.unbundled import UnbundledChapters
 
 from .conftest import make_archive, scan, sign
 
@@ -93,6 +96,76 @@ def test_c_an_empty_folder_renamed_is_missing_and_can_be_reattached_by_hand(db, 
     assert res.merged and res.how == "manual"
     _assert_kept(db, root, folder.with_name("Wanted Series (2024)"), old_id, mu_id=5)
     assert carry_mod.missing_series(db) == []
+
+
+def _renamed_empty(db, library):
+    """A decorated empty folder renamed: the old row is missing, the new folder a fresh live row."""
+    (library / "Wanted Series").mkdir()
+    root = db.add_root(str(library))
+    _decorate(db, root, scan(db).entries[0].folder, mu_id=5)
+    old_id = db.get_series(root.id, "Wanted Series").id
+    (library / "Wanted Series").rename(library / "Wanted Series (2024)")
+    scan(db)
+    return old_id, db.get_series(root.id, "Wanted Series (2024)").id
+
+
+def _batch(db, series_id, download_id=901):
+    with db.connect() as con:
+        con.execute("INSERT INTO replacements (download_id, series_id, status, created_at, updated_at) VALUES"
+                    " (?, ?, 'held', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')", (download_id, series_id))
+
+
+def _batches(db):
+    with db.connect() as con:
+        return [r[0] for r in con.execute("SELECT series_id FROM replacements ORDER BY id")]
+
+
+def test_reattach_keeps_what_the_live_folder_was_given(db, library):
+    """The live folder's own mode, Unbundled setting, chapter sources and replaced-files batch follow to the row that
+    takes its place (audit 2026-11)."""
+    old_id, live_id = _renamed_empty(db, library)
+    FindingStore(db).set_mode([live_id], "auto")
+    UnbundledChapters(db).set([live_id], True)
+    db.set_meta(f"suwayomi.series.{live_id}", json.dumps({"manga_id": 7}))
+    db.set_meta(f"extensions.series.{live_id}", json.dumps({"manga_id": 8}))
+    _batch(db, live_id)
+    res = carry_mod.reattach(db, old_id, live_id)
+    assert res.merged and res.to_series_id == old_id
+    assert FindingStore(db).own_mode(old_id) == "auto"
+    assert UnbundledChapters(db).series_ids() == {old_id}
+    assert json.loads(db.get_meta(f"suwayomi.series.{old_id}")) == {"manga_id": 7}
+    assert json.loads(db.get_meta(f"extensions.series.{old_id}")) == {"manga_id": 8}
+    assert db.get_meta(f"suwayomi.series.{live_id}") is None and db.get_meta(f"extensions.series.{live_id}") is None
+    assert _batches(db) == [old_id]
+
+
+def test_reattach_never_replaces_what_the_missing_series_had(db, library):
+    old_id, live_id = _renamed_empty(db, library)
+    FindingStore(db).set_mode([old_id], "off")
+    FindingStore(db).set_mode([live_id], "auto")
+    db.set_meta(f"suwayomi.series.{old_id}", json.dumps({"manga_id": 1}))
+    db.set_meta(f"suwayomi.series.{live_id}", json.dumps({"manga_id": 7}))
+    UnbundledChapters(db).set([live_id], True)
+    carry_mod.reattach(db, old_id, live_id)
+    assert FindingStore(db).own_mode(old_id) == "off"
+    assert json.loads(db.get_meta(f"suwayomi.series.{old_id}")) == {"manga_id": 1}
+    assert db.get_meta(f"suwayomi.series.{live_id}") is None          # nothing left under the id that is gone
+    assert UnbundledChapters(db).series_ids() == {old_id}
+
+
+def test_a_retired_series_leaves_its_replaced_files_batch_to_the_target(db, library):
+    (library / "Wanted Series").mkdir()
+    root = db.add_root(str(library))
+    scan(db)
+    old_id = db.get_series(root.id, "Wanted Series").id
+    _batch(db, old_id)
+    (library / "Wanted Series").rename(library / "Wanted Series (2024)")
+    scan(db)
+    assert db.set_series_kind(root.id, "Wanted Series (2024)", "volumes")    # own data: the rows are not swapped
+    live_id = db.get_series(root.id, "Wanted Series (2024)").id
+    res = carry_mod.reattach(db, old_id, live_id)
+    assert not res.merged and carry_mod.missing_series(db) == []
+    assert _batches(db) == [live_id]
 
 
 def test_d_a_move_to_another_root_is_kept(db, library, library2):

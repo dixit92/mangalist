@@ -87,6 +87,7 @@ def test_what_was_decided_on_the_host_reaches_suwayomi(db, suwayomi, host):
     assert "group" not in raw_choice(db, 4, META_SUWAYOMI_SERIES)
     assert raw_choice(db, 1, META_SUWAYOMI_SERIES)["manga_id"] == 11
     # Suwayomi's choices are what Suwayomi chosen reads
+    SuwayomiSettings(db).set_backend("suwayomi")
     assert SuwayomiSettings(db).series_choice(2)["manga_id"] == 13
 
     again = run(db, suwayomi, host)

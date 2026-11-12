@@ -84,7 +84,7 @@ def part_numbers(numbers: Iterable[Optional[Decimal]]) -> Dict[int, List[Decimal
     ... ``.4``, and ``.5`` or above only next to a ``.4`` - WHEREVER the run starts, ascending. :func:`splits_of`
     decides whether parts count as chapter ``N`` held (they must start at the beginning); this only tells the parts of a
     whole chapter apart from its extras, for the whole-or-parts rules (owner, 2026-10-18: a whole ``38`` next to
-    ``38.2`` - :mod:`mangalist.downloads.chapter_forms`, :func:`mangalist.duplicates.find_part_overlaps`)."""
+    ``38.2`` - :mod:`mangalist.downloads.chapter_forms`, :func:`mangalist.duplicates.find_whole_and_parts`)."""
     tenths: Dict[int, Set[int]] = {}
     for c in numbers:
         if c is None or c <= 0 or c > MAX_NUMBER:

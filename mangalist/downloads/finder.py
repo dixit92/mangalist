@@ -570,6 +570,9 @@ def _volume_pick(ctx: _Context, candidate: NyaaCandidate, fills: Tuple[str, ...]
         else:
             only_missing = True
             selection = ctx.backend.inspect_pack(candidate, list(fills))
+            if selection.refused:               # e-books, or chapters only: a Send would be refused too
+                _log.info("Find pass %d: %s: %s - not offered", ctx.run_id, candidate.title, selection.problem)
+                return None
             if not selection.readable or selection.whole_reason or selection.unknown_kept:
                 blocker = REASON_PACK_WHOLE
                 if not selection.readable:
@@ -699,7 +702,6 @@ def _suwayomi_up(ctx: _Context) -> bool:
 
 def _chapters(ctx: _Context, sid: int, name: str, mode: str, entries: list) -> bool:
     from .chapters import (
-        HOW_MANGADEX,
         chapter_rows,
         default_group,
         find_manga,

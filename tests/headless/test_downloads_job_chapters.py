@@ -22,6 +22,7 @@ SECRET = "suwa-not-a-real-password"
 def _setup(tmp_path):
     store.reset_stores()
     db = store.get_store()
+    SuwayomiSettings(db).set_backend("suwayomi")       # Suwayomi's chapters: chosen, not the fresh-install default
     root = tmp_path / "library" / "Manga"
     (root / "Series C").mkdir(parents=True)
     (root / "Series C" / "0001 [Ch. 0001 - One [Alpha Scans]].cbz").write_bytes(data("c1"))

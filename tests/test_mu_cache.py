@@ -63,3 +63,17 @@ def test_resaving_without_rescoring_keeps_the_stored_version(cache_db):
     mu_cache.save_entry(folder, 3, "Title", "", None, mu_confirmed=True, mu_score=1.0, mu_band="auto")
     row = mu_cache.load_entry(folder)
     assert row["mu_score_version"] == mu_cache.MU_SCORE_VERSION and row["mu_confirmed"] is True
+
+
+def test_an_automatic_pick_never_replaces_a_confirmed_record():
+    """A lookup that read the row before the owner confirmed another record must not store its own pick as confirmed."""
+    folder = Path("/library/Manga/Confirmed")
+    mu_cache.save_entry(folder, 111, "The Owner's Record", "", True, mu_confirmed=True)
+    mu_cache.save_entry(folder, 222, "The Lookup's Pick", "", None, mu_confirmed=False)
+    row = mu_cache.load_entry(folder)
+    assert (row["mu_id"], row["mu_title"], row["mu_confirmed"]) == (111, "The Owner's Record", True)
+    mu_cache.save_entry(folder, 111, "The Owner's Record", "", False, mu_confirmed=False)      # the same record: refreshed
+    row = mu_cache.load_entry(folder)
+    assert row["licensed"] is False and row["mu_confirmed"] is True
+    mu_cache.save_entry(folder, 222, "Fixed By The Owner", "", None, mu_confirmed=True)        # the owner's own change
+    assert mu_cache.load_entry(folder)["mu_id"] == 222

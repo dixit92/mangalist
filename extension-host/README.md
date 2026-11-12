@@ -1,8 +1,9 @@
-# MangaList extension host (prototype)
+# MangaList extension host
 
-Runs Mihon / Tachiyomi extensions without Suwayomi, for MangaList. Branch `prototype/mihon-extensions` only; `main`
-keeps the Suwayomi integration (owner, 2026-10-21: "develop a mangalist version that can work without Suwayomi and can
-use and get the Mihon extensions ... Make this a prototype").
+Runs Mihon / Tachiyomi extensions without Suwayomi, for MangaList. It began as a prototype on the branch
+`prototype/mihon-extensions` (owner, 2026-10-21: "develop a mangalist version that can work without Suwayomi and can
+use and get the Mihon extensions ... Make this a prototype"); since 2026.10.56 it is on `main`, built into the Docker
+image (`packaging/docker/Dockerfile`) and offered in Settings as "Built-in extensions" next to Suwayomi.
 
 A small JVM program: it reads an extension repository (keiyoushi's `index.json` by default - the one MangaList's
 Suwayomi uses), installs extensions (keiyoushi's ready JVM jar, or an APK converted with dex2jar), loads their sources
@@ -59,6 +60,10 @@ currently disabled". `GET /health` says which (`flareSolverr`: the URL or `off`)
 Binds `127.0.0.1` by default and has **no login** - keep it on localhost (in MangaList's container). Source ids are
 64-bit and travel as strings.
 
+So that a web page open in a browser on the same machine cannot call it, every request is screened first: one with an
+`Origin` header is refused (403), one whose `Host` is not `127.0.0.1`, `localhost` or `[::1]` (with or without a port)
+is refused (403), and a `POST` / `DELETE` body must be sent as `Content-Type: application/json` (else 415).
+
 | Call | Answer |
 | --- | --- |
 | `GET /health` | `{ok, version, sources, flareSolverr, webView}` |
@@ -82,9 +87,10 @@ Binds `127.0.0.1` by default and has **no login** - keep it on localhost (in Man
 | `POST /webview/debug-eval {url, script, waitMs}` | diagnostics: open a page, run a script, answer what it left in `window.__mlDebug` |
 | `/compat/...` | what MangaList asked Suwayomi, with Suwayomi's semantics: the contract is [`COMPAT.md`](COMPAT.md) |
 
-Errors: `{error, type}` with 400 (a bad call, a refused signature), 404 (unknown source, manga, package or endpoint), 409
-(not now: a chapter of the extension's sources is downloading, or it is installed from another repository / its
-repository was removed), 502 (the extension or its site failed).
+Errors: `{error, type}` with 400 (a bad call: a body that is not the JSON the call takes, a refused signature, a
+package that is not an extension this host can run), 403 / 415 (the screening above), 404 (unknown source, manga,
+package or endpoint), 409 (not now: a chapter of the extension's sources is downloading, or it is installed from
+another repository / its repository was removed), 502 (the extension or its site failed).
 
 ### `/compat` as built
 
@@ -113,7 +119,7 @@ v2.4.2366 does it (its code was read for each):
   PublishingStatus, Day / Month / Year); zipped in name order to `<cbz>.tmp`, renamed to
   `<downloads>/mangas/<displayName>/<title>/<scanlator>_<name>.cbz` (each part `SafePath.buildValidFilename`, the code
   MangaList's `suwayomi_name` mirrors). A finished chapter leaves the queue and reads `downloaded`; a failure is tried
-  again at once, up to 3 tries, then `ERROR` (a chapter with no pages: `ERROR` at once); enqueueing an `ERROR` chapter
+  again after 2 seconds, up to 3 tries, then `ERROR` (a chapter with no pages: `ERROR` at once); enqueueing an `ERROR` chapter
   gives it one more try; an already downloaded chapter (or a whole CBZ already there) finishes without fetching.
 - **The queue** is in `host.db`: after a restart a chapter that was downloading is queued again, and an `ERROR` one
   stays `ERROR` with its tries (Suwayomi re-adds its saved queue fresh, so its `ERROR` chapters get 3 new tries after a
@@ -209,19 +215,19 @@ Memory (`docker stats`, the same container): idle with no WebView 117 MiB (174 M
 
 ## Tests
 
-`./gradlew :host:test`: 53 tests - 39 unit (CBZ layout and names against MangaList's `suwayomi_name`, ComicInfo, ids
+`./gradlew :host:test`: 69 tests - 47 unit (CBZ layout and names against MangaList's `suwayomi_name`, ComicInfo, ids
 across a restart, the chapter merge, the queue: success, 3 failures -> ERROR, one more try, restart, dequeue, two
 sources at once, an update waiting for its source's download with that source's queue held; signatures of jars and v2
 APKs; preferences; the repository index; the repository list: seeding and persistence, add checked first, remove, the
-key kept per repository and a changed key refused, every repository's extensions), 13 HTTP (`/compat`, extension
-management and the repositories - `/repos`, `GET /repo` from two repositories with a shared package, each repository's
+key kept per repository and a changed key refused, every repository's extensions; a cut-off `installed.json`), 21 HTTP (`/compat`, extension
+management - a failed update keeping the installed version, bad calls answered 400, the screening of requests - and
+the repositories - `/repos`, `GET /repo` from two repositories with a shared package, each repository's
 own key at install, updates only from the repository installed from, a removed repository - against an in-process
 server with a fake source and local image / repository servers), 1 process (the real host program started, stopped and
 started again: ids and queue kept).
 
-## Not in the prototype
+## Not in the host
 
 - Comix's chapters (the extension, not the host: see above).
 - APK installs convert with dex2jar, which fails for keiyoushi's minified APKs at run time (the signature check passes);
   the jar is the format to use.
-- Packaging into MangaList's image (a JRE plus ~152 MB, and the WebView's libraries) - lane M.

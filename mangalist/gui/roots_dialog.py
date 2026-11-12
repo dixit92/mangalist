@@ -474,6 +474,10 @@ class RootsEditor(QWidget):
         self.error_label.clear()
         return True
 
+    def has_unsaved_edits(self) -> bool:
+        """The drafts differ from what is stored (a root added, removed or edited) - not merely shown or selected."""
+        return any(self._what_changed())
+
     def _what_changed(self) -> tuple:
         """(a library's automatic-download mode changed, anything else changed): a change of the modes alone needs no
         rescan - the List's mode chips and Found follow it."""

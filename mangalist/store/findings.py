@@ -249,8 +249,12 @@ class FindingStore:
                 raise FindingConflict(f"finding {finding_id} does not exist")
             if expect is not None and row["status"] not in expect:
                 raise FindingConflict(f"finding {finding_id} is {row['status']}, not {'/'.join(expect)}")
-            con.execute("UPDATE findings SET status = ?, record_id = COALESCE(?, record_id), updated_at = ? WHERE id = ?",
-                        (status, record_id, utcnow(), finding_id))
+            marks = ",".join("?" * len(expect)) if expect is not None else ""
+            cur = con.execute("UPDATE findings SET status = ?, record_id = COALESCE(?, record_id), updated_at = ?"
+                              " WHERE id = ?" + (f" AND status IN ({marks})" if expect is not None else ""),
+                              (status, record_id, utcnow(), finding_id, *(expect or ())))
+            if cur.rowcount == 0:               # another process moved it between the read and the write
+                raise FindingConflict(f"finding {finding_id} is no longer {'/'.join(expect or ())}")
             out = con.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone()
         return _finding(out)
 

@@ -1,5 +1,6 @@
 # MangaList for Unraid / Docker: the desktop GUI in the browser (jlesage/baseimage-gui: TigerVNC +
-# noVNC + nginx) plus the headless runner (scheduled rescans; downloads opt-in) as a second service.
+# noVNC + nginx), the headless runner (scheduled rescans; downloads opt-in) and the extension host (chapter
+# downloads) as further services.
 #
 #   docker build -f packaging/docker/Dockerfile -t mangalist .
 #   docker run -d -p 5800:5800 -v <appdata>:/config -v <library share>:/data mangalist
@@ -14,9 +15,9 @@
 # Base image: Debian 12 (glibc, so the PySide6 wheels from PyPI work; Alpine's musl does not) with
 # Debian's Python 3.11, which the test matrix covers. Pinned to an exact base version; bump it here.
 #
-# Chapter downloads go through one of two programs, chosen in Settings > Connected services: Suwayomi-Server (its own
-# container, reached over the network) or MangaList's built-in extension host (extension-host/, a JVM program running
-# Mihon / Tachiyomi extensions without Suwayomi). The host is built in a JDK stage and runs on a jlink'd Java 21 runtime
+# Chapter downloads go through one of two programs, chosen in Settings > Connected services: MangaList's built-in
+# extension host (the default; extension-host/, a JVM program running Mihon / Tachiyomi extensions without Suwayomi) or
+# Suwayomi-Server (its own container, reached over the network). The host is built in a JDK stage and runs on a jlink'd Java 21 runtime
 # in the final image, supervised as the "extension-host" service (rootfs/etc/services.d/extension-host): while
 # "Built-in extensions" is chosen, and on demand while Suwayomi is (the Extensions page, a test, a carry-over, a chapter
 # download of the host still to be finished). Its data: /config/extension-host; its log: /config/logs/extension-host.log.
@@ -143,7 +144,7 @@ EXPOSE 5800
 
 LABEL \
     org.opencontainers.image.title="MangaList" \
-    org.opencontainers.image.description="Scan a manga library, link it with MangaUpdates and see how far behind each series is - in the browser, with scheduled rescans." \
+    org.opencontainers.image.description="A file and folder manager for a manga library, in the browser: what is missing or behind (MangaUpdates, MangaPixer), downloads through qBittorrent and Mihon extensions, one naming scheme." \
     org.opencontainers.image.source="https://github.com/dixit92/MangaList" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.version="${DOCKER_IMAGE_VERSION}" \

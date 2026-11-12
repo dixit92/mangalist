@@ -1,8 +1,5 @@
-"""The ``mangapixer-sync`` job for the headless runner (not registered here - the integrator adds it to
-:func:`mangalist.headless.jobs.build_registry`, e.g.::
-
-    from .mangapixer_job import JOB_NAME, make_mangapixer_sync
-    Job(JOB_NAME, make_mangapixer_sync(), settings.rescan_schedule, enabled=..., description=DESCRIPTION)
+"""The ``mangapixer-sync`` job for the headless runner (registered, with its own schedule, in
+:func:`mangalist.headless.jobs.build_registry`).
 
 It runs one incremental sync of every MangaPixer library MangaList uses (a full sync the first time or
 when MangaPixer asks for one), then refreshes the automatic root mappings. Skipped when no MangaPixer

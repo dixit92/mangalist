@@ -156,7 +156,10 @@ def test_the_library_and_the_name_are_the_owners_to_pick(qapp, dialogs, libs):
 
 
 def test_a_mangadex_link_asks_suwayomi_and_passes_the_source_on(qapp, dialogs, libs):
+    from mangalist.store.downloads import SuwayomiSettings
+
     db, roots, base = libs
+    SuwayomiSettings(db).set_backend("suwayomi")                 # chosen (a fresh install is on the built-in extensions)
     md = core.mangadex_from_record({"data": {"id": UUID, "attributes": {
         "title": {"ja-ro": "Made Up Series"}, "altTitles": [{"en": "Made Up English"}], "links": {"mu": "rs"}}}})
     choice = core.SourceChoice("5511", "MangaDex (EN)", 77, "Made Up English")

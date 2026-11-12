@@ -7,6 +7,25 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.2] - 2026-11-11
+
+The sixty-second MangaList release (testing build): fixes from a full audit - replaced copies and downloads are safer when something goes wrong, the built-in extensions are the default for chapters, and Settings asks before dropping unsaved edits.
+
+- **Built-in extensions are the default for chapter downloads.** A new set-up downloads chapters through MangaList's own extension host without choosing anything; Suwayomi stays available in Settings > Connected services. A set-up that already has a Suwayomi connection and never chose keeps using Suwayomi.
+- **Old copies are safer when a replacement download goes wrong.** When a replacement was interrupted and then could not be filed, your old copies are moved back from the holding folder instead of staying there with nothing in their place. When only some volumes of a replacement are filed, the failed download says which old copies are still in the holding folder. The holding folder is no longer emptied at the end of its period for a batch whose replacement files are not in the library.
+- **Downloads are not marked failed for something that passes.** A download that was just sent waits up to 15 minutes for qBittorrent (or the chapter program) to list it, and finished downloads wait for a library share that is not mounted, instead of all failing with "the series folder is gone".
+- **Re-attaching a missing series keeps the folder's own settings.** The live folder's download mode, Unbundled Chapters setting, saved chapter source and replaced-chapter batches are no longer dropped.
+- **The background passes read a folder as the List does.** The find pass, the chapter check and the Rename-pending count misread files whose names carry another title than the folder (`Dress Up 009 v01` as chapter 9), so held volumes could be looked for again.
+- **A confirmed MangaUpdates match is never replaced by a lookup.** A lookup that started before you confirmed or fixed a match could store its own pick as the confirmed one; and a refresh while MangaUpdates did not answer blanked the series' Behind and Completed until the next check.
+- **Behind: the chapter estimate was inverted.** For a series held as chapters whose publisher progress is known in volumes only, the estimate through AniList read "Disk ahead" or "Up to date" for a series that was behind.
+- **Settings asks before dropping unsaved edits.** Close, Esc, the window's X and the "back" link ask "Discard the changes to ...?" (Discard / Keep editing) while a library or connected-service form has edits; Cancel inside a form still discards at once. Saving the Library editor with nothing changed no longer rescans every library.
+- **Download tab and Found fixes.** A pack of e-books or of chapters only is no longer offered in Found (its Send always failed, and it kept other releases from being picked). A Send clicked during "Send all" is sent next instead of staying "Queued". Cancel, Dismiss and Retry act only on the row clicked. The target-folder chooser comes back after a failed folder lookup. Retry and Cancel in the chapter queue work again after a Reload.
+- **Automatic renaming no longer stops at a large series.** A series with more renames than the pass has left kept every series after it from being renamed; it is now skipped (the log says so) and the others go on.
+- **A title that starts with a dot gets a folder beginning "DOT".** A series such as ".hack//SIGN" is given the folder `DOT hack--SIGN`: a folder whose name starts with a dot is never scanned, and the dot used to be dropped from the name. A folder named the old way is listed as Rename pending.
+- **The Windows build keeps paths within Windows' limit.** The names MangaList gives files and series folders are kept short enough for the 259-character path limit on Windows itself, as they already were for a library shared from the container.
+- **The extension host is harder to break.** A failed extension update or reinstall keeps the working version. A list of installed extensions damaged by an interrupted write is set aside instead of stopping the host from starting. The host refuses requests that come from a web page, and answers a malformed request as a bad request rather than as a failed extension.
+- Smaller fixes: a file deleted after your confirmation (replaced chapters, a stray file in the Rename window) is recorded, so its torrent is not kept for a "lost" file; `10.0` and `10` in two file names are the same number for the duplicate check; a scan of many folders whose library cannot be read keeps to those folders; two checks that the window and the background runner could both pass at once (a finding's status, a torrent already tracked) are now one step.
+
 ## [2026.11.1] - 2026-11-08
 
 The sixty-first MangaList release (testing build): volume releases of a series whose title is in square brackets are found on nyaa.

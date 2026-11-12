@@ -36,7 +36,8 @@ from mangalist.naming import (
 from mangalist.parsing import Kind, Layer, ParseContext, parse_name, parse_names
 
 D = Decimal
-WIN = NameLimits(windows_server="SERVER")
+WIN = NameLimits(windows_server="SERVER", native_windows=False)      # the container's rule, wherever the tests run
+OFF = NameLimits(native_windows=False)                               # no Windows rule at all
 
 
 # --- the format ------------------------------------------------------------------------------------------------
@@ -327,7 +328,7 @@ def test_the_windows_path_limit():
     assert r.fits and len(wp) <= 259 and r.shortened == ("title",)
     assert r.name.endswith(f"{ELLIPSIS}) [Grp].cbz")
     # without a server name (or outside /data/<share>) only the 255-byte rule applies
-    assert chapter_name("1", title="T" * 120, folder=folder).shortened == ()
+    assert chapter_name("1", title="T" * 120, folder=folder, limits=OFF).shortened == ()
     assert chapter_name("1", title="T" * 120, folder="/mnt/other/" + "F" * 200, limits=WIN).shortened == ()
 
 
@@ -370,10 +371,51 @@ def test_volume_names_shorten_only_the_group():
 def test_name_fits():
     assert name_fits("x" * 255) and not name_fits("x" * 256)
     assert not name_fits("Ü" * 128)
-    assert name_fits("x" * 200, folder="/data/R/" + "F" * 100)
+    assert name_fits("x" * 200, folder="/data/R/" + "F" * 100, limits=OFF)
     assert not name_fits("x" * 200, folder="/data/R/" + "F" * 100, limits=WIN)
     assert name_fits("x" * 100, folder="/data/R/" + "F" * 100, limits=NameLimits(windows_server="S",
-                                                                                     max_windows_path=300))
+                                                                                     max_windows_path=300,
+                                                                                     native_windows=False))
+
+
+def test_name_fits_on_windows_itself():
+    native, other = NameLimits(native_windows=True), NameLimits(native_windows=False)
+    long = "D:\\Manga\\" + "F" * 400
+    assert not name_fits("x" * 20, folder=long, limits=native)             # the path itself, no server name needed
+    assert not name_fits("x" * 20, folder=long, limits=NameLimits(windows_server="SERVER", native_windows=True))
+    assert name_fits("x" * 20, folder="D:\\Manga\\Series", limits=native)
+    folder = "D:\\Manga\\" + "F" * 100                                     # 109 characters, and the separator
+    assert name_fits("x" * 149, folder=folder, limits=native) and not name_fits("x" * 150, folder=folder, limits=native)
+    assert name_fits("x" * 149, folder=folder + "\\", limits=native)
+    assert not name_fits("\U0001f600" * 75, folder=folder, limits=native)   # UTF-16 units, as Windows counts
+    r = chapter_name("1", title="T" * 200, folder=folder, limits=native)
+    assert r.fits and r.shortened == ("title",) and len(folder) + 1 + len(r.name) == 259
+    # not on Windows: no server, or a path outside /data/<share>, is not limited by this rule
+    assert name_fits("x" * 20, folder=long, limits=other)
+    assert name_fits("x" * 200, folder="/mnt/user/" + "F" * 400, limits=other)
+    assert name_fits("x" * 200, folder="/mnt/user/" + "F" * 400, limits=NameLimits(windows_server="S",
+                                                                                       native_windows=False))
+
+
+def test_the_container_rule_is_the_same_on_windows_or_not():
+    for native in (False, True):
+        limits = NameLimits(windows_server="SERVER", native_windows=native)
+        folder = "/data/R/" + "F" * 100                                   # \\\\SERVER\\R\\FFF...\\: 112 characters
+        assert name_fits("x" * 147, folder=folder, limits=limits)
+        assert not name_fits("x" * 148, folder=folder, limits=limits)
+
+
+@pytest.mark.parametrize("path, expected", [
+    ("D:\\Manga\\Series\\Ch. 0001.00.cbz", "D:\\Manga\\Series\\Ch. 0001.00.cbz"),
+    ("D:/Manga//Series/x", "D:\\Manga\\Series\\x"),
+    ("D:\\Manga\\Series/x", "D:\\Manga\\Series\\x"),
+    ("\\\\?\\D:\\Manga\\x", "D:\\Manga\\x"),
+    ("\\\\?\\UNC\\srv\\share\\x", "\\\\srv\\share\\x"),
+    ("\\\\srv\\share\\x", "\\\\srv\\share\\x"),
+    ("", None),
+])
+def test_native_windows_path(path, expected):
+    assert naming.native_windows_path(path) == expected
 
 
 # --- Windows paths ----------------------------------------------------------------------------------------------

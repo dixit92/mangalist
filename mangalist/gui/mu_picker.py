@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..mu_client import REQUEST_DELAY, search_series
+from ..mu_client import search_series
 
 
 class MuPickerDialog(QDialog):

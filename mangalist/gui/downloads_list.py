@@ -100,8 +100,9 @@ def members_of(row: DownloadRecord, records: Sequence[DownloadRecord]) -> List[i
     Send in the same status and with the same error (:func:`~.download_rules.merge_batches`' grouping)."""
     if not row.is_chapters:
         return [row.id]
-    key = (row.batch or f"#{row.id}", row.status, row.error or "")
-    ids = [r.id for r in records if r.is_chapters and (r.batch or f"#{r.id}", r.status, r.error or "") == key]
+    key = (row.batch or f"#{row.id}", row.status, row.error or "", row.usual_note)
+    ids = [r.id for r in records
+           if r.is_chapters and (r.batch or f"#{r.id}", r.status, r.error or "", r.usual_note) == key]
     return ids or [row.id]
 
 

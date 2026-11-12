@@ -7,10 +7,23 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from .download_style import set_prop
 from .download_widgets import button, card, checkbox, hbox, label, pill
+
+
+def ask_discard(parent: QWidget, what: str) -> bool:
+    """Ask before unsaved edits to *what* are thrown away: True for "Discard", False for "Keep editing" (the default,
+    and what Esc answers)."""
+    box = QMessageBox(QMessageBox.Icon.Question, "Unsaved changes", f"Discard the changes to {what}?",
+                      QMessageBox.StandardButton.NoButton, parent)
+    discard = box.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+    keep = box.addButton("Keep editing", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(keep)
+    box.setEscapeButton(keep)
+    box.exec()
+    return box.clickedButton() is discard
 
 
 class SectionPage(QWidget):
@@ -37,12 +50,23 @@ class SectionPage(QWidget):
         self.body.setSpacing(14)
         outer.addLayout(self.body)
         outer.addStretch(1)
+        self.confirm_discard = ask_discard          # (parent, what) -> discard? The dialog passes its own; tests answer
 
     def on_show(self) -> None:
         """The section was brought to the front (the live checks of Connected services start here)."""
 
     def stop(self) -> None:
         """The dialog closes: abandon background work."""
+
+    def unsaved(self) -> str:
+        """What an open editor of this section holds that was edited and not saved (it completes "Discard the changes
+        to ...?"), or "" - no editor open, or its fields are as they were loaded."""
+        return ""
+
+    def may_discard(self) -> bool:
+        """True when nothing here is unsaved, or the owner answered "Discard" (asked only when something is)."""
+        what = self.unsaved()
+        return not what or bool(self.confirm_discard(self, what))
 
 
 def clear_layout(layout) -> None:

@@ -1828,8 +1828,11 @@ class Renamer:
                             break
                         kept.append(s)
                         count += len(s.auto_renames)
-                    if not kept:
-                        break
+                    if not kept:                # its first series alone is over what is left: the ones after it
+                        _log.info("Renamer: automatic batch in %s: %s has %d renames, more than the %d left for this "
+                                  "pass; left for a later pass or the window's Rename", root.name,
+                                  batch.series[0].title, len(batch.series[0].auto_renames), budget)
+                        continue                # still get their turn
                     batch = RenameBatch(batch.root_id, batch.root_path, tuple(kept), titles=False)
                 res = self.apply(batch, after=False)
                 report.batches.append(res)

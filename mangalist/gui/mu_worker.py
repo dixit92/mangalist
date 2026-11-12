@@ -116,7 +116,11 @@ class MuWorker(QObject):
                     licensed = detail.get("licensed")
                     progress = _detail_progress(detail)
                 except Exception:  # noqa: BLE001
-                    _log.warning("get_series failed for %s (id=%s)", entry.title, mu_id_cached, exc_info=True)
+                    # Nothing new is known: saving the defaults would blank the stored progress (Behind, Completed).
+                    _log.warning("get_series failed for %s (id=%s); keeping the stored progress", entry.title,
+                                 mu_id_cached, exc_info=True)
+                    self.entry_updated.emit(entry, row)
+                    return
                 # Clear examined if becoming licensed
                 _clear_examined_if_newly_licensed(entry, licensed)
                 entry.licensed = licensed

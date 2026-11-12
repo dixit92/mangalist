@@ -760,6 +760,7 @@ class ReleasesPanel(QWidget):
             for option in placement.options:
                 self.folder_combo.addItem(option, option)
             self.folder_combo.blockSignals(False)
+            self.folder_combo.setVisible(True)      # a failed lookup hides it
             self.folder_row.setVisible(True)
         else:
             self.folder_row.setVisible(False)

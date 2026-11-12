@@ -4,7 +4,7 @@ The host runs Mihon / Tachiyomi extensions on a JVM and answers a small local JS
 no login). Source ids are 64-bit numbers and travel as strings. Endpoints (``extension-host/.../ApiServer.kt``):
 
 - ``GET /health``; ``GET /repo`` (every listed repository's extensions, each naming its repository; ``?url=`` one)
-- ``GET /repos``, ``POST /repos {url}`` (the index is fetched and checked first), ``DELETE /repos {url}``: the host's
+- ``GET /repos``, ``POST /repos {url}`` (the index is fetched and checked first), ``POST /repos/remove {url}``: the host's
   repository list (keiyoushi's ``index.json`` until changed); each repository's own signing key is enforced
 - ``GET /extensions``; ``POST /extensions/install {pkg, repo?, format: jar|apk}``; ``POST /extensions/update {pkg,
   waitSeconds?}`` (only from the repository it was installed from; HTTP 409 while one of its sources downloads a
@@ -23,8 +23,8 @@ failed.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import quote
 
 DEFAULT_URL = "http://127.0.0.1:4570"

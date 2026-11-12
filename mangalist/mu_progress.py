@@ -145,7 +145,7 @@ def format_behind(
         if ch_part is None:
             ch_part = _anilist_cross_unit(
                 have_chapters=publisher_volumes, disk_vol=disk_max_chapter,
-                al_chapters=anilist_volumes, al_volumes=anilist_chapters,
+                al_chapters=anilist_chapters, al_volumes=anilist_volumes,
                 unit="ch", label="official (~)",
             )
         if ch_part:
@@ -168,7 +168,7 @@ def format_behind(
         if ch_part is None:
             ch_part = _anilist_cross_unit(
                 have_chapters=scan_latest_volume, disk_vol=disk_max_chapter,
-                al_chapters=anilist_volumes, al_volumes=anilist_chapters,
+                al_chapters=anilist_chapters, al_volumes=anilist_volumes,
                 unit="ch", label="(scan ~)",
             )
         if ch_part:

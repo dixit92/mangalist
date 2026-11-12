@@ -2,10 +2,14 @@
 
 <img src="packaging/icons/mangalist-512.png" alt="MangaList icon" width="96" align="right">
 
-A PySide6 desktop tool that scans a "Manga Root" folder, classifies each manga subfolder as
-**Volume-based**, **Chapter-based** or **Both** from its archive file names (`.cbz`, `.zip`, `.cbr`,
-`.rar`, `.7z`, `.cb7`), and matches it to [MangaUpdates](https://www.mangaupdates.com) to show what
-is licensed, finished or behind.
+A personal file and folder manager for a manga library (Python / PySide6; Windows, macOS, Linux and
+Unraid / Docker). It scans your library folders (`.cbz`, `.zip`, `.cbr`, `.rar`, `.7z`, `.cb7`), reads each
+series as volumes, chapters or both, and matches it to [MangaUpdates](https://www.mangaupdates.com) -
+or takes what [MangaPixer](https://github.com/dixit92/mangapixer) already knows - to show what is licensed,
+finished or behind. In the Docker image it can also fill the gaps: missing volumes from nyaa through
+qBittorrent, missing and new chapters through Mihon / Tachiyomi extensions (built in, or a Suwayomi server),
+filed into the series folder and kept named by one scheme. It also finds duplicate files and series held in
+two folders, and renames a library to its naming scheme with an undo.
 
 ## Install
 
@@ -108,14 +112,14 @@ menu (**Automatic downloads**, also for a selection); the default is in Settings
 mode differs from it shows a small chip after its title. A scheduled **find pass** (`MANGALIST_DISPATCH_SCHEDULE`,
 default `daily@04:30`; **Find now** runs it at once) searches the series in the Download tab's "To get" list. On Auto,
 a release goes out by itself only when it certainly fills a missing volume and is a single volume or a pack narrowed to
-the missing volumes, and chapters only from the series' saved Suwayomi source; everything else waits in the Download
+the missing volumes, and chapters only from the series' saved chapter source; everything else waits in the Download
 tab's **Found** list with the reason, for you to **Send** or **Skip**. **Bulk find** (select series in the List) fills
 the same list without sending anything.
 
 **New chapters before MangaUpdates lists them.** The find pass only looks for the chapters a series is missing up to
 MangaUpdates' latest chapter, which can lag the sites by days or weeks. A scheduled **check for new chapters**
 (`MANGALIST_CHAPTER_CHECK_SCHEDULE`, default every 6 hours; Settings > Scheduled tasks changes it or turns it off) asks
-the saved Suwayomi source of each ongoing chapter series that is not Off for the chapters numbered after the newest one
+the saved chapter source of each ongoing chapter series that is not Off for the chapters numbered after the newest one
 you have - the same as **Check for new chapters** in the List's row menu. Series on Auto get them sent; for series on
 Notify they wait in **Found**. A series without a saved source (or a MangaDex id MangaPixer links), or with a download
 on its way, is not asked. To keep the requests down, the check asks a source for the chapter list only, first syncs
@@ -131,21 +135,23 @@ chapters gets the whole chapter, never its parts. A part that turns up later (`3
 too - but never `38.1` while the files `38` and `38.2` are held: the file `38` is part 1 there. The chapters panel shows
 the other form unticked, with the reason.
 
-**Chapters without Suwayomi: the built-in extensions (since 2026.10.56).** Chapter downloads go through Suwayomi by
-default; you can choose MangaList's own extension host instead: a small Java program shipped in the image
-(`extension-host/`, about 210 MB with its Java 21 runtime) that runs the same Mihon / Tachiyomi extensions - MangaDex,
-Weeb Central, MangaFire, ... - and answers MangaList the way Suwayomi does, so the chapters panel, Check for new
-chapters, the find pass, filing and Retry / Cancel work unchanged. Every screen names the program in use (Suwayomi, or
-"the extension host"). To use it:
+**Chapters: the built-in extensions (since 2026.10.56; the default since 2026.11.2).** Chapter downloads go through
+MangaList's own extension host: a small Java program shipped in the image (`extension-host/`, about 210 MB with its
+Java 21 runtime) that runs Mihon / Tachiyomi extensions - MangaDex, Weeb Central, MangaFire, ... A
+[Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server of your own can be chosen instead; the host answers
+MangaList the way Suwayomi does, so the chapters panel, Check for new chapters, the find pass, filing and Retry /
+Cancel work the same with either. Every screen names the program in use (Suwayomi, or "the extension host"). The
+set-up:
 
-- **Choose it in Settings**, in either of two places - they are one setting: **Connected services > Chapter downloads
-  through** or **Download sources > Chapter sources** (the card that lists the sources chapters come from, with the same
-  chooser). Suwayomi stays the default. Switching is refused while chapter downloads are still in progress with the
-  other program. In the container the host starts by itself within a minute of choosing it (the `extension-host`
+- **The program is chosen in Settings**, in either of two places - they are one setting: **Connected services > Chapter
+  downloads through** or **Download sources > Chapter sources** (the card that lists the sources chapters come from,
+  with the same chooser). The built-in extensions are the default; a set-up from before 2026.11.2 that has a Suwayomi
+  connection and never chose stays on Suwayomi. Switching is refused while chapter downloads are still in progress with the
+  other program. In the container the host starts by itself within a minute while it is chosen (the `extension-host`
   service; its data - the installed extensions, the id database, the download queue and the WebView's Chromium bundle -
-  lives in `/config/extension-host`) and stops when you switch back; the card says "Starting..." until it answers.
+  lives in `/config/extension-host`) and stops when you switch to Suwayomi; the card says "Starting..." until it answers.
   `MANGALIST_EXTENSION_HOST=1` keeps it always running, `0` turns the service off.
-- **Going back to Suwayomi** is the same chooser: Suwayomi's connection and its per-series choices were never touched,
+- **Switching to Suwayomi and back** is the same chooser: Suwayomi's connection and its per-series choices were never touched,
   so nothing has to be set up again (what you picked on the host in the meantime is not copied back). The list of
   allowed sources is shared by both programs; editing it while one program is chosen keeps the sources only the other
   has installed.
@@ -223,13 +229,14 @@ Series folders are named `Romanized Title [English Title]` - MangaUpdates' title
 brackets (AniList's, found through MangaDex's links; else the folder's own English title), just `Romanized Title`
 otherwise, like animefetch's show folders. The official titles are looked up in the background when the Renamer opens
 and cached, so a scan never asks the network. When the path of a series' longest file would pass 255 characters, its
-folder name leaves the English part out. Add series proposes that name; the Renamer lists a folder named differently as
+folder name leaves the English part out. A title that starts with a dot is written with `DOT` (`.hack//SIGN` is the
+folder `DOT hack--SIGN`): a folder whose name starts with a dot is never scanned. Add series proposes that name; the Renamer lists a folder named differently as
 Rename pending and renames it only when you press Rename.
 
 ## MangaUpdates matching
 
 **Check MU** uses `mangalist/matcher/`, a Python port of the
-[MangaPixer](https://github.com/dixit92/mangapixer) 1.31.1 matcher with the same rules and
+[MangaPixer](https://github.com/dixit92/mangapixer) 1.42.0 matcher with the same rules and
 thresholds. It first decides whether a folder is one work (a series, a series with `Volumes/` /
 `Chapters/` / `Season N/` subfolders, or a one-shot) and matches only those. It searches a few title
 variants (and a second results page on a tie), then scores candidates by title similarity (sequel

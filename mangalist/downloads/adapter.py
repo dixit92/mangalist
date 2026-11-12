@@ -61,7 +61,6 @@ from .contracts import (
     Placement,
     QbtConnection,
     SuwayomiConnection,
-    SuwayomiSource,
     TorrentClient,
 )
 from .budget import OVER_CAP_QUEUE, SIZE_SELECTED, BudgetState

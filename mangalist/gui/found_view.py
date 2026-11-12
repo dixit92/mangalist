@@ -1396,16 +1396,11 @@ class FoundView(QWidget):
             return outcomes
 
         self.say(f"Sending {len(items)}...")
-        self._call = start_call(run, lambda outcomes: self.say(*send_all_summary(outcomes)),
-                                lambda message: self.say(f"Could not send them: {message}", "bad"),
-                                self._call_finished)
+        self._call = start_call(run, lambda outcomes: self._sent(*send_all_summary(outcomes)),
+                                lambda message: self._sent(f"Could not send them: {message}", "bad"),
+                                self._send_finished)    # a Send clicked meanwhile is queued: it goes next
         self._enable()
         return True
-
-    def _call_finished(self) -> None:
-        self._call = None
-        self._enable()
-        self.changed.emit()
 
     def stop(self) -> None:
         self._queue.clear()

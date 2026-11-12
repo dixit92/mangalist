@@ -56,8 +56,7 @@ a = Analysis(
         "mangalist.scanner",
         "mangalist.anilist_client",
         "mangalist.gui.theme",
-        # Loaded by name (mangalist/gui/lanes.py), so PyInstaller cannot see them: the Download tab, Settings and the
-        # duplicates view (a name that does not exist yet is only a build warning).
+        # Imported inside functions (mangalist/gui/lanes.py): the Download tab, Settings and the duplicates view.
         "mangalist.gui.download_tab",
         "mangalist.gui.settings_dialog",
         "mangalist.gui.duplicates_view",

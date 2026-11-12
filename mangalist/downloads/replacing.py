@@ -32,7 +32,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Callable, Collection, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Collection, Dict, FrozenSet, Iterable, List, Sequence, Set, Tuple
 
 from ..scanner import ARCHIVE_EXTS
 from .arrivals import _expand, volumes_of

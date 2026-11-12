@@ -401,6 +401,8 @@ def test_the_live_backend_knows_the_chosen_program(qapp, tmp_path):
     store.reset_stores()
     db = store.get_store()
     live = LiveBackend(db)
+    assert live.chapter_builtin() is True                        # a fresh install: the built-in extensions
+    SuwayomiSettings(db).set_backend("suwayomi")
     assert live.chapter_builtin() is False
     SuwayomiSettings(db).set_backend("extensions")
     assert live.chapter_builtin() is True

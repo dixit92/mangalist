@@ -270,6 +270,7 @@ def test_connection_is_kept_out_of_settings(db):
     from mangalist.downloads.contracts import SuwayomiConnection
 
     store = SuwayomiSettings(db)
+    store.set_backend("suwayomi")           # Suwayomi's own settings: chosen (a fresh install has the host's connection)
     assert store.connection() is None
     store.save_connection(SuwayomiConnection("http://suwa:4567", "owner", "pw-secret", "/data/suwayomi/downloads"))
     conn = store.connection()
