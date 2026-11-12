@@ -114,7 +114,8 @@ def test_the_windows_path_rule_leaves_room_for_a_chapter_file():
     name = fs.scheme_name("Made Up Romaji", "E" * 120, fits=fits)
     full = "\\\\SERVER\\share\\" + "L" * 150 + "\\" + name + "\\" + fs.PROBE_FILE
     assert len(full) <= 259 and name.startswith("Made Up Romaji [E") and name.endswith(fs.ELLIPSIS + "]")
-    assert fs.windows_fits("/data/share/x", None)("N" * 255) and not fs.windows_fits("/data/share/x", None)("N" * 256)
+    off = fs.windows_fits("/data/share/x", None, native=False)
+    assert off("N" * 255) and not off("N" * 256)
 
 
 @pytest.mark.parametrize("text, english, romaji", [

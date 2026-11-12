@@ -36,7 +36,8 @@ from mangalist.naming import (
 from mangalist.parsing import Kind, Layer, ParseContext, parse_name, parse_names
 
 D = Decimal
-WIN = NameLimits(windows_server="SERVER")
+WIN = NameLimits(windows_server="SERVER", native_windows=False)      # the container's rule, wherever the tests run
+OFF = NameLimits(native_windows=False)                               # no Windows rule at all
 
 
 # --- the format ------------------------------------------------------------------------------------------------
@@ -327,7 +328,7 @@ def test_the_windows_path_limit():
     assert r.fits and len(wp) <= 259 and r.shortened == ("title",)
     assert r.name.endswith(f"{ELLIPSIS}) [Grp].cbz")
     # without a server name (or outside /data/<share>) only the 255-byte rule applies
-    assert chapter_name("1", title="T" * 120, folder=folder).shortened == ()
+    assert chapter_name("1", title="T" * 120, folder=folder, limits=OFF).shortened == ()
     assert chapter_name("1", title="T" * 120, folder="/mnt/other/" + "F" * 200, limits=WIN).shortened == ()
 
 
@@ -370,10 +371,11 @@ def test_volume_names_shorten_only_the_group():
 def test_name_fits():
     assert name_fits("x" * 255) and not name_fits("x" * 256)
     assert not name_fits("Ü" * 128)
-    assert name_fits("x" * 200, folder="/data/R/" + "F" * 100)
+    assert name_fits("x" * 200, folder="/data/R/" + "F" * 100, limits=OFF)
     assert not name_fits("x" * 200, folder="/data/R/" + "F" * 100, limits=WIN)
     assert name_fits("x" * 100, folder="/data/R/" + "F" * 100, limits=NameLimits(windows_server="S",
-                                                                                     max_windows_path=300))
+                                                                                     max_windows_path=300,
+                                                                                     native_windows=False))
 
 
 def test_name_fits_on_windows_itself():
