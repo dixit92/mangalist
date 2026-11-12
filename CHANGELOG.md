@@ -7,6 +7,8 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+- **An e-book of a single volume is not downloaded.** Since 2026.11.2 a pack of e-books is no longer offered, which left its volumes to the next releases: single volumes of the same e-book, sent without a look at their files, then downloaded and failed ("no archives"). A single volume's file list is now read like a pack's, and an e-book or audio release is neither sent nor offered.
+
 ## [2026.11.2] - 2026-11-11
 
 The sixty-second MangaList release (testing build): fixes from a full audit - replaced copies and downloads are safer when something goes wrong, the built-in extensions are the default for chapters, and Settings asks before dropping unsaved edits.

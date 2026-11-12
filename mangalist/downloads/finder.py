@@ -564,7 +564,17 @@ def _volume_pick(ctx: _Context, candidate: NyaaCandidate, fills: Tuple[str, ...]
     them after all)."""
     single = not candidate.is_pack and (candidate.vol_to is None or _key(candidate.vol_to) == _key(candidate.vol_from))
     only_missing, size, blocker = False, candidate.size_bytes or None, None
-    if not single:
+    if single:
+        # A single volume is sent whole, but its files are still looked at: an e-book of the volume (a light novel's
+        # or the publisher's epub) can never be filed (2026-11-12: two were sent, downloaded and failed).
+        try:
+            selection = ctx.backend.inspect_pack(candidate, list(fills))
+        except Exception:  # noqa: BLE001 - not readable now: sent as before
+            selection = None
+        if selection is not None and selection.refused:
+            _log.info("Find pass %d: %s: %s - not offered", ctx.run_id, candidate.title, selection.problem)
+            return None
+    else:
         if not _partial_on(ctx):
             blocker = REASON_PARTIAL_OFF
         else:
