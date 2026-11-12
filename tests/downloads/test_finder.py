@@ -92,6 +92,24 @@ def test_auto_sends_a_single_volume_that_fills_a_missing_one(db, w):
     assert [c for c in w.qbt.calls if c[0] == "set_file_priority"] == []          # a single volume: whole
 
 
+def test_a_single_volume_that_is_an_e_book_is_not_sent_or_offered(db, w):
+    """An e-book of one volume (the light novel, or the publisher's epub) is read like a pack's file list: it could
+    never be filed, so it is neither sent nor offered, and a comic release of the same volume still goes out."""
+    auto(db, w)
+    novel = pack_release(1, w.nyaa, w.qbt, ["Series A, Vol. 2 [Pub] [Store].epub"], "2", "2", ("2",))
+    assert not novel.is_pack
+    w.search.results = [novel]
+    w.entries = wanted(w.series_id, w.folder, volumes=["2"])
+    report = run(db, w)
+    assert (report.sent, report.found) == (0, 0) and w.backend.ledger.all_records() == []
+    assert findings(db) == [] and findings(db, "sent") == []
+    w.search.results = [novel, single_release(2, w.qbt, "2", seeders=1)]
+    report = run(db, w)
+    assert (report.sent, report.found) == (1, 0)
+    (rec,) = w.backend.ledger.all_records()
+    assert rec.wanted_volumes == ("2",) and rec.info_hash != novel.info_hash
+
+
 def test_auto_sends_a_pack_narrowed_to_the_missing_volumes(db, w):
     auto(db, w)
     w.search.results = [pack_release(1, w.nyaa, w.qbt, NAMES, "1", "8", ("2", "3"))]
