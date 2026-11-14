@@ -7,6 +7,12 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.4] - 2026-11-14
+
+The sixty-fourth MangaList release (testing build): new chapters after a season's end go to the next season's folder.
+
+- **New chapters after a season's end go to the next season's folder.** A series kept in season folders (`Season 01` ... `Season 04`) put every new chapter into the latest one, even after a chapter titled as that season's end ("S4 END", "Season 3 END"). New chapters now go to the next season's folder (`Season 05`, with the same word and padding), made when the first one is filed; a chapter of the season that ended - a gap filled late, an extra after the finale - still goes to its season. In a series' chapters panel the new folder is the default, and another can still be chosen.
+
 ## [2026.11.3] - 2026-11-12
 
 The sixty-third MangaList release (testing build): the find pass no longer downloads an e-book of a single volume.

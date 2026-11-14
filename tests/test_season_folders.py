@@ -112,3 +112,57 @@ def test_old_season_rows_are_folded_into_the_parent_not_listed_missing(tmp_path,
         hows = {row[0] for row in con.execute("SELECT how FROM series_carries")}
     assert hows == {"unit-folder"}
     assert {a.series_id for a in db.list_archives(r.id)} == {live[0].id}
+
+
+def _end_units(*extra):
+    return [Unit("Season 03/Ch. 0115.00 (Season 3 END).cbz", "chapter", ch_from="115", ch_to="115", title="Season 3 END"),
+            Unit("Season 04/Ch. 0116.00 ({S4 Start}).cbz", "chapter", ch_from="116", ch_to="116", title="{S4 Start}"),
+            Unit("Season 04/Ch. 0151.00 (S4 END-).cbz", "chapter", ch_from="151", ch_to="151", title="S4 END-"),
+            *extra]
+
+
+def test_after_a_season_end_new_chapters_go_to_the_next_season(tmp_path):
+    # owner, 2026-11-14: after "S4 END" the next chapters were filed into "Season 04"
+    s = tmp_path / "Example Hunter"
+    for season in ("Season 03", "Season 04"):
+        (s / season).mkdir(parents=True)
+    filed_late = Unit("Season 04/Ch. 0152.00.cbz", "chapter", ch_from="152", ch_to="152")    # filed before the rule
+    p = chm.chapter_placement(str(s), _end_units(filed_late))
+    new, ended = str(s / "Season 05"), str(s / "Season 04")
+    assert p.target_dir == p.new_dir == new and not (s / "Season 05").exists() and not p.ambiguous
+    assert p.earlier_dir == ended and p.earlier_through == "151"
+    assert p.options[0] == new and ended in p.options and str(s / "Season 03") in p.options
+    assert '"Season 04" ended at ch 151 ("S4 END-")' in p.reason and '"Season 05"' in p.reason
+    assert p.folder_for("160") == p.folder_for("152") == new
+    assert p.folder_for("150") == p.folder_for("151") == p.folder_for("151.5") == ended   # its gaps and extras
+    assert p.folder_for(None) == new
+    (s / "Season 05").mkdir()                       # made by hand (or by the first filing): used, nothing to make
+    made = chm.chapter_placement(str(s), _end_units())
+    assert made.target_dir == new and made.new_dir is None and "(made when" not in made.reason
+
+
+def test_only_the_folders_own_season_end_counts(tmp_path):
+    s = tmp_path / "Example Hunter"
+    for season in ("Season 03", "Season 04"):
+        (s / season).mkdir(parents=True)
+    units = _end_units()[:2] + [
+        Unit("Season 04/Ch. 0117.00 (Season 3 End Notice).cbz", "chapter", ch_from="117", ch_to="117",
+             title="Season 3 End Notice"),                                # another season's notice, kept here
+        Unit("Season 04/Ch. 0118.00 (Weekend).cbz", "chapter", ch_from="118", ch_to="118", title="Weekend"),
+        Unit("Season 04/Ch. 0119.00 (END).cbz", "chapter", ch_from="119", ch_to="119", title="END"),
+        Unit("Season 04/Ch. 0120.00 (Season Ending).cbz", "chapter", ch_from="120", ch_to="120", title="Season Ending")]
+    p = chm.chapter_placement(str(s), units)
+    assert p.target_dir == str(s / "Season 04") and p.new_dir is None and p.earlier_dir is None
+
+
+def test_one_season_folder_that_ended_starts_the_next(tmp_path):
+    s = tmp_path / "Example Hunter"
+    (s / "Season 1").mkdir(parents=True)
+    units = [Unit("Season 1/Ch. 0001.00.cbz", "chapter", ch_from="1", ch_to="1"),
+             Unit("Season 1/Ch. 0040.00 (Season 1 End).cbz", "chapter", ch_from="40", ch_to="40",
+                  title="Season 1 End")]
+    p = chm.chapter_placement(str(s), units)
+    assert p.target_dir == p.new_dir == str(s / "Season 2")              # the folder's own word and padding
+    assert p.folder_for("41") == str(s / "Season 2") and p.folder_for("40") == str(s / "Season 1")
+    (s / "Season 2").write_text("not a folder")                         # a file in the way: no new folder
+    assert chm.chapter_placement(str(s), units).target_dir == str(s / "Season 1")
