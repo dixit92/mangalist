@@ -315,3 +315,28 @@ def test_a_plan_left_by_a_crash_is_settled(cledger, sent, suwa, downloads, cseri
 def test_find_cbz_explains_a_wrong_folder(tmp_path):
     path, why = find_cbz(str(tmp_path), {"chapter_name": "Ch.1", "source_name": "S", "manga_title": "T"})
     assert path is None and "no \"mangas\" folder" in why
+
+
+def test_after_a_season_end_the_next_season_folder_is_made_by_the_filing(db, cledger, suwa, downloads, tmp_path):
+    # owner, 2026-11-14: chapters after "S4 END" went into "Season 04"; the next season's folder is made by the
+    # journal's link step when its first chapter is filed (so an undo takes it away again)
+    root = tmp_path / "library" / "Manhwa"
+    season = root / "Series S" / "Season 01"
+    season.mkdir(parents=True)
+    (season / "Ch. 0001.00.cbz").write_bytes(data("s1"))
+    (season / "Ch. 0003.00 (Season 1 End).cbz").write_bytes(data("s3"))
+    r = db.add_root(str(root), "Manhwa")
+    scan(db)
+    sid = db.get_series(r.id, "Series S").id
+    placement = chm.chapter_placement_for(db, sid)
+    new = root / "Series S" / "Season 02"
+    assert placement.target_dir == placement.new_dir == str(new) and not new.exists()
+    match = chm.MangaMatch(MANGADEX, MANGA, chm.HOW_MANGADEX)
+    with pytest.raises(chm.ChapterSendRefused):                           # only when asked to make it
+        chm.send_chapters(suwa, cledger, sid, match, suwa.chapter_list[:1], str(new))
+    (rec,) = chm.send_placed(suwa, cledger, sid, match, suwa.chapter_list[:1], placement).records
+    assert rec.target_dir == str(new) and not new.exists()               # nothing made before the chapter is there
+    suwa.finish(4, data=data("chapter four"))
+    report = run(suwa, cledger, downloads)
+    assert rec.id in report.filed and new.is_dir()
+    assert [f"Season 02/{p.name}" for p in new.iterdir()] == list(cledger.get(rec.id).filed_files)

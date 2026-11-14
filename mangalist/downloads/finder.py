@@ -909,7 +909,7 @@ def _send_chapters(ctx: _Context, sid: int, name: str, pick: _Pick, match, picks
     """Send an Auto pick of chapters. Returns None when it went out, else why it waits. What was sent is logged as the
     series' line - or added to *said* for the caller's own line (the chapter check's). *usual*: the series' usual
     group - a pick from another group is provisional (:mod:`.usual_group`)."""
-    from .chapters import ChapterSendRefused, chapter_placement_for, send_chapters
+    from .chapters import ChapterSendRefused, chapter_placement_for, send_placed
 
     try:
         placement = chapter_placement_for(ctx.db, sid)
@@ -918,9 +918,8 @@ def _send_chapters(ctx: _Context, sid: int, name: str, pick: _Pick, match, picks
     if not placement.target_dir:
         return f"where to file the chapters is not decided ({placement.reason}); choose a folder first"
     try:
-        outcome = send_chapters(ctx.chapter_client, ctx.backend.chapter_ledger, sid, match, picks,
-                                placement.target_dir, manga_title=manga_title, source_name=source_name,
-                                usual_group=usual)
+        outcome = send_placed(ctx.chapter_client, ctx.backend.chapter_ledger, sid, match, picks, placement,
+                              manga_title=manga_title, source_name=source_name, usual_group=usual)
     except ChapterSendRefused as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001 - Suwayomi down: it waits, and the next pass tries again
@@ -1052,7 +1051,7 @@ def _send_nyaa_finding(store: FindingStore, backend, f, fills: Tuple[str, ...]) 
 def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str, ...]) -> str:
     from ..gui.downloads_backend import BackendError
     from .chapter_backend import backend_of, name_of_backend, wording
-    from .chapters import HOW_CONFIRMED, MangaMatch, ChapterSendRefused, chapter_placement_for, send_chapters
+    from .chapters import HOW_CONFIRMED, MangaMatch, ChapterSendRefused, chapter_placement_for, send_placed
 
     p = f.payload
     try:
@@ -1097,10 +1096,10 @@ def _send_chapter_finding(db, store: FindingStore, backend, f, fills: Tuple[str,
                     "the series' chapters first.")
         match = MangaMatch(source, manga, how, now)
         try:
-            outcome = send_chapters(client, backend.chapter_ledger, f.series_id, match, picks, placement.target_dir,
-                                    manga_title=fetched.manga.title or manga.title,
-                                    source_name=fetched.source_name or source.display_name,
-                                    usual_group=p.get("usual") or None)
+            outcome = send_placed(client, backend.chapter_ledger, f.series_id, match, picks, placement,
+                                  manga_title=fetched.manga.title or manga.title,
+                                  source_name=fetched.source_name or source.display_name,
+                                  usual_group=p.get("usual") or None)
         except ChapterSendRefused as exc:
             return f"Not sent: {exc}."
     except Exception as exc:  # noqa: BLE001 - Suwayomi down: the finding waits

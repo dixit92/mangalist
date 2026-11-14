@@ -146,6 +146,9 @@ def chapter_placement(series_dir: str, units: Sequence) -> Placement:
         if target is None or not os.path.isdir(target):
             return Placement(series_dir, None, f"the chapters' folder {folder or '(series folder)'!r} is gone; rescan "
                                                "first")
+        ended = _after_season_end(series_dir, folder, units, [folder, ""]) if folder else None
+        if ended is not None:
+            return ended
         return Placement(series_dir, target, "chapters live in the series folder" if not folder
                          else f'chapters live in "{folder}"')
     subs = [f for f in folders if f]
@@ -154,9 +157,13 @@ def chapter_placement(series_dir: str, units: Sequence) -> Placement:
         target = _folder(series_dir, latest)
         if target is not None and os.path.isdir(target):
             ordered = sorted(folders, key=lambda f: (-highest.get(f, Decimal(-1)), f))
+            ordered += [""] if "" not in ordered else []
+            ended = _after_season_end(series_dir, latest, units, ordered)
+            if ended is not None:
+                return ended
             return Placement(series_dir, target, f'chapters live in {len(subs)} season / part folders; new ones go to '
                                                  f'"{latest}", the one with the latest chapters',
-                             _options(series_dir, ordered + ([""] if "" not in ordered else [])))
+                             _options(series_dir, ordered))
     if len(folders) > 1:
         ordered = [f for f, _ in sorted(folders.items(), key=lambda kv: (-kv[1], kv[0]))]
         return Placement(series_dir, None, f"chapters are spread over {len(folders)} folders; choose one",
@@ -168,6 +175,57 @@ def _is_unit_subfolder(name: str) -> bool:
     from ..scanner import _is_unit_subfolder as unit
 
     return unit(name)
+
+
+#: A chapter title that ends a season or part: "Season 1 End", "Season 3 END", "S4 END-", "Season 2 End Notice",
+#: "Part 2 Finale" (a bare "S" needs its number; "Ending", "Weekend" and a plain "END" - the whole series' - are not).
+_SEASON_END = re.compile(r"(?i)(?<![a-z0-9])(?:(?:season|part)\s*(?:0*(?P<a>\d+))?|s\s*0*(?P<b>\d+))\s*[-:]?\s*"
+                         r"(?:end|finale)(?![a-z])")
+#: A season / part folder with its number last ("Season 04", "Part 2", "S3").
+_NUMBERED_FOLDER = re.compile(r"^(?P<word>.*?)(?P<num>\d+)$")
+
+
+def _after_season_end(series_dir: str, folder: str, units: Sequence, ordered: Sequence[str]) -> Optional[Placement]:
+    """The placement when the season / part folder *folder* (the latest) holds a chapter titled as that season's end
+    (owner, 2026-11-14: after "S4 END" the next chapters were filed into "Season 04"): new chapters go to the next
+    season's folder ("Season 05", with the folder's own word and padding), made when the first one is filed; a chapter
+    of the ended season (numbered up to the end chapter's whole number: a gap filled late, an extra after the finale)
+    still goes to *folder*. None when no such title, or no next folder name can be made."""
+    from .placement import _folder, _options
+
+    name = folder.split("/")[-1]
+    m = _NUMBERED_FOLDER.match(name)
+    if not m or not _is_unit_subfolder(name):
+        return None
+    season = int(m.group("num"))
+    end: Optional[Tuple[Decimal, str]] = None
+    for u in units:
+        rel = (u.rel_path or "").replace("\\", "/").strip("/")
+        if getattr(u, "kind", None) not in ("chapter", "both") or os.path.dirname(rel) != folder:
+            continue
+        hit = _SEASON_END.search(getattr(u, "title", None) or "")
+        number = to_decimal(getattr(u, "ch_from", None))
+        if hit is None or number is None:
+            continue
+        stated = hit.group("a") or hit.group("b")
+        if stated is not None and int(stated) != season:
+            continue                        # another season's end, kept in this folder by hand
+        if end is None or number > end[0]:
+            end = (number, u.title)
+    if end is None:
+        return None
+    following = f"{m.group('word')}{season + 1:0{len(m.group('num'))}d}"
+    parent = os.path.dirname(folder)
+    new = _folder(series_dir, f"{parent}/{following}" if parent else following)
+    earlier = _folder(series_dir, folder)
+    if new is None or earlier is None or (os.path.lexists(new) and not os.path.isdir(new)):
+        return None
+    through = int(end[0])
+    made = "" if os.path.isdir(new) else " (made when the first one is filed)"
+    return Placement(series_dir, new, f'"{folder}" ended at ch {through} ("{end[1]}"); new chapters go to '
+                                      f'"{following}"{made}, chapters up to {through} to "{folder}"',
+                     (new,) + tuple(p for p in _options(series_dir, ordered) if p != new),
+                     new_dir=None if os.path.isdir(new) else new, earlier_dir=earlier, earlier_through=str(through))
 
 
 def chapter_placement_for(db, series_id: int) -> Placement:
@@ -799,18 +857,22 @@ class ChapterSendOutcome:
 
 def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMatch, picks: Sequence[SuwayomiChapter],
                   target_dir: str, *, manga_title: str = "", source_name: str = "", usual_group: Optional[str] = None,
-                  replacing: Optional[Mapping[str, Mapping[str, Any]]] = None) -> ChapterSendOutcome:
+                  replacing: Optional[Mapping[str, Mapping[str, Any]]] = None,
+                  may_create: bool = False) -> ChapterSendOutcome:
     """Record and enqueue the picked chapters (see the module docstring). *ledger*: a Suwayomi ledger. *usual_group*:
     the series' usual group of an automatic send - a pick from another group is recorded as provisional
     (:mod:`.usual_group`); *replacing*: chapter number -> the provisional copy a pick replaces (the usual group's copy,
-    sent although the chapter is held)."""
+    sent although the chapter is held); *may_create*: *target_dir* is a new season's folder still to be made
+    (:attr:`Placement.new_dir`) - its parent must be there."""
     from ..store.downloads import StatusConflict
 
     if not match.confirmed:
         raise ChapterSendRefused("this match has not been confirmed yet")
     if not picks:
         raise ChapterSendRefused("pick at least one chapter")
-    if not target_dir or not os.path.isabs(target_dir) or not os.path.isdir(target_dir):
+    to_make = (may_create and bool(target_dir) and not os.path.lexists(target_dir)
+               and os.path.isdir(os.path.dirname(target_dir)))
+    if not target_dir or not os.path.isabs(target_dir) or not (os.path.isdir(target_dir) or to_make):
         raise ChapterSendRefused(f"the target folder {target_dir!r} is not there")
     try:
         client.add_to_library(match.manga.id)       # Suwayomi keeps its library entry (and its chapter list) for it
@@ -856,3 +918,25 @@ def send_chapters(client: ChapterClient, ledger, series_id: int, match: MangaMat
     _log.info("Chapters: series %s: sent %d chapter(s) from %s to %s (batch %s)%s", series_id, len(records),
               source.display_name, name_of_backend(backend), batch, f"; skipped {len(skipped)}" if skipped else "")
     return out
+
+
+def send_placed(client: ChapterClient, ledger, series_id: int, match: MangaMatch, picks: Sequence[SuwayomiChapter],
+                placement: Placement, **kwargs) -> ChapterSendOutcome:
+    """:func:`send_chapters` with each pick in its placement's folder (:meth:`Placement.folder_for`): after a season's
+    end the new season's folder, made by the filing, and a chapter of the ended season in that season's. One send per
+    folder; the outcomes are merged."""
+    by_folder: Dict[Optional[str], List[SuwayomiChapter]] = {}
+    for ch in picks:
+        by_folder.setdefault(placement.folder_for(ch.number), []).append(ch)
+    out: Optional[ChapterSendOutcome] = None
+    for folder, chapters in by_folder.items():
+        one = send_chapters(client, ledger, series_id, match, chapters, folder,
+                            may_create=placement.new_dir is not None and folder == placement.new_dir, **kwargs)
+        if out is None:
+            out = one
+        else:
+            out.records.extend(one.records)
+            out.skipped.extend(one.skipped)
+            out.error = out.error or one.error
+    return out if out is not None else send_chapters(client, ledger, series_id, match, picks, placement.target_dir,
+                                                     **kwargs)

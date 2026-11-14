@@ -81,6 +81,7 @@ from .chapters import (
     newer_text,
     remember_match,
     send_chapters,
+    send_placed,
     title_candidates,
 )
 from .options import (
@@ -829,8 +830,17 @@ class Backend(ExtensionsBackendMixin, FailuresBackendMixin):
     def send_chapters(self, series_id: int, match: MangaMatch, picks: Sequence, target_dir: str,
                       manga_title: str = "", source_name: str = "") -> ChapterSendOutcome:
         self._same_program(match)
+        try:
+            placement = chapter_placement_for(self.db, series_id)
+        except LookupError:
+            placement = None
         client = self._chapter_client()
         try:
+            if (placement is not None and placement.target_dir and target_dir
+                    and os.path.normpath(target_dir) == os.path.normpath(placement.target_dir)):
+                # the folder offered: after a season's end the new season's, and an ended season's chapter in it
+                return send_placed(client, self.chapter_ledger, series_id, match, picks, placement,
+                                   manga_title=manga_title, source_name=source_name)
             return send_chapters(client, self.chapter_ledger, series_id, match, picks, target_dir,
                                  manga_title=manga_title, source_name=source_name)
         except ChapterSendRefused as exc:

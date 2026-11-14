@@ -193,10 +193,28 @@ class Placement:
     target_dir: Optional[str]           # absolute; None when ambiguous
     reason: str                         # e.g. 'volumes live in the series folder', 'volumes live in "Volumes"'
     options: Tuple[str, ...] = ()       # candidate folders (absolute, inside series_dir) when ambiguous
+    # Chapters after a season's end (owner, 2026-11-14): target_dir is the next season's folder, not made yet
+    # (new_dir; the filing's link step makes it), and a chapter numbered up to the end chapter's whole number
+    # (earlier_through, an exact decimal string) still goes to the season that ended (earlier_dir).
+    new_dir: Optional[str] = None
+    earlier_dir: Optional[str] = None
+    earlier_through: Optional[str] = None
 
     @property
     def ambiguous(self) -> bool:
         return self.target_dir is None
+
+    def folder_for(self, number: Optional[str]) -> Optional[str]:
+        """The folder chapter *number* goes to: the ended season's for a chapter of that season, else target_dir."""
+        from decimal import Decimal, InvalidOperation
+
+        if self.earlier_dir is None or self.earlier_through is None or number is None:
+            return self.target_dir
+        try:
+            whole = int(Decimal(str(number)))
+        except (InvalidOperation, ValueError):
+            return self.target_dir
+        return self.earlier_dir if 0 <= whole <= int(Decimal(self.earlier_through)) else self.target_dir
 
 
 class DownloadStatus:
