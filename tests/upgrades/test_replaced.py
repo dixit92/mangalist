@@ -16,7 +16,7 @@ from mangalist.store.journal import Journal, StepRefused
 from mangalist.store.lock import RootLock
 from mangalist.store.replacements import ReplacementConflict, ReplacementStore
 
-from ..downloads.fakes import data
+from ..downloads.fakes import data, scan
 from .conftest import SERIES, chapter_files, file_volumes, make_series, names
 
 NOW = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
@@ -220,6 +220,29 @@ def test_the_purge_keeps_an_expired_batch_whose_volume_is_not_in_the_library(db,
         f.write(payload)
     assert upgrades.purge_expired(db, now=NOW + timedelta(days=31)) == [batch.id]
     assert names(holding) == []
+
+
+def test_a_batch_without_its_volume_record_is_checked_against_the_series(db, ledger, library, holding, known,
+                                                                        tmp_path, caplog):
+    # a batch of an older build records no volume files: it was never emptied, with a warning every hour (2026-11-21).
+    # The series' own files stand in for the record: emptied while the series holds the volume, else kept.
+    sid, sdir = make_series(db, library, chapter_files(CH))
+    file_volumes(ledger, tmp_path, sid, sdir, ("1",))
+    upgrades.after_filing(db, ledger, now=NOW)
+    (batch,) = batches(db)
+    with db.connect() as con:
+        con.execute("UPDATE replacements SET volume_files = '[]' WHERE id = ?", (batch.id,))
+    volume = batch.volume_files[0][0]
+    payload = open(volume, "rb").read()
+    os.remove(volume)
+    scan(db)                                            # the series holds no volume 1 now
+    with caplog.at_level(logging.WARNING):
+        assert upgrades.purge_expired(db, now=NOW + timedelta(days=31)) == []
+    assert "holds no volume 1 now" in caplog.text and ReplacementStore(db).get(batch.id).status == "held"
+    with open(volume, "wb") as f:
+        f.write(payload)
+    scan(db)
+    assert upgrades.purge_expired(db, now=NOW + timedelta(days=31)) == [batch.id]
 
 
 def test_a_tampered_record_cannot_make_the_purge_delete_library_files(db, ledger, library, holding, known, tmp_path):
