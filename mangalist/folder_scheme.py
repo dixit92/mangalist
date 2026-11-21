@@ -257,15 +257,60 @@ def short_name_candidates(title: Optional[str], english: Optional[str] = None,
     return sorted(found, key=lambda n: (found[n], len(n), n.casefold(), n))
 
 
-def short_romaji(title: Optional[str], english: Optional[str] = None, alt_titles: Iterable[str] = ()) -> str:
+def short_romaji(title: Optional[str], english: Optional[str] = None, alt_titles: Iterable[str] = (),
+                 current: Optional[str] = None) -> str:
     """The romaji part of the folder name: *title* cleaned; when it is longer than :data:`LONG_TITLE` characters, the
-    series' first official short name (:func:`short_name_candidates`) instead, else the full title - never cut."""
+    series' first official short name (:func:`short_name_candidates`); without one (owner, 2026-11-20: the scheme
+    proposed 135- and 147-character folders) the romaji part of the folder's *current* name when it is the title's own
+    head (:func:`own_head`: the owner's own shortening), else the title without its subtitle
+    (:func:`without_subtitle`), else the full title. Never cut in the middle of a word."""
     full = clean_part(title)
     if len(full) > LONG_TITLE:
         names = short_name_candidates(title, english, alt_titles)
         if names:
             return clean_part(names[0])
+        return own_head(full, current) or without_subtitle(full) or full
     return full
+
+
+def own_head(full: str, current: Optional[str]) -> Optional[str]:
+    """The romaji part of the folder name *current* when it is a shorter head of the (cleaned) romaji *full*, ending
+    at a word (``Isekai Shoukansareta Kita Seijo-sama ga Kareshi ga Shinda`` for the 147-character title), with at
+    least :data:`MIN_SHORT_LETTERS` letters; else None."""
+    if not current:
+        return None
+    head = clean_part(parse_folder(current)[0])
+    if (len(head) >= len(full) or _letters(head) < MIN_SHORT_LETTERS
+            or not full.casefold().startswith(head.casefold()) or full[len(head)].isalnum()):
+        return None
+    return full[:len(head)]                              # the title's own spelling (the owner's casing aside)
+
+
+#: Where a subtitle starts in a cleaned romaji title (a colon is already `` - ``: :func:`clean_part`).
+_SUBTITLE_AT = re.compile(r"\s+-\s+|\s*[~～]\s*")
+#: Words of a subtitle that names another work of the series (a side story, a sequel): never dropped - the name would
+#: become the main series' name.
+_WORK_WORDS = frozenset("""gaiden side story stories spin spinoff another episode episodes zero prequel sequel part
+season arc after before extra extras anthology official comic comics short shorts special specials remake reboot new
+second third final last retsuden hiroku ibun""".split())     # Retsuden, Hiroku, Ibun: a side story's chronicle
+
+
+def without_subtitle(full: str, guard: bool = True) -> Optional[str]:
+    """The cleaned romaji *full* without its subtitle - what follows the first `` - ``, ``~`` or ``～`` (``Osananajimi-tachi
+    ga Ninki Idol ni Natta - Amaama na Kanojo-tachi ...`` -> ``Osananajimi-tachi ga Ninki Idol ni Natta``). None when
+    there is no subtitle, the head has fewer than :data:`MIN_SHORT_LETTERS` letters, or the subtitle names another work
+    of the series (a number, ``Gaiden``, ``Side Story``, ``Season 2``, ...: :data:`_WORK_WORDS`; not checked with
+    *guard* off - the English title's subtitle, dropped only when the romaji's passed that check)."""
+    m = _SUBTITLE_AT.search(full)
+    if not m:
+        return None
+    head, rest = full[:m.start()].strip(" -~～"), full[m.end():]
+    if _letters(head) < MIN_SHORT_LETTERS:
+        return None
+    if guard and (any(c.isdigit() for c in rest)
+                  or any(w in _WORK_WORDS for w in re.findall(r"[a-z]+", rest.casefold()))):
+        return None
+    return head
 
 
 # --- the name --------------------------------------------------------------------------------------------------
@@ -318,27 +363,55 @@ def fit_name(romaji: str, english: Optional[str], fits=None) -> str:
     return _windows_safe(romaji)
 
 
+MIN_ENGLISH_CUT = 15            # an [English] part cut to fit keeps at least this many characters, else it is left out
+
+
+def _cut_at_word(text: str, chars: int) -> Optional[str]:
+    """*text* cut to at most *chars* characters with ``…``, at the last word that fits (mid-word only when that word
+    alone is longer than half of it); None when *chars* is below :data:`MIN_ENGLISH_CUT`."""
+    if len(text) <= chars:
+        return text
+    if chars < MIN_ENGLISH_CUT:
+        return None
+    head = text[:chars - 1]
+    space = head.rfind(" ")
+    if space >= len(head) // 2:
+        head = head[:space]
+    head = head.rstrip(" .,-;:_~!?")
+    return f"{head}{ELLIPSIS}" if head else None
+
+
 def scheme_name(romaji: Optional[str], english: Optional[str] = None, *, fits=None,
-                alt_titles: Iterable[str] = (), max_chars: Optional[int] = None) -> Optional[str]:
+                alt_titles: Iterable[str] = (), max_chars: Optional[int] = None,
+                current: Optional[str] = None) -> Optional[str]:
     """The scheme's folder name for a series called *romaji* (its MangaUpdates title) with the English title *english*
     (None: unknown) and the alternative titles *alt_titles* (where an official short name of a long romaji comes from:
     :func:`short_romaji`); None without a usable romaji title. A name that would start with a dot starts with
     :data:`DOT` instead (:func:`folder_head`; an official short name that is not the title's own head is not the
     dotted title and stays as it is). The bracket is left out when the English title is the
-    romaji, its short form, or the short name is the English title (answer 86), written differently; and when the name
-    with it would be longer than *max_chars* characters (answer 85: the room :func:`name_room` leaves for the folder
-    name below the path limit; None: no path limit)."""
+    romaji, its short form, or the short name is the English title (answer 86), written differently. When the name with
+    it would be longer than *max_chars* characters (answer 85: the room :func:`name_room` leaves for the folder name
+    below the path limit; None: no path limit), the English part is left out - unless the folder carries one now
+    (*current* has an ``[English]`` part): then it is cut at a word with ``…`` (owner, 2026-11-21, option A: a folder
+    keeps the English it has, none gains a cut one) and left out only when fewer than :data:`MIN_ENGLISH_CUT`
+    characters would remain. When the romaji loses its subtitle (:func:`without_subtitle`, or the owner's own head that
+    ends where it starts), the English title loses its own too (owner, 2026-11-21: ``Koisuru Futari wa Kiba o Kakusu
+    [The Two Lovebirds are Hiding Their Fangs]``, not ``[... - The Story of a Couple with a Crazy Gap]``). *current*:
+    the folder's name now (also a long romaji's own head the owner chose: :func:`short_romaji`)."""
     full, head = clean_part(romaji), folder_head(romaji)
     if not head:
         return None
-    short = short_romaji(romaji, english, alt_titles)
+    short = short_romaji(romaji, english, alt_titles, current)
     eng = clean_part(english_remainder(english, (full, short))) if english else ""
+    if eng and len(short) < len(full) and _SUBTITLE_AT.match(full[len(short):]):
+        eng = without_subtitle(eng, guard=False) or eng      # the romaji's subtitle went: the English one too
     if eng and (same_title(eng, short) or same_title(eng, full)):
         eng = ""
     if full.casefold().startswith(short.casefold()):      # the title or its own head: with what stands for its dot
         short = head[:len(head) - len(full)] + short
     if eng and max_chars is not None and len(_windows_safe(_render(short, eng))) > max_chars:
-        eng = ""
+        has_english = bool(current) and parse_folder(current)[1] is not None
+        eng = (_cut_at_word(eng, max_chars - len(short) - 3) or "") if has_english else ""
     return fit_name(short, eng or None, fits) or None
 
 
@@ -471,9 +544,11 @@ class SeriesTitles:
     source: str = ""                 # where the romaji came from ("MangaPixer", "MangaUpdates match", ...)
     alt_titles: Tuple[str, ...] = ()  # the record's alternative titles (an official short name of a long romaji)
     english_from: str = ""
+    current: Optional[str] = None     # the folder's name now (its own head of a long romaji is kept: short_romaji)
 
     def name(self, fits=None, max_chars: Optional[int] = None) -> Optional[str]:
-        return scheme_name(self.romaji, self.english, fits=fits, alt_titles=self.alt_titles, max_chars=max_chars)
+        return scheme_name(self.romaji, self.english, fits=fits, alt_titles=self.alt_titles, max_chars=max_chars,
+                           current=self.current)
 
 
 def titles_for(folder_name: str, romaji: Optional[str], alt_titles: Iterable[str] = (), *, top_level: bool = True,
@@ -487,18 +562,21 @@ def titles_for(folder_name: str, romaji: Optional[str], alt_titles: Iterable[str
         return None
     alts = tuple(a.strip() for a in alt_titles or () if isinstance(a, str) and a.strip())
     eng = english_from_folder(folder_name, romaji, alts, top_level=top_level) if folder_name else None
-    parts = (clean_part(romaji), short_romaji(romaji, official, alts)) if official else ()
+    current = folder_name if top_level else None
+    parts = (clean_part(romaji), short_romaji(romaji, official, alts, current)) if official else ()
     if official and clean_part(official) and not any(same_title(official, p) for p in parts):
         # AniList's "English" title that is only the romaji (or its short name) again is no English title: the next
         # source is asked. The folder's own English that is the same title (case and punctuation aside) keeps the
         # owner's spelling: casing or a hyphen alone never renames a folder.
         if eng and (same_title(eng, official) or same_title(eng, english_remainder(official, parts))):
-            return SeriesTitles(str(romaji).strip(), eng, source, alts, ENGLISH_OFFICIAL)
-        return SeriesTitles(str(romaji).strip(), official.strip(), source, alts, ENGLISH_OFFICIAL)
-    if eng:
-        return SeriesTitles(str(romaji).strip(), eng, source, alts, ENGLISH_FOLDER)
+            return SeriesTitles(str(romaji).strip(), eng, source, alts, ENGLISH_OFFICIAL, current)
+        return SeriesTitles(str(romaji).strip(), official.strip(), source, alts, ENGLISH_OFFICIAL, current)
     other = english.strip() if english and english.strip() else None
-    return SeriesTitles(str(romaji).strip(), other, source, alts, ENGLISH_OTHER if other else "")
+    if eng and eng.endswith(ELLIPSIS) and other and title_key(other).startswith(title_key(eng[:-1])):
+        eng = None                      # the folder's English is one the length rule cut: the whole title is known
+    if eng:
+        return SeriesTitles(str(romaji).strip(), eng, source, alts, ENGLISH_FOLDER, current)
+    return SeriesTitles(str(romaji).strip(), other, source, alts, ENGLISH_OTHER if other else "", current)
 
 
 def english_candidates(alt_titles: Iterable[str], romaji: Optional[str], limit: int = 6) -> Sequence[str]:

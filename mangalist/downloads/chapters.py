@@ -131,15 +131,20 @@ def chapter_placement(series_dir: str, units: Sequence) -> Placement:
                                            "rescan first")
     folders: Counter = Counter()
     highest: Dict[str, Decimal] = {}
+    volume_folders = set()
     for u in units:
+        rel = (u.rel_path or "").replace("\\", "/").strip("/")
+        if getattr(u, "kind", None) == "volume" and rel and _is_archive(rel):
+            volume_folders.add(os.path.dirname(rel))
         if getattr(u, "kind", None) in ("chapter", "both"):
-            rel = (u.rel_path or "").replace("\\", "/").strip("/")
             if rel and _is_archive(rel):
                 folder = os.path.dirname(rel)
                 folders[folder] += 1
                 number = to_decimal(getattr(u, "ch_to", None) or getattr(u, "ch_from", None))
                 if number is not None and number > highest.get(folder, Decimal(-1)):
                     highest[folder] = number
+    if volume_folders == {""} and set(folders) <= {""}:
+        return _chapters_folder(series_dir, bool(folders))
     if len(folders) == 1:
         (folder,) = folders
         target = _folder(series_dir, folder)
@@ -175,6 +180,31 @@ def _is_unit_subfolder(name: str) -> bool:
     from ..scanner import _is_unit_subfolder as unit
 
     return unit(name)
+
+
+CHAPTERS_FOLDER = "Chapters"
+
+
+def _chapters_folder(series_dir: str, mixed: bool) -> Placement:
+    """The placement of a series that keeps its volumes in the series folder (owner, 2026-11-20): its chapters - the
+    ones after the last volume - go to a ``Chapters`` subfolder, so they never sort before ``Vol. 001`` ("Ch." before
+    "Vol.") and the chapter files that volumes later replace sit together. A ``Chapters`` folder there already (any
+    case) is used; else it is made when the first chapter is filed. *mixed*: chapter files lie beside the volumes now
+    (filed before the rule) - only new ones go to the subfolder."""
+    try:
+        existing = next((n for n in sorted(os.listdir(series_dir)) if n.casefold() == CHAPTERS_FOLDER.casefold()
+                         and os.path.isdir(os.path.join(series_dir, n))), None)
+    except OSError:
+        existing = None
+    target = os.path.join(series_dir, existing or CHAPTERS_FOLDER)
+    if existing is None and os.path.lexists(target):
+        return Placement(series_dir, series_dir, f'volumes live in the series folder; "{CHAPTERS_FOLDER}" there is not '
+                                                 "a folder, so chapters go beside the volumes")
+    made = "" if existing else " (made when the first one is filed)"
+    beside = "; the chapters filed before stay beside them" if mixed else ""
+    return Placement(series_dir, target, f'volumes live in the series folder; chapters go to "{os.path.basename(target)}"'
+                                         f"{made}{beside}", (target, series_dir),
+                     new_dir=None if existing else target)
 
 
 #: A chapter title that ends a season or part: "Season 1 End", "Season 3 END", "S4 END-", "Season 2 End Notice",

@@ -7,6 +7,14 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.5] - 2026-11-21
+
+The sixty-fifth MangaList release (testing build): shorter series folder names, an English title kept when a path is too long, and chapters after the volumes in a `Chapters` subfolder.
+
+- **Shorter series folder names.** A long romaji title with no official short name no longer gives a very long folder name: the folder keeps your own shortening when its name is the start of the title, and otherwise the title loses its subtitle (the part after ":" or " - ") - unless the subtitle names another work of the series, such as "Gaiden", "Side Story", "Season 2" or a number. When the romaji loses its subtitle, the English title loses its own too (`Koisuru Futari wa Kiba o Kakusu [The Two Lovebirds are Hiding Their Fangs]`).
+- **A folder keeps its English title when the path would be too long.** When the path of a series' longest file would pass 255 characters, a folder that carries an English title now keeps it cut at a word with "…", instead of losing it. A folder without one does not gain a cut one.
+- **Chapters after the volumes go to a `Chapters` subfolder.** A series that keeps its volumes in the series folder now files its chapters in a `Chapters` subfolder (made when the first one is filed), so they no longer sort before `Vol. 001` ("Ch." comes before "Vol.") and the chapters that volumes later replace sit together. A series that holds only chapters is unchanged.
+
 ## [2026.11.4] - 2026-11-14
 
 The sixty-fourth MangaList release (testing build): new chapters after a season's end go to the next season's folder.

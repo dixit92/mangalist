@@ -217,9 +217,10 @@ def find_cbz(download_dir: str, request: Mapping[str, object], windows: bool = F
 
 # --- the pass ------------------------------------------------------------------------------------------------------
 
-def _new_season(target: str, series_dir: str) -> bool:
-    """*target* is a season / part folder still to be made right inside the series folder: the next season after one
-    that ended (:func:`mangalist.downloads.chapters.chapter_placement`); the filing's link step makes it."""
+def _new_unit_folder(target: str, series_dir: str) -> bool:
+    """*target* is a unit folder still to be made right inside the series folder (:func:`mangalist.downloads.chapters.
+    chapter_placement`): the next season after one that ended, or ``Chapters`` beside the volumes; the filing's link
+    step makes it."""
     from ..scanner import _is_unit_subfolder
 
     return (not os.path.lexists(target) and os.path.isdir(series_dir)
@@ -576,7 +577,7 @@ class _ChapterPass:
             return "the series folder was missing at the last scan"
         if not os.path.isdir(series_dir):
             return "the series folder is gone"
-        if not target or not os.path.isabs(target) or not (os.path.isdir(target) or _new_season(target, series_dir)):
+        if not target or not os.path.isabs(target) or not (os.path.isdir(target) or _new_unit_folder(target, series_dir)):
             return f"the target folder {target!r} is gone"
         if not same_or_inside(target, series_dir):
             return "the target folder is no longer inside the series folder"

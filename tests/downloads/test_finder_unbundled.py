@@ -70,12 +70,13 @@ def test_on_notify_offers_the_chapters_with_the_missing_range(db, w):
 # --- where the chapters go, and how they are named and counted --------------------------------------------------------
 
 
-def test_a_volume_series_files_its_chapters_in_the_series_folder(db, series):
+def test_a_volume_series_files_its_chapters_in_a_chapters_folder(db, series):
+    # owner, 2026-11-20: the chapters after the last volume get their own subfolder (made by the first filing)
     from mangalist.downloads.chapters import chapter_placement_for
 
     sid, folder = series
     placement = chapter_placement_for(db, sid)
-    assert placement.target_dir == str(folder) and "series folder" in placement.reason
+    assert placement.target_dir == placement.new_dir == str(folder / "Chapters") and '"Chapters"' in placement.reason
 
 
 def test_a_filed_chapter_is_named_by_the_scheme_and_counted_as_a_chapter_next_to_the_volumes():
