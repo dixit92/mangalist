@@ -389,7 +389,7 @@ def test_fill_english_asks_the_network_once_and_the_next_dry_run_uses_it(db, lib
     assert root is not None
 
 
-def test_a_long_path_drops_the_english_part_and_255_keeps_it(db, library):
+def test_a_long_path_cuts_the_english_part_and_255_keeps_it(db, library):
     romaji, english = "Made Up Romaji", "The Made Up English"
     full = f"{romaji} [{english}]"
     head, tail = "Ch. 0001.00 (", ") [G].cbz"
@@ -402,8 +402,11 @@ def test_a_long_path_drops_the_english_part_and_255_keeps_it(db, library):
     # the file's name after the rename counts (the scheme's name), not the one it has now
     s = make(db, title_for=lookup, namer=FakeNamer(overrides={"Ch. 0001.00 [G].cbz": long_name})).preview_series(sid)
     assert len(os.path.join(str(library), s.folder_target, long_name)) == 255 and s.folder_target == full
-    longer = long_name.replace("(t", "(tt", 1)                           # 256 characters: the English part goes
+    longer = long_name.replace("(t", "(tt", 1)                           # 256: "Old Name" has no English, gains none
     s = make(db, title_for=lookup, namer=FakeNamer(overrides={"Ch. 0001.00 [G].cbz": longer})).preview_series(sid)
+    assert s.folder_target == romaji
+    much = long_name.replace("(t", "(" + "t" * 20, 1)                    # too little room for it: left out
+    s = make(db, title_for=lookup, namer=FakeNamer(overrides={"Ch. 0001.00 [G].cbz": much})).preview_series(sid)
     assert s.folder_target == romaji
     assert make(db, title_for=lookup).preview_series(sid).folder_target == full     # short names: kept
 
@@ -419,7 +422,7 @@ def test_a_long_file_in_a_subfolder_counts_too(db, library):
     r = make(db, title_for=lambda root_, series: (romaji, (), {"mu_id": 9}) if series.rel_path == "Old Name"
              else ("Made Up Gaiden", ()))
     parent = next(s for s in r.dry_run(root_ids=[root.id]).series if s.title == "Old Name")
-    assert parent.folder_target == romaji                                 # 256 with the English part: left out
+    assert parent.folder_target == romaji                                 # 256 with it; "Old Name" had none: left out
 
 
 # --- a title starting with a dot (owner, 2026-11: "replace '.' with 'DOT'") ---------------------------------------
@@ -437,3 +440,18 @@ def test_a_dotted_title_names_the_folder_DOT_and_the_named_folder_is_unchanged(d
     rescan(db)
     again = r.preview_series(_sid(db, root, "DOT made--UP"))
     assert (again.folder_status, again.folder_target) == (UNCHANGED, "DOT made--UP")
+
+
+def test_a_folder_with_an_english_part_keeps_it_cut_when_the_path_is_too_long(db, library):
+    # owner, 2026-11-21 (option A): the English part a folder carries is cut with "…", never dropped; none is added
+    romaji, english = "Made Up Romaji", "The Made Up English"
+    full = f"{romaji} [{english}]"
+    head, tail = "Ch. 0001.00 (", ") [G].cbz"
+    at_limit = 255 - len(str(library)) - len(full) - 2
+    longer = head + "t" * (at_limit - len(head) - len(tail) + 1) + tail          # 256 with the whole English part
+    root = make_library(db, library, {full: {"Ch. 0001.00 [G].cbz": payload("e1")}})
+    sid = _sid(db, root, full)
+    _official(db, "mu:10", english)
+    lookup = lambda root_, series: (romaji, (), {"mu_id": 10})            # noqa: E731
+    s = make(db, title_for=lookup, namer=FakeNamer(overrides={"Ch. 0001.00 [G].cbz": longer})).preview_series(sid)
+    assert s.folder_target == f"{romaji} [The Made Up…]"

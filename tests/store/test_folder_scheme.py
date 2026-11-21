@@ -42,14 +42,32 @@ def test_scheme_name(romaji, english, name):
 LONG = "Made Up Romaji wa Hontou ni: Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"
 
 
-def test_a_long_romaji_without_an_official_short_name_stays_whole():
-    """Owner, 2026-10-16: "a long romaji stays full if official name isn't there" - never cut at a subtitle."""
+def test_a_long_romaji_without_an_official_short_name():
+    """Owner, 2026-11-20 (replacing 2026-10-16's "a long romaji stays full if official name isn't there"): the scheme
+    proposed 135- and 147-character folders. Without an official short name a long romaji keeps the folder's own head
+    of it, else loses its subtitle."""
     assert len(LONG) > fs.LONG_TITLE
     whole = "Made Up Romaji wa Hontou ni - Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"   # the colon reads " - "
-    assert fs.short_romaji(LONG) == whole
-    assert fs.scheme_name(LONG, "The Made Up Story") == f"{whole} [The Made Up Story]"
-    assert fs.short_romaji(LONG, "The Made Up Story", ["The Made Up Story", "Nagai Monogatari desu yo ne"]) == whole
+    head = "Made Up Romaji wa Hontou ni"
+    assert fs.short_romaji(LONG) == head                                                  # the subtitle goes
+    assert fs.scheme_name(LONG, "The Made Up Story") == f"{head} [The Made Up Story]"
+    assert fs.short_romaji(LONG, "The Made Up Story", ["The Made Up Story", "Nagai Monogatari desu yo ne"]) == head
     assert fs.short_romaji("Made Up: Subtitle", None, ["Made Up"]) == "Made Up - Subtitle"   # not long: never shortened
+    # the owner's own head of it, ending at a word: kept (in the title's spelling), whatever the subtitle
+    assert fs.short_romaji(LONG, current="Made Up Romaji wa Hontou ni - Nagai [The Made Up Story]") == \
+        "Made Up Romaji wa Hontou ni - Nagai"
+    assert fs.short_romaji(LONG, current="made up romaji WA") == "Made Up Romaji wa"
+    assert fs.short_romaji(LONG, current="Made Up Roma") == head                        # not at a word: not a head
+    assert fs.short_romaji(LONG, current="Mad") == head                                 # too short to be a name
+    assert fs.short_romaji(LONG, current=whole) == head                                 # the whole title: not shorter
+    assert fs.scheme_name(LONG, current="Made Up Romaji wa") == "Made Up Romaji wa"
+    # a subtitle that names another work of the series is never dropped (it would be the main series' name)
+    for subtitle in ("Gaiden - Nagai Nagai Monogatari", "Side Story of the Very Long Nagai Title", "Nagai 2nd Arc",
+                     "~Shichi Kage Retsuden~ no Nagai Nagai Hanashi"):
+        title = f"Made Up Romaji wa Hontou ni Nagai Nagai: {subtitle}"
+        assert len(title) > fs.LONG_TITLE and fs.short_romaji(title) == fs.clean_part(title)
+    no_sub = "Made Up Romaji wa Hontou ni Nagai Nagai Fukudai ga Tsuzuku Monogatari desu"
+    assert fs.short_romaji(no_sub) == no_sub                                             # nothing to drop: whole
 
 
 @pytest.mark.parametrize("alts, english, short", [
@@ -73,7 +91,7 @@ def test_a_long_romaji_without_an_official_short_name_stays_whole():
 def test_an_official_short_name_replaces_a_long_romaji(alts, english, short):
     got = fs.short_name_candidates(LONG, english, alts)
     assert (got[0] if got else None) == short
-    assert fs.short_romaji(LONG, english, alts) == (short or fs.clean_part(LONG))
+    assert fs.short_romaji(LONG, english, alts) == (short or fs.without_subtitle(fs.clean_part(LONG)))
 
 
 def test_the_short_name_choice_is_deterministic():
@@ -231,7 +249,7 @@ def test_name_room_is_what_the_path_limit_leaves():
     assert fs.name_room(None, file) is None and fs.name_room(root, "") is None
 
 
-def test_a_path_over_255_characters_drops_the_english_part_whole():
+def test_a_path_over_255_characters_cuts_the_english_part():
     romaji, english = "Made Up Romaji", "The Made Up English Title"
     full = f"{romaji} [{english}]"
     root = "/data/" + "r" * 40
@@ -239,8 +257,14 @@ def test_a_path_over_255_characters_drops_the_english_part_whole():
         + ") [G].cbz"
     assert len(f"{root}/{full}/{file}") == fs.MAX_PATH_CHARS        # exactly 255: kept
     assert fs.scheme_name(romaji, english, max_chars=fs.name_room(root, file)) == full
-    longer = file.replace("(t", "(tt", 1)                            # 256: the English part goes, never cut with "…"
+    longer = file.replace("(t", "(tt", 1)                            # 256: a folder without English gains none
     assert fs.scheme_name(romaji, english, max_chars=fs.name_room(root, longer)) == romaji
+    assert fs.scheme_name(romaji, english, max_chars=fs.name_room(root, longer), current="Old Name") == romaji
+    # a folder that carries an English part keeps it, cut at a word (owner, 2026-11-21, option A)
+    assert fs.scheme_name(romaji, english, max_chars=fs.name_room(root, longer), current=full) == \
+        f"{romaji} [The Made Up English…]"
+    much = file.replace("(t", "(" + "t" * 20, 1)                      # under 15 characters left: left out
+    assert fs.scheme_name(romaji, english, max_chars=fs.name_room(root, much), current=full) == romaji
     assert fs.scheme_name(romaji, english, max_chars=None) == full  # no path limit known: kept
     assert fs.titles_for("Folder", romaji, official=english).name(max_chars=5) == romaji   # the romaji is never cut by it
 
@@ -364,3 +388,29 @@ def test_the_windows_path_rule_on_windows_itself():
     assert fs.windows_fits("D:\\Manga", None, native=True)("N" * 200)
     container = fs.windows_fits("/data/share/" + "L" * 150, "SERVER", native=False)     # the container rule, as before
     assert container("N" * 60) and not container("N" * 80)
+
+
+def test_a_cut_english_part_gives_way_to_the_whole_title_known_elsewhere():
+    # the length rule cut the folder's English; the next proposal takes the whole one again (the room decides)
+    t = fs.titles_for("Made Up Romaji [The Made Up English…]", "Made Up Romaji", english="The Made Up English Title")
+    assert t.english == "The Made Up English Title"
+    kept = fs.titles_for("Made Up Romaji [The Made Up English…]", "Made Up Romaji")          # nothing else known
+    assert kept.english == "The Made Up English…"
+    other = fs.titles_for("Made Up Romaji [Another…]", "Made Up Romaji", english="The Made Up English Title")
+    assert other.english == "Another…"                                       # not a cut of it: the owner's own
+
+
+def test_the_english_subtitle_goes_with_the_romajis():
+    # owner, 2026-11-21: when the romaji loses its subtitle, the English title loses its own too
+    eng = "The Made Up Story - A Very Long English Subtitle"
+    assert fs.scheme_name(LONG, eng) == "Made Up Romaji wa Hontou ni [The Made Up Story]"
+    assert fs.scheme_name(LONG, eng, current="Made Up Romaji wa Hontou ni") == \
+        "Made Up Romaji wa Hontou ni [The Made Up Story]"                  # the owner's head where the subtitle starts
+    assert fs.scheme_name(LONG, eng, current="Made Up Romaji wa") == f"Made Up Romaji wa [{eng}]"   # not there: kept
+    assert fs.scheme_name("Made Up: Subtitle", eng) == f"Made Up - Subtitle [{eng}]"    # a short romaji keeps all
+    # the romaji's subtitle passed the check for another work: the English one goes whatever its words
+    assert fs.scheme_name(LONG, "The Made Up Story - The Story After a Long Day") == \
+        "Made Up Romaji wa Hontou ni [The Made Up Story]"
+    gaiden = "Made Up Romaji wa Hontou ni Nagai Nagai: Gaiden - Nagai Nagai Monogatari"   # the romaji's is kept...
+    assert fs.scheme_name(gaiden, "The Made Up Story - Side Story") == \
+        f"{fs.clean_part(gaiden)} [The Made Up Story - Side Story]"                     # ...so the English one is

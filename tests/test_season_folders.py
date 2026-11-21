@@ -166,3 +166,31 @@ def test_one_season_folder_that_ended_starts_the_next(tmp_path):
     assert p.folder_for("41") == str(s / "Season 2") and p.folder_for("40") == str(s / "Season 1")
     (s / "Season 2").write_text("not a folder")                         # a file in the way: no new folder
     assert chm.chapter_placement(str(s), units).target_dir == str(s / "Season 1")
+
+
+def test_chapters_after_the_volumes_go_to_a_chapters_folder(tmp_path):
+    # owner, 2026-11-20: "Ch." sorts before "Vol." - chapters after the last volume get their own subfolder
+    s = tmp_path / "Mixed Series"
+    s.mkdir()
+    vols = [Unit("Vol. 001.cbz", "volume", vol_from="1", vol_to="1"), Unit("Vol. 002.cbz", "volume", vol_from="2", vol_to="2")]
+    p = chm.chapter_placement(str(s), vols)                                   # volumes only: the first chapter too
+    assert p.target_dir == p.new_dir == str(s / "Chapters") and not (s / "Chapters").exists()
+    assert p.options == (str(s / "Chapters"), str(s)) and '"Chapters" (made when the first one is filed)' in p.reason
+    flat = vols + [Unit("Ch. 0020.00.cbz", "chapter", ch_from="20", ch_to="20")]     # filed beside them before the rule
+    assert chm.chapter_placement(str(s), flat).target_dir == str(s / "Chapters")
+    (s / "chapters").mkdir()                                                  # one there already, any case: used
+    held = vols + [Unit("chapters/Ch. 0020.00.cbz", "chapter", ch_from="20", ch_to="20")]
+    for units in (vols, held):
+        q = chm.chapter_placement(str(s), units)
+        assert q.target_dir == str(s / "chapters") and q.new_dir is None
+    only = tmp_path / "Chapter Series"
+    only.mkdir()                                                              # chapters only: the series folder, as before
+    assert chm.chapter_placement(str(only), [Unit("Ch. 0001.00.cbz", "chapter", ch_from="1", ch_to="1")]).target_dir \
+        == str(only)
+    sub = tmp_path / "Volumes Apart"
+    (sub / "Volumes").mkdir(parents=True)                                     # volumes in their own folder: unchanged
+    assert chm.chapter_placement(str(sub), [Unit("Volumes/Vol. 001.cbz", "volume", vol_from="1", vol_to="1")]
+                                 ).target_dir == str(sub)
+    (tmp_path / "File" ).mkdir()
+    (tmp_path / "File" / "Chapters").write_text("not a folder")
+    assert chm.chapter_placement(str(tmp_path / "File"), vols).target_dir == str(tmp_path / "File")
