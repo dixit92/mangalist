@@ -878,7 +878,7 @@ def volumes_in_library_problem(db, batch: Batch) -> Optional[str]:
     still be in the library - a plain file of the size it was filed with, inside a root that is still configured
     (owner, 2026-10-09: empty the holding folder "as long as the contents are filled in the real roots")."""
     if not batch.volume_files:
-        return "it does not record which volume files replaced the chapters"
+        return _held_by_series_problem(db, batch)
     roots = [os.path.normpath(r.path) for r in db.list_roots()]
     for path, size in _volume_files_now(db, batch):
         top = next((r for r in roots if os.path.normcase(os.path.normpath(path)).startswith(
@@ -891,6 +891,40 @@ def volumes_in_library_problem(db, batch: Batch) -> Optional[str]:
             return f"{name} is no longer in the library"
         if st.st_size != size:
             return f"{name} has changed since it was filed"
+    return None
+
+
+def _held_by_series_problem(db, batch: Batch) -> Optional[str]:
+    """:func:`volumes_in_library_problem` for a batch that does not record its replacing files (made by a build before
+    the record, 2026-11; its warning then came every hour and the batch was never emptied): its series' current files
+    must hold what replaced its own - its volumes (each in a volume file of the series), or for a batch of no volume
+    (a chapter replaced by another copy) each of its files' chapters. None: they do."""
+    from .downloads.placement import locate_series, series_units
+
+    if batch.series_id is None:
+        return "it does not record which files replaced its own, nor its series"
+    try:
+        series, _root, _dir = locate_series(db, batch.series_id)
+    except LookupError:
+        return "it does not record which files replaced its own, and its series is gone"
+    units = series_units(db, series)
+
+    def held(number: str, kinds: Tuple[str, ...], lo: str, hi: str) -> bool:
+        want = to_decimal(number)
+        for u in units:
+            start, end = to_decimal(getattr(u, lo)), to_decimal(getattr(u, hi) or getattr(u, lo))
+            if u.kind in kinds and want is not None and start is not None and start <= want <= (end or start):
+                return True
+        return False
+
+    for volume in batch.volumes or sorted({f.volume for f in batch.files if f.volume}):
+        if not held(volume, ("volume", "both"), "vol_from", "vol_to"):
+            return f"it does not record its volume files, and the series holds no volume {volume} now"
+    if not batch.volumes and not any(f.volume for f in batch.files):
+        for f in batch.files:
+            first = (f.chapters or "").split("-")[0].strip()
+            if not first or not held(first, ("chapter", "both"), "ch_from", "ch_to"):
+                return f"it does not record its replacing files, and the series holds no chapter {f.chapters} now"
     return None
 
 
