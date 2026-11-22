@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.6] - 2026-11-21
+
+The sixty-sixth MangaList release (testing build): held batches from older builds are emptied again at the end of their holding period.
+
 - **Old held batches are emptied again at the end of their holding period.** Since 2026.11.2 a batch in the holding folder is emptied only while the files that replaced it are still in the library; a batch made by an older build does not record those files, so it was never emptied and the log warned about it every hour. Such a batch is now checked against the series' own files - its volumes, or for a replaced chapter that chapter - and emptied when the series still holds them.
 
 ## [2026.11.5] - 2026-11-21
