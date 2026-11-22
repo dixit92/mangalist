@@ -135,6 +135,13 @@ chapters gets the whole chapter, never its parts. A part that turns up later (`3
 too - but never `38.1` while the files `38` and `38.2` are held: the file `38` is part 1 there. The chapters panel shows
 the other form unticked, with the reason.
 
+**Replacing chapters you already have.** "Replace held chapters…" (a series' row menu, the Download tab's series menu,
+the chapters panel) takes another source's or group's copy of chapters you hold - for example a site's whole chapters
+for the `.1` / `.2` parts you downloaded elsewhere. Pick a source (the series' saved source is not changed), confirm the
+series on it, tick the chapters and Replace: each new copy is filed in place of the files it replaces, which go to the
+holding folder first (restorable; emptied after the holding period) and come back if the new copy cannot be filed.
+Nothing is replaced automatically.
+
 **Chapters: the built-in extensions (since 2026.10.56; the default since 2026.11.2).** Chapter downloads go through
 MangaList's own extension host: a small Java program shipped in the image (`extension-host/`, about 210 MB with its
 Java 21 runtime) that runs Mihon / Tachiyomi extensions - MangaDex, Weeb Central, MangaFire, ... A

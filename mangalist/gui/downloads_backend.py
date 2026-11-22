@@ -90,6 +90,11 @@ available:
 ``last_find_run()``                       quick: the last find pass (``FindRun``) or None.
 ``send_chapters(series_id, match, picks,  record and enqueue the picked chapters ->
  target_dir, manga_title, source_name)``  :class:`~mangalist.downloads.chapters.ChapterSendOutcome`.
+``replace_candidates(source_id, titles)`` optional: the series' title matches on one source (``[MangaMatch]``).
+``replace_lookup(series_id, match)``      optional: what the source has of the held chapters
+                                          (:class:`~mangalist.downloads.replace_held.ReplaceLookup`).
+``send_replacements(series_id, match,     optional: send the picked copies, ``[(chapter, [paths replaced])]``;
+ picks, manga_title, source_name)``       the old files go to the holding folder at filing -> ``ChapterSendOutcome``.
 ========================================  =======================================================================
 
 ``records()`` then returns every tool's records (chapter downloads have ``tool == 'suwayomi'``), and ``check_now()``
