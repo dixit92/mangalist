@@ -827,6 +827,56 @@ class Backend(ExtensionsBackendMixin, FailuresBackendMixin):
                                f"since this list was made by {chapter_backend.name_of_backend(match.backend)}: look the "
                                "series up again")
 
+    # --- replacing held chapters by hand (owner, 2026-11-22; mangalist.downloads.replace_held) -------------------------
+
+    def replace_candidates(self, source_id: str, titles: Sequence[str]) -> List[MangaMatch]:
+        """The series' matches on one source, by its titles - for the owner to confirm (the saved source unchanged)."""
+        client = self._chapter_client()
+        try:
+            source = next((s for s in client.sources() if str(s.id) == str(source_id)), None)
+            if source is None:
+                raise BackendError("that source is not installed any more")
+            return title_candidates(client, [source], titles)
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
+    def replace_lookup(self, series_id: int, match: MangaMatch):
+        """What *match*'s source has of the chapters the series holds (:class:`~.replace_held.ReplaceLookup`)."""
+        from . import replace_held
+
+        self._same_program(match)
+        client = self._chapter_client()
+        try:
+            return replace_held.build(client, self.db, series_id, replace(match, how=HOW_CONFIRMED))
+        except LookupError as exc:
+            raise BackendError(str(exc)) from None
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
+    def send_replacements(self, series_id: int, match: MangaMatch, picks: Sequence, manga_title: str = "",
+                          source_name: str = "") -> ChapterSendOutcome:
+        """Send the picked copies (``[(chapter, [library paths it replaces])]``): filed in place of those files, which
+        go to the holding folder first (:mod:`.replace_held`)."""
+        from ..store.discards import latest_plan_id
+        from . import replace_held
+
+        self._same_program(match)
+        client = self._chapter_client()
+        try:
+            return replace_held.send_replacements(client, self.chapter_ledger, series_id,
+                                                  replace(match, how=HOW_CONFIRMED), picks, manga_title=manga_title,
+                                                  source_name=source_name, since=latest_plan_id(self.db))
+        except ChapterSendRefused as exc:
+            raise BackendError(str(exc)) from None
+        except SuwayomiError as exc:
+            raise BackendError(str(exc)) from None
+        finally:
+            _close(client)
+
     def send_chapters(self, series_id: int, match: MangaMatch, picks: Sequence, target_dir: str,
                       manga_title: str = "", source_name: str = "") -> ChapterSendOutcome:
         self._same_program(match)

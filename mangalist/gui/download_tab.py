@@ -1070,6 +1070,12 @@ class DownloadTab(QWidget):
             act_new = menu.addAction(CHECK_NEW_CHAPTERS)
             act_new.setToolTip(self._w("Ask the series' chapter source for chapters newer than the newest one you have "
                                        "(for volumes: the last chapter of your newest volume)"))
+            from .replace_held_dialog import MENU_TEXT, MENU_TIP, available
+
+            if available(self._backend):
+                sid_now = self._series_ids.get(folder) or series.series_id
+                actions.add_action(MENU_TEXT, lambda s=sid_now: self._replace_line(s, series.title, series.titles),
+                                   MENU_TIP, self.suwayomi_ready() and sid_now is not None)
             if series.group in (GROUP_VOLUMES, GROUP_UPGRADES):       # its releases with Other releases open
                 target = self._target_for(series)
                 actions.add_action(SEARCH_RELEASES, lambda t=target: self._search_releases_line(t),
@@ -1186,6 +1192,18 @@ class DownloadTab(QWidget):
         shown = bool(self._current) and self._group != GROUP_FOUND
         self.releases.btn_series.setVisible(shown and bool(self.releases.title_label.text()))
         self.chapters.btn_series.setVisible(shown)
+
+    def _replace_line(self, series_id: Optional[int], title: str, titles: Sequence[str]) -> str:
+        self.replace_held_chapters(series_id, title, titles)
+        return ""
+
+    def replace_held_chapters(self, series_id: Optional[int], title: str, titles: Sequence[str]) -> bool:
+        """Replace held chapters… (the List's row menu and this tab's series menu; owner, 2026-11-22)."""
+        from .replace_held_dialog import open_replace_dialog
+
+        if not self.suwayomi_ready():
+            return False
+        return open_replace_dialog(self, self._backend, series_id, title, tuple(titles or ()) or (title,))
 
     def check_new_chapters(self, series_id: Optional[int], folder: str, title: str, titles: Sequence[str]) -> bool:
         """"Check for new chapters" (the List's row menu; owner, 2026-10-11): the chapters panel with what the series'

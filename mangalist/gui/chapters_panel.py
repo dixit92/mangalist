@@ -145,7 +145,14 @@ class ChaptersPanel(QWidget):
         self.btn_other.clicked.connect(self.other_sources)
         self.btn_other.setVisible(False)
         self._before_other: Optional[ChapterLookup] = None
+        from .replace_held_dialog import MENU_TEXT, MENU_TIP, available
+
+        self.btn_replace = button(MENU_TEXT, link=True, tip=MENU_TIP)
+        self.btn_replace.clicked.connect(self.replace_held)
+        self.btn_replace.setVisible(False)
+        self._can_replace = available(self._backend)
         head.addWidget(self.progress)
+        head.addWidget(self.btn_replace)
         head.addWidget(self.btn_other)
         head.addWidget(self.btn_again)
         self.btn_series = menu_button()             # the series' menu (series_actions.py); the host shows it
@@ -282,6 +289,7 @@ class ChaptersPanel(QWidget):
         *newer*: "Check for new chapters" - what the source has after the newest chapter held, whatever *missing*
         says."""
         self._series_id, self._title = series_id, title
+        self.btn_replace.setVisible(self._can_replace)
         self._apply_wording()
         self._missing, self._titles = tuple(missing), tuple(titles) or (title,)
         self._newer = newer
@@ -331,6 +339,14 @@ class ChaptersPanel(QWidget):
             if self._source_pending is not None and self._source_pending == self._series_id and self.lookup is not None:
                 self._source_pending = None
                 self.other_sources()
+
+    def replace_held(self) -> bool:
+        """Replace held chapters… for the series shown (:mod:`.replace_held_dialog`)."""
+        from .replace_held_dialog import open_replace_dialog
+
+        if self._series_id is None:
+            return False
+        return open_replace_dialog(self, self._backend, self._series_id, self._title, self._titles)
 
     @property
     def series_id(self) -> Optional[int]:

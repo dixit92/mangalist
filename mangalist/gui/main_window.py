@@ -1003,6 +1003,21 @@ class MainWindow(QMainWindow):
         self.show_tab(TAB_DOWNLOAD)
         return self._download_tab.check_new_chapters(series_id, folder, entry.title, titles)
 
+    def replace_held_chapters(self, folder: str) -> bool:
+        """Replace held chapters… for *folder*'s series (owner, 2026-11-22; :mod:`.replace_held_dialog`)."""
+        if self._download_tab is None:
+            return False
+        row = self._row_for_folder(folder)
+        entry = self._model.entry_at(row) if row is not None else None
+        if entry is None:
+            return False
+        knowledge = self._model.knowledge_at(row)
+        own = (entry.english_title, entry.title)
+        titles = (search_titles(knowledge, *own) if knowledge is not None
+                  else tuple(dict.fromkeys(t.strip() for t in own if t and t.strip())))
+        series_id = self._volumes.series_id_for(entry) if self._volumes is not None else None
+        return self._download_tab.replace_held_chapters(series_id, entry.title, titles)
+
     def _releases_target(self, folder: str):
         """(the series' search target, '') or (None, why it cannot be searched on nyaa)."""
         if self._download_tab is None or self._volumes is None:
@@ -2489,7 +2504,7 @@ class MainWindow(QMainWindow):
                                    for e in entries],
                             backend=self._volumes_backend if self._auto_modes is not None else None, host=self)
         act_kind = None
-        act_get = act_new = act_aside = None
+        act_get = act_new = act_aside = act_replace = None
         act_dupes = None
         act_exclude = None
         act_rename = act_rename_library = None
@@ -2526,6 +2541,10 @@ class MainWindow(QMainWindow):
                                    "Nothing missing: no gaps to download")
                 act_new = menu.addAction("Check for new chapters…")
                 act_new.setToolTip(CHECK_NEW_TIP)
+                from .replace_held_dialog import MENU_TEXT, MENU_TIP
+
+                act_replace = menu.addAction(MENU_TEXT)
+                act_replace.setToolTip(MENU_TIP)
                 series.add_search_releases()            # every release, also with nothing missing (2026-10-24)
                 menu.setToolTipsVisible(True)
             act_aside = menu.addAction("Set aside chapters its volumes hold…")
@@ -2616,6 +2635,8 @@ class MainWindow(QMainWindow):
             self.get_missing(str(entries[0].folder))
         elif chosen is act_new and act_new is not None:
             self.check_new_chapters(str(entries[0].folder))
+        elif act_replace is not None and chosen is act_replace:
+            self.replace_held_chapters(str(entries[0].folder))
         elif chosen is act_aside and act_aside is not None:
             self.set_aside_volume_chapters(str(entries[0].folder))
         elif chosen is act_check_mu:

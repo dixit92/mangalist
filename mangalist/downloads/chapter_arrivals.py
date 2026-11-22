@@ -380,8 +380,8 @@ class _ChapterPass:
         if not name or "/" in name or "\\" in name or name in (".", ".."):
             return self._fail(rec, f"the naming scheme gave no usable name ({name!r}); nothing filed")
         dst = os.path.join(rec.target_dir, name)
-        batch, old = self._old_copy(rec, request, root)
-        free = {os.path.normcase(os.path.normpath(p)) for p in (old, self._held_path(batch)) if p}
+        batch, olds = self._old_copy(rec, request, root)
+        free = {os.path.normcase(os.path.normpath(p)) for p in [*olds, *self._held_paths(batch)] if p}
         if os.path.lexists(dst) and os.path.normcase(os.path.normpath(dst)) not in free:
             return self._fail(rec, f"a file named {name} is already in the target folder; nothing filed")
         held = self._held_copy(rec.target_dir, number, ignore={os.path.basename(p) for p in free
@@ -389,10 +389,11 @@ class _ChapterPass:
                                                                       os.path.normpath(rec.target_dir))})
         if held:
             return self._fail(rec, f"chapter {number} is already in the folder ({held}); nothing filed")
-        if old is not None or batch is not None:
-            # the usual group's copy replaces a provisional one (mangalist.downloads.usual_group): the old copy goes
-            # to the holding folder first (the new name may be the old one's), restorable
-            batch = self._hold_old_copy(rec, batch, old, root, series_dir, src, dst, number)
+        if olds or batch is not None:
+            # the usual group's copy replaces a provisional one (mangalist.downloads.usual_group), or the owner's pick
+            # replaces held files (mangalist.downloads.replace_held): the old copies go to the holding folder first
+            # (the new name may be an old one's), restorable
+            batch = self._hold_old_copy(rec, batch, olds, root, series_dir, src, dst, number)
             if batch is None or batch.status not in ("held", "purged"):
                 now = self.ledger.get(rec.id)
                 return now if now is not None and now.status == DownloadStatus.FAILED else None
@@ -414,32 +415,47 @@ class _ChapterPass:
     # --- the usual group's copy replaces a provisional one (owner, 2026-11-06; mangalist.downloads.usual_group) ---
 
     def _old_copy(self, rec: DownloadRecord, request: Mapping[str, object], root) -> Tuple[Optional[object],
-                                                                                         Optional[str]]:
-        """(the replaced-files batch already made for this record, the provisional copy it replaces as it is now) -
-        (None, None) for any other chapter download, or when the provisional copy is gone (filed as any chapter)."""
+                                                                                         List[str]]:
+        """(the replaced-files batch already made for this record, the copies it replaces as they are now): the
+        provisional copy a usual group's copy replaces, or the held files the owner's pick replaces
+        (:data:`mangalist.downloads.replace_held.KEY_REPLACES_FILES`, followed through the moves since it was sent) -
+        (None, []) for any other chapter download, or when they are gone (filed as any chapter)."""
+        from ..store.journal import MoveFollower
         from ..store.replacements import ReplacementStore
+        from .replace_held import KEY_REPLACES_FILES, KEY_REPLACES_SINCE
         from .usual_group import KEY_REPLACES, old_copy
 
         replaces = request.get(KEY_REPLACES)
-        if not isinstance(replaces, int) or isinstance(replaces, bool):
-            return None, None
+        files = request.get(KEY_REPLACES_FILES)
+        record = isinstance(replaces, int) and not isinstance(replaces, bool)
+        listed = isinstance(files, list) and any(isinstance(p, str) and p for p in files)
+        if not record and not listed:
+            return None, []
         batch_id = request.get("replace_batch")
         if isinstance(batch_id, int) and not isinstance(batch_id, bool):
             batch = ReplacementStore(self.db).get(batch_id)
             if batch is not None:
-                return batch, None
-        return None, old_copy(self.ledger, self.journal, replaces, root.path)
+                return batch, []
+        if record:
+            old = old_copy(self.ledger, self.journal, replaces, root.path)
+            return None, [old] if old else []
+        since = request.get(KEY_REPLACES_SINCE)
+        since = since if isinstance(since, int) and not isinstance(since, bool) else 0
+        follower = MoveFollower(self.journal)
+        now = [follower.current_path(p, since) for p in files if isinstance(p, str) and p]
+        return None, [p for p in dict.fromkeys(now) if os.path.isfile(p)]
 
-    def _held_path(self, batch) -> Optional[str]:
-        """The library path the batch's hold took away (its name is free for the new copy)."""
-        if batch is None or batch.plan_id is None:
-            return batch.files[0].path if batch is not None and batch.files else None
-        steps = [s for s in self.journal.get_plan(batch.plan_id).steps if s.op == "hold"]
-        return steps[0].src if steps else None
+    def _held_paths(self, batch) -> List[str]:
+        """The library paths the batch's hold took away (their names are free for the new copy)."""
+        if batch is None:
+            return []
+        if batch.plan_id is None:
+            return [f.path for f in batch.files]
+        return [s.src for s in self.journal.get_plan(batch.plan_id).steps if s.op == "hold"]
 
-    def _hold_old_copy(self, rec: DownloadRecord, batch, old: Optional[str], root, series_dir: str, src: str,
+    def _hold_old_copy(self, rec: DownloadRecord, batch, olds: Sequence[str], root, series_dir: str, src: str,
                        dst: str, number: Optional[str]):
-        """The provisional copy to the holding folder (one replaced-files batch, the other releases' own,
+        """The copies it replaces to the holding folder (one replaced-files batch, the other releases' own,
         :func:`mangalist.upgrades.hold_replaced_volumes`); a batch made before (a pass that stopped, a busy root) is
         resumed. The batch - held: file the new copy; pending: the record waits; failed: the record FAILED - or None
         (the record waits for the holding folder, or FAILED: the old copy is not a plain file)."""
@@ -447,17 +463,20 @@ class _ChapterPass:
         from ..store.replacements import ReplacementConflict
 
         if batch is None:
-            st = upgrades._plain_below(old, root.path)
-            if st is None:
-                self._fail(rec, "the copy it replaces is not a plain file in the library; nothing filed")
-                return None
-            replaced = upgrades.ReplacedFile(path=old, rel=os.path.relpath(old, series_dir).replace(os.sep, "/"),
-                                             size=st.st_size, modified=upgrades._iso_from_ns(st.st_mtime_ns),
-                                             chapters=number or "", volume="")
+            replaced = []
+            for old in olds:
+                st = upgrades._plain_below(old, root.path)
+                if st is None:
+                    self._fail(rec, f"{os.path.basename(old)}, which it replaces, is not a plain file in the library; "
+                                    "nothing filed")
+                    return None
+                replaced.append(upgrades.ReplacedFile(
+                    path=old, rel=os.path.relpath(old, series_dir).replace(os.sep, "/"), size=st.st_size,
+                    modified=upgrades._iso_from_ns(st.st_mtime_ns), chapters=number or "", volume=""))
             try:
                 batch = upgrades.hold_replaced_volumes(
                     self.db, download_id=rec.id, title=rec.title, series_id=rec.series_id, root_path=root.path,
-                    series_dir=series_dir, files=[replaced], volumes=[], volume_files=[(dst, os.stat(src).st_size)],
+                    series_dir=series_dir, files=replaced, volumes=[], volume_files=[(dst, os.stat(src).st_size)],
                     journal=self.journal, reason=upgrades.REPLACED_CHAPTER_REASON)
             except ReplacementConflict as exc:
                 note = f"the copy it replaces waits for the holding folder: {exc}"
@@ -465,8 +484,8 @@ class _ChapterPass:
                 self._note(rec, note)
                 return None
             self.ledger.note_replacement(rec.id, batch.id)
-            _log.info("Chapter arrivals: download %d (%s) replaces %s (batch %d)", rec.id, rec.title, replaced.rel,
-                      batch.id)
+            _log.info("Chapter arrivals: download %d (%s) replaces %s (batch %d)", rec.id, rec.title,
+                      ", ".join(f.rel for f in replaced), batch.id)
         elif batch.status == "pending":                 # its move was interrupted or had to wait
             try:
                 batch = upgrades.hold_batch(self.db, batch.id, journal=self.journal)
