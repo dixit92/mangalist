@@ -7,6 +7,10 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.7] - 2026-11-22
+
+The sixty-seventh MangaList release (testing build): chapters you already have can be replaced by another source's or group's copy.
+
 - **Replace held chapters with another source's or group's copy.** "Replace held chapters…" (in a series' row menu, the Download tab's series menu and the chapters panel) finds the series on any installed source - its saved source stays as it is - and lists the chapters you already hold that the source has, with the files each would replace: the same chapter, or a whole chapter for the parts you hold (`33` for `33.1` and `33.2`). Tick the ones to replace and Replace: when each new copy is filed, the files it replaces go to the holding folder first (restorable from the Download tab, emptied after the holding period), and they are put back if the new copy cannot be filed. A whole chapter you hold is never replaced by some of its parts, and a file holding several chapters is kept.
 
 ## [2026.11.6] - 2026-11-21
