@@ -67,6 +67,10 @@ from .budget import OVER_CAP_QUEUE, SIZE_SELECTED, BudgetState
 from .chapters import (
     HOW_CONFIRMED,
     HOW_MANGADEX,
+    SEARCH_FAILED,
+    SEARCH_FOUND,
+    SEARCH_NONE,
+    Candidates,
     ChapterLookup,
     ChapterSendOutcome,
     ChapterSendRefused,
@@ -787,12 +791,29 @@ class Backend(ExtensionsBackendMixin, FailuresBackendMixin):
         MangaDex by the id MangaPixer links (first), the others by title - for the owner to pick."""
         client = self._chapter_client()
         try:
-            sources = allowed_sources(list(client.sources()), self.suwayomi.sources(), self._source_languages())
-            others = [s for s in sources if s.id != str(exclude_source or "")]
+            installed, languages = list(client.sources()), self._source_languages()
+            sources = allowed_sources(installed, self.suwayomi.sources(), languages)
+            current = str(exclude_source or "")
+            others = [s for s in sources if s.id != current]
             mangadex_id = mangadex_id_for(self.db, series_id)
             linked = find_manga(client, others, mangadex_id=mangadex_id, titles=titles, title_search=False).match
-            by_title = title_candidates(client, [s for s in others if not (mangadex_id and s.is_mangadex)], titles)
-            return ([linked] if linked is not None else []) + by_title
+            outcomes: Dict[str, str] = {}
+            if mangadex_id:                         # MangaDex is asked by its id, never by title
+                for s in others:
+                    if s.is_mangadex:
+                        outcomes[s.display_name] = (SEARCH_FOUND if linked is not None and linked.source.id == s.id
+                                                    else SEARCH_NONE)
+            by_title = title_candidates(client, [s for s in others if not (mangadex_id and s.is_mangadex)], titles,
+                                        outcomes)
+            asked = {s.id for s in sources} | {current}
+            langs = set(languages or ())
+            not_searched = [s.display_name for s in installed
+                            if s.id not in asked and (not langs or s.lang in langs)]
+            return Candidates(([linked] if linked is not None else []) + by_title,
+                              searched=list(outcomes),
+                              empty=[n for n, o in outcomes.items() if o == SEARCH_NONE],
+                              failed=[n for n, o in outcomes.items() if o == SEARCH_FAILED],
+                              not_searched=sorted(dict.fromkeys(not_searched), key=str.casefold))
         except SuwayomiError as exc:
             raise BackendError(str(exc)) from None
         finally:

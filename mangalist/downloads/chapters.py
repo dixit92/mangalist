@@ -694,25 +694,70 @@ def remember_match(settings, series_id: int, found: FindResult, stored: Mapping[
     return True
 
 
-def title_candidates(client: ChapterClient, sources: Sequence[SuwayomiSource], titles: Sequence[str]) -> List[MangaMatch]:
+SEARCH_FOUND, SEARCH_NONE, SEARCH_FAILED = "found", "none", "failed"
+MAX_NOT_SEARCHED_NAMED = 6          # the coverage line names this many unticked sources, then "and N more"
+
+
+def title_candidates(client: ChapterClient, sources: Sequence[SuwayomiSource], titles: Sequence[str],
+                     outcomes: Optional[Dict[str, str]] = None) -> List[MangaMatch]:
     """Title search results on *sources*, in source order: candidates the owner must confirm. A source that fails is
-    skipped (logged); the others still answer."""
+    skipped (logged); the others still answer. *outcomes*, when given, gets each source's display name ->
+    :data:`SEARCH_FOUND` / :data:`SEARCH_NONE` / :data:`SEARCH_FAILED` (the Change source coverage line)."""
     from .chapter_backend import backend_of
 
     backend = backend_of(client)
     out: List[MangaMatch] = []
     queries = [t for t in dict.fromkeys(t.strip() for t in titles if t and t.strip())][:MAX_TITLE_QUERIES]
     for source in sources:
+        outcome = SEARCH_NONE
         for query in queries:
             try:
                 found = client.search(source.id, query)
             except Exception as exc:  # noqa: BLE001 - one source down must not hide the others
                 _log.info("Chapters: %s search failed (%s)", source.display_name, type(exc).__name__)
+                outcome = SEARCH_FAILED
                 break
             if found:
                 out.extend(MangaMatch(source, m, HOW_TITLE, backend) for m in found[:MAX_CANDIDATES_PER_SOURCE])
+                outcome = SEARCH_FOUND
                 break
+        if outcomes is not None:
+            outcomes[source.display_name] = outcome
     return out
+
+
+class Candidates(List[MangaMatch]):
+    """Change source's matches, plus which sources were looked at (owner, 2026-11-22: Asmodeus Scans was missing from
+    the list because it was not ticked under Chapter sources, and nothing said so). Still a plain list of
+    :class:`MangaMatch` for every caller that only wants the matches."""
+
+    def __init__(self, matches: Iterable[MangaMatch] = (), *, searched: Sequence[str] = (),
+                 empty: Sequence[str] = (), failed: Sequence[str] = (), not_searched: Sequence[str] = ()) -> None:
+        super().__init__(matches)
+        self.searched = tuple(searched)            # sources asked (by title, or MangaDex by its id)
+        self.empty = tuple(empty)                  # ... that found nothing
+        self.failed = tuple(failed)                # ... whose search failed (site down, Cloudflare, ...)
+        self.not_searched = tuple(not_searched)    # installed in the owner's languages, not ticked: never asked
+
+
+def coverage_text(found: Sequence[MangaMatch]) -> str:
+    """The line under Change source's list: what was searched, what found nothing or failed, and the installed sources
+    that were not searched because they are not ticked. '' for a plain list (nothing known)."""
+    if not isinstance(found, Candidates):
+        return ""
+    parts: List[str] = []
+    if found.searched:
+        parts.append("Searched: " + ", ".join(found.searched))
+    if found.empty:
+        parts.append("Found nothing: " + ", ".join(found.empty))
+    if found.failed:
+        parts.append("Search failed: " + ", ".join(found.failed))
+    if found.not_searched:
+        named = list(found.not_searched[:MAX_NOT_SEARCHED_NAMED])
+        more = len(found.not_searched) - len(named)
+        parts.append("Not searched (not ticked under Settings > Download sources > Chapter sources): " +
+                     ", ".join(named) + (f" and {more} more" if more > 0 else ""))
+    return " · ".join(parts)
 
 
 # --- one lookup for the chapters panel ---------------------------------------------------------------------------

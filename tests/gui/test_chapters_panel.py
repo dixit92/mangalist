@@ -371,3 +371,31 @@ def test_a_default_folder_with_choices_is_shown_and_can_be_changed(qapp):
     assert panel.chosen_target_dir() == latest and "Season 03" in panel.folder_label.text()
     panel.folder_combo.setCurrentIndex(panel.folder_combo.findData(older))
     assert panel.chosen_target_dir() == older
+
+
+def test_change_source_says_which_sources_were_not_searched(qapp):
+    # owner, 2026-11-22: Asmodeus Scans was missing from the list - not ticked under Chapter sources, and nothing said so
+    backend = FakeChapterBackend()
+    backend.coverage = dict(searched=("Weeb Example",), empty=(), failed=(), not_searched=("Asmodeus Scans (EN)",))
+    panel, _, _ = make(qapp, backend)
+    open_series(qapp, panel)
+    assert panel.cand_coverage.isHidden()
+    assert panel.other_sources()
+    settle(qapp, panel)
+    assert panel.stack.currentIndex() == cp.PAGE_CANDIDATES and not panel.cand_coverage.isHidden()
+    text = panel.cand_coverage.text()
+    assert text.startswith("Searched: Weeb Example") and "Not searched" in text and "Asmodeus Scans (EN)" in text
+    # nothing found anywhere: the status line says the same
+    panel.btn_cand_back.click()
+    backend.no_others = True
+    assert panel.other_sources()
+    settle(qapp, panel)
+    assert "Asmodeus Scans (EN)" in panel.status_label.text()
+
+
+def test_a_plain_candidate_list_shows_no_coverage_line(qapp):
+    panel, backend, _ = make(qapp)
+    open_series(qapp, panel)
+    assert panel.other_sources()
+    settle(qapp, panel)
+    assert panel.stack.currentIndex() == cp.PAGE_CANDIDATES and panel.cand_coverage.isHidden()
