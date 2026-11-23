@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..downloads.chapters import HOW_MANGADEX, ChapterLookup, ChapterRow, MangaMatch, group_key
+from ..downloads.chapters import HOW_MANGADEX, ChapterLookup, ChapterRow, MangaMatch, coverage_text, group_key
 from ..downloads.contracts import DownloadRecord, SuwayomiChapter
 from .background import BackgroundCall, start_call
 from .chapter_words import is_builtin, reword
@@ -208,8 +208,12 @@ class ChaptersPanel(QWidget):
                                     tip="Keep the source this series has now")
         self.btn_cand_back.clicked.connect(self.back_to_chapters)
         self.btn_cand_back.setVisible(False)
+        # which sources Change source asked, found nothing on, or never asked (not ticked; owner, 2026-11-22)
+        self.cand_coverage = label("", "muted", wrap=True, selectable=True)
+        self.cand_coverage.setVisible(False)
         cv.addWidget(self.cand_note)
         cv.addWidget(self.cand_table, 1)
+        cv.addWidget(self.cand_coverage)
         cv.addLayout(hbox(self.btn_cand_back, None, self.btn_confirm))
         self.stack.addWidget(cand)
 
@@ -457,6 +461,9 @@ class ChaptersPanel(QWidget):
             item.setToolTip(cand.manga.url)
             self.cand_table.setItem(row, 1, item)
         self.cand_table.clearSelection()
+        coverage = coverage_text(lookup.candidates)
+        self.cand_coverage.setText(coverage)
+        self.cand_coverage.setVisible(bool(coverage))
         self.stack.setCurrentIndex(PAGE_CANDIDATES)
         self._update_confirm()
 
@@ -716,11 +723,12 @@ class ChaptersPanel(QWidget):
         if series_id != self._series_id or self.lookup is not before:
             return
         if not found:
+            coverage = coverage_text(found)
             self.status_label.setText("None of your other chapter sources has this series. Allow more under Settings > "
-                                      "Download sources > Chapter sources.")
+                                      "Download sources > Chapter sources." + (f" ({coverage})" if coverage else ""))
             return
         self.status_label.setText("")
-        self.lookup = replace(before, candidates=list(found))
+        self.lookup = replace(before, candidates=found if isinstance(found, list) else list(found))  # keeps coverage
         missing = self._wanted_text(before.missing)
         if before.match is None:                        # after a failed lookup: nothing to go back to
             self._before_other = None

@@ -335,3 +335,45 @@ def test_the_same_series_in_two_folders_never_sends_a_suwayomi_chapter_twice(db,
         cledger.set_status(rec.id, S.REMOVED, expect=(S.FILED,))
     later = chm.send_chapters(fake, cledger, second, match, fake.chapter_list, str(second_dir))
     assert [r.wanted_chapters for r in later.records] == [("19",), ("20",)] and later.skipped == []
+
+
+# --- Change source coverage (owner, 2026-11-22: an unticked source was missing from the list without a word) ---------
+
+class _SearchClient:
+    """search(source_id, query) -> per-source answers: a list of manga, or an exception to raise."""
+
+    def __init__(self, answers):
+        self.answers = answers
+
+    def search(self, source_id, query):
+        answer = self.answers.get(source_id, [])
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def test_title_candidates_record_each_sources_outcome():
+    from dataclasses import replace
+
+    down = replace(WEEB, id="3", display_name="Down Scans")
+    empty = replace(WEEB, id="4", display_name="Empty Scans")
+    hit = SuwayomiManga(id=7, title="Example Manga", url="/m/7", source_id=WEEB.id)
+    client = _SearchClient({WEEB.id: [hit], down.id: RuntimeError("cloudflare"), empty.id: []})
+    outcomes = {}
+    found = chm.title_candidates(client, [WEEB, down, empty], ("Example Manga", "Another Title"), outcomes)
+    assert [m.manga for m in found] == [hit]
+    assert outcomes == {"Weeb Example": chm.SEARCH_FOUND, "Down Scans": chm.SEARCH_FAILED,
+                        "Empty Scans": chm.SEARCH_NONE}
+    assert chm.title_candidates(client, [WEEB], ("Example Manga",)) == found        # outcomes stay optional
+
+
+def test_coverage_text_names_what_was_and_was_not_searched():
+    unticked = [f"Source {i}" for i in range(8)]
+    text = chm.coverage_text(chm.Candidates(searched=("MangaDex (EN)", "MangaFox (EN)", "Down Scans"),
+                                            empty=("MangaDex (EN)",), failed=("Down Scans",), not_searched=unticked))
+    assert text.startswith("Searched: MangaDex (EN), MangaFox (EN), Down Scans")
+    assert "Found nothing: MangaDex (EN)" in text and "Search failed: Down Scans" in text
+    assert "Not searched (not ticked under Settings > Download sources > Chapter sources): Source 0" in text
+    assert "Source 5 and 2 more" in text and "Source 6" not in text
+    assert chm.coverage_text([]) == "" and chm.coverage_text(chm.Candidates()) == ""
+    assert isinstance(chm.Candidates([1, 2]), list) and chm.Candidates([1, 2]) == [1, 2]

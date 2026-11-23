@@ -61,6 +61,7 @@ class FakeChapterBackend(FakeBackend):
         self.forgotten: List[int] = []
         self.other_searches: List[tuple] = []
         self.no_others = False
+        self.coverage = None                # Candidates' keyword arguments: Change source's coverage line
         self.groups_set: List[tuple] = []
         self.chapter_sends: List[tuple] = []
         self.matches: dict = {}                     # series id -> MangaMatch (confirmed or by MangaDex id)
@@ -131,9 +132,10 @@ class FakeChapterBackend(FakeBackend):
         self.threads.append(threading.get_ident())
         self.other_searches.append((series_id, tuple(titles), exclude_source))
         if self.no_others:
-            return []
+            return chm.Candidates(**self.coverage) if self.coverage is not None else []
         linked = [chm.MangaMatch(MANGADEX, MANGA, chm.HOW_MANGADEX)] if exclude_source != MANGADEX.id else []
-        return linked + [chm.MangaMatch(WEEB, WEEB_MANGA, chm.HOW_TITLE)]
+        found = linked + [chm.MangaMatch(WEEB, WEEB_MANGA, chm.HOW_TITLE)]
+        return chm.Candidates(found, **self.coverage) if self.coverage is not None else found
 
     def confirm_match(self, series_id, match):
         self.confirmed.append((series_id, match))

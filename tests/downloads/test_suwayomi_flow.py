@@ -316,6 +316,28 @@ def test_other_sources_by_title_leave_out_the_matched_one(world):
     assert not any(OTHER in str(v) for v in searches)
 
 
+def test_change_source_says_which_sources_were_and_were_not_searched(world):
+    # owner, 2026-11-22: Asmodeus Scans was missing from Change source's list - it was installed but not ticked
+    backend, session, sid = world["backend"], world["session"], world["sid"]
+    connect(world)
+    sources = with_other_source()
+    for sid_, name, lang in (("1000000000000000002", "Asmodeus Example", "en"),
+                             ("1000000000000000003", "Raw Example", "ko")):
+        sources["data"]["sources"]["nodes"].append({
+            "id": sid_, "name": name, "lang": lang, "displayName": name, "contentWarning": "SAFE",
+            "supportsLatest": True, "extension": {"pkgName": f"eu.example.{lang}.x", "name": name}})
+    session.answers["MangaListSources"] = sources
+    session.answers["MangaListSearch"] = titles_on_other_source()
+    backend.set_suwayomi_sources([MANGADEX_EN, OTHER])
+    found = backend.other_candidates(sid, (SERIES,), MANGADEX_EN)
+    assert isinstance(found, chm.Candidates) and {c.source.id for c in found} == {OTHER}
+    assert found.searched == ("Weeb Example",) and not found.empty and not found.failed
+    # the unticked English source is named; MangaDex (JA) and the Korean one are outside the owner's languages, the
+    # local source never counts, and MangaDex (EN) is the current source
+    assert found.not_searched == ("Asmodeus Example",)
+    assert "Not searched" in chm.coverage_text(found) and "Asmodeus Example" in chm.coverage_text(found)
+
+
 def by_query(variables):
     """The MangaDex id search finds the linked manga; a title search finds it on the other source."""
     return "search_id.json" if str(variables.get("query", "")).startswith("id:") else titles_on_other_source()
