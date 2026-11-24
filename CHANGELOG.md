@@ -7,6 +7,13 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.8] - 2026-11-24
+
+The sixty-eighth MangaList release (testing build): volume upgrades and manual set-aside now match chapter pages directly against volume archives when the volume list is missing or incomplete.
+
+- **Page-hash proof for replaced chapters.** When a volume archive is filed (or checked with "Set aside chapters its volumes hold…"), MangaList now also compares the volume's perceptual page hashes against the series' loose chapter files (caching hashes in `page_hashes` by content signature). Chapters proven inside the volume in page order are replaced even when MangaPixer's volume list is missing or only maps part of the volume, while volume-only pages (covers, table of contents, inter-chapter dividers, afterwords) and chapter-only pages (scanlator credits, merged spreads) are ignored. MangaPixer's volume list remains alongside page proof for non-zip archives or very short chapters.
+- **Partial volume ranges widened by proven replacements.** Replacement batches whose chapters were filed or proven by page hashes now widen a partial mapped volume range in `volume_contents` (without colliding with neighbouring volumes), so gap detection does not re-flag those chapters as missing after they are moved to the holding folder.
+
 ## [2026.11.7] - 2026-11-22
 
 The sixty-seventh MangaList release (testing build): chapters you already have can be replaced by another source's or group's copy.

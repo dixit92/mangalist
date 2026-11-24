@@ -41,7 +41,8 @@ from typing import List, Optional, Sequence, Tuple
 ALGORITHM = "mp-coverhash64-draft128-v1"
 
 MATCH_BITS = 12                         # two pages are one page within this many differing bits (of 64)
-MAX_PAGES = 400                         # more image entries than this: not hashed ("too many pages")
+MAX_PAGES = 400                         # chapter archive limit: more image entries than this is not hashed
+MAX_VOLUME_PAGES = 2000                 # volume / omnibus archive limit (MangaPixer's PageHashLimits.MaxPages)
 MAX_PAGE_BYTES = 64 * 1024 * 1024       # an entry larger than this (uncompressed) is not decoded
 MAX_ARCHIVE_BYTES = 4 * 1024 ** 3       # MangaPixer's limit per archive
 MAX_UNREAD_SHARE = 0.25                 # more than this share of undecodable pages: the archive is "unreadable"
@@ -157,10 +158,11 @@ def _stamp(path) -> Optional[Tuple[int, int]]:
     return int(st.st_size), int(st.st_mtime_ns)
 
 
-def hash_archive(path, expect: Optional[Tuple[int, int]] = None) -> ArchivePages:
+def hash_archive(path, expect: Optional[Tuple[int, int]] = None,
+                 max_pages: Optional[int] = None) -> ArchivePages:
     """Every page's hash and (CRC32, size) of the archive at *path* (module docstring). *expect*: its ``(size,
     mtime_ns)`` as listed; a file that differs, or changes while it is read, gives STATUS_UNSUPPORTED ("changed").
-    Never raises for a bad file."""
+    *max_pages*: override :data:`MAX_PAGES` (e.g. :data:`MAX_VOLUME_PAGES` for volume archives). Never raises."""
     timer = _Timer()
     before = _stamp(path)
     if before is None:
@@ -180,13 +182,14 @@ def hash_archive(path, expect: Optional[Tuple[int, int]] = None) -> ArchivePages
         return ArchivePages(STATUS_UNSUPPORTED, reason="Pillow is not installed, so pages cannot be decoded")
     from PIL import Image
 
+    limit = MAX_PAGES if max_pages is None else max_pages
     try:
         with zipfile.ZipFile(path) as archive:
             entries = page_entries(archive)
             if not entries:
                 return ArchivePages(STATUS_UNREADABLE, reason="the archive holds no image", seconds=timer())
-            if len(entries) > MAX_PAGES:
-                return ArchivePages(STATUS_UNSUPPORTED, reason=f"more than {MAX_PAGES} pages", seconds=timer())
+            if len(entries) > limit:
+                return ArchivePages(STATUS_UNSUPPORTED, reason=f"more than {limit} pages", seconds=timer())
             hashes: List[Optional[int]] = []
             crcs = []
             for info in entries:
@@ -211,6 +214,6 @@ def hash_archive(path, expect: Optional[Tuple[int, int]] = None) -> ArchivePages
     return ArchivePages(STATUS_OK, tuple(hashes), tuple(crcs), seconds=timer())
 
 
-__all__ = ["ALGORITHM", "MATCH_BITS", "MAX_PAGES", "MAX_PAGE_BYTES", "MAX_ARCHIVE_BYTES", "STATUS_OK",
-           "STATUS_UNREADABLE", "STATUS_UNSUPPORTED", "ArchivePages", "distance", "hash_archive", "hash_image",
-           "hash_luma", "page_entries", "pillow_available", "same_page"]
+__all__ = ["ALGORITHM", "MATCH_BITS", "MAX_PAGES", "MAX_VOLUME_PAGES", "MAX_PAGE_BYTES", "MAX_ARCHIVE_BYTES",
+           "STATUS_OK", "STATUS_UNREADABLE", "STATUS_UNSUPPORTED", "ArchivePages", "distance", "hash_archive",
+           "hash_image", "hash_luma", "page_entries", "pillow_available", "same_page"]

@@ -1098,12 +1098,14 @@ class MainWindow(QMainWindow):
             lines.append(f"  Volume {volume}: {span} ({len(files)} file{'s' if len(files) != 1 else ''})")
         days = upgrades.load_settings(self._db).holding_days
         size = batch.total_size if hasattr(batch, "total_size") else sum(f.size for f in batch.files)
+        how = batch.error or "by MangaPixer's estimated volume ranges"
+        caution = (" Check one volume against its chapters first if unsure - the ranges are estimates."
+                   if "estimate" in how else "")
         box = QMessageBox(QMessageBox.Icon.Question, "Set aside chapters the volumes hold?",
-                          f"{title}: {len(batch.files)} chapter files lie inside volumes you hold, by MangaPixer's "
-                          f"estimated volume ranges:\n\n" + "\n".join(lines) +
+                          f"{title}: {len(batch.files)} chapter files lie inside volumes you hold, {how}:\n\n"
+                          + "\n".join(lines) +
                           f"\n\nThey move to the holding folder ({size / 1e6:.0f} MB): restorable from the Download "
-                          f"tab, emptied after {days} days. The volumes are not touched. Check one volume against its "
-                          "chapters first if unsure - the ranges are estimates.", parent=self)
+                          f"tab, emptied after {days} days. The volumes are not touched.{caution}", parent=self)
         yes = box.addButton(f"Set aside {len(batch.files)} files", QMessageBox.ButtonRole.AcceptRole)
         no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(no)
