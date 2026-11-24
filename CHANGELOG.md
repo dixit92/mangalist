@@ -7,6 +7,15 @@ push the tag. CI refuses a tag without its section here and uses the section as 
 
 ## [Unreleased]
 
+## [2026.11.9] - 2026-11-24
+
+The sixty-ninth MangaList release (testing build): a slimmer List context menu with grouped submenus, interactive Details panel actions, a contextual multi-select bulk bar, a `Ctrl+K` quick actions palette, and a skip-rename prefix filter.
+
+- **Slimmer List context menu with grouped submenus.** The single-series right-click menu now keeps only frequent and contextual actions at the top level (`Open folder`, `Open in MangaPixer`, plus `Volumes or chapters?…`, `Get missing…`, `Rename to the scheme (N)…`, and `Review duplicate files (N)…` only when relevant), organizes the rest into **Downloads**, **Files & library**, and **Metadata & MU** submenus, collapses single-row boolean pairs into checkable toggles (`Confirm MU match`, `Mark Behind as up to date`, `Examined`), and drops the duplicate `Rename its whole library…` entry (already on the filter bar as `Rename library…`).
+- **Interactive Details panel.** The Details panel now offers inline MangaUpdates controls (`Fix MU…`, `Confirm`/`Un-confirm`, `MU ↗`), a one-click action strip (`Get missing…` or `Search releases…`, `Open folder`, `MangaPixer`, `Check ch.`, `Actions ▾`), contextual action pills (`Rename (N)…`, `Duplicates (N)…`, `Set aside…`, `Mark up to date`), and a `Copy path` button on the Folder row.
+- **Multi-select bulk action bar and `Ctrl+K` quick actions.** Selecting two or more series in the List shows a contextual bulk bar (`Automatic ▾`, `Move to library ▾`, `Rename…`, `Check MU`, `Find releases`, `Examined ▾`, `Clear`). Pressing `Ctrl+K` opens a searchable Quick Actions palette for the selected series and library.
+- **Skip-rename prefix filter.** Settings → Library → File naming adds a **Skip prefix(es)** option (e.g. `@` or `@, _`). Files and series folders whose names start with a configured prefix are excluded from renaming and `Rename pending` counts (manual and automatic passes alike), while the Rename window still displays them clearly marked as `excluded from renaming`.
+
 ## [2026.11.8] - 2026-11-24
 
 The sixty-eighth MangaList release (testing build): volume upgrades and manual set-aside now match chapter pages directly against volume archives when the volume list is missing or incomplete.
