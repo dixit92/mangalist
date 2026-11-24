@@ -12,6 +12,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QItemSelectionModel  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 
+from mangalist.gui.links import OPEN_FOLDER_LABEL  # noqa: E402
 from mangalist.gui.quick_actions import QuickAction, QuickActionsDialog  # noqa: E402
 from mangalist.gui.table_model import COL_TITLE  # noqa: E402
 from mangalist.models import FileHit, MangaEntry  # noqa: E402
@@ -71,7 +72,7 @@ def test_context_menu_is_slimmed_with_grouped_submenus_and_checkable_toggles(win
     top = texts(menu)
     assert len(top) <= 10
     assert "Rename its whole library…" not in top
-    assert "Open folder" in top
+    assert OPEN_FOLDER_LABEL in top
     assert "Downloads" in top and "Files & library" in top and "Metadata & MU" in top
     assert "Mark Behind as up to date" in top and "Examined" in top
     # Old redundant toggles are gone on single-select
