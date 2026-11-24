@@ -243,16 +243,17 @@ class SeriesMenu:
 
     # --- the entries (each returns its action, or None when this screen cannot offer it)
 
-    def add_modes(self, apply: Optional[Callable[[Optional[str]], str]] = None) -> Dict[QAction, Optional[str]]:
+    def add_modes(self, apply: Optional[Callable[[Optional[str]], str]] = None,
+                  menu: Optional[QMenu] = None) -> Dict[QAction, Optional[str]]:
         """Automatic downloads ▸ for the series (*apply*: the screen's own setter - the List's keeps its chips' cache -
         returning the status line; else :func:`apply_mode`)."""
         if self.backend is None or not has_automation(self.backend):
             return {}
-        self._modes = add_mode_menu(self.menu, self.backend, self.series_ids())
+        self._modes = add_mode_menu(menu or self.menu, self.backend, self.series_ids())
         self._apply_mode = apply
         return self._modes
 
-    def add_unbundled(self) -> Optional[QAction]:
+    def add_unbundled(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
         """Unbundled chapters (a tick: every series has it on), then - for one series with it on whose volume list does
         not say where its newest volume ends - "First chapter to get…" (owner, 2026-10-15: asked once, editable)."""
         is_on, set_on = self._host_fn("unbundled_on"), self._host_fn("set_unbundled_for")
@@ -260,12 +261,13 @@ class SeriesMenu:
         if is_on is None or set_on is None or not folders:
             return None
         on = bool(is_on(folders))
-        act = self._add(UNBUNDLED_MENU, lambda: self._unbundled(set_on, folders, not on), UNBUNDLED_HELP)
+        act = self._add(UNBUNDLED_MENU, lambda: self._unbundled(set_on, folders, not on), UNBUNDLED_HELP, menu=menu)
         act.setCheckable(True)
         act.setChecked(on)
         first_ask, ask_first = self._host_fn("unbundled_first_ask"), self._host_fn("ask_unbundled_first_for")
         if on and len(folders) == 1 and first_ask is not None and ask_first is not None and first_ask(folders):
-            self._add(UNBUNDLED_FIRST_MENU, lambda: self._unbundled_first(ask_first, folders[0]), UNBUNDLED_FIRST_HELP)
+            self._add(UNBUNDLED_FIRST_MENU, lambda: self._unbundled_first(ask_first, folders[0]), UNBUNDLED_FIRST_HELP,
+                      menu=menu)
         return act
 
     def _unbundled_first(self, ask_first, folder) -> str:
@@ -278,7 +280,7 @@ class SeriesMenu:
         self._changed("unbundled")
         return text or ""
 
-    def add_behind(self) -> Tuple[Optional[QAction], Optional[QAction]]:
+    def add_behind(self, menu: Optional[QMenu] = None) -> Tuple[Optional[QAction], Optional[QAction]]:
         """Mark Behind as up to date / Clear 'up to date' override (a series marked up to date is not searched by the
         find pass - :func:`mangalist.downloads.finder.up_to_date_folders`)."""
         counts, set_done = self._host_fn("behind_counts"), self._host_fn("set_behind_done")
@@ -287,24 +289,40 @@ class SeriesMenu:
             return None, None
         can_mark, marked = counts(folders)
         mark_text, clear_text = behind_labels(len(folders), can_mark, marked)
-        mark = self._add(mark_text, lambda: self._behind(set_done, folders, True), BEHIND_DONE_TIP, can_mark > 0)
+        mark = self._add(mark_text, lambda: self._behind(set_done, folders, True), BEHIND_DONE_TIP, can_mark > 0,
+                         menu=menu)
         clear = self._add(clear_text, lambda: self._behind(set_done, folders, False),
-                          "Count the series' chapter gaps again", marked > 0)
+                          "Count the series' chapter gaps again", marked > 0, menu=menu)
         return mark, clear
+
+    def add_behind_toggle(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
+        """Single checkable 'Mark Behind as up to date' action for a single-series menu (replaces the Mark/Clear pair)."""
+        counts, set_done = self._host_fn("behind_counts"), self._host_fn("set_behind_done")
+        folders = self.folders()
+        if counts is None or set_done is None or len(folders) != 1:
+            return None
+        can_mark, marked = counts(folders)
+        is_marked = marked > 0
+        act = self._add("Mark Behind as up to date", lambda: self._behind(set_done, folders, not is_marked),
+                        "Count the series' chapter gaps again" if is_marked else BEHIND_DONE_TIP,
+                        can_mark > 0 or is_marked, menu=menu)
+        act.setCheckable(True)
+        act.setChecked(is_marked)
+        return act
 
     def _behind(self, set_done, folders, done: bool) -> str:
         text = set_done(folders, done)
         self._changed("behind")
         return text or ""
 
-    def add_move_to_library(self) -> Optional[QMenu]:
+    def add_move_to_library(self, menu: Optional[QMenu] = None) -> Optional[QMenu]:
         """Move to library ▸: the other library folders by name (each moves the series there, after the host's
         confirmation), then "Undo last move (…)" while the last move can be undone (owner, 2026-10-15)."""
         targets, move = self._host_fn("library_targets"), self._host_fn("move_to_library")
         folders = self.folders()
         if targets is None or move is None or not folders:
             return None
-        sub = self.menu.addMenu(MOVE_MENU)
+        sub = (menu or self.menu).addMenu(MOVE_MENU)
         sub.setToolTipsVisible(True)
         sub.menuAction().setToolTip(MOVE_TIP)
         try:
@@ -323,18 +341,18 @@ class SeriesMenu:
             self._add(label, lambda: undo() or "", UNDO_MOVE_TIP, menu=sub)
         return sub
 
-    def add_show_in_list(self) -> Optional[QAction]:
+    def add_show_in_list(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
         ref = self.single
         if self._show_in_list is None or ref is None:
             return None
         return self._add(SHOW_IN_LIST, lambda: self._call(self._show_in_list, ref.folder),
-                         "Select this series in the List tab", bool(ref.folder))
+                         "Select this series in the List tab", bool(ref.folder), menu=menu)
 
-    def add_open_folder(self) -> Optional[QAction]:
+    def add_open_folder(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
         ref = self.single
         if ref is None:
             return None
-        return self._add(OPEN_FOLDER_LABEL, lambda: self._open_folder(ref.folder), "", bool(ref.folder))
+        return self._add(OPEN_FOLDER_LABEL, lambda: self._open_folder(ref.folder), "", bool(ref.folder), menu=menu)
 
     def _open_folder(self, folder: str) -> str:
         own = self._host_fn("open_series_folder")
@@ -346,11 +364,11 @@ class SeriesMenu:
         QGuiApplication.clipboard().setText(str(folder))
         return f"No file manager here - folder path copied: {folder}"
 
-    def add_copy_title(self) -> Optional[QAction]:
+    def add_copy_title(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
         ref = self.single
         if ref is None or not ref.title:
             return None
-        return self._add(COPY_TITLE, lambda: self._copy_title(ref.title))
+        return self._add(COPY_TITLE, lambda: self._copy_title(ref.title), menu=menu)
 
     def _copy_title(self, title: str) -> str:
         own = self._host_fn("copy_series_title")
@@ -360,7 +378,7 @@ class SeriesMenu:
         QGuiApplication.clipboard().setText(title)
         return f"Copied title: {title}"
 
-    def add_mu_page(self, url: Optional[str] = None) -> Optional[QAction]:
+    def add_mu_page(self, url: Optional[str] = None, menu: Optional[QMenu] = None) -> Optional[QAction]:
         """Open MangaUpdates page (off when the series has no match); *url*: the screen knows it already."""
         ref = self.single
         lookup = self._host_fn("series_mu_url")
@@ -368,28 +386,29 @@ class SeriesMenu:
             return None
         if url is None:
             url = lookup(ref.folder) or ""
-        return self._add(OPEN_MU, lambda: self._open_url(url), "", bool(url))
+        return self._add(OPEN_MU, lambda: self._open_url(url), "", bool(url), menu=menu)
 
-    def add_mangapixer(self) -> Optional[QAction]:
+    def add_mangapixer(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
         """Open in MangaPixer (only when MangaPixer knows the series)."""
         ref = self.single
         lookup = self._host_fn("mangapixer_series_url")
         if ref is None or lookup is None or not ref.folder:
             return None
         url = lookup(ref.folder)
-        return self._add(OPEN_MANGAPIXER, lambda: self._open_url(url)) if url else None
+        return self._add(OPEN_MANGAPIXER, lambda: self._open_url(url), menu=menu) if url else None
 
     def _open_url(self, url: str) -> str:
         return "" if open_link(url) else f"No browser here - link copied: {url}"
 
-    def add_fix_mu(self) -> Optional[QAction]:
+    def add_fix_mu(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
         ref = self.single
         fix = self._host_fn("fix_mu_match_for")
         if ref is None or fix is None or not ref.folder:
             return None
-        return self._add(FIX_MU, lambda: self._call(fix, ref.folder), "Pick the series on MangaUpdates yourself")
+        return self._add(FIX_MU, lambda: self._call(fix, ref.folder), "Pick the series on MangaUpdates yourself",
+                         menu=menu)
 
-    def add_search_releases(self) -> Optional[QAction]:
+    def add_search_releases(self, menu: Optional[QMenu] = None) -> Optional[QAction]:
         """Search releases… (owner, 2026-10-24: "optionally show downloads even if you don't have missing chapters"):
         the series' releases card in the Download tab with its Other releases open - also for a series with no gaps.
         Off, with the reason, for a series that cannot be searched on nyaa."""
@@ -399,11 +418,13 @@ class SeriesMenu:
             return None
         blocked = self._host_fn("search_releases_blocked")
         why = (blocked(ref.folder) or "") if blocked is not None else ""
-        return self._add(SEARCH_RELEASES, lambda: run(ref.folder) or "", why or SEARCH_RELEASES_TIP, not why)
+        return self._add(SEARCH_RELEASES, lambda: run(ref.folder) or "", why or SEARCH_RELEASES_TIP, not why,
+                         menu=menu)
 
-    def add_action(self, text: str, do: Callable[[], Optional[str]], tip: str = "", enabled: bool = True) -> QAction:
+    def add_action(self, text: str, do: Callable[[], Optional[str]], tip: str = "", enabled: bool = True,
+                   menu: Optional[QMenu] = None) -> QAction:
         """A screen's own entry, run by :meth:`run` like the shared ones."""
-        return self._add(text, do, tip, enabled)
+        return self._add(text, do, tip, enabled, menu=menu)
 
     @staticmethod
     def _call(fn, *args) -> str:

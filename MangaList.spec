@@ -60,6 +60,7 @@ a = Analysis(
         "mangalist.gui.download_tab",
         "mangalist.gui.settings_dialog",
         "mangalist.gui.duplicates_view",
+        "mangalist.gui.quick_actions",
         "mangalist.duplicates",
         # The content verdicts decode pages with Pillow (imported on first use, so named here).
         "mangalist.duplicate_verdicts",

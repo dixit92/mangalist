@@ -134,7 +134,9 @@ def test_the_list_row_menu_searches_releases_of_a_series_with_no_gaps(make_windo
         win._select_source_row(_row(win, title))
         rect = win._table.visualRect(win._proxy.mapFromSource(win._model.index(_row(win, title), 2)))
         win._on_context_menu(rect.center())
-    done, own = ({a.text(): a for a in m.actions()}[SEARCH_RELEASES] for m in menus)
+    from .test_series_actions import find_action
+
+    done, own = (find_action(m, SEARCH_RELEASES) for m in menus)
     assert done.isEnabled() and "also when nothing is missing" in done.toolTip()
     assert not own.isEnabled() and "can be searched on nyaa" in own.toolTip()
     folder = str(Path("/lib") / DONE)

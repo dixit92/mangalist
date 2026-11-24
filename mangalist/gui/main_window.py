@@ -535,8 +535,28 @@ class MainWindow(QMainWindow):
         lst.details_toggled.connect(self._on_details_toggled)
         lst.add_root_clicked.connect(lambda: self._on_choose_root())
         lst.rename_library_clicked.connect(self.rename_library)
+        lst.bulk_auto_clicked.connect(self._on_bulk_auto)
+        lst.bulk_move_clicked.connect(self._on_bulk_move)
+        lst.bulk_rename_clicked.connect(self._on_bulk_rename)
+        lst.bulk_mu_clicked.connect(self._on_bulk_mu)
+        lst.bulk_find_clicked.connect(self._on_bulk_find)
+        lst.bulk_examined_clicked.connect(self._on_bulk_examined)
+        lst.bulk_clear_clicked.connect(self._table.clearSelection)
         self._detail.get_requested.connect(self._on_get_requested)
         self._detail.unbundled_toggled.connect(self._on_detail_unbundled)
+        self._detail.open_folder_requested.connect(self._on_detail_open_folder)
+        self._detail.mangapixer_requested.connect(self._on_detail_mangapixer)
+        self._detail.check_chapters_requested.connect(self._on_detail_check_chapters)
+        self._detail.search_releases_requested.connect(self._on_detail_search_releases)
+        self._detail.actions_menu_requested.connect(self._on_detail_actions_menu)
+        self._detail.fix_mu_requested.connect(self._on_detail_fix_mu)
+        self._detail.confirm_mu_toggled.connect(self._on_detail_confirm_mu)
+        self._detail.mu_page_requested.connect(self._on_detail_mu_page)
+        self._detail.rename_requested.connect(self._on_detail_rename)
+        self._detail.duplicates_requested.connect(self._on_detail_duplicates)
+        self._detail.behind_toggled.connect(self._on_detail_behind)
+        self._detail.set_aside_requested.connect(self._on_detail_set_aside)
+        self._detail.copy_path_requested.connect(self._on_detail_copy_path)
 
         header = self._table.horizontalHeader()
         header.customContextMenuRequested.connect(self._on_header_context_menu)
@@ -601,6 +621,7 @@ class MainWindow(QMainWindow):
 
         QShortcut(QKeySequence.StandardKey.Find, self, activated=self._focus_search)
         QShortcut(QKeySequence(Qt.Key_F5), self, activated=self._on_rescan)
+        QShortcut(QKeySequence("Ctrl+K"), self, activated=self.open_quick_actions)
 
         # Connect selection (rebind in case it returned None earlier)
         sel = self._table.selectionModel()
@@ -652,14 +673,25 @@ class MainWindow(QMainWindow):
 
     def _on_settings_at(self, section: str) -> None:
         """The Settings dialog at *section* (a Download tab button: Connected services, or the Extensions page)."""
+        from .. import renamer
         from ..identity.carry import last_carry_id
 
         try:
             before = last_carry_id(self._db)
         except Exception:  # noqa: BLE001
             before = 0
+        try:
+            prefixes_before = renamer.skip_prefixes(self._db)
+        except Exception:  # noqa: BLE001
+            prefixes_before = ()
         result = lanes.open_settings_function()(self, self._db, self._volumes_backend, section or None)
         self._apply_settings_result(result, before)
+        try:
+            prefixes_after = renamer.skip_prefixes(self._db)
+        except Exception:  # noqa: BLE001
+            prefixes_after = prefixes_before
+        if prefixes_after != prefixes_before and not getattr(result, "roots_changed", False):
+            self._count_rename_pending()
         if self._download_tab is not None and callable(getattr(self._download_tab, "refresh_extension_notice", None)):
             self._download_tab.refresh_extension_notice()
 
@@ -860,6 +892,7 @@ class MainWindow(QMainWindow):
         self._update_counts()
         self._rebuild_wanted()
         self._update_detail_wanted()
+        self._update_detail_actions()
         self._refresh_auto_modes()
         if self._list.current_filter() == DUPLICATES and self._duplicates_view is not None:
             self._duplicates_view.set_series_duplicates(self._model.duplicate_series())
@@ -964,17 +997,307 @@ class MainWindow(QMainWindow):
             return
         self._detail.set_wanted(wanted_label(self._wanted_groups(str(entry.folder))))
 
-    def _current_entry(self) -> Optional[MangaEntry]:
+    def _current_source_row(self) -> Optional[int]:
         sel = self._table.selectionModel()
         idx = sel.currentIndex() if sel is not None else QModelIndex()
         if not idx.isValid():
             return None
-        return self._model.entry_at(self._proxy.mapToSource(idx).row())
+        return self._proxy.mapToSource(idx).row()
+
+    def _current_entry(self) -> Optional[MangaEntry]:
+        row = self._current_source_row()
+        return self._model.entry_at(row) if row is not None else None
+
+    def _update_detail_actions(self) -> None:
+        row = self._current_source_row()
+        entry = self._model.entry_at(row) if row is not None else None
+        if entry is None:
+            return
+        folder = str(entry.folder)
+        vols, chs = self._model.duplicate_files_at(row)
+        held_vols = self._model.held_volumes_at(row)
+        held_chs = self._model.held_chapters_at(row)
+        can_behind = entry.mu_id is not None and entry.behind_override != "done"
+        behind_done = entry.behind_override == "done"
+        can_search = self._download_tab is not None and self._volumes is not None
+        search_blocked = self.search_releases_blocked(folder) if can_search else ""
+        self._detail.set_series_actions(
+            has_mu=entry.mu_id is not None,
+            mu_confirmed=bool(entry.mu_confirmed),
+            has_mu_url=bool(entry.mu_url),
+            has_mangapixer=bool(self.mangapixer_series_url(folder)),
+            rename_pending=self._model.rename_count_at(row),
+            duplicates=vols + chs,
+            mixed=bool(held_vols) and bool(held_chs),
+            can_behind=can_behind,
+            behind_done=behind_done,
+            can_search=can_search,
+            search_blocked=search_blocked,
+        )
+
+    def _update_bulk_bar(self) -> None:
+        rows = self._selected_source_rows()
+        self._list.set_bulk_selection(len(rows), has_automation=self._auto_modes is not None)
 
     def _on_get_requested(self) -> None:
         entry = self._current_entry()
         if entry is not None:
             self.get_missing(str(entry.folder))
+
+    def _on_detail_open_folder(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.open_series_folder(str(entry.folder))
+
+    def _on_detail_mangapixer(self) -> None:
+        entry = self._current_entry()
+        if entry is None:
+            return
+        url = self.mangapixer_series_url(str(entry.folder))
+        if url:
+            self._open_url(url)
+
+    def _on_detail_check_chapters(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.check_new_chapters(str(entry.folder))
+
+    def _on_detail_search_releases(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            why = self.search_releases_for(str(entry.folder))
+            if why:
+                self._status_label.setText(why)
+
+    def _on_detail_actions_menu(self, anchor) -> None:
+        row = self._current_source_row()
+        entry = self._model.entry_at(row) if row is not None else None
+        if row is None or entry is None:
+            return
+        pos = anchor.mapToGlobal(QPoint(0, anchor.height())) if anchor is not None else self.mapToGlobal(QPoint(0, 0))
+        self._open_series_menu([row], [entry], pos)
+
+    def _on_detail_fix_mu(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.fix_mu_match_for(str(entry.folder))
+
+    def _on_detail_confirm_mu(self) -> None:
+        row = self._current_source_row()
+        entry = self._model.entry_at(row) if row is not None else None
+        if row is None or entry is None or entry.mu_id is None:
+            return
+        new_confirmed = not entry.mu_confirmed
+        if self._model.set_mu_confirmed(row, new_confirmed):
+            mu_cache.set_mu_confirmed(entry.folder, new_confirmed)
+        self._update_detail_actions()
+
+    def _on_detail_mu_page(self) -> None:
+        entry = self._current_entry()
+        if entry is not None and entry.mu_url:
+            self._open_url(entry.mu_url)
+
+    def _on_detail_rename(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.rename_series([entry])
+
+    def _on_detail_duplicates(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.review_duplicates(str(entry.folder))
+
+    def _on_detail_behind(self) -> None:
+        entry = self._current_entry()
+        if entry is None:
+            return
+        done = entry.behind_override != "done"
+        said = self.set_behind_done([str(entry.folder)], done)
+        if said:
+            self._status_label.setText(said)
+        self._update_detail_actions()
+
+    def _on_detail_set_aside(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.set_aside_volume_chapters(str(entry.folder))
+
+    def _on_detail_copy_path(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            QGuiApplication.clipboard().setText(str(entry.folder))
+            self._status_label.setText(f"Copied path: {entry.folder}")
+
+    def _selected_entries(self) -> Tuple[List[int], List[MangaEntry]]:
+        rows = self._selected_source_rows()
+        pairs = [(r, self._model.entry_at(r)) for r in rows]
+        pairs = [(r, e) for r, e in pairs if e is not None]
+        return [r for r, _e in pairs], [e for _r, e in pairs]
+
+    def _on_bulk_auto(self, anchor) -> None:
+        _rows, entries = self._selected_entries()
+        if not entries or self._auto_modes is None:
+            return
+        menu = QMenu(anchor)
+        folders = [str(e.folder) for e in entries]
+        modes = self._auto_modes
+        series = SeriesMenu(menu, [SeriesRef(str(e.folder), modes.series_id(str(e.folder)), e.title) for e in entries],
+                            backend=self._volumes_backend, host=self)
+        sub = series.add_modes(apply=lambda mode: self._auto_modes.apply(folders, mode))
+        if sub is None:
+            return
+        chosen = self._exec_menu(sub, anchor.mapToGlobal(QPoint(0, anchor.height())))
+        if chosen is not None:
+            said = series.run(chosen)
+            if said:
+                self._status_label.setText(said)
+
+    def _on_bulk_move(self, anchor) -> None:
+        _rows, entries = self._selected_entries()
+        if not entries:
+            return
+        menu = QMenu(anchor)
+        modes = self._auto_modes
+        series = SeriesMenu(menu, [SeriesRef(str(e.folder), modes.series_id(str(e.folder)) if modes else None, e.title)
+                                   for e in entries],
+                            backend=self._volumes_backend if modes is not None else None, host=self)
+        sub = series.add_move_to_library()
+        if sub is None or not sub.actions():
+            return
+        chosen = self._exec_menu(sub, anchor.mapToGlobal(QPoint(0, anchor.height())))
+        if chosen is not None:
+            said = series.run(chosen)
+            if said:
+                self._status_label.setText(said)
+
+    def _on_bulk_rename(self) -> None:
+        _rows, entries = self._selected_entries()
+        if entries:
+            self.rename_series(entries)
+
+    def _on_bulk_mu(self) -> None:
+        _rows, entries = self._selected_entries()
+        if entries:
+            self._start_mu_lookup(entries)
+
+    def _on_bulk_find(self) -> None:
+        _rows, entries = self._selected_entries()
+        if entries:
+            self.bulk_find(entries)
+
+    def _on_bulk_examined(self, anchor) -> None:
+        rows, entries = self._selected_entries()
+        if not rows:
+            return
+        n = len(rows)
+        n_examined = sum(1 for e in entries if e.examined)
+        menu = QMenu(anchor)
+        act_mark = menu.addAction(f"Mark all {n} as examined")
+        act_mark.setEnabled(n_examined < n)
+        act_unmark = menu.addAction(f"Reset examined on {n} folders")
+        act_unmark.setEnabled(n_examined > 0)
+        chosen = self._exec_menu(menu, anchor.mapToGlobal(QPoint(0, anchor.height())))
+        if chosen is act_mark:
+            self._set_examined_for_rows(rows, True)
+        elif chosen is act_unmark:
+            self._set_examined_for_rows(rows, False)
+
+    def _quick_actions_for(self, row: Optional[int], entry: Optional[MangaEntry]):
+        from .quick_actions import QuickAction
+
+        actions: List[QuickAction] = []
+        if row is not None and entry is not None:
+            folder = str(entry.folder)
+            if self._download_tab is not None:
+                groups = self._wanted_groups(folder)
+                if groups:
+                    actions.append(QuickAction(wanted_label(groups) + "…", "Downloads",
+                                               lambda f=folder: self.get_missing(f)))
+            actions.append(QuickAction("Open folder", "Files", lambda f=folder: self.open_series_folder(f)))
+            mp_url = self.mangapixer_series_url(folder)
+            if mp_url:
+                actions.append(QuickAction("Open in MangaPixer", "Links", lambda u=mp_url: self._open_url(u)))
+            pending = self._model.rename_count_at(row)
+            rename_label = (f"Rename to the scheme ({pending} file{'s' if pending != 1 else ''})…"
+                            if pending else "Rename to the scheme…")
+            actions.append(QuickAction(rename_label, "Files", lambda e=entry: self.rename_series([e])))
+            vols, chs = self._model.duplicate_files_at(row)
+            if vols or chs:
+                actions.append(QuickAction(f"Review duplicate files ({vols + chs})…", "Files",
+                                           lambda f=folder: self.review_duplicates(f)))
+            actions.append(QuickAction("Set aside chapters its volumes hold…", "Files",
+                                       lambda f=folder: self.set_aside_volume_chapters(f)))
+            if self._download_tab is not None:
+                actions.append(QuickAction("Check for new chapters…", "Downloads",
+                                           lambda f=folder: self.check_new_chapters(f)))
+                if not self.search_releases_blocked(folder):
+                    actions.append(QuickAction("Search releases…", "Downloads",
+                                               lambda f=folder: self.search_releases_for(f)))
+                from .replace_held_dialog import MENU_TEXT
+                actions.append(QuickAction(MENU_TEXT, "Downloads", lambda f=folder: self.replace_held_chapters(f)))
+            if self._auto_modes is not None and callable(getattr(self._download_tab, "find_for", None)):
+                actions.append(QuickAction("Find releases for this series", "Downloads",
+                                           lambda e=entry: self.bulk_find([e])))
+            unbundled_on = self._unbundled.is_on(entry.folder)
+            actions.append(QuickAction(
+                "Turn off Unbundled chapters" if unbundled_on else "Turn on Unbundled chapters",
+                "Downloads",
+                lambda e=entry, on=not unbundled_on: self.set_unbundled([e], on),
+            ))
+            actions.append(QuickAction("Fix MangaUpdates match…", "Metadata",
+                                       lambda f=folder: self.fix_mu_match_for(f)))
+            actions.append(QuickAction("Check MU for this entry", "Metadata",
+                                       lambda e=entry: self._start_mu_lookup([e])))
+            if entry.mu_url:
+                actions.append(QuickAction("Open MangaUpdates page", "Metadata",
+                                           lambda u=entry.mu_url: self._open_url(u)))
+            if entry.mu_id is not None:
+                actions.append(QuickAction(
+                    "Un-confirm MU match" if entry.mu_confirmed else "Confirm MU match",
+                    "Metadata",
+                    self._on_detail_confirm_mu,
+                ))
+                actions.append(QuickAction("Clear MU match", "Metadata",
+                                           lambda r=row, e=entry: (
+                                               mu_cache.delete_entry(e.folder)
+                                               if self._model.clear_mu_match(r) else None)))
+            if entry.mu_id is not None or entry.behind_override == "done":
+                done = entry.behind_override != "done"
+                actions.append(QuickAction(
+                    "Mark Behind as up to date" if done else "Clear 'up to date' override",
+                    "Status",
+                    self._on_detail_behind,
+                ))
+            actions.append(QuickAction(
+                "Mark as not examined" if entry.examined else "Mark as examined",
+                "Status",
+                lambda r=row, ex=not entry.examined: self._set_examined_for_rows([r], ex),
+            ))
+            actions.append(QuickAction("Copy title", "Files", lambda t=entry.title: self.copy_series_title(t)))
+            actions.append(QuickAction("Copy folder path", "Files", self._on_detail_copy_path))
+            actions.append(QuickAction("Exclude from its library…", "Library",
+                                       lambda e=entry: self.exclude_from_library([e])))
+
+        actions.append(QuickAction("Rescan library", "Library", self._on_rescan))
+        actions.append(QuickAction("Rename library…", "Library", self.rename_library))
+        actions.append(QuickAction("Add series…", "Library", self._on_add_series))
+        actions.append(QuickAction("Open Settings…", "App", self._on_settings))
+        return actions
+
+    def _exec_quick_actions(self, dialog) -> int:
+        """Open the Quick Actions palette (one place, so tests can drive it)."""
+        return dialog.exec()
+
+    def open_quick_actions(self) -> None:
+        """Ctrl+K: searchable quick actions palette for the selected series and library."""
+        from .quick_actions import QuickActionsDialog
+
+        row = self._current_source_row()
+        entry = self._model.entry_at(row) if row is not None else None
+        title = entry.title if entry is not None else "Library"
+        dlg = QuickActionsDialog(title, self._quick_actions_for(row, entry), self)
+        if self._exec_quick_actions(dlg) == QuickActionsDialog.DialogCode.Accepted and dlg.chosen is not None:
+            dlg.chosen.run()
 
     def get_missing(self, folder: str) -> bool:
         """"Get the missing volumes": switch to the Download tab with *folder*'s series selected."""
@@ -1260,6 +1583,7 @@ class MainWindow(QMainWindow):
         self._dupe_per_folder = dict(per_folder)
         self._model.set_duplicate_file_counts(per_folder)
         self._update_counts()
+        self._update_detail_actions()
 
     def review_duplicates(self, folder: str) -> None:
         """The Duplicates view on *folder*'s series only (its own Apply deletes nothing elsewhere)."""
@@ -1346,6 +1670,7 @@ class MainWindow(QMainWindow):
             counts = kept
         self._model.set_rename_counts(counts)
         self._update_counts()
+        self._update_detail_actions()
 
     def _on_rename_count_finished(self) -> None:
         self._rename_call = None
@@ -2437,6 +2762,7 @@ class MainWindow(QMainWindow):
         self._keep_last_column_readable()
 
     def _on_row_changed(self, *_args) -> None:
+        self._update_bulk_bar()
         idx = self._table.selectionModel().currentIndex()
         if not idx.isValid():
             self._detail.show_entry(None)
@@ -2450,6 +2776,7 @@ class MainWindow(QMainWindow):
         self._detail.show_entry(entry, m.state_at(row), m.links_at(row), knowledge=m.knowledge_at(row),
                                 held_volumes=m.held_volumes_at(row), held_chapters=m.held_chapters_at(row))
         self._update_detail_wanted()
+        self._update_detail_actions()
         self._update_detail_auto()
         self._update_detail_unbundled()
         if self._volumes is not None:
@@ -2492,7 +2819,10 @@ class MainWindow(QMainWindow):
         entries = [e for e in entries if e is not None]
         if not entries:
             return
+        self._open_series_menu(rows, entries, self._table.viewport().mapToGlobal(pos))
 
+    def _open_series_menu(self, rows: List[int], entries: List[MangaEntry], global_pos: QPoint) -> None:
+        """Build and execute the slimmed series context menu (used for table right-click and Details > Actions ▾)."""
         n = len(entries)
         n_examined = sum(1 for e in entries if e.examined)
         n_with_mu = sum(1 for e in entries if e.mu_id is not None)
@@ -2500,6 +2830,7 @@ class MainWindow(QMainWindow):
         n_unconfirmed = sum(1 for e in entries if e.mu_id is not None and not e.mu_confirmed)
 
         menu = QMenu(self._table)
+        menu.setToolTipsVisible(True)
         # The entries every screen shares (series_actions.py: the Download tab's To get rows, Found cards, the panels)
         modes = self._auto_modes
         series = SeriesMenu(menu, [SeriesRef(str(e.folder), modes.series_id(str(e.folder)) if modes else None, e.title)
@@ -2509,106 +2840,139 @@ class MainWindow(QMainWindow):
         act_get = act_new = act_aside = act_replace = None
         act_dupes = None
         act_exclude = None
-        act_rename = act_rename_library = None
+        act_rename = None
+        act_copy_path = None
+        act_confirm_toggle = None
+        act_confirm_mu = act_unconfirm_mu = act_clear_mu = None
+        act_examined_toggle = act_mark = act_unmark = None
+        link_actions = {}
 
         if n == 1:
-            if getattr(entries[0], "needs_kind", False):
+            entry0 = entries[0]
+            if getattr(entry0, "needs_kind", False):
                 act_kind = menu.addAction("Volumes or chapters?…")
                 act_kind.setToolTip("Its files are bare numbers: say once whether they are volumes or chapters")
                 menu.addSeparator()
-            series.add_open_folder()
-            menu.addSeparator()
-            act_copy_path = menu.addAction("Copy folder path")
-            series.add_copy_title()
-            act_exclude = menu.addAction("Exclude from its library…")
-            act_exclude.setToolTip("Add this folder to its library's exclusions: MangaList stops scanning it (its files "
-                                   "are not touched; Settings > Library undoes it)")
-            series.add_move_to_library()
-            pending = self._model.rename_count_at(rows[0])
-            act_rename = menu.addAction(f"Rename to the scheme ({pending} file{'s' if pending != 1 else ''})…"
-                                        if pending else "Rename to the scheme…")
-            act_rename.setToolTip("Preview the naming scheme's names for this series' files, then rename them "
-                                  "(undoable) - the first step before a whole library")
-            act_rename_library = menu.addAction("Rename its whole library…")
-            menu.addSeparator()
-            series.add_fix_mu()
-            entry0 = entries[0]
-            series.add_mu_page(entry0.mu_url or "")
-            act_check_mu = menu.addAction("Check MU for this entry")
-            if self._download_tab is not None:
-                groups = self._wanted_groups(str(entry0.folder))
-                act_get = menu.addAction((wanted_label(groups) or "Get the missing volumes") + "…")
-                act_get.setEnabled(bool(groups))
-                act_get.setToolTip("Open this series in the Download tab" if groups else
-                                   "Nothing missing: no gaps to download")
-                act_new = menu.addAction("Check for new chapters…")
-                act_new.setToolTip(CHECK_NEW_TIP)
-                from .replace_held_dialog import MENU_TEXT, MENU_TIP
 
-                act_replace = menu.addAction(MENU_TEXT)
-                act_replace.setToolTip(MENU_TIP)
-                series.add_search_releases()            # every release, also with nothing missing (2026-10-24)
-                menu.setToolTipsVisible(True)
-            act_aside = menu.addAction("Set aside chapters its volumes hold…")
-            act_aside.setToolTip("Chapter files inside volumes this series holds, by MangaPixer's estimated volume ranges: "
-                                 "listed for you to confirm, then moved to the holding folder (restorable)")
-            menu.setToolTipsVisible(True)
+            # Contextual promotions at the top (only when relevant for this series)
+            groups = self._wanted_groups(str(entry0.folder)) if self._download_tab is not None else []
+            if self._download_tab is not None and groups:
+                act_get = menu.addAction(wanted_label(groups) + "…")
+                act_get.setToolTip("Open this series in the Download tab")
+
+            pending = self._model.rename_count_at(rows[0])
+            if pending:
+                act_rename = menu.addAction(f"Rename to the scheme ({pending} file{'s' if pending != 1 else ''})…")
+                act_rename.setToolTip("Preview the naming scheme's names for this series' files, then rename them "
+                                      "(undoable)")
+
             vols, chs = self._model.duplicate_files_at(rows[0])
             if vols or chs:
                 act_dupes = menu.addAction(f"Review duplicate files ({vols + chs})…")
                 act_dupes.setToolTip("The Duplicates view on this series only: keep or discard its extra copies")
+
+            series.add_open_folder()
             series.add_mangapixer()
-            links_menu = menu.addMenu("Official sources")
-            link_actions = {}
+            menu.addSeparator()
+
+            # --- Downloads submenu
+            downloads_menu = menu.addMenu("Downloads")
+            downloads_menu.setToolTipsVisible(True)
+            if self._download_tab is not None:
+                if not groups:
+                    act_get = downloads_menu.addAction("Get the missing volumes…")
+                    act_get.setEnabled(False)
+                    act_get.setToolTip("Nothing missing: no gaps to download")
+                act_new = downloads_menu.addAction("Check for new chapters…")
+                act_new.setToolTip(CHECK_NEW_TIP)
+                series.add_search_releases(menu=downloads_menu)
+                from .replace_held_dialog import MENU_TEXT, MENU_TIP
+
+                act_replace = downloads_menu.addAction(MENU_TEXT)
+                act_replace.setToolTip(MENU_TIP)
+                downloads_menu.addSeparator()
+            act_bulk_find = self._add_automation_menu(series, entries, menu=downloads_menu)
+            series.add_unbundled(menu=downloads_menu)
+
+            # --- Files & library submenu
+            files_menu = menu.addMenu("Files & library")
+            files_menu.setToolTipsVisible(True)
+            if not pending:
+                act_rename = files_menu.addAction("Rename to the scheme…")
+                act_rename.setToolTip("Preview the naming scheme's names for this series' files, then rename them "
+                                      "(undoable)")
+            act_aside = files_menu.addAction("Set aside chapters its volumes hold…")
+            act_aside.setToolTip("Chapter files inside volumes this series holds (matched by pages, MangaPixer's "
+                                 "volume list, or estimated ranges): listed for you to confirm, then moved to the "
+                                 "holding folder (restorable)")
+            series.add_move_to_library(menu=files_menu)
+            act_exclude = files_menu.addAction("Exclude from its library…")
+            act_exclude.setToolTip("Add this folder to its library's exclusions: MangaList stops scanning it (its files "
+                                   "are not touched; Settings > Library undoes it)")
+            files_menu.addSeparator()
+            series.add_copy_title(menu=files_menu)
+            act_copy_path = files_menu.addAction("Copy folder path")
+
+            # --- Metadata & MU submenu
+            meta_menu = menu.addMenu("Metadata & MU")
+            meta_menu.setToolTipsVisible(True)
+            series.add_fix_mu(menu=meta_menu)
+            act_check_mu = meta_menu.addAction("Check MU for this entry")
+            series.add_mu_page(entry0.mu_url or "", menu=meta_menu)
+            links_menu = meta_menu.addMenu("Official sources")
             for link in self._model.links_at(rows[0]):
                 act = links_menu.addAction(link.label if link.url else f"{link.label} (no page known)")
                 act.setEnabled(bool(link.url))
                 link_actions[act] = link.url
             links_menu.setEnabled(bool(link_actions))
+            meta_menu.addSeparator()
+            act_confirm_toggle = meta_menu.addAction("Confirm MU match")
+            act_confirm_toggle.setCheckable(True)
+            act_confirm_toggle.setChecked(bool(entry0.mu_confirmed))
+            act_confirm_toggle.setEnabled(entry0.mu_id is not None)
+            act_clear_mu = meta_menu.addAction("Clear MU match")
+            act_clear_mu.setEnabled(entry0.mu_id is not None)
+
             menu.addSeparator()
+            series.add_behind_toggle()
+            act_examined_toggle = menu.addAction("Examined")
+            act_examined_toggle.setCheckable(True)
+            act_examined_toggle.setChecked(bool(entry0.examined))
         else:
-            act_copy_path = None
-            link_actions = {}
             menu.addAction(f"{n} folders selected").setEnabled(False)
             menu.addSeparator()
-            act_exclude = menu.addAction(f"Exclude {n} folders from their libraries…")
-            series.add_move_to_library()
-            act_rename = menu.addAction(f"Rename {n} series to the scheme…")
-            act_check_mu = menu.addAction(f"Check MU for {n} selected entries")
+
+            downloads_menu = menu.addMenu("Downloads")
+            downloads_menu.setToolTipsVisible(True)
+            act_bulk_find = self._add_automation_menu(series, entries, menu=downloads_menu)
+            series.add_unbundled(menu=downloads_menu)
+
+            files_menu = menu.addMenu("Files & library")
+            files_menu.setToolTipsVisible(True)
+            act_rename = files_menu.addAction(f"Rename {n} series to the scheme…")
+            series.add_move_to_library(menu=files_menu)
+            act_exclude = files_menu.addAction(f"Exclude {n} folders from their libraries…")
+
+            meta_menu = menu.addMenu("Metadata & MU")
+            meta_menu.setToolTipsVisible(True)
+            act_check_mu = meta_menu.addAction(f"Check MU for {n} selected entries")
+            meta_menu.addSeparator()
+            act_confirm_mu = meta_menu.addAction(f"Confirm MU match ({n_unconfirmed})")
+            act_confirm_mu.setEnabled(n_unconfirmed > 0)
+            act_unconfirm_mu = meta_menu.addAction(f"Un-confirm MU match ({n_confirmed})")
+            act_unconfirm_mu.setEnabled(n_confirmed > 0)
+            act_clear_mu = meta_menu.addAction(f"Clear MU match ({n_with_mu})")
+            act_clear_mu.setEnabled(n_with_mu > 0)
+
             menu.addSeparator()
+            series.add_behind()
+            menu.addSeparator()
+            act_mark = menu.addAction(f"Mark all {n} as examined")
+            act_unmark = menu.addAction(f"Reset examined on {n} folders")
+            act_mark.setEnabled(n_examined < n)
+            act_unmark.setEnabled(n_examined > 0)
 
-        series.add_unbundled()
-        act_bulk_find = self._add_automation_menu(series, entries)
-
-        act_confirm_mu = menu.addAction(
-            "Confirm MU match" if n == 1 else f"Confirm MU match ({n_unconfirmed})"
-        )
-        act_confirm_mu.setEnabled(n_unconfirmed > 0)
-        act_unconfirm_mu = menu.addAction(
-            "Un-confirm MU match" if n == 1 else f"Un-confirm MU match ({n_confirmed})"
-        )
-        act_unconfirm_mu.setEnabled(n_confirmed > 0)
-        act_clear_mu = menu.addAction(
-            "Clear MU match" if n == 1 else f"Clear MU match ({n_with_mu})"
-        )
-        act_clear_mu.setEnabled(n_with_mu > 0)
-
-        menu.addSeparator()
-        series.add_behind()
-
-        menu.addSeparator()
-        act_mark = menu.addAction(
-            "Mark as examined" if n == 1 else f"Mark all {n} as examined"
-        )
-        act_unmark = menu.addAction(
-            "Mark as not examined" if n == 1 else f"Reset examined on {n} folders"
-        )
-        act_toggle = menu.addAction("Toggle examined")
-        # Sensible enable/disable hints
-        act_mark.setEnabled(n_examined < n)
-        act_unmark.setEnabled(n_examined > 0)
-
-        chosen = self._exec_menu(menu, self._table.viewport().mapToGlobal(pos))
+        chosen = self._exec_menu(menu, global_pos)
         if chosen is None:
             return
 
@@ -2616,6 +2980,7 @@ class MainWindow(QMainWindow):
         if said is not None:                # one of the shared entries (series_actions.py): done, its line shown
             if said:
                 self._status_label.setText(said)
+            self._update_detail_actions()
         elif act_bulk_find is not None and chosen is act_bulk_find:
             self.bulk_find(entries)
         elif act_kind is not None and chosen is act_kind:
@@ -2631,8 +2996,6 @@ class MainWindow(QMainWindow):
             self.exclude_from_library(entries)
         elif act_rename is not None and chosen is act_rename:
             self.rename_series(entries)
-        elif act_rename_library is not None and chosen is act_rename_library:
-            self.rename_library(entries[0].root_id)
         elif chosen is act_get and act_get is not None:
             self.get_missing(str(entries[0].folder))
         elif chosen is act_new and act_new is not None:
@@ -2643,35 +3006,38 @@ class MainWindow(QMainWindow):
             self.set_aside_volume_chapters(str(entries[0].folder))
         elif chosen is act_check_mu:
             self._start_mu_lookup(entries)
-        elif chosen is act_confirm_mu:
+        elif act_confirm_toggle is not None and chosen is act_confirm_toggle:
+            new_confirmed = not entries[0].mu_confirmed
+            if self._model.set_mu_confirmed(rows[0], new_confirmed):
+                mu_cache.set_mu_confirmed(entries[0].folder, new_confirmed)
+            self._update_detail_actions()
+        elif act_confirm_mu is not None and chosen is act_confirm_mu:
             for r, e in zip(rows, entries):
                 if e.mu_id is not None and not e.mu_confirmed:
                     if self._model.set_mu_confirmed(r, True):
                         mu_cache.set_mu_confirmed(e.folder, True)
-        elif chosen is act_unconfirm_mu:
+            self._update_detail_actions()
+        elif act_unconfirm_mu is not None and chosen is act_unconfirm_mu:
             for r, e in zip(rows, entries):
                 if e.mu_confirmed:
                     if self._model.set_mu_confirmed(r, False):
                         mu_cache.set_mu_confirmed(e.folder, False)
-        elif chosen is act_clear_mu:
+            self._update_detail_actions()
+        elif act_clear_mu is not None and chosen is act_clear_mu:
             for r, e in zip(rows, entries):
                 if e.mu_id is not None:
                     if self._model.clear_mu_match(r):
                         mu_cache.delete_entry(e.folder)
-        elif chosen is act_copy_path and entries:
+            self._update_detail_actions()
+        elif act_copy_path is not None and chosen is act_copy_path and entries:
             QGuiApplication.clipboard().setText(str(entries[0].folder))
             self._status_label.setText(f"Copied path: {entries[0].folder}")
-        elif chosen is act_mark:
+        elif act_examined_toggle is not None and chosen is act_examined_toggle:
+            self._set_examined_for_rows([rows[0]], not entries[0].examined)
+        elif act_mark is not None and chosen is act_mark:
             self._set_examined_for_rows(rows, True)
-        elif chosen is act_unmark:
+        elif act_unmark is not None and chosen is act_unmark:
             self._set_examined_for_rows(rows, False)
-        elif chosen is act_toggle:
-            # Per-row toggle.
-            for r in rows:
-                e = self._model.entry_at(r)
-                if e is not None:
-                    self._model.set_examined(r, not e.examined)
-            self._persist_examined()
 
     def set_unbundled(self, entries, on: bool) -> int:
         """The row menu's Unbundled Chapters tick for *entries*' series (mangalist.unbundled); the states follow."""
@@ -2958,24 +3324,24 @@ class MainWindow(QMainWindow):
         if entry is not None:
             self.set_unbundled([entry], on)
 
-    def _add_automation_menu(self, series: SeriesMenu, entries):
+    def _add_automation_menu(self, series: SeriesMenu, entries, menu: Optional[QMenu] = None):
         """The row menu's "Automatic downloads" submenu and "Find releases for N series" (None without)."""
         if self._auto_modes is None:
             return None
         from .automation_rules import bulk_find_label
 
-        menu = series.menu
+        target = menu if menu is not None else series.menu
         folders = [str(e.folder) for e in entries]
-        series.add_modes(apply=lambda mode: self._auto_modes.apply(folders, mode))
+        series.add_modes(apply=lambda mode: self._auto_modes.apply(folders, mode), menu=target)
         act_bulk = None
         if callable(getattr(self._download_tab, "find_for", None)):
             ids = self._auto_modes.series_ids(folders)
-            act_bulk = menu.addAction(bulk_find_label(len(ids)))
+            act_bulk = target.addAction(bulk_find_label(len(ids)))
             act_bulk.setEnabled(bool(ids))
             act_bulk.setToolTip("Run the find pass for these series; what it finds waits under Found in the Download "
                                 "tab - nothing is sent by itself" if ids else "Not scanned yet: rescan first")
-            menu.setToolTipsVisible(True)
-        menu.addSeparator()
+            target.setToolTipsVisible(True)
+        target.addSeparator()
         return act_bulk
 
     def bulk_find(self, entries) -> bool:

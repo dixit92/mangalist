@@ -254,12 +254,24 @@ QProgressBar::chunk {{ background: {p.accent}; border-radius: 3px; }}
 QSplitter::handle {{ background: {p.border}; }}
 QSplitter::handle:horizontal {{ width: 1px; }}
 
-/* the shell (top bar, filter bar, details, footer) */
+/* the shell (top bar, filter bar, bulk bar, details, footer) */
 QWidget#topBar {{ background: {p.surface}; border-bottom: 1px solid {p.border}; }}
 QWidget#filterBar {{ background: {p.surface_subtle}; border-bottom: 1px solid {p.border_soft}; }}
+QWidget#bulkBar {{ background: {p.accent_tint}; border-bottom: 1px solid {p.border_soft}; }}
+QWidget#bulkBar QLabel[role="name"] {{ color: {p.accent}; font-weight: 600; }}
+QWidget#bulkBar QPushButton {{ min-height: 28px; padding: 0 10px; font-size: 12px; }}
 QWidget#footer {{ background: {p.surface}; border-top: 1px solid {p.border}; }}
 QWidget#footer QLabel {{ color: {p.muted}; font-size: 12px; }}
 QScrollArea#detailsScroll, QWidget#details {{ background: {p.surface_subtle}; border: none; }}
+QWidget#details QPushButton {{ min-height: 30px; padding: 0 10px; font-size: 13px; }}
+QWidget#details QPushButton[variant="primary"] {{ min-height: 32px; padding: 0 12px; }}
+QWidget#details QPushButton[variant="close"] {{ min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; }}
+QWidget#details QPushButton[variant="ghost"] {{
+    min-height: 24px; padding: 0 8px; font-size: 12px; color: {p.accent};
+    border: 1px solid {p.border_soft}; border-radius: 5px; background: {p.surface};
+}}
+QWidget#details QPushButton[variant="ghost"]:hover {{ background: {p.hover}; border-color: {p.accent}; }}
+QWidget#details QPushButton[variant="ghost"]:disabled {{ color: {p.disabled}; border-color: {p.border}; background: {p.surface_subtle}; }}
 QWidget#emptyState {{ background: {p.surface}; }}
 QLabel#emptyTitle {{ font-size: 18px; font-weight: 600; }}
 QFrame#placeholder {{ background: {p.surface}; border: 1px dashed {p.control}; border-radius: 8px; }}

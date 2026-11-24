@@ -267,7 +267,8 @@ def test_rename_pending_shows_in_the_list_and_the_row_menu_opens_the_pilot(lib):
     win._select_source_row(p)
     rect = win._table.visualRect(win._proxy.mapFromSource(model.index(p, 2)))
     win._on_context_menu(rect.center())
-    assert "Rename its whole library…" in menus[0]
+    assert "Rename its whole library…" not in menus[0]      # lives on the filter bar ("Rename library…")
+    assert "Rename to the scheme (2 files)…" in menus[0]    # promoted top-level when files are pending
     rw = win._renamer_window
     assert rw is not None and rw.scope.kind == "series" and rw.scope.label == "Series P"
     assert rw.dry_run.count(RENAME) == 2
@@ -642,3 +643,35 @@ def test_the_window_without_anything_to_look_up_says_nothing(qapp, db, made):
     win = _window(qapp, _renamer(db), Scope.all())                  # no record titles: no lookup
     assert win.english_label.isHidden() and win.english_label.text() == ""
     win.close()
+
+
+def test_excluded_prefix_files_are_shown_marked_excluded_and_not_pending(qapp, db, tmp_path):
+    from mangalist.renamer import set_skip_prefixes
+
+    library = tmp_path / "prefixed" / "Manga"
+    library.mkdir(parents=True)
+    kept = "@Extra 001.cbz"
+    normal = fmd2(1, "0001", "Opening", "G")
+    root = make_library(db, library, {
+        "Series X": {kept: payload("k"), normal: payload("n")},
+        "Series Y": {"@Only Excluded.cbz": payload("y")},
+    })
+    set_skip_prefixes(db, ("@",))
+    win = _window(qapp, _renamer(db), Scope.root(root.id, "Manga"))
+    try:
+        assert "2 excluded from renaming" in win.summary_label.text()
+        series_x = next(s for s in win.dry_run.series if s.title == "Series X")
+        series_y = next(s for s in win.dry_run.series if s.title == "Series Y")
+        assert len(series_x.renames) == 1 and len(series_y.renames) == 0
+        win._show_series(series_x)
+        rows = {win.preview.topLevelItem(i).text(0): (win.preview.topLevelItem(i).text(1),
+                                                      win.preview.topLevelItem(i).text(2))
+                for i in range(win.preview.topLevelItemCount())}
+        assert rows[kept] == ("(excluded)", "excluded from renaming: starts with '@'")
+        assert rows[normal][0] == "Ch. 0001.00 (Opening) [G].cbz"
+        win.apply()
+        assert (library / "Series X" / kept).exists()
+        assert (library / "Series X" / "Ch. 0001.00 (Opening) [G].cbz").exists()
+        assert (library / "Series Y" / "@Only Excluded.cbz").exists()
+    finally:
+        win.close()

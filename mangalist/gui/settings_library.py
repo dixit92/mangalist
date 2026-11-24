@@ -35,6 +35,9 @@ SERVER_TEXT = ("Windows server name (optional). If you open these files from a W
                "a path longer than 259 characters, so MangaList then shortens long chapter titles (and after them long "
                "group names) wherever the whole Windows path would be too long. Leave it empty if you never open the "
                "library from Windows; file names are still kept to 255 bytes.")
+SKIP_PREFIX_TEXT = ("Skip renaming files starting with (optional). Files or series folders whose name starts with any "
+                    "of these prefixes (separated by spaces or commas, e.g. @ or @, _) are ignored by the renamer and "
+                    "never show up as rename candidates. The Rename window still lists them marked as excluded.")
 NO_ROOTS = "No roots yet. Add the folder that holds your series folders."
 
 
@@ -101,6 +104,20 @@ class LibraryPage(SectionPage):
         self.server_error.setVisible(False)
         lay.addLayout(hbox(label("Windows server:"), self.server_edit, None))
         lay.addWidget(self.server_error)
+        self.skip_prefixes_note = label(SKIP_PREFIX_TEXT, "muted", wrap=True)
+        lay.addWidget(self.skip_prefixes_note)
+        self.skip_prefixes_edit = QLineEdit()
+        self.skip_prefixes_edit.setPlaceholderText("e.g. @ or @, _ (empty: rename all)")
+        self.skip_prefixes_edit.setAccessibleName("Skip rename prefixes")
+        self.skip_prefixes_edit.setMinimumWidth(280)
+        self.skip_prefixes_edit.setMaximumWidth(360)
+        self.skip_prefixes_edit.setText(renamer.format_skip_prefixes(renamer.skip_prefixes(self._db)))
+        self.skip_prefixes_edit.editingFinished.connect(self.save_skip_prefixes)
+        self.skip_prefixes_error = label("", wrap=True)
+        self.skip_prefixes_error.setProperty("tone", "bad")
+        self.skip_prefixes_error.setVisible(False)
+        lay.addLayout(hbox(label("Skip prefix(es):"), self.skip_prefixes_edit, None))
+        lay.addWidget(self.skip_prefixes_error)
         return box
 
     def save_server(self) -> bool:
@@ -116,6 +133,21 @@ class LibraryPage(SectionPage):
         if stored != renamer.windows_server(self._db):
             renamer.set_windows_server(self._db, stored)
         self.server_edit.setText(stored or "")
+        return True
+
+    def save_skip_prefixes(self) -> bool:
+        """Store skip-rename prefixes typed (empty clears them); rejects path separators."""
+        text = self.skip_prefixes_edit.text()
+        try:
+            stored = renamer.normalize_skip_prefixes(text)
+        except ValueError as exc:
+            self.skip_prefixes_error.setText(str(exc))
+            self.skip_prefixes_error.setVisible(True)
+            return False
+        self.skip_prefixes_error.setVisible(False)
+        if stored != renamer.skip_prefixes(self._db):
+            renamer.set_skip_prefixes(self._db, stored)
+        self.skip_prefixes_edit.setText(renamer.format_skip_prefixes(stored))
         return True
 
     # --- the overview ------------------------------------------------------------------------------------
@@ -247,4 +279,6 @@ class LibraryPage(SectionPage):
         self.stack.setCurrentIndex(0)
 
     def stop(self) -> None:
+        self.save_server()
+        self.save_skip_prefixes()
         self._close_editor()
