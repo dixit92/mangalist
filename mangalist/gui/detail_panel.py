@@ -38,6 +38,7 @@ from ..models import MangaEntry
 from ..states import ATTENTION_LABELS, SeriesState
 from . import theme
 from .automation_rules import MODE_LABELS, MODES, default_entry_label, default_entry_tip
+from .chips import FlowLayout
 from .list_text import UNBUNDLED_HELP, english_text, holds_text, match_text, same_title, unbundled_detail
 from .links import open_link
 
@@ -123,6 +124,19 @@ class DetailPanel(QWidget):
     get_requested = Signal()            # "Get the missing volumes": the window switches to the Download tab
     auto_mode_chosen = Signal(object)   # the picker: "off" / "notify" / "auto", or None (back to the default)
     unbundled_toggled = Signal(bool)    # the Unbundled chapters switch
+    open_folder_requested = Signal()
+    mangapixer_requested = Signal()
+    check_chapters_requested = Signal()
+    search_releases_requested = Signal()
+    actions_menu_requested = Signal(object)   # button widget to anchor the series actions menu under
+    fix_mu_requested = Signal()
+    confirm_mu_toggled = Signal()
+    mu_page_requested = Signal()
+    rename_requested = Signal()
+    duplicates_requested = Signal()
+    behind_toggled = Signal()
+    set_aside_requested = Signal()
+    copy_path_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -143,9 +157,9 @@ class DetailPanel(QWidget):
         scroll.setWidget(body)
         root = QVBoxLayout(body)
         root.setContentsMargins(20, 20, 20, 20)
-        root.setSpacing(18)
+        root.setSpacing(14)
 
-        # Header: title, match line, close
+        # Header: title, match line + inline MU links, close
         head = QHBoxLayout()
         head.setSpacing(12)
         titles = QVBoxLayout()
@@ -154,6 +168,18 @@ class DetailPanel(QWidget):
         self._eng_label = _label("", role="muted")      # the matched series' title and where the match comes from
         titles.addWidget(self._title_label)
         titles.addWidget(self._eng_label)
+        self._match_links = QWidget()
+        ml = FlowLayout(self._match_links, spacing=6)
+        self.btn_fix_mu = self._inline_btn("Fix MU…", "Pick the series on MangaUpdates yourself")
+        self.btn_fix_mu.clicked.connect(self.fix_mu_requested)
+        self.btn_confirm_mu = self._inline_btn("Confirm", "Confirm or un-confirm the MangaUpdates match")
+        self.btn_confirm_mu.clicked.connect(self.confirm_mu_toggled)
+        self.btn_mu_page = self._inline_btn("MU ↗", "Open the MangaUpdates page")
+        self.btn_mu_page.clicked.connect(self.mu_page_requested)
+        for b in (self.btn_fix_mu, self.btn_confirm_mu, self.btn_mu_page):
+            ml.addWidget(b)
+        self._match_links.setVisible(False)
+        titles.addWidget(self._match_links)
         head.addLayout(titles, 1)
         self.btn_close = QPushButton("×")
         self.btn_close.setProperty("variant", "close")
@@ -161,6 +187,56 @@ class DetailPanel(QWidget):
         self.btn_close.clicked.connect(self.close_requested)
         head.addWidget(self.btn_close, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(head)
+
+        # Quick action strip: primary CTA + frequent one-click actions (works with left-click / tap)
+        self._action_strip = QWidget()
+        al_strip = FlowLayout(self._action_strip, spacing=6)
+        self.btn_get = QPushButton("Get the missing volumes")
+        self.btn_get.setProperty("variant", "primary")
+        self.btn_get.setToolTip("Open this series in the Download tab")
+        self.btn_get.clicked.connect(self.get_requested)
+        self.btn_get.setVisible(False)
+        self.btn_search = QPushButton("Search releases…")
+        self.btn_search.setProperty("variant", "primary")
+        self.btn_search.setToolTip("Look up releases for this series in the Download tab")
+        self.btn_search.clicked.connect(self.search_releases_requested)
+        self.btn_search.setVisible(False)
+        self.btn_open_folder = QPushButton("Open folder")
+        self.btn_open_folder.setToolTip("Open this series' folder in the file manager")
+        self.btn_open_folder.clicked.connect(self.open_folder_requested)
+        self.btn_mangapixer = QPushButton("MangaPixer")
+        self.btn_mangapixer.setToolTip("Open this series in MangaPixer")
+        self.btn_mangapixer.clicked.connect(self.mangapixer_requested)
+        self.btn_mangapixer.setVisible(False)
+        self.btn_check_chapters = QPushButton("Check ch.")
+        self.btn_check_chapters.setToolTip("Check this series' chapter source for new chapters")
+        self.btn_check_chapters.clicked.connect(self.check_chapters_requested)
+        self.btn_check_chapters.setVisible(False)
+        self.btn_actions = QPushButton("Actions ▾")
+        self.btn_actions.setToolTip("More actions for this series (same menu as right-click)")
+        self.btn_actions.clicked.connect(lambda: self.actions_menu_requested.emit(self.btn_actions))
+        for b in (self.btn_get, self.btn_search, self.btn_open_folder, self.btn_mangapixer,
+                  self.btn_check_chapters, self.btn_actions):
+            al_strip.addWidget(b)
+        self._action_strip.setVisible(False)
+        root.addWidget(self._action_strip)
+
+        # Inline contextual pills (shown only when relevant: rename pending, duplicates, mixed set-aside, behind)
+        self._context_pills = QWidget()
+        cp = FlowLayout(self._context_pills, spacing=6)
+        self.btn_inline_rename = self._inline_btn("Rename…", "Preview and rename this series' files to the scheme")
+        self.btn_inline_rename.clicked.connect(self.rename_requested)
+        self.btn_inline_dupes = self._inline_btn("Duplicates…", "Review duplicate files of this series")
+        self.btn_inline_dupes.clicked.connect(self.duplicates_requested)
+        self.btn_inline_aside = self._inline_btn("Set aside…", "Set aside chapter files that held volumes contain")
+        self.btn_inline_aside.clicked.connect(self.set_aside_requested)
+        self.btn_inline_behind = self._inline_btn("Mark up to date", "Mark Behind as up to date (or clear override)")
+        self.btn_inline_behind.clicked.connect(self.behind_toggled)
+        for b in (self.btn_inline_rename, self.btn_inline_dupes, self.btn_inline_aside, self.btn_inline_behind):
+            b.setVisible(False)
+            cp.addWidget(b)
+        self._context_pills.setVisible(False)
+        root.addWidget(self._context_pills)
 
         # The facts grid
         grid = QGridLayout()
@@ -204,6 +280,18 @@ class DetailPanel(QWidget):
         self.unbundled_check.clicked.connect(self.unbundled_toggled)
         self._lbl_kind = _label("-")
         self._path_label = _label("", mono=True)
+        self.btn_copy_path = self._inline_btn("Copy path", "Copy this series' folder path to the clipboard")
+        self.btn_copy_path.clicked.connect(self.copy_path_requested)
+        folder_cell = QWidget()
+        fc = QVBoxLayout(folder_cell)
+        fc.setContentsMargins(0, 0, 0, 0)
+        fc.setSpacing(4)
+        fc.addWidget(self._path_label)
+        fc_row = QHBoxLayout()
+        fc_row.setContentsMargins(0, 0, 0, 0)
+        fc_row.addWidget(self.btn_copy_path)
+        fc_row.addStretch(1)
+        fc.addLayout(fc_row)
         for key, caption, widget in (("state", "State", state_cell), ("flags", "Flags", self._lbl_flags),
                                      ("gaps", "Gaps", self._lbl_gaps), ("holds", "Holds", self._lbl_holds),
                                      ("english", "English", self._lbl_english),
@@ -212,16 +300,9 @@ class DetailPanel(QWidget):
                                      ("auto", "Automatic", auto_cell),
                                      ("unbundled", "Unbundled", self.unbundled_row),
                                      ("kind", "Kind", self._lbl_kind),
-                                     ("folder", "Folder", self._path_label)):
+                                     ("folder", "Folder", folder_cell)):
             self._add_row(key, caption, widget)
         root.addLayout(grid)
-
-        self.btn_get = QPushButton("Get the missing volumes")
-        self.btn_get.setProperty("variant", "primary")
-        self.btn_get.setToolTip("Open this series in the Download tab")
-        self.btn_get.clicked.connect(self.get_requested)
-        self.btn_get.setVisible(False)
-        root.addWidget(self.btn_get)
 
         # Official sources (they stay in List: owner, 2026-10-08)
         self._links_box = QWidget()
@@ -252,7 +333,16 @@ class DetailPanel(QWidget):
 
         self._downloads = False
         self._auto = False
+        self._can_search = False
         self.show_entry(None)
+
+    @staticmethod
+    def _inline_btn(text: str, tip: str = "") -> QPushButton:
+        btn = QPushButton(text)
+        btn.setProperty("variant", "ghost")
+        btn.setToolTip(tip)
+        btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        return btn
 
     # ------------------------------------------------------------------
 
@@ -271,6 +361,9 @@ class DetailPanel(QWidget):
     def set_downloads_enabled(self, enabled: bool) -> None:
         self._downloads = enabled
         self._show_row("download", enabled)
+        shown = not self._action_strip.isHidden()
+        self.btn_check_chapters.setVisible(enabled and shown)
+        self.btn_search.setVisible(enabled and self._can_search and self.btn_get.isHidden() and shown)
 
     def set_auto_enabled(self, enabled: bool) -> None:
         """Show the "Automatic" line (the backend offers automatic downloads)."""
@@ -325,6 +418,37 @@ class DetailPanel(QWidget):
         self.btn_get.setText(label or "Get the missing volumes")
         self.btn_get.setToolTip(tooltip or "Open this series in the Download tab")
         self.btn_get.setVisible(bool(label))
+        self.btn_search.setVisible(self._downloads and self._can_search and not bool(label)
+                                   and not self._action_strip.isHidden())
+
+    def set_series_actions(self, *, has_mu: bool = False, mu_confirmed: bool = False, has_mu_url: bool = False,
+                           has_mangapixer: bool = False, rename_pending: int = 0, duplicates: int = 0,
+                           mixed: bool = False, can_behind: bool = False, behind_done: bool = False,
+                           can_search: bool = False, search_blocked: str = "") -> None:
+        """Update the Details panel's action strip and inline contextual pills for the selected series."""
+        self._can_search = bool(can_search)
+        self.btn_confirm_mu.setVisible(has_mu)
+        self.btn_confirm_mu.setText("Un-confirm" if mu_confirmed else "Confirm")
+        self.btn_mu_page.setVisible(has_mu_url)
+        self.btn_mangapixer.setVisible(has_mangapixer)
+        self.btn_check_chapters.setVisible(self._downloads and not self._action_strip.isHidden())
+        self.btn_search.setEnabled(not search_blocked)
+        self.btn_search.setToolTip(search_blocked or "Look up releases for this series in the Download tab")
+        self.btn_search.setVisible(self._downloads and self._can_search and self.btn_get.isHidden()
+                                   and not self._action_strip.isHidden())
+
+        self.btn_inline_rename.setVisible(rename_pending > 0)
+        if rename_pending > 0:
+            self.btn_inline_rename.setText(f"Rename ({rename_pending})…")
+        self.btn_inline_dupes.setVisible(duplicates > 0)
+        if duplicates > 0:
+            self.btn_inline_dupes.setText(f"Duplicates ({duplicates})…")
+        self.btn_inline_aside.setVisible(mixed)
+        show_behind = can_behind or behind_done
+        self.btn_inline_behind.setVisible(show_behind)
+        if show_behind:
+            self.btn_inline_behind.setText("✓ Up to date" if behind_done else "Mark up to date")
+        self._context_pills.setVisible(any((rename_pending > 0, duplicates > 0, mixed, show_behind)))
 
     def show_entry(self, entry: Optional[MangaEntry], state: Optional[SeriesState] = None,
                    links: Optional[Sequence[OfficialLink]] = None, knowledge: Optional[SeriesKnowledge] = None,
@@ -335,6 +459,8 @@ class DetailPanel(QWidget):
         self._show_state(state if has else None, links if has else None)
         self._links_box.setVisible(has)
         self._files_box.setVisible(has)
+        self._match_links.setVisible(has)
+        self._action_strip.setVisible(has)
         self.btn_close.setVisible(True)
         if entry is None:
             self._title_label.setText(EMPTY_TEXT)
@@ -344,6 +470,7 @@ class DetailPanel(QWidget):
             self._eng_label.setVisible(False)
             self._path_label.setText("")
             self._files_label.setText("")
+            self._context_pills.setVisible(False)
             self.set_wanted("")
             return
 

@@ -220,6 +220,28 @@ def test_library_keeps_the_windows_server_name_for_the_length_rule(qapp, db, cac
     assert again.pages[SECTION_LIBRARY].server_edit.text() == ""
 
 
+def test_library_keeps_skip_rename_prefixes(qapp, db, cache, library):
+    from mangalist import renamer
+
+    db.add_root(str(library), "Manga")
+    dlg, _ = make(qapp, db, cache)
+    page = dlg.pages[SECTION_LIBRARY]
+    assert page.skip_prefixes_edit.text() == ""
+    page.skip_prefixes_edit.setText(" @, _ , @ ")
+    assert page.save_skip_prefixes() and renamer.skip_prefixes(db) == ("@", "_")
+    assert page.skip_prefixes_edit.text() == "@, _"
+    page.skip_prefixes_edit.setText("@/bad")
+    assert not page.save_skip_prefixes() and renamer.skip_prefixes(db) == ("@", "_")
+    assert not page.skip_prefixes_error.isHidden() and "cannot contain" in page.skip_prefixes_error.text()
+    page.skip_prefixes_edit.setText("!")
+    page.stop()                                               # closing Settings flushes unsaved text
+    assert renamer.skip_prefixes(db) == ("!",)
+    page.skip_prefixes_edit.setText("")
+    assert page.save_skip_prefixes() and renamer.skip_prefixes(db) == () and page.skip_prefixes_error.isHidden()
+    again, _ = make(qapp, db, cache)
+    assert again.pages[SECTION_LIBRARY].skip_prefixes_edit.text() == ""
+
+
 def test_library_says_which_mangapixer_library_each_root_is_part_of(qapp, db, cache, library, tmp_path):
     from mangalist.services.mangapixer import mapping as mp_map
     from mangalist.store.mangapixer import Mapping

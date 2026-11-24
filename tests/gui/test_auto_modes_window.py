@@ -114,8 +114,17 @@ def _menu_for(win, *titles):
     return menus[-1]
 
 
+def _all_actions(menu):
+    out = []
+    for a in menu.actions():
+        out.append(a)
+        if a.menu() is not None:
+            out.extend(_all_actions(a.menu()))
+    return out
+
+
 def _submenu(menu):
-    return next(a.menu() for a in menu.actions() if a.menu() is not None and a.text() == "Automatic downloads")
+    return next(a.menu() for a in _all_actions(menu) if a.menu() is not None and a.text() == "Automatic downloads")
 
 
 def _choose(win, titles, text):
@@ -146,7 +155,7 @@ def test_a_series_not_scanned_yet_has_the_submenu_off(make_window):
     sub = _submenu(_menu_for(win, "Unscanned Story"))
     assert not sub.isEnabled()
     menu = _menu_for(win, "Unscanned Story")
-    bulk = next(a for a in menu.actions() if a.text().startswith("Find releases for"))
+    bulk = next(a for a in _all_actions(menu) if a.text().startswith("Find releases for"))
     assert bulk.text() == "Find releases for 0 series" and not bulk.isEnabled()
 
 
@@ -180,9 +189,9 @@ def test_bulk_find_from_the_list_opens_found(make_window, qapp):
     backend = _backend()
     win = make_window(backend)
     menu = _menu_for(win, "Alpha Saga", "Gamma Tales", "Unscanned Story")
-    bulk = next(a for a in menu.actions() if a.text().startswith("Find releases for"))
+    bulk = next(a for a in _all_actions(menu) if a.text().startswith("Find releases for"))
     assert bulk.text() == "Find releases for 2 series" and bulk.isEnabled()
-    win._exec_menu = lambda m, pos: next(a for a in m.actions() if a.text() == "Find releases for 2 series")
+    win._exec_menu = lambda m, pos: next(a for a in _all_actions(m) if a.text() == "Find releases for 2 series")
     idx = win._proxy.mapFromSource(win._model.index(_row(win, "Alpha Saga"), COL_TITLE))
     win._on_context_menu(win._table.visualRect(idx).center())
     tab = win._download_tab
@@ -196,8 +205,8 @@ def test_nothing_of_it_without_the_backend_methods(make_window):
     assert win._auto_modes is None and not win._detail._lbl_auto.isVisibleTo(win._detail)
     assert win._detail.auto_choice() == ""
     menu = _menu_for(win, "Alpha Saga")
-    assert not any(a.text() == "Automatic downloads" for a in menu.actions())
-    assert not any(a.text().startswith("Find releases for") for a in menu.actions())
+    assert not any(a.text() == "Automatic downloads" for a in _all_actions(menu))
+    assert not any(a.text().startswith("Find releases for") for a in _all_actions(menu))
 
 
 # --- Settings > Automation ---------------------------------------------------------------------------------------

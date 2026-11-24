@@ -131,9 +131,10 @@ def test_row_menu_leads_to_the_download_tab(make_window):
         win._select_source_row(_row(win, title))
         rect = win._table.visualRect(win._proxy.mapFromSource(win._model.index(_row(win, title), 2)))
         win._on_context_menu(rect.center())
-    acts = [{a.text(): a for a in m.actions()} for m in menus]
-    assert acts[0]["Get the missing volumes…"].isEnabled()
-    off = acts[1]["Get the missing volumes…"]
+    from .test_series_actions import find_action
+
+    assert find_action(menus[0], "Get the missing volumes…").isEnabled()
+    off = find_action(menus[1], "Get the missing volumes…")
     assert not off.isEnabled() and "no gaps" in off.toolTip()
     assert win.get_missing(str(Path("/lib") / QUEST))
     assert win._top.current() == 1 and win._pages.currentWidget() is win._download_tab
@@ -245,7 +246,9 @@ def test_check_for_new_chapters_opens_the_chapters_panel_also_without_gaps(make_
     win._select_source_row(_row(win, DONE))
     rect = win._table.visualRect(win._proxy.mapFromSource(win._model.index(_row(win, DONE), 2)))
     win._on_context_menu(rect.center())
-    act = {a.text(): a for a in menus[0].actions()}["Check for new chapters…"]
+    from .test_series_actions import find_action
+
+    act = find_action(menus[0], "Check for new chapters…")
     assert act.isEnabled() and "newer than the newest" in act.toolTip()
     folder = str(Path("/lib") / DONE)
     assert win.check_new_chapters(folder)

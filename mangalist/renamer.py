@@ -74,6 +74,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequ
 _log = logging.getLogger(__name__)
 
 KEY_WINDOWS_SERVER = "naming.windows_server"     # Settings > Library: the server name of the Windows path (optional)
+KEY_SKIP_PREFIXES = "naming.skip_prefixes"       # Settings > Library: file/folder prefixes excluded from renaming
 KEY_GUIDED_ROOTS = "renamer.guided_roots"         # root ids the owner started converting from the Renamer window
 KEY_AUTOMATIC_OFFERED = "renamer.automatic_offered"  # root ids already asked "Rename automatically from now on?"
 META_AUTOMATIC_SEEN = "renamer.automatic_seen"    # (meta) per root: the naming inputs + the series found unchanged
@@ -84,7 +85,7 @@ AUTO_LIMIT = 500            # files the automatic pass renames per run at most (
 ENFORCE_OFF, ENFORCE_ASK, ENFORCE_AUTOMATIC = "off", "ask", "automatic"
 ENFORCE_LABELS = {ENFORCE_OFF: "Off", ENFORCE_ASK: "Ask before renaming", ENFORCE_AUTOMATIC: "Rename automatically"}
 
-UNCHANGED, RENAME, LEFT_ALONE, COLLISION = "unchanged", "rename", "left alone", "collision"
+UNCHANGED, RENAME, LEFT_ALONE, COLLISION, EXCLUDED = "unchanged", "rename", "left alone", "collision", "excluded"
 
 FOLDER_NOTE = ("Series folders are renamed to \"<romaji> [<English>]\" only when you press Rename here - never "
                "automatically. MangaList asks MangaPixer to scan afterwards so it sees the new folder names.")
@@ -207,6 +208,61 @@ def set_windows_server(db, text: Optional[str]) -> Optional[str]:
     return name
 
 
+def normalize_skip_prefixes(value: Any) -> Tuple[str, ...]:
+    """Parse skip-rename prefixes from text (comma- or whitespace-separated, e.g. ``"@"`` or ``"@, _"``) or a sequence.
+    Rejects path separators (``/``, ``\\``)."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        raw = [part.strip() for part in re.split(r"[\s,]+", value) if part.strip()]
+    elif isinstance(value, Iterable):
+        raw = [str(part).strip() for part in value if str(part).strip()]
+    else:
+        raise ValueError("prefixes must be text (e.g. @ or @, _)")
+    out: List[str] = []
+    for p in raw:
+        if "/" in p or "\\" in p:
+            raise ValueError("a prefix cannot contain '/' or '\\'")
+        if p not in out:
+            out.append(p)
+    return tuple(out)
+
+
+def format_skip_prefixes(prefixes: Sequence[str]) -> str:
+    return ", ".join(prefixes)
+
+
+def skip_prefixes(db) -> Tuple[str, ...]:
+    """Configured file/folder name prefixes excluded from renaming (empty tuple when none)."""
+    try:
+        value = db.get_setting(KEY_SKIP_PREFIXES, None)
+    except Exception:  # noqa: BLE001
+        return ()
+    try:
+        return normalize_skip_prefixes(value)
+    except ValueError:
+        return ()
+
+
+def set_skip_prefixes(db, value: Any) -> Tuple[str, ...]:
+    """Store skip-rename prefixes (empty clears). Returns the stored tuple."""
+    prefixes = normalize_skip_prefixes(value)
+    db.set_setting(KEY_SKIP_PREFIXES, list(prefixes) if prefixes else None)
+    _log.info("Renamer: skip-rename prefixes %s", f"set to {format_skip_prefixes(prefixes)}" if prefixes else "cleared")
+    return prefixes
+
+
+def matching_skip_prefix(name: str, prefixes: Sequence[str]) -> Optional[str]:
+    """The first configured prefix that *name*'s basename starts with, or None."""
+    if not name or not prefixes:
+        return None
+    base = os.path.basename(str(name).replace("\\", "/"))
+    for prefix in prefixes:
+        if prefix and base.startswith(prefix):
+            return prefix
+    return None
+
+
 def guided_roots(db) -> Set[int]:
     try:
         value = db.get_setting(KEY_GUIDED_ROOTS, [])
@@ -238,6 +294,11 @@ class FilePlan:
     def held(self) -> bool:
         """The rename waits for the owner's Rename in the window: the automatic pass never makes it."""
         return self.title_held or self.format_held
+
+    @property
+    def excluded(self) -> bool:
+        """Excluded from renaming by a configured skip prefix."""
+        return self.status == EXCLUDED
 
     @property
     def name(self) -> str:
@@ -291,6 +352,10 @@ class SeriesPreview:
         return self.of(LEFT_ALONE)
 
     @property
+    def excluded(self) -> List[FilePlan]:
+        return self.of(EXCLUDED)
+
+    @property
     def unchanged(self) -> List[FilePlan]:
         return self.of(UNCHANGED)
 
@@ -324,7 +389,7 @@ class SeriesPreview:
 
     def counts(self) -> Dict[str, int]:
         c = Counter(f.status for f in self.files)
-        return {s: c.get(s, 0) for s in (RENAME, UNCHANGED, LEFT_ALONE, COLLISION)}
+        return {s: c.get(s, 0) for s in (RENAME, UNCHANGED, LEFT_ALONE, COLLISION, EXCLUDED)}
 
 
 @dataclass
@@ -563,7 +628,8 @@ def _has_new_title(name: str, title: Optional[str]) -> bool:
 def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: Optional[str],
                volume_of: Optional[Callable[[Decimal], Optional[Decimal]]] = None, limits: Any = None,
                listdir: Callable[[str], Iterable[str]] = os.listdir,
-               exists: Callable[[str], bool] = os.path.lexists, legacy_title: Optional[str] = None) -> List[FilePlan]:
+               exists: Callable[[str], bool] = os.path.lexists, legacy_title: Optional[str] = None,
+               skip_prefixes: Sequence[str] = ()) -> List[FilePlan]:
     """What the scheme makes of each ``(absolute path, ParsedName)``: see the module docstring. Collisions are found per
     folder, comparing names case-insensitively, against the other files of the series AND everything else in the
     folder (a file that is not part of the series is never displaced).
@@ -584,6 +650,10 @@ def plan_files(files: Sequence[Tuple[str, Any]], *, namer: Namer, series_title: 
             continue
         if os.path.islink(path):
             first.append(FilePlan(path, None, LEFT_ALONE, layer, "a link to another file (left as it is)"))
+            continue
+        matched_prefix = matching_skip_prefix(name, skip_prefixes)
+        if matched_prefix is not None:
+            first.append(FilePlan(path, None, EXCLUDED, layer, f"starts with {matched_prefix!r}"))
             continue
         if parsed is None:
             first.append(FilePlan(path, None, LEFT_ALONE, layer, "the name could not be read"))
@@ -767,14 +837,18 @@ def folder_names(root_path: str) -> Set[str]:
 
 
 def plan_folder(current: str, target: Optional[str], *, names: Set[str],
-                excluded: Callable[[str], bool] = lambda _name: False, no_title: str = FOLDER_NO_TITLE
+                excluded: Callable[[str], bool] = lambda _name: False, no_title: str = FOLDER_NO_TITLE,
+                skip_prefixes: Sequence[str] = ()
                 ) -> Tuple[str, str]:
     """``(status, reason)`` of renaming the series folder *current* to *target* (the scheme's name; None: no title) in
-    a library folder holding *names* (:func:`folder_names`): UNCHANGED, RENAME, LEFT_ALONE (no title, an invalid name,
-    a name the library excludes) or COLLISION (another folder has that name, in any case). Changing only the case of
-    the folder's own name is a rename."""
+    a library folder holding *names* (:func:`folder_names`): UNCHANGED, RENAME, EXCLUDED (starts with a skip prefix),
+    LEFT_ALONE (no title, an invalid name, a name the library excludes) or COLLISION (another folder has that name, in
+    any case). Changing only the case of the folder's own name is a rename."""
     from .store.names import windows_name_problem
 
+    matched_prefix = matching_skip_prefix(current, skip_prefixes)
+    if matched_prefix is not None:
+        return EXCLUDED, f"starts with {matched_prefix!r}"
     if not target:
         return LEFT_ALONE, no_title
     if target == current:
@@ -1124,6 +1198,8 @@ class Renamer:
         rule) - None when the name cannot be read with certainty or the naming scheme is not in this build."""
         from .parsing import parse_name, with_series_head
 
+        if matching_skip_prefix(name, skip_prefixes(self.db)) is not None:
+            return None
         try:
             folder = os.path.join(root.path, *series.rel_path.split("/")) if series.rel_path else root.path
             ctx = _parse_context(os.path.basename(folder), series.kind_hint, getattr(root, "naming_scheme", None))
@@ -1289,7 +1365,8 @@ class Renamer:
             return
         preview.folder_target = target
         preview.folder_status, preview.folder_reason = plan_folder(rel, target, names=names_of(root.path),
-                                                                   excluded=_root_excludes(root))
+                                                                   excluded=_root_excludes(root),
+                                                                   skip_prefixes=skip_prefixes(self.db))
 
     def _volume_of(self, series_id: Optional[int]):
         if series_id is None:
@@ -1366,7 +1443,8 @@ class Renamer:
             preview.error = "no files recorded for this series (rescan first)"
             return preview
         preview.files = plan_files(files, namer=self.namer, series_title=title, volume_of=self._volume_of(series.id),
-                                   limits=limits, legacy_title=self.legacy_title(root, series))
+                                   limits=limits, legacy_title=self.legacy_title(root, series),
+                                   skip_prefixes=skip_prefixes(self.db))
         self._plan_folder(root, series, preview, names_of or _listing_cache(), server)
         if self._manual:
             preview.files = [replace(f, reason=f.reason or MANUAL_REASON)
@@ -1889,8 +1967,8 @@ class Renamer:
         from . import __version__
 
         h = hashlib.sha256()
-        h.update(repr((__version__, type(self.namer).__name__, windows_server(self.db))).encode("utf-8",
-                                                                                               "surrogatepass"))
+        h.update(repr((__version__, type(self.namer).__name__, windows_server(self.db),
+                       skip_prefixes(self.db))).encode("utf-8", "surrogatepass"))
         try:
             with self.db.connect() as con:
                 for r in con.execute("SELECT root_id, library_id, prefix, manual FROM mangapixer_mappings"
@@ -1929,7 +2007,9 @@ class Renamer:
 
 __all__ = [
     "ANALYSIS_WARNING", "AUTO_LIMIT", "AutoReport", "BATCH_SIZE", "BatchRecord", "BatchResult", "COLLISION",
-    "DefaultNamer", "DryRun", "ENFORCE_LABELS", "FilePlan", "KEY_GUIDED_ROOTS", "KEY_WINDOWS_SERVER", "LEFT_ALONE",
+    "DefaultNamer", "DryRun", "ENFORCE_LABELS", "EXCLUDED", "FilePlan", "KEY_GUIDED_ROOTS", "KEY_SKIP_PREFIXES",
+    "KEY_WINDOWS_SERVER", "LEFT_ALONE", "format_skip_prefixes", "matching_skip_prefix", "normalize_skip_prefixes",
+    "set_skip_prefixes", "skip_prefixes",
     "Namer", "NamingUnavailable", "PLAN_REASON", "RENAME", "RenameBatch", "Renamer", "RootDryRun", "SeriesPreview",
     "UNCHANGED", "guided_roots", "in_volume_format", "make_batches", "naming_available", "normalize_server",
     "order_moves", "plan_files",

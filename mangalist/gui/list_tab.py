@@ -98,6 +98,13 @@ class ListTab(QWidget):
     details_toggled = Signal(bool)
     add_root_clicked = Signal()
     rename_library_clicked = Signal()   # "Rename library…": the library picked (or every library) to the naming scheme
+    bulk_auto_clicked = Signal(object)
+    bulk_move_clicked = Signal(object)
+    bulk_rename_clicked = Signal()
+    bulk_mu_clicked = Signal()
+    bulk_find_clicked = Signal()
+    bulk_examined_clicked = Signal(object)
+    bulk_clear_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -111,6 +118,8 @@ class ListTab(QWidget):
         outer.setSpacing(0)
         self.filter_bar = self._build_filter_bar()
         outer.addWidget(self.filter_bar)
+        self.bulk_bar = self._build_bulk_bar()
+        outer.addWidget(self.bulk_bar)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -191,6 +200,53 @@ class ListTab(QWidget):
         for b in (self.btn_details, self.btn_rename, self.btn_mu_start, self.btn_mu_stop):
             row.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         return bar
+
+    def _build_bulk_bar(self) -> QWidget:
+        """Contextual multi-select toolbar shown whenever 2+ series rows are selected."""
+        bar = QWidget()
+        bar.setObjectName("bulkBar")
+        bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(20, 6, 20, 6)
+        row.setSpacing(8)
+        self.bulk_count_label = QLabel("0 series selected")
+        self.bulk_count_label.setProperty("role", "name")
+        row.addWidget(self.bulk_count_label)
+        self.btn_bulk_auto = QPushButton("Automatic ▾")
+        self.btn_bulk_auto.setToolTip("Set automatic download mode for the selected series")
+        self.btn_bulk_auto.clicked.connect(lambda: self.bulk_auto_clicked.emit(self.btn_bulk_auto))
+        self.btn_bulk_move = QPushButton("Move to library ▾")
+        self.btn_bulk_move.setToolTip("Move the selected series to another library")
+        self.btn_bulk_move.clicked.connect(lambda: self.bulk_move_clicked.emit(self.btn_bulk_move))
+        self.btn_bulk_rename = QPushButton("Rename…")
+        self.btn_bulk_rename.setToolTip("Rename the selected series to the naming scheme")
+        self.btn_bulk_rename.clicked.connect(self.bulk_rename_clicked)
+        self.btn_bulk_mu = QPushButton("Check MU")
+        self.btn_bulk_mu.setToolTip("Look up the selected series on MangaUpdates")
+        self.btn_bulk_mu.clicked.connect(self.bulk_mu_clicked)
+        self.btn_bulk_find = QPushButton("Find releases")
+        self.btn_bulk_find.setToolTip("Find releases for the selected series")
+        self.btn_bulk_find.clicked.connect(self.bulk_find_clicked)
+        self.btn_bulk_examined = QPushButton("Examined ▾")
+        self.btn_bulk_examined.setToolTip("Mark or unmark the selected series as examined")
+        self.btn_bulk_examined.clicked.connect(lambda: self.bulk_examined_clicked.emit(self.btn_bulk_examined))
+        self.btn_bulk_clear = QPushButton("Clear")
+        self.btn_bulk_clear.setProperty("variant", "ghost")
+        self.btn_bulk_clear.clicked.connect(self.bulk_clear_clicked)
+        for b in (self.btn_bulk_auto, self.btn_bulk_move, self.btn_bulk_rename, self.btn_bulk_mu,
+                  self.btn_bulk_find, self.btn_bulk_examined):
+            row.addWidget(b)
+        row.addStretch(1)
+        row.addWidget(self.btn_bulk_clear)
+        bar.setVisible(False)
+        return bar
+
+    def set_bulk_selection(self, count: int, *, has_automation: bool = False) -> None:
+        """Show the contextual bulk action bar while 2+ series are selected."""
+        self.bulk_bar.setVisible(count >= 2 and self._has_library)
+        self.bulk_count_label.setText(f"{count} series selected")
+        self.btn_bulk_auto.setVisible(has_automation)
+        self.btn_bulk_find.setVisible(has_automation)
 
     def _build_table(self) -> QTableView:
         table = QTableView()

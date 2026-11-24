@@ -100,9 +100,18 @@ def _menu(win, *titles, pick=None):
         sel.select(idx, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
     seen = []
 
+    def _walk(menu):
+        out = []
+        for a in menu.actions():
+            out.append(a)
+            if a.menu() is not None:
+                out.extend(_walk(a.menu()))
+        return out
+
     def answer(menu, pos):
-        seen.extend(a.text() for a in menu.actions())
-        return next((a for a in menu.actions() if a.text() == pick), None) if pick else None
+        all_acts = _walk(menu)
+        seen.extend(a.text() for a in all_acts)
+        return next((a for a in all_acts if a.text() == pick), None) if pick else None
 
     win._exec_menu = answer
     idx = win._proxy.mapFromSource(win._model.index(_row(win, titles[0]), COL_TITLE))

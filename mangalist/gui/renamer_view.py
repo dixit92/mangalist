@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 
 from ..renamer import (
     COLLISION,
+    EXCLUDED,
     FOLDER_NO_TITLE,
     LEFT_ALONE,
     RENAME,
@@ -85,7 +86,8 @@ class _SeriesRowDelegate(TwoLineDelegate):
         return hint
 
 #: The colour of each status: a palette token (accent blue, grey, amber, red), read when the preview is filled.
-STATUS_TOKENS = {RENAME: "accent", UNCHANGED: "muted_2", LEFT_ALONE: "caution_text", COLLISION: "bad_text"}
+STATUS_TOKENS = {RENAME: "accent", UNCHANGED: "muted_2", LEFT_ALONE: "caution_text", COLLISION: "bad_text",
+                 EXCLUDED: "muted_2"}
 
 
 def status_colors() -> dict:
@@ -100,7 +102,7 @@ def __getattr__(name: str):
 
 # A preview: the table always shows what renaming WOULD do (applying re-runs the preview) - owner, 2026-10-10.
 STATUS_TEXT = {RENAME: "will be renamed", UNCHANGED: "already named by the scheme", LEFT_ALONE: "left alone",
-               COLLISION: "keeps its name: name collision"}
+               COLLISION: "keeps its name: name collision", EXCLUDED: "excluded from renaming"}
 
 PATTERN_LABELS = {"scheme": "already in a scheme", "fmd2": "FMD2 names", "release": "release names",
                   "generic": "other chapter / volume names", "bare": "bare numbers", "none": "unreadable"}
@@ -237,7 +239,8 @@ def _thread_runner(fn, on_done, on_error):
 FOLDER_TEXT = {RENAME: "the series folder will be renamed - the series keeps its data (one step, undoable)",
                UNCHANGED: "the series folder is named by the scheme",
                LEFT_ALONE: "the series folder keeps its name",
-               COLLISION: "the series folder keeps its name: name collision"}
+               COLLISION: "the series folder keeps its name: name collision",
+               EXCLUDED: "the series folder is excluded from renaming"}
 
 
 def _in_scheme(s: SeriesPreview) -> bool:
@@ -604,10 +607,12 @@ class RenamerWindow(QDialog):
         series = dry.series
         moving = sum(1 for s in series if s.renames)
         folders = len(dry.folders_to_rename)
+        excluded = dry.count(EXCLUDED)
         self.summary_label.setText(
             f"{_plural(dry.count(RENAME), 'file')} to rename in {_plural(moving, 'series', 'series')}; "
             f"{dry.count(UNCHANGED)} already named by the scheme; {dry.count(LEFT_ALONE)} left alone; "
-            f"{_plural(dry.count(COLLISION), 'name collision')} (not renamed)."
+            f"{_plural(dry.count(COLLISION), 'name collision')} (not renamed)"
+            + (f"; {excluded} excluded from renaming" if excluded else "") + "."
             + (f" {_plural(folders, 'series folder')} not named \"<romaji> [<English>]\" to rename." if folders else "")
             if series else "Nothing to look at: no series here has been scanned yet.")
         patterns = dry.patterns
@@ -648,6 +653,8 @@ class RenamerWindow(QDialog):
                 bits.append(_plural(c[COLLISION], "collision"))
             if c[LEFT_ALONE]:
                 bits.append(f"{c[LEFT_ALONE]} left alone")
+            if c.get(EXCLUDED):
+                bits.append(f"{c[EXCLUDED]} excluded")
             item = QListWidgetItem(s.title)
             item.setData(ROLE_SUB, " · ".join(b for b in bits if not b.endswith(("collision", "collisions"))))
             if c[COLLISION]:
@@ -712,14 +719,15 @@ class RenamerWindow(QDialog):
         show_all = self.show_unchanged.isChecked()
         if _folder_row_shown(s, show_all):
             self._add_folder_row(s)
-        order = {RENAME: 0, COLLISION: 1, LEFT_ALONE: 2, UNCHANGED: 3}
+        order = {RENAME: 0, COLLISION: 1, LEFT_ALONE: 2, EXCLUDED: 3, UNCHANGED: 4}
         for f in sorted(s.files, key=lambda f: (order.get(f.status, 9), f.name.casefold())):
             if f.status == UNCHANGED and not show_all:
                 continue
             rel_dir = os.path.relpath(f.folder, s.folder) if f.folder != s.folder else ""
             prefix = f"{rel_dir}/" if rel_dir and rel_dir != "." else ""
             after = (prefix + f.target) if f.status in (RENAME, COLLISION) and f.target else (
-                "(as it is)" if f.status != UNCHANGED else prefix + f.name)
+                "(excluded)" if f.status == EXCLUDED
+                else "(as it is)" if f.status != UNCHANGED else prefix + f.name)
             what = STATUS_TEXT[f.status] + (f": {f.reason}" if f.reason and f.status != COLLISION else
                                             f" - {f.reason}" if f.reason else "")
             if f.status == RENAME and f.format_held:
@@ -823,8 +831,9 @@ class RenamerWindow(QDialog):
         act_open = menu.addAction(OPEN_FOLDER_LABEL)
         act_open.setToolTip("Show the folder this file is in")
         act_set = act_forget = act_delete = act_dupes = None
+        status = item.data(0, Qt.ItemDataRole.UserRole)
         if not self._busy:
-            if callable(getattr(self._renamer, "set_file_units", None)):
+            if status != EXCLUDED and callable(getattr(self._renamer, "set_file_units", None)):
                 menu.addSeparator()
                 act_set = menu.addAction("Set chapter / volume…")
                 act_set.setToolTip("Say which chapter or volume this file holds; it is then named by the scheme")

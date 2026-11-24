@@ -76,8 +76,10 @@ def _menu(win, *titles, pick=False):
         sel.select(idx, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
     seen = []
 
+    from .test_series_actions import find_action
+
     def answer(menu, pos):
-        act = next(a for a in menu.actions() if a.text() == UNBUNDLED_MENU)
+        act = find_action(menu, UNBUNDLED_MENU)
         seen.append((act.isCheckable(), act.isChecked()))
         return act if pick else None
 

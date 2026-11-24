@@ -127,7 +127,14 @@ def find_action(menu, text):
 
 
 def submenu(menu, title="Automatic downloads"):
-    return next(a.menu() for a in menu.actions() if a.menu() is not None and a.text() == title)
+    for a in menu.actions():
+        if a.menu() is not None:
+            if a.text() == title:
+                return a.menu()
+            found = submenu(a.menu(), title)
+            if found is not None:
+                return found
+    return None
 
 
 def row_of(tab, folder):
