@@ -11,7 +11,7 @@ from mangalist.inventory import Span, compute_inventory
 from mangalist.knowledge import from_mangapixer_item
 from mangalist.store.units import Unit
 from mangalist.states import GAP_CHAPTER, InventorySnapshot, State, compute_state
-from mangalist.volume_contents import (SOURCE_FILED, SOURCE_NAME, _batch_claims, claim, contents_text,
+from mangalist.volume_contents import (SOURCE_FILED, SOURCE_NAME, SOURCE_PROVEN, _batch_claims, claim, contents_text,
                                        held_volume_contents)
 
 from .helpers import TODAY, item, vol
@@ -72,6 +72,16 @@ def test_the_list_wins_and_volumes_not_held_get_nothing():
     assert got == {D(7): (D(53), D(53))}          # 6: the list's 42-50 stands; 10: not held
 
 
+def test_filed_and_proven_claims_widen_a_partial_mapped_volume_without_colliding():
+    # Partial MangaDex volume 1 (4.1-5) widened to 1-5 by page-proven replacement claims; volume 3 (12-14) untouched
+    mapped = {D(1): (D("4.1"), D(5)), D(3): (D(12), D(14))}
+    got = held_volume_contents([claim(1, 1, 1, SOURCE_PROVEN), claim(1, 3, 3, SOURCE_FILED)], [1], mapped)
+    assert got == {D(1): (D(1), D(5))}
+    # A widened claim that would overlap a neighbour's mapped range is dropped safely
+    colliding = {D(1): (D(1), D(5)), D(2): (D(6), D(10))}
+    assert held_volume_contents([claim(1, 7, 7, SOURCE_FILED)], [1, 2], colliding) == {}
+
+
 def test_a_span_that_does_not_fit_is_dropped_with_the_one_it_collides_with():
     # numbering that restarts per volume: both volumes claim chapters 1-5
     restart = tagged(1, 5, 1) + tagged(1, 5, 2)
@@ -86,10 +96,11 @@ def test_a_span_that_does_not_fit_is_dropped_with_the_one_it_collides_with():
 
 
 def test_claims_of_a_replacement_batch():
-    files = ('[{"chapters": "24", "volume": "4"}, {"chapters": "1-3, 5", "volume": "1"},'
+    files = ('[{"chapters": "24", "volume": "4"}, {"chapters": "1-3, 5", "volume": "1", "proven": true},'
              ' {"chapters": "8-9", "volume": "1, 2"}, {"chapters": "x", "volume": "2"}, "junk"]')
     got = _batch_claims(files)
-    assert got == [claim(4, 24, 24, SOURCE_FILED), claim(1, 1, 5, SOURCE_FILED)]
+    assert got == [claim(4, 24, 24, SOURCE_FILED), claim(1, 1, 5, SOURCE_PROVEN)]
+    assert _batch_claims(files, proven_only=True) == [claim(1, 1, 5, SOURCE_PROVEN)]
     assert _batch_claims("not json") == [] and _batch_claims(None) == []
 
 

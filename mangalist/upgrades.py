@@ -386,11 +386,38 @@ def _knowledge_volumes(db, series) -> Tuple[Optional[Sequence[VolumeInfo]], str]
     return volumes, ""
 
 
+def _merge_replaced(series_dir: str, root_path: str, coverage: Coverage,
+                    proven: Dict[str, object]) -> Tuple[List[ReplacedFile], List[Tuple[str, str]]]:
+    """Combine volume-list *coverage* with page-hash-proven matches (*proven*): page proof wins when both cover a file
+    and overrides any volume-list keep reason for that file."""
+    from_list = {rel: (chapters, volume) for rel, chapters, volume in coverage.replaced}
+    kept = [(rel, why) for rel, why in coverage.kept if rel not in proven]
+    files: List[ReplacedFile] = []
+    for rel in sorted(set(from_list) | set(proven)):
+        path = os.path.join(series_dir, *rel.split("/"))
+        st = _plain_below(path, root_path)
+        if st is None:
+            kept.append((rel, "not a plain file in the library now (gone since the last scan?)"))
+            continue
+        if rel in proven:
+            m = proven[rel]
+            chapters = m.chapters
+            volume = ", ".join(fmt_num(v) for v in m.volumes)
+            is_proven = True
+        else:
+            chapters, volume = from_list[rel]
+            is_proven = False
+        files.append(ReplacedFile(path=path, rel=rel, size=st.st_size, modified=_iso_from_ns(st.st_mtime_ns),
+                                  chapters=chapters, volume=volume, proven=is_proven))
+    return files, kept
+
+
 def examine(db, ledger, record) -> NewBatch:
     """The batch for one filed download: the chapter files its filed volumes replace, as they are on disk now."""
     from .downloads.arrivals import volumes_of
     from .downloads.placement import locate_series
     from .store.journal import Journal, PlanStateError
+    from .volume_match import match_series_volumes
 
     def nothing(why: str, status: str = "nothing", **kw) -> NewBatch:
         return NewBatch(download_id=record.id, series_id=record.series_id, status=status, error=why, **kw)
@@ -408,8 +435,12 @@ def examine(db, ledger, record) -> NewBatch:
         return nothing(str(exc))
     volume_files = [(s.dst, int(s.src_size or 0)) for s in plan.steps if s.op == "link" and s.state == "done"]
     filed: Set[Decimal] = set()
+    filed_entries: List[Tuple[Tuple[Decimal, ...], str]] = []
     for path, _ in volume_files:
-        filed |= volumes_of(os.path.basename(path), "volumes")
+        vols = volumes_of(os.path.basename(path), "volumes")
+        filed |= vols
+        if vols:
+            filed_entries.append((tuple(sorted(vols)), path))
     common = dict(root_path=root.path, series_dir=series_dir, volumes=[fmt_num(v) for v in sorted(filed)],
                   volume_files=volume_files)
     if not filed:
@@ -420,21 +451,15 @@ def examine(db, ledger, record) -> NewBatch:
         # "don't both of those series only have volumes in the folder anyway?") - say that, not MangaPixer's gaps
         return nothing("the series holds no chapter files", **common)
     volumes, why = _knowledge_volumes(db, series)
-    if volumes is None:
-        return nothing(f"{why}; no chapter is replaced", **common)
-    coverage = chapters_replaced(units, volumes, filed)
-    files: List[ReplacedFile] = []
-    kept = list(coverage.kept)
-    for rel, chapters, volume in coverage.replaced:
-        path = os.path.join(series_dir, *rel.split("/"))
-        st = _plain_below(path, root.path)
-        if st is None:
-            kept.append((rel, "not a plain file in the library now (gone since the last scan?)"))
-            continue
-        files.append(ReplacedFile(path=path, rel=rel, size=st.st_size, modified=_iso_from_ns(st.st_mtime_ns),
-                                  chapters=chapters, volume=volume))
-    note = "; ".join(coverage.notes) or None
+    coverage = chapters_replaced(units, volumes, filed) if volumes is not None else Coverage()
+    hint_spans = volume_spans(volumes, filed)[0] if volumes is not None else {}
+    proven = match_series_volumes(db, series.id, root.path, series_dir, filed_entries, units, hint_spans=hint_spans)
+    files, kept = _merge_replaced(series_dir, root.path, coverage, proven)
+    proven_vols = {v for m in proven.values() for v in m.volumes}
+    note = ("; ".join(coverage.notes) or None) if volumes is not None and not (filed <= proven_vols) else None
     if not files:
+        if volumes is None:
+            return nothing(f"{why}; no chapter is replaced", **common)
         return nothing(note or "no chapter file is fully covered by the filed volumes", kept=kept, **common)
     return NewBatch(download_id=record.id, series_id=record.series_id, status="pending", files=files, kept=kept,
                     mode=load_settings(db).mode, error=note, **common)
@@ -470,12 +495,11 @@ def _knowledge_estimates(db, series) -> Tuple[Sequence[VolumeInfo], str]:
 
 
 def estimated_duplicates(db, series_id: int) -> NewBatch:
-    """The chapter files of *series_id* that volumes it holds contain - by MangaPixer's volume list, and by its
-    estimated ranges for held volumes the list does not map - for the owner to confirm (nothing is moved here).
-    ``status`` "pending" with the files, else "nothing" with why. The mapped ranges count too (owner, 2026-10-14:
-    volumes that arrived outside MangaList's downloads kept 30 chapter files beside them, and this action - estimates
-    only until then - found nothing)."""
+    """The chapter files of *series_id* that volumes it holds contain - by matching pages inside the volume archives,
+    by MangaPixer's volume list, and by its estimated ranges for held volumes the list does not map - for the owner
+    to confirm (nothing is moved here). ``status`` "pending" with the files, else "nothing" with why."""
     from .downloads.placement import locate_series
+    from .volume_match import match_series_volumes
 
     series, root, series_dir = locate_series(db, series_id)
 
@@ -485,50 +509,65 @@ def estimated_duplicates(db, series_id: int) -> NewBatch:
     listed, list_why = _knowledge_volumes(db, series)
     mapped = [v for v in (listed or ()) if v.has_chapters]
     estimates, est_why = _knowledge_estimates(db, series)
-    if not mapped and not estimates:
-        return nothing(est_why or list_why)
     units = db.list_units(series.id)
     held: Dict[Decimal, str] = {}
+    vols_by_rel: Dict[str, Set[Decimal]] = defaultdict(set)
     for u in units:
         if u.kind != "volume" or u.vol_from is None:
             continue
         lo, hi = to_decimal(u.vol_from), to_decimal(u.vol_to if u.vol_to is not None else u.vol_from)
-        for n in (_numbers(lo, hi) or []) if lo is not None and hi is not None else []:
+        nums = (_numbers(lo, hi) or []) if lo is not None and hi is not None else []
+        for n in nums:
             held.setdefault(n, u.rel_path)
+            vols_by_rel[u.rel_path].add(n)
+    held_entries: List[Tuple[Tuple[Decimal, ...], str]] = []
+    for rel, vnums in sorted(vols_by_rel.items()):
+        path = os.path.join(series_dir, *rel.split("/"))
+        if _plain_below(path, root.path) is not None:
+            held_entries.append((tuple(sorted(vnums)), path))
+
     by_volume: Dict[Decimal, VolumeInfo] = {}
     for v in estimates:                                     # an estimate only where the list maps no range
         by_volume.setdefault(to_decimal(v.volume), v)
     for v in mapped:
         by_volume[to_decimal(v.volume)] = v
     covered = [v for n, v in sorted(by_volume.items()) if n in held]
-    if not covered:
-        return nothing("no volume you hold has a chapter range (mapped or estimated)")
-    estimated_used = any(v in estimates for v in covered)
-    numbers = sorted({to_decimal(v.volume) for v in covered})
+    numbers = sorted({to_decimal(v.volume) for v in covered}) if covered else []
+    hint_spans = {to_decimal(v.volume): (to_decimal(v.chapters_from), to_decimal(v.chapters_to))
+                  for v in covered if v.has_chapters and to_decimal(v.volume) is not None
+                  and to_decimal(v.chapters_from) is not None and to_decimal(v.chapters_to) is not None}
+    coverage = chapters_replaced(units, covered, numbers) if covered else Coverage()
+    proven = (match_series_volumes(db, series.id, root.path, series_dir, held_entries, units, hint_spans=hint_spans)
+              if held_entries else {})
+    files, kept = _merge_replaced(series_dir, root.path, coverage, proven)
+
+    all_numbers = sorted(set(numbers) | {v for m in proven.values() for v in m.volumes})
     volume_files = []
-    for rel in dict.fromkeys(held[n] for n in numbers):
+    for rel in dict.fromkeys(held[n] for n in all_numbers if n in held):
         path = os.path.join(series_dir, *rel.split("/"))
         st = _plain_below(path, root.path)
         if st is not None:
             volume_files.append((path, st.st_size))
-    common = dict(root_path=root.path, series_dir=series_dir, volumes=[fmt_num(n) for n in numbers],
+    common = dict(root_path=root.path, series_dir=series_dir, volumes=[fmt_num(n) for n in all_numbers],
                   volume_files=volume_files)
-    coverage = chapters_replaced(units, covered, numbers)
-    files: List[ReplacedFile] = []
-    kept = list(coverage.kept)
-    for rel, chapters, volume in coverage.replaced:
-        path = os.path.join(series_dir, *rel.split("/"))
-        st = _plain_below(path, root.path)
-        if st is None:
-            kept.append((rel, "not a plain file in the library now (gone since the last scan?)"))
-            continue
-        files.append(ReplacedFile(path=path, rel=rel, size=st.st_size, modified=_iso_from_ns(st.st_mtime_ns),
-                                  chapters=chapters, volume=volume))
     if not files:
+        if not mapped and not estimates:
+            return nothing(est_why or list_why)
+        if not covered:
+            return nothing("no volume you hold has a chapter range (mapped or estimated)")
         return nothing("no chapter file lies inside the chapter range of a volume you hold", kept=kept, **common)
-    how = "by MangaPixer's volume list" + (" and its estimated ranges" if estimated_used else "")
-    if estimated_used and not any(v in mapped for v in covered):
-        how = "by MangaPixer's estimated volume ranges"
+
+    has_proven = any(f.proven for f in files)
+    has_unproven = any(not f.proven for f in files)
+    if has_proven and not has_unproven:
+        how = "by matching pages inside the volume"
+    else:
+        estimated_used = any(v in estimates for v in covered)
+        how = "by MangaPixer's volume list" + (" and its estimated ranges" if estimated_used else "")
+        if estimated_used and not any(v in mapped for v in covered):
+            how = "by MangaPixer's estimated volume ranges"
+        if has_proven:
+            how += " and by matching pages inside the volume"
     return NewBatch(download_id=0, series_id=series_id, status="pending", files=files, kept=kept, mode=MODE_HOLDING,
                     error=how, **common)
 
@@ -547,8 +586,8 @@ def set_aside_estimated(db, series_id: int, rels: Sequence[str], *, journal=None
                                   root_path=found.root_path, series_dir=found.series_dir, volumes=found.volumes,
                                   volume_files=found.volume_files, files=files, kept=found.kept, mode=MODE_HOLDING,
                                   error=None))
-    _log.info("Upgrades: batch %d: %d chapter file(s) of series %d set aside by hand (volumes %s, MangaPixer's "
-              "estimated ranges)", batch.id, len(files), series_id, ", ".join(found.volumes))
+    _log.info("Upgrades: batch %d: %d chapter file(s) of series %d set aside by hand (volumes %s, %s)",
+              batch.id, len(files), series_id, ", ".join(found.volumes), found.error or "by hand")
     return hold_batch(db, batch.id, journal=journal, now=now)
 
 
@@ -660,8 +699,11 @@ def after_filing(db, ledger, *, journal=None, now: Optional[datetime] = None) ->
         if batch.status == "nothing":
             _log.info("Upgrades: download %d (%s): no chapter replaced (%s)", record.id, record.title, batch.error)
             continue
-        _log.info("Upgrades: download %d (%s): %d chapter file(s) replaced by volume(s) %s: %s", record.id,
-                  record.title, len(batch.files), ", ".join(batch.volumes), ", ".join(f.rel for f in batch.files))
+        n_proven = sum(1 for f in batch.files if f.proven)
+        proven_note = f" ({n_proven} proven by pages)" if n_proven else ""
+        _log.info("Upgrades: download %d (%s): %d chapter file(s) replaced by volume(s) %s%s: %s", record.id,
+                  record.title, len(batch.files), ", ".join(batch.volumes), proven_note,
+                  ", ".join(f.rel for f in batch.files))
         for rel, why in batch.kept:
             _log.info("Upgrades: download %d: kept %s (%s)", record.id, rel, why)
     settings = load_settings(db)

@@ -49,10 +49,14 @@ class ReplacedFile:
     modified: str
     chapters: str                       # e.g. "12", "1-5", "10.1"
     volume: str                         # the filed volume that holds them
+    proven: bool = False                # True when proven inside the volume by page hashes (mangalist.volume_match)
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"path": self.path, "rel": self.rel, "size": self.size, "modified": self.modified,
-                "chapters": self.chapters, "volume": self.volume}
+        d: Dict[str, Any] = {"path": self.path, "rel": self.rel, "size": self.size, "modified": self.modified,
+                             "chapters": self.chapters, "volume": self.volume}
+        if self.proven:
+            d["proven"] = True
+        return d
 
 
 @dataclass(frozen=True)
@@ -110,7 +114,8 @@ def _file(d: Any) -> Optional[ReplacedFile]:
         return None
     try:
         return ReplacedFile(path=str(d["path"]), rel=str(d["rel"]), size=int(d["size"]), modified=str(d["modified"]),
-                            chapters=str(d.get("chapters") or ""), volume=str(d.get("volume") or ""))
+                            chapters=str(d.get("chapters") or ""), volume=str(d.get("volume") or ""),
+                            proven=bool(d.get("proven", False)))
     except (KeyError, TypeError, ValueError):
         return None
 

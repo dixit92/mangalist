@@ -64,6 +64,7 @@ a = Analysis(
         # The content verdicts decode pages with Pillow (imported on first use, so named here).
         "mangalist.duplicate_verdicts",
         "mangalist.page_hash",
+        "mangalist.volume_match",
         "PIL.Image",
         "PIL.JpegImagePlugin",
         "PIL.PngImagePlugin",

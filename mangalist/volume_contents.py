@@ -54,6 +54,7 @@ _log = logging.getLogger(__name__)
 
 SOURCE_NAME = "name"            # a chapter file's own name says its volume (held now or before)
 SOURCE_FILED = "filed"          # a filed download's replacement batch recorded it with that volume
+SOURCE_PROVEN = "proven"        # proven inside the volume archive by perceptual page hashes (mangalist.volume_match)
 
 # Replacement batches whose recorded volumes stand: the owner did not undo them (restored) or refuse them (declined).
 TRUSTED_BATCH_STATUS = ("pending", "held", "purged", "deleted")
@@ -83,8 +84,9 @@ Span = Tuple[Decimal, Decimal]
 
 def held_volume_contents(claims: Iterable[Claim], held_volumes: Iterable[Any],
                          mapped: Mapping[Any, Span]) -> Dict[Decimal, Span]:
-    """``{held volume: (first, last chapter)}`` for the held volumes the volume list does not map, by *claims* (see the
-    module docstring's rule). *mapped*: ``{volume: (from, to)}`` the list maps (held or not)."""
+    """``{held volume: (first, last chapter)}`` for held volumes the volume list does not map - or whose partial mapped
+    range is widened by filed/page-proven replacement records (:data:`SOURCE_FILED` / :data:`SOURCE_PROVEN`) without
+    colliding with any other volume. *mapped*: ``{volume: (from, to)}`` the list maps (held or not)."""
     held = {d for d in (to_decimal(v) for v in held_volumes) if d is not None}
     listed: Dict[Decimal, Span] = {}
     for v, (lo, hi) in mapped.items():
@@ -92,11 +94,21 @@ def held_volume_contents(claims: Iterable[Claim], held_volumes: Iterable[Any],
         if dv is not None and dlo is not None and dhi is not None and dlo <= dhi:
             listed[dv] = (dlo, dhi)
     recorded: Dict[Decimal, Span] = {}
+    widened: Dict[Decimal, Span] = {}
     for c in claims:
-        if c is None or c.volume in listed:
+        if c is None:
+            continue
+        if c.volume in listed:
+            if c.source not in (SOURCE_FILED, SOURCE_PROVEN):
+                continue
+            lo, hi = widened.get(c.volume, listed[c.volume])
+            widened[c.volume] = (min(lo, c.lo), max(hi, c.hi))
             continue
         lo, hi = recorded.get(c.volume, (c.lo, c.hi))
         recorded[c.volume] = (min(lo, c.lo), max(hi, c.hi))
+    for v, span in widened.items():
+        if span[0] < listed[v][0] or span[1] > listed[v][1]:
+            recorded[v] = span
     if not recorded:
         return {}
     every = {**listed, **recorded}
@@ -140,9 +152,10 @@ def _name_claim(name: str, context: Any, size: Optional[int] = None) -> Optional
     return claim(parsed.volume.start, parsed.chapter.start, parsed.chapter.end, SOURCE_NAME)
 
 
-def _batch_claims(files_json: Optional[str]) -> List[Claim]:
+def _batch_claims(files_json: Optional[str], *, proven_only: bool = False) -> List[Claim]:
     """The claims of one replacement batch's ``files``: each file's ``chapters`` (``"12"``, ``"1-5"``, ``"1-3, 5"``)
-    in its one ``volume`` (a file across two volumes says nothing about either alone)."""
+    in its one ``volume`` (a file across two volumes says nothing about either alone). With *proven_only*, only files
+    explicitly proven by page hashes (``proven: true``) count (for set-aside batches where estimates are untrusted)."""
     try:
         files = json.loads(files_json or "[]")
     except (TypeError, ValueError):
@@ -151,13 +164,16 @@ def _batch_claims(files_json: Optional[str]) -> List[Claim]:
     for f in files if isinstance(files, list) else ():
         if not isinstance(f, Mapping):
             continue
+        is_proven = bool(f.get("proven"))
+        if proven_only and not is_proven:
+            continue
         volume = str(f.get("volume") or "").strip()
         if not volume or "," in volume:
             continue
         numbers = [to_decimal(p) for p in str(f.get("chapters") or "").replace(",", "-").split("-")]
         numbers = [n for n in numbers if n is not None]
         if numbers:
-            c = claim(volume, min(numbers), max(numbers), SOURCE_FILED)
+            c = claim(volume, min(numbers), max(numbers), SOURCE_PROVEN if is_proven else SOURCE_FILED)
             if c is not None:
                 out.append(c)
     return out
@@ -187,8 +203,8 @@ def load_claims(db, series_ids: Optional[Iterable[int]] = None) -> Dict[int, Tup
         gone = con.execute("SELECT series_id, rel_path, size FROM archives"
                            " WHERE status = 'missing' AND series_id IS NOT NULL").fetchall()
         marks = ",".join("?" * len(TRUSTED_BATCH_STATUS))
-        batches = con.execute(f"SELECT series_id, files FROM replacements WHERE download_id > 0"
-                              f" AND series_id IS NOT NULL AND status IN ({marks})", TRUSTED_BATCH_STATUS).fetchall()
+        batches = con.execute(f"SELECT series_id, download_id, files FROM replacements"
+                              f" WHERE series_id IS NOT NULL AND status IN ({marks})", TRUSTED_BATCH_STATUS).fetchall()
     contexts: Dict[int, Any] = {}
     for a in gone:
         sid = a["series_id"]
@@ -203,7 +219,7 @@ def load_claims(db, series_ids: Optional[Iterable[int]] = None) -> Dict[int, Tup
             contexts[sid] = _parse_context(title, row["kind_hint"], _root_schemes(root) if root is not None else ())
         add(sid, _name_claim(a["rel_path"].rsplit("/", 1)[-1], contexts[sid], a["size"]))
     for b in batches:
-        for c in _batch_claims(b["files"]):
+        for c in _batch_claims(b["files"], proven_only=int(b["download_id"]) <= 0):
             add(b["series_id"], c)
     return {sid: tuple(cs) for sid, cs in out.items()}
 
@@ -250,6 +266,6 @@ class ClaimsByFolder:
 
 
 __all__ = [
-    "Claim", "ClaimsByFolder", "SOURCE_FILED", "SOURCE_NAME", "claim", "contents_text", "held_volume_contents",
-    "load_claims", "safe_load_claims",
+    "Claim", "ClaimsByFolder", "SOURCE_FILED", "SOURCE_NAME", "SOURCE_PROVEN", "claim", "contents_text",
+    "held_volume_contents", "load_claims", "safe_load_claims",
 ]
